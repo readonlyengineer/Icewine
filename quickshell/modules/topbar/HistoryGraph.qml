@@ -16,6 +16,15 @@ Rectangle {
     property real minimumMaximum: unit === "B/s" ? 1024 : 100
     readonly property var latest: history.length && now - history[history.length - 1].time < 3000
         ? history[history.length - 1].values : []
+    readonly property real minimum: {
+        let minimum = 0
+        for (const point of history) {
+            if (point.time < now - 120000) continue
+            for (const value of point.values)
+                if (value !== null) minimum = Math.min(minimum, value)
+        }
+        return minimum
+    }
     readonly property real maximum: {
         let maximum = minimumMaximum
         for (const point of history) {
@@ -32,11 +41,14 @@ Rectangle {
     onHistoryChanged: graph.requestPaint()
     onNowChanged: graph.requestPaint()
     onMaximumChanged: graph.requestPaint()
+    onMinimumChanged: graph.requestPaint()
     onColoursChanged: graph.requestPaint()
 
     Text {
         x: 10; y: 8
+        width: parent.width - 20
         text: root.title
+        elide: Text.ElideRight
         color: Theme.Palette.foreground
         font.family: "JetBrainsMono Nerd Font"
         font.pixelSize: 11
@@ -63,8 +75,9 @@ Rectangle {
         anchors.right: parent.right
         anchors.rightMargin: 10
         y: 44
-        text: Metrics.format(root.maximum, root.unit)
-        color: Theme.Palette.muted
+        text: (root.minimum < 0 ? Metrics.format(root.minimum, root.unit) + " – " : "")
+            + Metrics.format(root.maximum, root.unit)
+        color: Theme.Palette.foregroundDark
         font.family: "JetBrainsMono Nerd Font"
         font.pixelSize: 8
     }
@@ -99,7 +112,7 @@ Rectangle {
                         continue
                     }
                     const x = Math.min(width, (point.time - root.now + 120000) / 120000 * width)
-                    const y = height - 1 - Math.min(1, value / root.maximum) * (height - 2)
+                    const y = height - 1 - (value - root.minimum) / (root.maximum - root.minimum) * (height - 2)
                     if (!lastTime || point.time - lastTime > 3000) ctx.moveTo(x, y)
                     else ctx.lineTo(x, y)
                     lastTime = point.time
@@ -112,7 +125,7 @@ Rectangle {
     Text {
         x: 10; y: 136
         text: "−2 min"
-        color: Theme.Palette.muted
+        color: Theme.Palette.foregroundDark
         font.family: "JetBrainsMono Nerd Font"
         font.pixelSize: 8
     }
@@ -121,7 +134,7 @@ Rectangle {
         anchors.rightMargin: 10
         y: 136
         text: "now"
-        color: Theme.Palette.muted
+        color: Theme.Palette.foregroundDark
         font.family: "JetBrainsMono Nerd Font"
         font.pixelSize: 8
     }

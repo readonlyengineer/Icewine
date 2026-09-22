@@ -25,6 +25,15 @@ ShellRoot {
     property bool handedOff: false
     signal tick()
     Bar.SystemMetrics { id: systemMetrics }
+    Bar.HistoryGraph {
+        id: coldGraph
+        width: 380
+        title: "Temperature"
+        unit: "°C"
+        history: [{ time: root.now - 121000, values: [-50] },
+            { time: root.now - 1000, values: [-5] }, { time: root.now, values: [null] }]
+        now: root.now
+    }
 
     function findButton(item) {
         if (item.text === "Advanced · btop") return item
@@ -76,7 +85,8 @@ ShellRoot {
                 cpu: { history: [{ time: root.now, values: [25] }] },
                 memory: { history: [{ time: root.now, values: [60] }] },
                 sensors: [{ title: "CPU temperature", kind: "temperature",
-                    history: [{ time: root.now, values: [45] }] }]
+                    history: [{ time: root.now - 1000, values: [-5] },
+                        { time: root.now, values: [5] }] }]
             })
         }
     }
@@ -107,6 +117,8 @@ ShellRoot {
             if (network.history.length !== 2 || network.history[1].values[0] !== 0)
                 throw new Error("Network sampler did not read counters")
             if (!root.handedOff) throw new Error("btop launch did not hand off focus")
+            if (coldGraph.minimum !== -5 || coldGraph.maximum !== 100)
+                throw new Error("Temperature axis must include negative values and expire old samples")
             for (const sampler of [systemMetrics.cpu, systemMetrics.memory]) {
                 const values = sampler.history
                 const value = values[values.length - 1]?.values[0]

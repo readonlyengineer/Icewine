@@ -1,5 +1,5 @@
 function network(text, interfaces) {
-    const counters = {}
+    const counters = Object.create(null)
     for (const line of text.split("\n")) {
         const fields = line.trim().split(/[:\s]+/)
         if (!interfaces.includes(fields[0]) || fields.length < 17) continue
@@ -11,12 +11,17 @@ function network(text, interfaces) {
 }
 
 function networkRate(current, previous, seconds) {
-    if (!previous || seconds <= 0 || seconds > 3) return [null, null]
+    const names = Object.keys(current)
+    if (!previous || seconds <= 0 || seconds > 3 || names.length === 0
+            || names.some(name => !Object.prototype.hasOwnProperty.call(previous, name)))
+        return [null, null]
     const rate = [0, 0]
-    for (const name of Object.keys(current)) {
-        if (!previous[name]) continue
-        for (let i = 0; i < 2; ++i)
-            rate[i] += Math.max(0, current[name][i] - previous[name][i]) / seconds
+    for (const name of names) {
+        for (let i = 0; i < 2; ++i) {
+            const delta = current[name][i] - previous[name][i]
+            if (delta < 0) return [null, null]
+            rate[i] += delta / seconds
+        }
     }
     return rate
 }
@@ -46,7 +51,7 @@ function memoryUsage(text) {
 function sensor(text, temperature) {
     if (!/^-?\d+\s*$/.test(text)) return null
     const value = Number(text) / (temperature ? 1000 : 1)
-    return value >= 0 && value <= (temperature ? 200 : 100) ? value : null
+    return value >= (temperature ? -273.15 : 0) && value <= (temperature ? 200 : 100) ? value : null
 }
 
 function append(history, time, values) {
