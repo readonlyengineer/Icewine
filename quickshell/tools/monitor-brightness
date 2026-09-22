@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+
+# Optional sysfs root is used by the hardware-free check.
+sysfs=${ICEWINE_SYSFS_ROOT:-/sys}
+monitor=${1:-}
+percent=${2:-}
+fail() { printf '%s\n' "$*" >&2; exit 1; }
+[[ "$monitor" =~ ^[[:alnum:]_-]+$ ]] || fail 'Invalid monitor name'
+[[ -z "$percent" || "$percent" =~ ^(0|[1-9][0-9]?|100)$ ]] || fail 'Invalid brightness'
+
+connectors=()
+for candidate in "$sysfs"/class/drm/card*-"$monitor"; do
+    [[ -r "$candidate/status" && $(<"$candidate/status") == connected ]] && connectors+=("$candidate")
+done
+[[ ${#connectors[@]} == 1 ]] || fail 'Monitor connector missing or ambiguous'
+connector=$(readlink -f "${connectors[0]}")
+
+backlights=()
+for candidate in "$sysfs"/class/backlight/*; do
+    resolved=$(readlink -f "$candidate")
+    [[ "$resolved" == "$connector/"* ]] && backlights+=("$candidate")
+done
+if [[ ${#backlights[@]} == 0 && "$monitor" =~ ^(eDP|LVDS|DSI)- ]]; then
+    # Ponytail: ACPI backlights lack connector ancestry. Only infer the mapping
+    # with one internal panel and one backlight; multi-panel hardware needs an explicit map.
+    panels=()
+    for candidate in "$sysfs"/class/drm/card*-{eDP,LVDS,DSI}-*; do
+        [[ -r "$candidate/status" && $(<"$candidate/status") == connected ]] && panels+=("$candidate")
+    done
+    candidates=("$sysfs"/class/backlight/*)
+    if [[ ${#panels[@]} == 1 && ${#candidates[@]} == 1
+        && ${candidates[0]##*/} == acpi_video* ]]; then
+        backlights=("${candidates[0]}")
+    fi
+fi
+
+if [[ ${#backlights[@]} == 1 ]]; then
+    device=${backlights[0]##*/}
+    if [[ -n "$percent" ]]; then
+        brightnessctl --class=backlight --device="$device" --min-value=1 set "$percent%" >/dev/null
+    fi
+    current=$(brightnessctl --class=backlight --device="$device" get)
+    maximum=$(brightnessctl --class=backlight --device="$device" max)
+else
+    [[ ${#backlights[@]} == 0 ]] || fail 'Multiple backlights for monitor'
+    buses=("$connector"/ddc/i2c-dev/i2c-*)
+    if [[ ${#buses[@]} == 0 ]]; then
+        buses=("$connector"/i2c-*/i2c-dev/i2c-*)
+    fi
+    [[ ${#buses[@]} == 1 ]] || fail 'No unambiguous DDC bus for monitor'
+    bus=${buses[0]##*/i2c-}
+    [[ "$bus" =~ ^[0-9]+$ ]] || fail 'Invalid DDC bus'
+    output=$(timeout 8s ddcutil --bus "$bus" --terse getvcp 10)
+    read -r kind code type current maximum extra <<< "$output"
+    [[ "$kind $code $type" == 'VCP 10 C' && -z "$extra" ]] || fail 'Brightness is not supported'
+    [[ "$current" =~ ^[0-9]+$ && "$maximum" =~ ^[1-9][0-9]*$ ]] || fail 'Invalid brightness response'
+    (( current <= maximum && maximum <= 65535 )) || fail 'Invalid DDC range'
+    if [[ -n "$percent" ]]; then
+        target=$(( (percent * maximum + 50) / 100 ))
+        timeout 8s ddcutil --bus "$bus" setvcp 10 "$target" >/dev/null
+        current=$target
+    fi
+fi
+[[ "$current" =~ ^[0-9]+$ && "$maximum" =~ ^[1-9][0-9]*$ ]] || fail 'Invalid brightness response'
+(( current <= maximum )) || fail 'Brightness exceeds maximum'
+printf '%d\n' "$(( (current * 100 + maximum / 2) / maximum ))"

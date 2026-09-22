@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Check controls, live metric sampling and the performance terminal handoff.
+Run with python3 tests/controls.py . (requires qs on PATH).
+"""
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+QML = """import QtQuick
+import QtQuick.Window
+import Quickshell
+import "modules/topbar" as Bar
+import "modules/topbar/popouts" as Popouts
+ShellRoot {
+    id: root
+    property bool keepAwake: false
+    property bool doNotDisturb: false
+    property int count: 0
+    property var items: []
+    property double now: Date.now()
+    property bool handedOff: false
+    signal tick()
+    Bar.SystemMetrics { id: systemMetrics }
+
+    function findButton(item) {
+        if (item.text === "Advanced · btop") return item
+        for (const child of item.children ?? []) {
+            const button = findButton(child)
+            if (button) return button
+        }
+        return null
+    }
+    Bar.MetricSampler {
+        id: network
+        clock: root
+        path: Qt.resolvedUrl("network.txt")
+        kind: "network"
+        interfaces: ["eth0"]
+    }
+    Window {
+        visible: true
+        width: 380; height: 180
+        Bar.HistoryGraph {
+            anchors.fill: parent
+            title: "Network"
+            labels: ["↓", "↑"]
+            unit: "B/s"
+            history: network.history
+            now: root.now
+        }
+    }
+    Bar.MonitorBrightness {
+        id: brightness
+        monitorName: "DP-1"
+        active: true
+    }
+    Popouts.Battery { width: 380; height: 420; powerState: root; brightness: brightness }
+    Popouts.Notifications { width: 380; height: 456; notificationService: root }
+    Window {
+        visible: true
+        width: 380; height: 500
+        Bar.StatusPopout {
+            id: performance
+            anchors.fill: parent
+            currentPage: "performance"
+            notificationService: root
+            player: null
+            powerState: root
+            monitorName: "DP-1"
+            onHandoffRequested: root.handedOff = true
+            metrics: ({ now: root.now,
+                cpu: { history: [{ time: root.now, values: [25] }] },
+                memory: { history: [{ time: root.now, values: [60] }] },
+                sensors: [{ title: "CPU temperature", kind: "temperature",
+                    history: [{ time: root.now, values: [45] }] }]
+            })
+        }
+    }
+    Timer {
+        interval: 400
+        running: true
+        onTriggered: {
+            if (!brightness.available || brightness.value !== 37)
+                throw new Error("Initial brightness failed")
+            brightness.setBrightness(55)
+            brightness.setBrightness(76)
+            brightness.active = false
+            root.tick()
+            const button = root.findButton(performance)
+            if (!button) throw new Error("Missing btop button")
+            button.click()
+            performance.metrics = { now: root.now, cpu: { history: [] },
+                memory: { history: [] }, sensors: [] }
+            finish.start()
+        }
+    }
+    Timer {
+        id: finish
+        interval: 1200
+        onTriggered: {
+            if (!brightness.available || brightness.value !== 76)
+                throw new Error("Pending brightness did not survive popup closure")
+            if (network.history.length !== 2 || network.history[1].values[0] !== 0)
+                throw new Error("Network sampler did not read counters")
+            if (!root.handedOff) throw new Error("btop launch did not hand off focus")
+            for (const sampler of [systemMetrics.cpu, systemMetrics.memory]) {
+                const values = sampler.history
+                const value = values[values.length - 1]?.values[0]
+                if (values.length < 2 || value === null || !Number.isFinite(value)
+                        || value < 0 || value > 100)
+                    throw new Error("Live CPU/RAM sampling failed")
+            }
+            console.log("CONTROL_CHECK_PASSED")
+            Qt.quit()
+        }
+    }
+}
+"""
+
+source = Path(sys.argv[1]).resolve()
+with tempfile.TemporaryDirectory() as directory:
+    root = Path(directory)
+    (root / "modules").symlink_to(source / "quickshell/modules")
+    (root / "theme").mkdir()
+    palette = (source / "quickshell/theme/Palette.qml.in").read_text()
+    (root / "theme/Palette.qml").write_text(re.sub(r"@\w+@", "7aa2f7", palette))
+    (root / "theme/qmldir").write_text("singleton Palette 1.0 Palette.qml\n")
+    (root / "bin").mkdir()
+    mock = root / "bin/icewine-monitor-brightness"
+    mock.write_text("#!" + shutil.which("bash") + '\necho "${2:-37}"\n')
+    mock.chmod(0o755)
+    uwsm = root / "bin/uwsm"
+    uwsm.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$@" > "' + str(root / "launch") + '"\n')
+    uwsm.chmod(0o755)
+    (root / "shell.qml").write_text(QML)
+    (root / "network.txt").write_text("eth0: 100 0 0 0 0 0 0 0 50 0 0 0 0 0 0 0\n")
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen",
+               DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(root / "no-session-bus"),
+               DBUS_SYSTEM_BUS_ADDRESS="unix:path=" + str(root / "no-system-bus"),
+               XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(root / "runtime"),
+               PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
+    result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                            capture_output=True, text=True, timeout=10)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0 and "CONTROL_CHECK_PASSED" in output, output
+    assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
+    assert (root / "launch").read_text().splitlines() == ["app", "--", "icewine-terminal-exec", "btop"]
+    print("control lifecycle checks passed")

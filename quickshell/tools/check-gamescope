@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+plan=$(qs ipc call gameLauncher gamescopePlan)
+
+jq -e '
+  def after($flag): .arguments as $args | ($args | index($flag)) as $i | $args[$i + 1];
+  .ok == true
+  and .arguments[0] == "gamescope"
+  and (after("-W") == (.monitor.width | round | tostring))
+  and (after("-H") == (.monitor.height | round | tostring))
+  and (after("-w") == (.monitor.width | round | tostring))
+  and (after("-h") == (.monitor.height | round | tostring))
+  and (after("-r") == (.monitor.refreshHz | round | tostring))
+  and (.arguments | index("-f") != null)
+  and (.arguments | index("-e") != null)
+  and (.arguments | index("--expose-wayland") != null)
+  and ((.monitor.hdr and (.arguments | index("--hdr-enabled") != null))
+       or ((.monitor.hdr | not) and (.arguments | index("--hdr-enabled") == null)))
+  and ((.monitor.vrr and (.arguments | index("--adaptive-sync") != null))
+       or ((.monitor.vrr | not) and (.arguments | index("--adaptive-sync") == null)))
+' <<< "$plan" >/dev/null
+
+printf 'gamescope plan ok for %s\n' "$(jq -r .monitor.name <<< "$plan")"

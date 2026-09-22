@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+drm_root=${1:-/sys/class/drm}
+
+for status in "$drm_root"/card*-*/status; do
+    [[ -r "$status" && "$(<"$status")" == connected ]] || continue
+
+    connector=${status%/status}
+    [[ -s "$connector/edid" ]] || continue
+    decoded=$(edid-decode "$connector/edid" 2>/dev/null) || continue
+
+    hdr=false
+    [[ "$decoded" == *"SMPTE ST2084"* ]] && hdr=true
+
+    vrr=false
+    if [[ "$decoded" == *"Adaptive-Sync Data Block"* \
+        || "$decoded" == *"FreeSync"* \
+        || "$decoded" == *"VRRmin:"* \
+        || ("$decoded" == *"Vendor-Specific Data Block (AMD)"* \
+            && "$decoded" == *"Minimum Refresh Rate:"*) ]]; then
+        vrr=true
+    fi
+
+    name=${connector##*/}
+    printf '%s\t%s\t%s\n' "${name#*-}" "$hdr" "$vrr"
+done

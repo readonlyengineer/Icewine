@@ -1,0 +1,28 @@
+pragma Singleton
+
+import QtQuick
+import Quickshell
+
+Singleton {
+    readonly property color background: "#@background@"
+    readonly property color backgroundDark: "#@backgroundDark@"
+    readonly property color surface: "#@surface@"
+    readonly property color selection: "#@selection@"
+    readonly property color border: "#@border@"
+    readonly property color foreground: "#@foreground@"
+    readonly property color foregroundDark: "#@foregroundDark@"
+    readonly property color muted: "#@muted@"
+    readonly property color primary: "#@highlight@"
+    readonly property color primaryDark: "#@highlightDark@"
+    readonly property color secondary: "#@secondaryHighlight@"
+    readonly property color tertiary: "#@tertiaryHighlight@"
+    readonly property color success: "#@success@"
+    readonly property color warning: "#@warning@"
+    readonly property color caution: "#@caution@"
+    readonly property color error: "#@error@"
+    readonly property color info: "#@info@"
+
+    function alpha(colour, opacity) {
+        return Qt.rgba(colour.r, colour.g, colour.b, opacity)
+    }
+}

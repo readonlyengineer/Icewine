@@ -1,0 +1,11 @@
+# Cursor size (defaults are tiny on HiDPI; 24 is the common HiDPI pick)
+export XCURSOR_SIZE=24
+
+# NixOS port: Arch resolved the cursor theme via /usr/share/icons/default →
+# Adwaita without this var; NixOS has no "default" alias, and without a
+# resolvable theme some Wayland compositors show their bundled fallback cursor.
+export XCURSOR_THEME=Adwaita
+
+# Qt: let Qt apps follow the per-screen scale Wayland advertises
+export QT_AUTO_SCREEN_SCALE_FACTOR=1
+export QT_WAYLAND_DISABLE_WINDOWDECORATION=1

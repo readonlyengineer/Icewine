@@ -1,0 +1,84 @@
+-- ~/.config/hypr/modules/Baseline.lua
+-- Hardware-agnostic baseline: defaults, catchall monitor, env vars,
+-- global behaviour fixes, and the (commented) permissions reference.
+-- Hardware-specific overrides are supplied by the host configuration.
+
+hl.config({
+	general = {
+		gaps_in          = 5,
+		gaps_out         = 10,
+		border_size      = 2,
+		resize_on_border = false,
+		allow_tearing    = false,
+		layout           = "scrolling",
+	},
+
+	scrolling = {
+		column_width             = 1.0,
+		fullscreen_on_one_column = false,
+		direction                = "right",
+		follow_focus             = true,
+		focus_fit_method         = 1,
+		wrap_focus               = true,
+		wrap_swapcol             = false,
+		explicit_column_widths   = "0.5, 1.0",
+	},
+
+	misc = {
+		focus_on_activate       = true,
+		force_default_wallpaper = -1,
+		disable_hyprland_logo   = true,
+	},
+
+	input = {
+		kb_layout    = "us",
+		kb_variant   = "",
+		kb_model     = "",
+		kb_options   = "",
+		kb_rules     = "",
+		follow_mouse = 0,
+		sensitivity  = 0,
+	},
+
+	render = {
+		cm_auto_hdr = 1,
+	},
+})
+
+-- Catchall monitor: any output not handled by a hardware module gets preferred mode at auto position.
+hl.monitor({
+	output   = "",
+	mode     = "preferred",
+	position = "auto",
+	scale    = "auto",
+})
+
+-- Per-device example (kept commented in case the epic-mouse comes back)
+-- hl.device({ name = "epic-mouse-v1", sensitivity = -0.5 })
+
+hl.env("EDITOR", require("modules.DefaultApps").editor)
+
+-- Global behaviour fixes (template carryover; kept as part of the baseline).
+
+-- Suppress client-driven maximize events globally so they don't fight the
+-- scrolling column-width policy.
+hl.window_rule({
+	name           = "suppress-maximize-events",
+	match          = { class = ".*" },
+	suppress_event = "maximize",
+})
+
+-- Some XWayland apps spawn a transient classless/titleless floating helper
+-- that grabs focus while dragging. Deny it focus so the source stays active.
+hl.window_rule({
+	name  = "fix-xwayland-drags",
+	match = {
+		class      = "^$",
+		title      = "^$",
+		xwayland   = true,
+		float      = true,
+		fullscreen = false,
+		pin        = false,
+	},
+	no_focus = true,
+})

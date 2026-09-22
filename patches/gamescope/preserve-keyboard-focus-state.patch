@@ -1,0 +1,440 @@
+Subject: [PATCH] wayland: transfer keyboard focus state without replaying presses
+
+Based on Gamescope 3.16.28 (fa0b4d3342078f01eadff0193e09c3b561f40c03).
+
+A key that dismisses another application can still be held when Gamescope
+receives keyboard focus. Sending it through HandleKey creates a second
+press in the nested client. Preserve the host keymap, keys and modifiers
+through the seat's leave/enter path instead, and pair shortcut releases
+with the presses actually handled by that shortcut.
+
+Regression check: python3 check-focus.py PATH_TO_PATCHED_GAMESCOPE_SOURCE
+See README.md for scope and remaining end-to-end validation.
+
+diff --git a/src/wlserver.cpp b/src/wlserver.cpp
+--- a/src/wlserver.cpp
++++ b/src/wlserver.cpp
+@@ -2387,7 +2387,11 @@
+ 	wlr_seat_set_keyboard( wlserver.wlr.seat, wlserver.wlr.virtual_keyboard_device );
+ 
+ 	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard( wlserver.wlr.seat );
+-	if ( keyboard == nullptr )
++	// Keep the selected surface, but do not restore seat focus while the host
++	// keyboard is elsewhere (or while its enter snapshot awaits modifiers).
++	if ( !wlserver.nested_keyboard_focus || !surface )
++		wlr_seat_keyboard_notify_clear_focus( wlserver.wlr.seat );
++	else if ( keyboard == nullptr )
+ 		wlr_seat_keyboard_notify_enter( wlserver.wlr.seat, surface, nullptr, 0, nullptr);
+ 	else
+ 		wlr_seat_keyboard_notify_enter( wlserver.wlr.seat, surface, keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
+@@ -2464,6 +2468,106 @@
+ 	}
+ 
+ 	return false;
++}
++
++void wlserver_nested_keyboard_leave()
++{
++	assert( wlserver_is_lock_held() );
++	wlserver.nested_keyboard_focus = false;
++	wlr_seat_keyboard_notify_clear_focus( wlserver.wlr.seat );
++
++	wlr_keyboard *keyboard = wlserver.wlr.virtual_keyboard_device;
++	// Update the device only. This stub has no key-event forwarding listener.
++	while ( keyboard->num_keycodes )
++	{
++		wlr_keyboard_key_event event = {
++			.time_msec = 0,
++			.keycode = keyboard->keycodes[keyboard->num_keycodes - 1],
++			.update_state = false,
++			.state = WL_KEYBOARD_KEY_STATE_RELEASED,
++		};
++		wlr_keyboard_notify_key( keyboard, &event );
++	}
++	wlr_keyboard_notify_modifiers( keyboard, 0, 0, 0, 0 );
++	std::erase_if( wlserver.mapPressedHotkeyKeys, [keyboard]( const auto &entry ) {
++		return entry.first.first == keyboard;
++	} );
++}
++
++bool wlserver_nested_keyboard_enter( const uint32_t *keys, size_t count )
++{
++	assert( wlserver_is_lock_held() );
++	wlserver_nested_keyboard_leave();
++	if ( count > WLR_KEYBOARD_KEYS_CAP )
++	{
++		wl_log.errorf( "Host keyboard snapshot exceeds wlroots' key capacity" );
++		return false;
++	}
++
++	wlr_keyboard *keyboard = wlserver.wlr.virtual_keyboard_device;
++	for ( size_t i = 0; i < count; ++i )
++	{
++		wlr_keyboard_key_event event = {
++			.time_msec = 0,
++			.keycode = keys[i],
++			.update_state = false,
++			.state = WL_KEYBOARD_KEY_STATE_PRESSED,
++		};
++		wlr_keyboard_notify_key( keyboard, &event );
++	}
++	// wl_keyboard.enter is followed by modifiers. Restore focus with both.
++	return true;
++}
++
++bool wlserver_nested_keyboard_modifiers( xkb_keymap *keymap, const wlr_keyboard_modifiers *mods, bool enter )
++{
++	assert( wlserver_is_lock_held() );
++	wlr_keyboard *keyboard = wlserver.wlr.virtual_keyboard_device;
++	if ( !keymap || ( keyboard->keymap != keymap && !wlr_keyboard_set_keymap( keyboard, keymap ) ) )
++	{
++		wl_log.errorf( "Failed to install host keyboard keymap" );
++		wlserver_nested_keyboard_leave();
++		return false;
++	}
++	wlr_keyboard_notify_modifiers( keyboard, mods->depressed, mods->latched, mods->locked, mods->group );
++	wlr_seat_set_keyboard( wlserver.wlr.seat, keyboard );
++	if ( enter )
++	{
++		wlserver.nested_keyboard_focus = true;
++		if ( wlserver.kb_focus_surface )
++			wlserver_keyboardfocus( wlserver.kb_focus_surface, false );
++	}
++	else if ( wlserver.nested_keyboard_focus )
++		wlr_seat_keyboard_notify_modifiers( wlserver.wlr.seat, &keyboard->modifiers );
++	return true;
++}
++
++void wlserver_nested_key( uint32_t key, bool press, uint32_t time, bool hotkeys )
++{
++	assert( wlserver_is_lock_held() );
++	if ( !wlserver.nested_keyboard_focus )
++		return;
++	wlr_keyboard *keyboard = wlserver.wlr.virtual_keyboard_device;
++	bool handled = hotkeys && wlserver_process_hotkeys( keyboard, key, press );
++	bool wasForwarded = std::find( keyboard->keycodes,
++		keyboard->keycodes + keyboard->num_keycodes, key ) != keyboard->keycodes + keyboard->num_keycodes;
++	// A consumed press never enters client state. A previously forwarded press
++	// must still get its release, even when that release also completes a binding.
++	if ( ( press && handled ) || ( !press && !wasForwarded ) )
++	{
++		bump_input_counter();
++		return;
++	}
++	wlr_keyboard_key_event event = {
++		.time_msec = time,
++		.keycode = key,
++		.update_state = false, // Host modifier events are authoritative.
++		.state = press ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED,
++	};
++	wlr_keyboard_notify_key( keyboard, &event );
++	wlr_seat_set_keyboard( wlserver.wlr.seat, keyboard );
++	wlr_seat_keyboard_notify_key( wlserver.wlr.seat, time, key, event.state );
++	bump_input_counter();
+ }
+ 
+ void wlserver_key( uint32_t key, bool press, uint32_t time )
+diff --git a/src/wlserver.hpp b/src/wlserver.hpp
+--- a/src/wlserver.hpp
++++ b/src/wlserver.hpp
+@@ -135,6 +135,7 @@
+ 	
+ 	struct wlr_surface *mouse_focus_surface;
+ 	struct wlr_surface *kb_focus_surface;
++	bool nested_keyboard_focus = true;
+ 	std::unordered_map<struct wlr_surface *, std::pair<int, int>> current_dropdown_surfaces;
+ 	double mouse_surface_cursorx = 0.0f;
+ 	double mouse_surface_cursory = 0.0f;
+@@ -247,6 +248,10 @@
+ 
+ void wlserver_keyboardfocus( struct wlr_surface *surface, bool bConstrain = true );
+ void wlserver_key( uint32_t key, bool press, uint32_t time );
++void wlserver_nested_keyboard_leave();
++bool wlserver_nested_keyboard_enter( const uint32_t *keys, size_t count );
++bool wlserver_nested_keyboard_modifiers( xkb_keymap *keymap, const struct wlr_keyboard_modifiers *mods, bool enter );
++void wlserver_nested_key( uint32_t key, bool press, uint32_t time, bool hotkeys = true );
+ 
+ void wlserver_mousefocus( struct wlr_surface *wlrsurface, int x = 0, int y = 0 );
+ void wlserver_clear_dropdowns();
+diff --git a/src/Backends/WaylandBackend.cpp b/src/Backends/WaylandBackend.cpp
+--- a/src/Backends/WaylandBackend.cpp
++++ b/src/Backends/WaylandBackend.cpp
+@@ -23,6 +23,7 @@
+ 
+ #include "wlr_begin.hpp"
+ #include <wayland-client.h>
++#include <wlr/types/wlr_keyboard.h>
+ #include <xdg-shell-client-protocol.h>
+ #include <linux-dmabuf-v1-client-protocol.h>
+ #include <viewporter-client-protocol.h>
+@@ -533,6 +534,7 @@
+     private:
+ 
+         void HandleKey( uint32_t uKey, bool bPressed );
++        void LeaveKeyboard();
+ 
+         CWaylandBackend *m_pBackend = nullptr;
+ 
+@@ -572,6 +574,10 @@
+ 
+         std::atomic<std::shared_ptr<zwp_relative_pointer_v1>> m_pRelativePointer = nullptr;
+         std::unordered_set<uint32_t> m_uScancodesHeld;
++        std::unordered_set<uint32_t> m_uInheritedScancodes;
++        std::unordered_set<uint32_t> m_uShortcutScancodes;
++        bool m_bKeyboardEnterPending = false;
++        wlr_keyboard_modifiers m_KeyboardModifiers = {};
+ 
+         void Wayland_Registry_Global( wl_registry *pRegistry, uint32_t uName, const char *pInterface, uint32_t uVersion );
+         static const wl_registry_listener s_RegistryListener;
+@@ -2090,6 +2096,9 @@
+             return false;
+         }
+ 
++        // Only claim host focus handling after successful initialization:
++        // a failed Wayland init may fall back to SDL, which owns its own input.
++        wlserver.nested_keyboard_focus = false;
+         xdg_log.infof( "Initted Wayland backend" );
+ 
+         return true;
+@@ -2929,8 +2938,11 @@
+ 
+     void CWaylandInputThread::HandleKey( uint32_t uKey, bool bPressed )
+     {
+-        if ( m_uKeyModifiers & m_uModMask[ GAMESCOPE_WAYLAND_MOD_META ] )
+-        {
++        // Match shortcut releases to their presses, not the current Meta state.
++        if ( bPressed ? ( m_uKeyModifiers & m_uModMask[ GAMESCOPE_WAYLAND_MOD_META ] )
++                      : m_uShortcutScancodes.contains( uKey ) )
++        {
++            bool handled = true;
+             switch ( uKey )
+             {
+                 case KEY_F:
+@@ -2939,7 +2951,7 @@
+                     {
+                         static_cast< CWaylandConnector * >( m_pBackend->GetCurrentConnector() )->SetFullscreen( !g_bFullscreen );
+                     }
+-                    return;
++                    break;
+                 }
+ 
+                 case KEY_N:
+@@ -2948,7 +2960,7 @@
+                     {
+                         g_wantedUpscaleFilter = GamescopeUpscaleFilter::PIXEL;
+                     }
+-                    return;
++                    break;
+                 }
+ 
+                 case KEY_B:
+@@ -2957,7 +2969,7 @@
+                     {
+                         g_wantedUpscaleFilter = GamescopeUpscaleFilter::LINEAR;
+                     }
+-                    return;
++                    break;
+                 }
+ 
+                 case KEY_U:
+@@ -2967,7 +2979,7 @@
+                         g_wantedUpscaleFilter = ( g_wantedUpscaleFilter == GamescopeUpscaleFilter::FSR ) ?
+                             GamescopeUpscaleFilter::LINEAR : GamescopeUpscaleFilter::FSR;
+                     }
+-                    return;
++                    break;
+                 }
+ 
+                 case KEY_Y:
+@@ -2977,7 +2989,7 @@
+                         g_wantedUpscaleFilter = ( g_wantedUpscaleFilter == GamescopeUpscaleFilter::NIS ) ?
+                             GamescopeUpscaleFilter::LINEAR : GamescopeUpscaleFilter::NIS;
+                     }
+-                    return;
++                    break;
+                 }
+ 
+                 case KEY_I:
+@@ -2986,7 +2998,7 @@
+                     {
+                         g_upscaleFilterSharpness = std::min( 20, g_upscaleFilterSharpness + 1 );
+                     }
+-                    return;
++                    break;
+                 }
+ 
+                 case KEY_O:
+@@ -2995,7 +3007,7 @@
+                     {
+                         g_upscaleFilterSharpness = std::max( 0, g_upscaleFilterSharpness - 1 );
+                     }
+-                    return;
++                    break;
+                 }
+ 
+                 case KEY_S:
+@@ -3004,16 +3016,25 @@
+                     {
+                         gamescope::CScreenshotManager::Get().TakeScreenshot( true );
+                     }
+-                    return;
++                    break;
+                 }
+ 
+                 default:
++                    handled = false;
+                     break;
+             }
++            if ( handled )
++            {
++                if ( bPressed )
++                    m_uShortcutScancodes.insert( uKey );
++                else
++                    m_uShortcutScancodes.erase( uKey );
++                return;
++            }
+         }
+ 
+         wlserver_lock();
+-        wlserver_key( uKey, bPressed, ++m_uFakeTimestamp );
++        wlserver_nested_key( uKey, bPressed, ++m_uFakeTimestamp );
+         wlserver_unlock();
+     }
+ 
+@@ -3054,6 +3075,8 @@
+         {
+             if ( m_pKeyboard )
+             {
++                if ( m_bKeyboardEntered )
++                    LeaveKeyboard();
+                 wl_keyboard_release( m_pKeyboard );
+                 m_pKeyboard = nullptr;
+             }
+@@ -3184,9 +3207,6 @@
+ 
+     void CWaylandInputThread::Wayland_Keyboard_Keymap( wl_keyboard *pKeyboard, uint32_t uFormat, int32_t nFd, uint32_t uSize )
+     {
+-        // We are not doing much with the keymap, we pass keycodes thru.
+-        // Ideally we'd use this to influence our keymap to clients, eg. x server.
+-
+         defer( close( nFd ) );
+         if ( uFormat != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 )
+ 		return;
+@@ -3208,6 +3228,14 @@
+ 
+         xkb_keymap_unref( m_pXkbKeymap );
+         m_pXkbKeymap = pKeymap;
++        if ( m_bKeyboardEntered )
++        {
++            wlserver_lock();
++            bool ok = wlserver_nested_keyboard_modifiers( m_pXkbKeymap, &m_KeyboardModifiers, false );
++            wlserver_unlock();
++            if ( !ok )
++                LeaveKeyboard();
++        }
+ 
+         for ( uint32_t i = 0; i < GAMESCOPE_WAYLAND_MOD_COUNT; i++ )
+             m_uModMask[ i ] = 1u << xkb_keymap_mod_get_index( m_pXkbKeymap, WaylandModifierToXkbModifierName( ( WaylandModifierIndex ) i ) );
+@@ -3217,17 +3245,33 @@
+ 		if ( !IsGamescopeToplevel( pSurface ) )
+ 			return;
+ 
++        LeaveKeyboard();
++        if ( !m_pXkbKeymap || pKeys->size % sizeof(uint32_t) != 0 )
++        {
++            xdg_log.errorf( "Invalid host keyboard focus snapshot" );
++            return;
++        }
++        const uint32_t *keys = static_cast<const uint32_t *>( pKeys->data );
++        size_t count = pKeys->size / sizeof(uint32_t);
++        for ( size_t i = 0; i < count; ++i )
++        {
++            if ( uint64_t( keys[i] ) + 8 > xkb_keymap_max_keycode( m_pXkbKeymap ) ||
++                 uint64_t( keys[i] ) + 8 < xkb_keymap_min_keycode( m_pXkbKeymap ) )
++            {
++                xdg_log.errorf( "Invalid key in host keyboard focus snapshot" );
++                return;
++            }
++        }
++        wlserver_lock();
++        bool ok = wlserver_nested_keyboard_enter( keys, count );
++        wlserver_unlock();
++        if ( !ok )
++            return;
++        for ( size_t i = 0; i < count; ++i )
++            m_uScancodesHeld.insert( keys[i] );
++        m_uInheritedScancodes = m_uScancodesHeld;
+         m_bKeyboardEntered = true;
+-        m_uScancodesHeld.clear();
+-
+-        const uint32_t *pBegin = (uint32_t *)pKeys->data;
+-        const uint32_t *pEnd = pBegin + ( pKeys->size / sizeof(uint32_t) );
+-        std::span<const uint32_t> keys{ pBegin, pEnd };
+-        for ( uint32_t uKey : keys )
+-        {
+-            HandleKey( uKey, true );
+-            m_uScancodesHeld.insert( uKey );
+-        }
++        m_bKeyboardEnterPending = true;
+ 
+         if ( m_ofPendingCursorX )
+         {
+@@ -3243,13 +3287,20 @@
+ 		if ( !IsGamescopeToplevel( pSurface ) )
+ 			return;
+ 
++        LeaveKeyboard();
++    }
++    void CWaylandInputThread::LeaveKeyboard()
++    {
+         m_bKeyboardEntered = false;
++        m_bKeyboardEnterPending = false;
+         m_uKeyModifiers = 0;
+-
+-        for ( uint32_t uKey : m_uScancodesHeld )
+-            HandleKey( uKey, false );
+-
++        m_KeyboardModifiers = {};
+         m_uScancodesHeld.clear();
++        m_uInheritedScancodes.clear();
++        m_uShortcutScancodes.clear();
++        wlserver_lock();
++        wlserver_nested_keyboard_leave();
++        wlserver_unlock();
+     }
+     void CWaylandInputThread::Wayland_Keyboard_Key( wl_keyboard *pKeyboard, uint32_t uSerial, uint32_t uTime, uint32_t uKey, uint32_t uState )
+     {
+@@ -3261,7 +3312,16 @@
+         if ( bWasPressed == bPressed )
+             return;
+ 
+-        HandleKey( uKey, bPressed );
++        // An inherited release updates client state, but must not fire a
++        // release-triggered shortcut whose press happened outside Gamescope.
++        if ( !bPressed && m_uInheritedScancodes.erase( uKey ) )
++        {
++            wlserver_lock();
++            wlserver_nested_key( uKey, false, ++m_uFakeTimestamp, false );
++            wlserver_unlock();
++        }
++        else
++            HandleKey( uKey, bPressed );
+ 
+         if ( bWasPressed )
+             m_uScancodesHeld.erase( uKey );
+@@ -3271,6 +3331,15 @@
+     void CWaylandInputThread::Wayland_Keyboard_Modifiers( wl_keyboard *pKeyboard, uint32_t uSerial, uint32_t uModsDepressed, uint32_t uModsLatched, uint32_t uModsLocked, uint32_t uGroup )
+     {
+         m_uKeyModifiers = uModsDepressed | uModsLatched | uModsLocked;
++        m_KeyboardModifiers = { uModsDepressed, uModsLatched, uModsLocked, uGroup };
++        if ( !m_bKeyboardEntered )
++            return;
++        wlserver_lock();
++        bool ok = wlserver_nested_keyboard_modifiers( m_pXkbKeymap, &m_KeyboardModifiers, m_bKeyboardEnterPending );
++        wlserver_unlock();
++        m_bKeyboardEnterPending = false;
++        if ( !ok )
++            LeaveKeyboard();
+     }
+     void CWaylandInputThread::Wayland_Keyboard_RepeatInfo( wl_keyboard *pKeyboard, int32_t nRate, int32_t nDelay )
+     {

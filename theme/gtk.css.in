@@ -1,0 +1,49 @@
+/* Tokyo Night palette values supplied by Icewine. */
+
+@define-color palette_bg              #@background@;
+@define-color palette_bg_dark         #@backgroundDark@;
+@define-color palette_bg_highlight    #@surface@;
+@define-color palette_fg              #@foreground@;
+@define-color palette_fg_dark         #@foregroundDark@;
+@define-color palette_fg_gutter       #@border@;
+@define-color palette_comment         #@muted@;
+@define-color palette_highlight       #@highlight@;
+@define-color palette_secondary       #@secondaryHighlight@;
+@define-color palette_success         #@success@;
+@define-color palette_warning         #@caution@;
+@define-color palette_error           #@error@;
+@define-color palette_info            #@info@;
+
+/* --- Core GTK semantic tokens --- */
+@define-color theme_bg_color            @palette_bg;
+@define-color theme_fg_color            @palette_fg;
+@define-color theme_base_color          @palette_bg_dark;
+@define-color theme_text_color          @palette_fg;
+@define-color theme_selected_bg_color   @palette_highlight;
+@define-color theme_selected_fg_color   @palette_bg_dark;
+@define-color theme_tooltip_bg_color    @palette_bg_highlight;
+@define-color theme_tooltip_fg_color    @palette_fg;
+@define-color theme_unfocused_bg_color  @palette_bg_dark;
+@define-color theme_unfocused_fg_color  @palette_fg_dark;
+
+@define-color insensitive_bg_color      @palette_bg_dark;
+@define-color insensitive_fg_color      @palette_comment;
+@define-color insensitive_base_color    @palette_bg_dark;
+
+@define-color borders                   @palette_fg_gutter;
+@define-color unfocused_borders         @palette_fg_gutter;
+
+/* --- Accent (used by newer GTK3 apps + libadwaita-style widgets) --- */
+@define-color accent_color              @palette_highlight;
+@define-color accent_bg_color           @palette_highlight;
+@define-color accent_fg_color           @palette_bg_dark;
+
+/* --- Status --- */
+@define-color success_color             @palette_success;
+@define-color warning_color             @palette_warning;
+@define-color error_color               @palette_error;
+@define-color destructive_color         @palette_error;
+
+/* --- Links --- */
+@define-color link_color                @palette_info;
+@define-color visited_link_color        @palette_secondary;

@@ -1,0 +1,139 @@
+{ self, nixpkgs }:
+let
+  lib = nixpkgs.lib;
+  pkgs = nixpkgs.legacyPackages.x86_64-linux;
+  example = extra: (nixpkgs.lib.nixosSystem {
+    system = "x86_64-linux";
+    modules = [ self.nixosModules.default {
+      users.users.demo.isNormalUser = true;
+      services.icewine = { enable = true; user = "demo"; };
+      home-manager.users.demo.home.stateVersion = "26.05";
+      system.stateVersion = "26.05";
+    } extra ];
+  }).config;
+  home = c: c.home-manager.users.demo;
+  defaults = example { };
+  unmanaged = example {
+    services.icewine = {
+      gtk.enable = false;
+      idle.enable = false;
+      battery.enable = false;
+      fileManager.preset = null;
+      terminal.preset = null;
+      shell.enable = false;
+      applications.terminal = [ "custom-terminal" ];
+    };
+  };
+  bareShell = example {
+    services.icewine.shell = {
+      fastfetch.enable = false;
+      blesh.enable = false;
+      starship.enable = false;
+    };
+  };
+  externalGtk = example { home-manager.users.demo.gtk.theme.package = null; };
+  noGit = example { services.icewine.shell.starship.git.enable = false; };
+  ownTerminal = example {
+    services.icewine.terminal.preset = null;
+    services.icewine.applications.terminal = [ "custom-terminal" ];
+  };
+  ownShell = example { services.icewine.shell.enable = false; };
+  customised = example {
+    home-manager.users.demo.services.hypridle.settings.listener = [ { timeout = 42; on-timeout = "true"; } ];
+    home-manager.users.demo.services.batsignal.extraArgs = [ "-w" "25" ];
+    home-manager.users.demo.programs.yazi.theme.mode.normal_main.fg = "#112233";
+    home-manager.users.demo.programs.kitty = {
+      font.size = 12;
+      settings.background = "#112233";
+    };
+  };
+  # Only replace the report executable; exercise Home Manager's real bashrc.
+  startup = example {
+    services.icewine.shell = { blesh.enable = false; starship.enable = false; };
+    home-manager.users.demo.programs = {
+      bash.enableCompletion = false;
+      fastfetch.package = pkgs.writeShellScriptBin "fastfetch" "echo ICEWINE_FASTFETCH";
+    };
+  };
+  bashrc = (home startup).home.file.".bashrc".source;
+  gitConfig = c: (home c).home.file.${(home c).programs.starship.configPath}.source;
+in
+assert lib.all (package: lib.isDerivation package) externalGtk.environment.systemPackages;
+assert (home defaults).gtk.enable;
+assert (home defaults).services.hypridle.enable;
+assert (home defaults).services.batsignal.enable;
+assert (home defaults).programs.yazi.enable;
+assert (home defaults).programs.yazi.plugins ? mount;
+assert lib.elem pkgs.ffmpegthumbnailer (home defaults).programs.yazi.extraPackages;
+assert lib.elem pkgs._7zz (home defaults).programs.yazi.extraPackages;
+assert defaults.services.gvfs.enable;
+assert defaults.services.icewine.applications.fileManager == [ "icewine-terminal-exec" "yazi" ];
+assert (home defaults).home.sessionVariables ? LS_COLORS;
+assert (home defaults).xdg.dataFile ? "applications/uuctl.desktop";
+assert !((home defaults).systemd.user.services ? waybar);
+assert !(home unmanaged).gtk.enable;
+assert !(home unmanaged).services.hypridle.enable;
+assert !(home unmanaged).services.batsignal.enable;
+assert !(home unmanaged).programs.yazi.enable;
+assert !unmanaged.services.gvfs.enable;
+assert !((home unmanaged).home.sessionVariables ? LS_COLORS);
+assert (home customised).programs.yazi.theme.mode.normal_main.fg == "#112233";
+assert (home customised).services.batsignal.extraArgs == [ "-w" "25" ];
+assert (builtins.head (home customised).services.hypridle.settings.listener).timeout == 42;
+assert (home defaults).programs.kitty.enable;
+assert (home defaults).programs.kitty.package != null;
+assert defaults.services.icewine.applications.terminal == [ "kitty" ];
+assert (home defaults).programs.bash.enable;
+assert (home defaults).programs.fastfetch.enable;
+assert (home defaults).programs.fastfetch.package != null;
+assert lib.elem pkgs.blesh (home defaults).home.packages;
+assert (home defaults).programs.starship.enable;
+assert !(home defaults).programs.starship.settings.git_status.disabled;
+assert !(home unmanaged).programs.kitty.enable;
+assert !(home unmanaged).programs.bash.enable;
+assert !(home unmanaged).programs.fastfetch.enable;
+assert !(home unmanaged).programs.starship.enable;
+assert !(lib.elem pkgs.blesh (home unmanaged).home.packages);
+assert !(home ownTerminal).programs.kitty.enable && (home ownTerminal).programs.bash.enable;
+assert (home ownShell).programs.kitty.enable && !(home ownShell).programs.bash.enable;
+assert (home bareShell).programs.bash.enable;
+assert !(home bareShell).programs.fastfetch.enable;
+assert !(home bareShell).programs.starship.enable;
+assert !(lib.elem pkgs.blesh (home bareShell).home.packages);
+assert (home customised).programs.kitty.font.size == 12;
+assert (home customised).programs.kitty.settings.background == "#112233";
+assert (home customised).programs.kitty.settings.background_blur == 1;
+assert (home noGit).programs.starship.settings.git_branch.disabled;
+assert !(lib.hasInfix "$git_" (home noGit).programs.starship.settings.format);
+pkgs.runCommand "icewine-terminal-checks" {
+  nativeBuildInputs = [ pkgs.bashInteractive pkgs.git pkgs.starship ];
+} ''
+  # No interactive output in ordinary commands, including the SSH environment.
+  output=$(BASH_ENV=${bashrc} bash --noprofile --norc -c 'echo COMMAND_OK')
+  test "$output" = COMMAND_OK
+  output=$(SSH_CONNECTION="127.0.0.1 1000 127.0.0.1 22" BASH_ENV=${bashrc} bash --noprofile --norc -c 'echo COMMAND_OK')
+  test "$output" = COMMAND_OK
+  output=$(BASH_ENV=${(home defaults).home.file.".bashrc".source} bash --noprofile --norc -c 'echo COMMAND_OK')
+  test "$output" = COMMAND_OK
+  # Interactive local/TTY and SSH sessions both run the report exactly once.
+  output=$(bash --noprofile --rcfile ${bashrc} -ic 'unset HISTFILE' 2>/dev/null)
+  test "$output" = ICEWINE_FASTFETCH
+  output=$(SSH_CONNECTION="127.0.0.1 1000 127.0.0.1 22" bash --noprofile --rcfile ${bashrc} -ic 'unset HISTFILE' 2>/dev/null)
+  test "$output" = ICEWINE_FASTFETCH
+
+  # Check native Starship modules against a disposable Git repository.
+  export STARSHIP_CACHE="$TMPDIR/starship"
+  mkdir -p "$STARSHIP_CACHE"
+  git init -q --initial-branch=icewine-check repo
+  cd repo
+  touch tracked
+  git add tracked
+  git -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -qm initial
+  touch untracked
+  prompt=$(STARSHIP_CONFIG=${gitConfig defaults} starship prompt)
+  case "$prompt" in *icewine-check*) ;; *) exit 1 ;; esac
+  case "$prompt" in *'?'*) ;; *) exit 1 ;; esac
+  prompt=$(STARSHIP_CONFIG=${gitConfig noGit} starship prompt)
+  case "$prompt" in *icewine-check*|*'?'*) exit 1 ;; esac
+  touch "$out"
+''

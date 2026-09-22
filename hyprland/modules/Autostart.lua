@@ -1,0 +1,1 @@
+-- Session applications are selected by the host.

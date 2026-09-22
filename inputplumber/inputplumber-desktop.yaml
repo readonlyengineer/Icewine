@@ -1,0 +1,155 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
+version: 1
+kind: DeviceProfile
+name: Icewine Desktop
+description: Steam Deck controls translated for the icewine desktop.
+
+target_devices:
+  - xbox-elite
+  - keyboard
+  - mouse
+  - touchpad
+
+mapping:
+  # Desktop pointer.
+  - name: Right stick mouse
+    source_event:
+      gamepad:
+        axis:
+          name: RightStick
+    target_events:
+      - mouse:
+          motion:
+            speed_pps: 800
+  - name: Right trigger left click
+    source_event:
+      gamepad:
+        trigger:
+          name: RightTrigger
+          deadzone: 0.2
+    target_events:
+      - mouse:
+          button: Left
+  - name: Left trigger right click
+    source_event:
+      gamepad:
+        trigger:
+          name: LeftTrigger
+          deadzone: 0.2
+    target_events:
+      - mouse:
+          button: Right
+  - name: Right bumper scroll down
+    source_event:
+      gamepad:
+        button: RightBumper
+    target_events:
+      - mouse:
+          wheel:
+            direction: down
+  - name: Left bumper scroll up
+    source_event:
+      gamepad:
+        button: LeftBumper
+    target_events:
+      - mouse:
+          wheel:
+            direction: up
+
+  # Face buttons.
+  - name: A enter
+    source_event:
+      gamepad:
+        button: South
+    target_events:
+      - keyboard: KeyEnter
+  - name: X tab
+    source_event:
+      gamepad:
+        button: North
+    target_events:
+      - keyboard: KeyTab
+  - name: B backspace
+    source_event:
+      gamepad:
+        button: East
+    target_events:
+      - keyboard: KeyBackspace
+  - name: Y escape
+    source_event:
+      gamepad:
+        button: West
+    target_events:
+      - keyboard: KeyEsc
+
+  # D-pad. Left stick, Quick Access, Start, and Select remain unassigned.
+  - name: D-pad up
+    source_event:
+      gamepad:
+        button: DPadUp
+    target_events:
+      - keyboard: KeyUp
+  - name: D-pad down
+    source_event:
+      gamepad:
+        button: DPadDown
+    target_events:
+      - keyboard: KeyDown
+  - name: D-pad left
+    source_event:
+      gamepad:
+        button: DPadLeft
+    target_events:
+      - keyboard: KeyLeft
+  - name: D-pad right
+    source_event:
+      gamepad:
+        button: DPadRight
+    target_events:
+      - keyboard: KeyRight
+
+  # Outside Gamescope, Guide returns to (or starts) the game session.
+  - name: Steam
+    source_event:
+      gamepad:
+        button: Guide
+    target_events:
+      - keyboard: KeyF17
+
+  # Back grips retain their global desktop actions.
+  - name: R4
+    source_event:
+      gamepad:
+        button: RightPaddle1
+    target_events:
+      - keyboard: KeyF13
+  - name: R4 alias
+    source_event:
+      gamepad:
+        button: RightTop
+    target_events:
+      - keyboard: KeyF13
+  - name: R5
+    source_event:
+      gamepad:
+        button: RightPaddle2
+    target_events:
+      - keyboard: KeyF14
+  - name: L4
+    source_event:
+      gamepad:
+        button: LeftPaddle1
+    target_events:
+      - keyboard: KeyF15
+  - name: L4 alias
+    source_event:
+      gamepad:
+        button: LeftTop
+    target_events:
+      - keyboard: KeyF15
+  - name: L5
+    source_event:
+      gamepad:
+        button: LeftPaddle2
+    target_events:
+      - keyboard: KeyF16
