@@ -66,8 +66,6 @@ Scope {
         var event = SessionModel.logindEvent(line, logindSessionPath)
         if (event === "lock" || event === "sleep") {
             lockFromLogind()
-        } else if (event === "unlock") {
-            releaseLock(false)
         } else if (event === "resume") {
             wakeDisplay()
         }
