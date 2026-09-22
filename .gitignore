@@ -2,3 +2,7 @@ result
 result-*
 .vm-state/
 artifacts/
+__pycache__/
+*.py[cod]
+.direnv/
+.qmlls.ini
