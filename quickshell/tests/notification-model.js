@@ -13,6 +13,45 @@ assert.match(card, /MouseArea\s*\{\s*anchors.fill: parent\s*onClicked: root.dism
 for (const handler of card.matchAll(/TapHandler\s*\{([^}]+)\}/g))
     assert.match(handler[1], /gesturePolicy: TapHandler.WithinBounds/,
         "Buttons must capture clicks before the body-dismiss MouseArea")
+assert.match(card, /Accessible\.name:\s*"Go to source window"/,
+    "Source navigation must have an accessible name")
+assert.match(card, /Accessible\.role:\s*Accessible\.Button/,
+    "Source navigation must expose button semantics")
+assert.match(card, /Controls\.ToolTip\.text:\s*"Go to source window"/,
+    "Source navigation must explain itself on hover")
+const sourceButton = card.match(/Controls\.Button\s*\{([\s\S]+?)\n    \}\n\n    Column/)[1]
+assert.match(sourceButton, /root\.sourceRequested\(address\)/,
+    "Source navigation must use its isolated action")
+assert.doesNotMatch(sourceButton, /root\.dismissRequested\(\)/,
+    "Source navigation must not duplicate the card-body dismissal signal")
+
+const window = (address, appId, fallbackClass = "") => ({
+    address,
+    wayland: appId === null ? null : { appId },
+    lastIpcObject: { class: fallbackClass }
+})
+const kitty = { desktopEntry: "kitty.desktop" }
+const kittyEntry = { id: "kitty", startupClass: "kitty" }
+assert.equal(notifications.sourceWindowAddress(kitty,
+    [window("0x1", "kitty")], kittyEntry), "0x1")
+assert.equal(notifications.sourceWindowAddress(kitty,
+    [window("0x1", "kitty"), window("0x2", "kitty")], kittyEntry), "",
+    "Multiple matching windows must not select an arbitrary source")
+assert.equal(notifications.sourceWindowAddress({ desktopEntry: "org.example.App" },
+    [window("0x3", "org.example.App")],
+    { id: "org.example.App", startupClass: "ExampleClass" }), "0x3")
+assert.equal(notifications.sourceWindowAddress({ desktopEntry: "example" },
+    [window("0x4", "", "Example")], { id: "example", startupClass: "Example" }), "0x4")
+assert.equal(notifications.sourceWindowAddress({ appName: "kitty" },
+    [window("0x5", "kitty")], null), "",
+    "A display name alone must not establish source identity")
+assert.equal(notifications.sourceWindowAddress({ desktopEntry: "batsignal" },
+    [window("0x6", "kitty")], { id: "batsignal", startupClass: "" }), "")
+assert.equal(notifications.sourceWindowAddress(kitty, [], kittyEntry), "",
+    "Closed source windows must not leave an actionable address")
+assert.equal(notifications.sourceWindowAddress(kitty,
+    [window("0x7", null, "kitty")], kittyEntry), "",
+    "A toplevel without an activatable Wayland handle must not be actionable")
 
 for (const urgency of [0, 1, 2]) {
     assert.equal(notifications.shouldAlert(false, urgency), true)

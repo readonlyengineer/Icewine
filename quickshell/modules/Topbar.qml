@@ -343,6 +343,7 @@ Scope {
                     y: root.barHeight + 4
                     width: Math.min(380, panel.width - 16)
                     height: Math.min(implicitHeight, panel.height - y - 8)
+                    compositor: root.compositor
                     notificationService: root.notificationService
                     powerState: root
                     metrics: metrics

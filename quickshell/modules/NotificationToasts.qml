@@ -68,7 +68,12 @@ Scope {
 
                             width: parent.width
                             notification: toast.modelData
+                            compositor: root.compositor
                             onDismissRequested: toast.modelData.dismiss()
+                            onSourceRequested: address => {
+                                toast.modelData.dismiss()
+                                root.compositor.activateWindow(address)
+                            }
                         }
 
                         Timer {

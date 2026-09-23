@@ -13,6 +13,7 @@ QtObject {
     signal navigationRequested()
 
     readonly property string activeWindowAddress: Hyprland.activeToplevel?.address ?? ""
+    readonly property var toplevels: Hyprland.toplevels.values
 
     readonly property string activeWindowClass: String(
         Hyprland.activeToplevel?.wayland?.appId

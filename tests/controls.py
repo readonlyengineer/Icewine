@@ -24,6 +24,11 @@ ShellRoot {
     property double now: Date.now()
     property bool handedOff: false
     signal tick()
+    QtObject {
+        id: compositor
+        readonly property var toplevels: []
+        function activateWindow(address) {}
+    }
     Bar.SystemMetrics { id: systemMetrics }
     Bar.HistoryGraph {
         id: coldGraph
@@ -68,7 +73,11 @@ ShellRoot {
         active: true
     }
     Popouts.Battery { width: 380; height: 420; powerState: root; brightness: brightness }
-    Popouts.Notifications { width: 380; height: 456; notificationService: root }
+    Popouts.Notifications {
+        width: 380; height: 456
+        compositor: compositor
+        notificationService: root
+    }
     Window {
         visible: true
         width: 380; height: 500
@@ -76,6 +85,7 @@ ShellRoot {
             id: performance
             anchors.fill: parent
             currentPage: "performance"
+            compositor: compositor
             notificationService: root
             player: null
             powerState: root

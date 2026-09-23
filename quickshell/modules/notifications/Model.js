@@ -19,5 +19,24 @@ function toastTimeout(urgency, requestedTimeout) {
     return urgency === 0 ? 3000 : 5000
 }
 
+function sourceWindowAddress(notification, windows, desktopEntry) {
+    const identities = [notification?.desktopEntry, desktopEntry?.id,
+        desktopEntry?.startupClass]
+        .map(identity => String(identity || "").replace(/\.desktop$/i, "").toLowerCase())
+        .filter((identity, index, values) => identity && values.indexOf(identity) === index)
+    if (!identities.length)
+        return ""
+
+    const matches = Array.from(windows || []).filter(window => {
+        if (!window.wayland)
+            return false
+        const appId = String(window.wayland?.appId || window.lastIpcObject?.class || "")
+            .replace(/\.desktop$/i, "").toLowerCase()
+        return window.address && identities.includes(appId)
+    })
+    return matches.length === 1 ? matches[0].address : ""
+}
+
 if (typeof module !== "undefined")
-    module.exports = { shouldAlert, highestUrgency, prependUnique, toastTimeout }
+    module.exports = { shouldAlert, highestUrgency, prependUnique, toastTimeout,
+        sourceWindowAddress }

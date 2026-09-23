@@ -1,14 +1,21 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Services.Notifications
+import "Model.js" as NotificationModel
 import qs.theme as Theme
 
 Rectangle {
     id: root
 
     required property var notification
+    required property var compositor
+    readonly property var desktopEntry: notification?.desktopEntry
+        ? DesktopEntries.byId(notification.desktopEntry) : null
+    readonly property string sourceWindowAddress: NotificationModel.sourceWindowAddress(
+        notification, compositor.toplevels, desktopEntry)
     readonly property color accent: notification?.urgency === NotificationUrgency.Critical
         ? Theme.Palette.error : notification?.urgency === NotificationUrgency.Normal
             ? Theme.Palette.secondary : Theme.Palette.muted
@@ -16,6 +23,7 @@ Rectangle {
         || Quickshell.iconPath(notification?.appIcon ?? "", true)
 
     signal dismissRequested()
+    signal sourceRequested(string address)
 
     implicitHeight: Math.max(58, details.implicitHeight + 20)
     radius: 10
@@ -76,35 +84,43 @@ Rectangle {
         }
     }
 
-    Item {
-        id: dismiss
+    Controls.Button {
+        id: sourceButton
 
         anchors {
             top: parent.top
             right: parent.right
-            topMargin: 7
-            rightMargin: 7
+            topMargin: 8
+            rightMargin: 8
         }
-        width: 24
-        height: 24
-
-        Rectangle {
-            anchors.fill: parent
-            radius: height / 2
-            color: dismissHover.hovered ? Theme.Palette.selection : "transparent"
-        }
-
-        Text {
-            anchors.centerIn: parent
-            text: "×"
-            color: dismissHover.hovered ? Theme.Palette.error : Theme.Palette.muted
-            font.pixelSize: 16
+        visible: root.sourceWindowAddress !== ""
+        width: 36
+        height: 36
+        focusPolicy: Qt.StrongFocus
+        Accessible.role: Accessible.Button
+        Accessible.name: "Go to source window"
+        Controls.ToolTip.visible: hovered
+        Controls.ToolTip.text: "Go to source window"
+        onClicked: {
+            const address = root.sourceWindowAddress
+            if (address)
+                root.sourceRequested(address)
         }
 
-        HoverHandler { id: dismissHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler {
-            gesturePolicy: TapHandler.WithinBounds
-            onTapped: root.dismissRequested()
+        background: Rectangle {
+            radius: 9
+            color: sourceButton.down ? Theme.Palette.primaryDark
+                : sourceButton.hovered ? Theme.Palette.selection : "transparent"
+            border.width: sourceButton.activeFocus ? 1 : 0
+            border.color: Theme.Palette.primary
+        }
+
+        contentItem: Text {
+            text: "↗"
+            color: Theme.Palette.foreground
+            font.pixelSize: 18
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
         }
     }
 
@@ -114,10 +130,10 @@ Rectangle {
         anchors {
             top: parent.top
             left: iconFrame.right
-            right: dismiss.left
+            right: parent.right
             topMargin: 9
             leftMargin: 10
-            rightMargin: 7
+            rightMargin: sourceButton.visible ? 52 : 11
         }
         spacing: 2
 

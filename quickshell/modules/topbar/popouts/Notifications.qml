@@ -8,8 +8,10 @@ import qs.theme as Theme
 Item {
     id: root
 
+    required property var compositor
     required property var notificationService
     readonly property Item initialFocus: dnd
+    signal sourceRequested(string address)
 
     Item {
         id: header
@@ -84,7 +86,12 @@ Item {
 
             width: ListView.view.width
             notification: modelData
+            compositor: root.compositor
             onDismissRequested: modelData.dismiss()
+            onSourceRequested: address => {
+                modelData.dismiss()
+                root.sourceRequested(address)
+            }
         }
 
         add: Transition {

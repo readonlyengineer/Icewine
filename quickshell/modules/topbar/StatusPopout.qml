@@ -8,6 +8,7 @@ import qs.theme as Theme
 Widget {
     id: root
 
+    required property var compositor
     required property var notificationService
     required property var player
     required property var powerState
@@ -78,7 +79,14 @@ Widget {
     }
     Component {
         id: notificationsPage
-        Popouts.Notifications { notificationService: root.notificationService }
+        Popouts.Notifications {
+            compositor: root.compositor
+            notificationService: root.notificationService
+            onSourceRequested: address => {
+                root.handoffRequested()
+                Qt.callLater(() => root.compositor.activateWindow(address))
+            }
+        }
     }
     Component {
         id: batteryPage
