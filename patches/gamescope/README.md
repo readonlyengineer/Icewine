@@ -1,8 +1,9 @@
 # Gamescope patches
 
-Icewine owns these patches and applies them in `modules/handheld.nix` when
-`services.icewine.handheld.enable` is enabled. Host configurations only enable
-Icewine; they do not carry the patches.
+Icewine owns the keyboard-focus patch and applies it in `modules/default.nix`
+whenever `services.icewine.enable` is enabled, including laptops and handhelds.
+The experimental upstream touch patches remain in `modules/handheld.nix` and
+apply only to handhelds. Host configurations do not carry the patches.
 
 ## Preserve keyboard focus state
 
@@ -55,8 +56,9 @@ initially unfocused launch, and the focus gate leaking into SDL fallback after
 failed Wayland initialization. The final review found no remaining actionable
 blockers.
 
-The check applies the complete Gamescope patch stack from Icewine, compiles the
-patched Gamescope package, and runs `check-focus.py`. That script extracts the
+The check requires the focus patch exactly once in both desktop/laptop and
+handheld package variants, applies each complete patch stack, compiles both
+Gamescope variants, and runs `check-focus.py` against each. That script extracts the
 changed production handlers and compiles them into an assert-based C++ check
 with an in-memory seat. It covers inherited Enter, subsequent real presses,
 modifier snapshots, internal focus changes, missing selected surfaces, hotkey

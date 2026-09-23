@@ -80,6 +80,16 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    nixpkgs.overlays = lib.mkAfter [
+      (_final: prev: {
+        gamescope = prev.gamescope.overrideAttrs (old: {
+          patches = (old.patches or [ ]) ++ [
+            ../patches/gamescope/preserve-keyboard-focus-state.patch
+          ];
+        });
+      })
+    ];
+
     assertions = [
       { assertion = cfg.user != "" && builtins.hasAttr cfg.user config.users.users;
         message = "Icewine requires services.icewine.user to name an existing user."; }

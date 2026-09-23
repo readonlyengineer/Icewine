@@ -94,9 +94,8 @@ in {
         '';
       });
       gamescope = prev.gamescope.overrideAttrs (old: {
-        # Local keyboard-focus fix and experimental upstream touch patches.
+        # Experimental upstream touch patches for handhelds.
         patches = (old.patches or [ ]) ++ [
-          ../patches/gamescope/preserve-keyboard-focus-state.patch
           (prev.fetchurl {
             url = "https://github.com/ValveSoftware/gamescope/commit/8a0c26e594c9186adbaed742cafcbdfc612f3c50.patch";
             hash = "sha256-MRXtXlK0fx7S7i7+AWg2yvdMKNWJa3IFdawYCx7rdK0=";
