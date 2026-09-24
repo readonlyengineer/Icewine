@@ -38,9 +38,11 @@ Scope {
     property bool interactionActive: false
     property string previousWindow: ""
     property int focusGeneration: 0
+    property bool reportedRender: false
 
     signal widgetDismissed()
     signal focusWidgetRequested(string screenName)
+    signal rendered()
 
     function focusedScreenName() {
         return Quickshell.screens.find(screen => root.compositor.monitorFor(screen)?.focused)?.name
@@ -196,6 +198,15 @@ Scope {
 
             screen: modelData
             visible: true
+            RenderReady {
+                item: panel.contentItem
+                onReady: {
+                    if (!root.reportedRender) {
+                        root.reportedRender = true
+                        root.rendered()
+                    }
+                }
+            }
             anchors { top: true; bottom: true; left: true; right: true }
             // Reserve nothing; respect an OSK's own reservation so it stays usable.
             exclusiveZone: 0

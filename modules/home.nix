@@ -18,6 +18,12 @@ let
       inactive_border = "rgba(${palette.background}aa)",
     } } })
   '';
+  quickshellPalette = pkgs.writeText "icewine-palette.qml" (
+    builtins.replaceStrings
+      (map (name: "@${name}@") (builtins.attrNames palette))
+      (builtins.attrValues palette)
+      (builtins.readFile ../quickshell/theme/Palette.qml.in)
+  );
   hyprTree = pkgs.runCommand "icewine-hyprland" { } ''
     mkdir -p $out
     cp -r ${../hyprland}/hyprland.lua ${../hyprland}/modules ${../hyprland}/deck $out/
@@ -41,6 +47,9 @@ in {
       then ../quickshell/deck/shell.qml else ../quickshell/shell.qml;
     "quickshell/adapters".source = ../quickshell/adapters;
     "quickshell/modules".source = ../quickshell/modules;
+    "quickshell/startup/shell.qml".source = ../quickshell/startup/shell.qml;
+    "quickshell/startup/StartupSplash.js".source = ../quickshell/startup/StartupSplash.js;
+    "quickshell/startup/theme/Palette.qml".source = quickshellPalette;
     "quickshell/DeckOverlay.qml" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckOverlay.qml; };
     "quickshell/DeckMenu.js" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckMenu.js; };
     "quickshell/config/qmldir".text = "singleton Settings 1.0 Settings.qml\n";
@@ -51,12 +60,21 @@ in {
         readonly property bool authenticationRequired: ${builtins.toJSON cfg.authenticationRequired}
       }
     '';
-    "quickshell/theme/Palette.qml".source = pkgs.writeText "icewine-palette.qml" (
-      builtins.replaceStrings
-        (map (name: "@${name}@") (builtins.attrNames palette))
-        (builtins.attrValues palette)
-        (builtins.readFile ../quickshell/theme/Palette.qml.in)
-    );
+    "quickshell/theme/Palette.qml".source = quickshellPalette;
+  };
+
+  systemd.user.services.icewine-session-splash = {
+    Unit = {
+      Description = "Icewine session startup splash";
+      PartOf = [ "graphical-session.target" ];
+      After = [ "graphical-session.target" ];
+      Before = [ "icewine.service" ];
+    };
+    Service = {
+      ExecStart = "${pkgs.quickshell}/bin/qs -p ${config.xdg.configHome}/quickshell/startup/shell.qml";
+      Environment = "ICEWINE_SPLASH_MODE=session";
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
   };
 
   systemd.user.services.icewine = {

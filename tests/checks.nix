@@ -61,13 +61,15 @@ in {
     nativeBuildInputs = [ pkgs.python3 pkgs.quickshell ];
   } ''
     python3 ${./controls.py} ${self}
+    python3 ${./render-ready.py} ${self}
     touch "$out"
   '';
   terminal = import ./terminal.nix { inherit self nixpkgs; };
   logic = pkgs.runCommand "icewine-logic-checks" {
-    nativeBuildInputs = [ pkgs.nodejs pkgs.lua ];
+    nativeBuildInputs = [ pkgs.bash pkgs.gamescope pkgs.nodejs pkgs.lua ];
   } ''
     cd ${self}
+    bash tests/steam-session.sh scripts/steam-session.sh gamescopereaper
     for test in quickshell/tests/*.js quickshell/deck/test-demo.js; do node "$test"; done
     lua hyprland/tests/docking.lua hyprland/modules/Docking.lua
     lua hyprland/tests/workspace-navigation.lua hyprland/modules/Binds.lua

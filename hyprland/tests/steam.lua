@@ -30,6 +30,10 @@ windows = {{class="kitty"}, game}
 host.focus_or_start_gamescope()
 guide()
 assert(focused == game and launches == 1) -- Existing Gamescope: focus, never relaunch.
+local outerSteam = {class="com.valvesoftware.Steam"}
+windows = {{class="kitty"}, outerSteam}
+host.focus_or_start_gamescope()
+assert(focused == outerSteam and launches == 1) -- Already-running outer Steam: focus it.
 windows = {}
 host.focus_or_start_gamescope()
 assert(launches == 2) -- Explicit launch after closing Steam.

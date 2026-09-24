@@ -35,11 +35,20 @@ hl.bind("F16", hl.dsp.exec_cmd("icewine-keyboard-toggle"), {
 }) -- L5
 
 local function focus_or_start_gamescope()
+	local outer_steam
 	for _, win in ipairs(hl.get_windows()) do
 		if win.class == "gamescope" then
 			hl.dispatch(hl.dsp.focus({ window = win }))
 			return
 		end
+		local class = string.lower(win.class or "")
+		if class == "steam" or class == "com.valvesoftware.steam" then
+			outer_steam = win
+		end
+	end
+	if outer_steam then
+		hl.dispatch(hl.dsp.focus({ window = outer_steam }))
+		return
 	end
 
 	hl.exec_cmd("uwsm app -- icewine-steam-gamescope")

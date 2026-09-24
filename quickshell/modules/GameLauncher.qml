@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "GameLauncher.js" as Launcher
 
 Scope {
     id: root
@@ -107,6 +108,14 @@ Scope {
         return JSON.stringify(plan, null, 2)
     }
 
+    function focusExistingGamescope() {
+        var window = Launcher.existingSteamWindow(compositor.toplevels)
+        if (!window)
+            return false
+        compositor.activateWindow(window.address)
+        return true
+    }
+
     Process {
         id: monitorCapabilityProbe
 
@@ -147,11 +156,13 @@ Scope {
         }
 
         function gamescopePlan(): string {
-            return JSON.stringify(root.gamescopePlan(["icewine-steam"], true), null, 2)
+            return JSON.stringify(root.gamescopePlan(["icewine-steam-session"], true), null, 2)
         }
 
         function launchSteamGamescope(): string {
-            return root.launchGamescope(["icewine-steam"], true)
+            if (root.focusExistingGamescope())
+                return JSON.stringify({ok: true, reused: true}, null, 2)
+            return root.launchGamescope(["icewine-steam-session"], true)
         }
 
         function launchCommand(commandJson: string): string {
