@@ -83,6 +83,13 @@ QtObject {
         return workspaceForId(id)?.toplevels?.values ?? []
     }
 
+    function workspaceIdsForMonitor(monitor) {
+        return Hyprland.workspaces.values
+            .filter(workspace => workspace.monitor?.name === monitor?.name)
+            .map(workspace => workspace.id)
+            .sort((a, b) => a - b)
+    }
+
     function activateWorkspace(id) {
         navigationRequested()
         const workspace = workspaceForId(id)

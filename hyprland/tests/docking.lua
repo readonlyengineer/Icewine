@@ -10,24 +10,31 @@ hl = {
 	on = function(event, callback) events[event] = callback end,
 }
 setup("eDP-1")
-local panel, tv, dock = {name="eDP-1"}, {name="HDMI-A-1"}, {name="DP-1"}
-local function check(monitors, main, auxiliary, event)
+local panel, tv, dock = {name="eDP-1", x=0}, {name="HDMI-A-1", x=0}, {name="DP-1", x=1920}
+local function check(monitors, expected, event)
 	outputs = monitors
 	events[event]()
 	for id = 1, 10 do
 		local rule = rules[tostring(id)]
-		assert(rule.monitor == (id == 10 and auxiliary or main).name)
+		assert(rule.monitor == expected[id], rule.monitor .. " for workspace " .. id)
 		assert(rule.persistent)
-		assert(rule.default == (id == 1 or (id == 10 and auxiliary ~= main)))
+		assert(rule.default == (id == 1 or expected[id] ~= expected[id - 1]))
 	end
 end
-check({panel}, panel, panel, "monitor.added")
-check({panel,tv}, tv, panel, "monitor.added")
-check({tv}, tv, tv, "monitor.removed") -- Close lid.
-check({tv,panel}, tv, panel, "monitor.added") -- Open lid.
-check({panel,tv,dock}, tv, panel, "monitor.added")
-check({panel,dock}, dock, panel, "monitor.removed") -- Remove selected external.
-check({panel}, panel, panel, "monitor.removed")
+local function repeated(a, b)
+	local expected = {}
+	for id = 1, 10 do expected[id] = (id == 10 and b or a).name end
+	return expected
+end
+check({panel}, repeated(panel, panel), "monitor.added")
+check({panel,tv}, (function() local e = {}; for id = 1, 10 do e[id] = id <= 8 and tv.name or panel.name end; return e end)(), "monitor.added")
+check({tv}, repeated(tv, tv), "monitor.removed") -- Close lid.
+check({tv,panel}, (function() local e = {}; for id = 1, 10 do e[id] = id <= 8 and tv.name or panel.name end; return e end)(), "monitor.added") -- Open lid.
+check({panel,tv,dock}, (function() local e = {}; for id = 1, 10 do e[id] = id <= 4 and tv.name or id <= 8 and dock.name or panel.name end; return e end)(), "monitor.added")
+check({tv,dock}, (function() local e = {}; for id = 1, 10 do e[id] = id <= 5 and tv.name or dock.name end; return e end)(), "monitor.removed") -- Close lid with two externals.
+check({dock,tv}, (function() local e = {}; for id = 1, 10 do e[id] = id <= 5 and tv.name or dock.name end; return e end)(), "monitor.added") -- Enumeration order is irrelevant.
+check({panel,dock}, (function() local e = {}; for id = 1, 10 do e[id] = id <= 8 and dock.name or panel.name end; return e end)(), "monitor.removed") -- Remove selected external.
+check({panel}, repeated(panel, panel), "monitor.removed")
 outputs = {{name="FALLBACK"}}
 events["monitor.removed"]()
 assert(rules["1"].monitor == panel.name) -- No physical display: retain bindings.

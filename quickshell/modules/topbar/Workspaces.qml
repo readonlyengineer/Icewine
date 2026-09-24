@@ -12,7 +12,7 @@ Rectangle {
 
     readonly property var monitor: compositor.monitorFor(screen)
     readonly property int activeId: monitor?.activeWorkspace?.id ?? 1
-    readonly property int groupStart: Math.floor((Math.max(activeId, 1) - 1) / 5) * 5 + 1
+    readonly property var workspaceIds: compositor.workspaceIdsForMonitor(monitor)
 
     implicitWidth: workspaceRow.implicitWidth + 9
     implicitHeight: 29
@@ -28,7 +28,7 @@ Rectangle {
         spacing: 2
 
         Repeater {
-            model: 5
+            model: root.workspaceIds
 
             WorkspaceButton {}
         }
@@ -39,7 +39,9 @@ Rectangle {
 
         required property int index
 
-        readonly property int workspaceId: root.groupStart + index
+        required property int modelData
+
+        readonly property int workspaceId: modelData
         readonly property var toplevels: root.compositor.toplevelsForWorkspace(workspaceId)
         readonly property bool active: root.activeId === workspaceId
         readonly property bool occupied: toplevels.length > 0
