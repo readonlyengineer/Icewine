@@ -9,7 +9,9 @@ apply only to handhelds. Host configurations do not carry the patches.
 
 `preserve-keyboard-focus-state.patch` targets Gamescope 3.16.28, upstream commit
 `fa0b4d3342078f01eadff0193e09c3b561f40c03`, as pinned by Icewine's `flake.lock`.
-There is no upstream issue or PR for this local patch yet.
+Its declaration hunk also applies to 3.16.29, which downstream configurations
+can select when Icewine follows their newer Nixpkgs input. There is no upstream
+issue or PR for this local patch yet.
 
 Reproduction reported on the Deck:
 

@@ -1,6 +1,7 @@
 Subject: [PATCH] wayland: transfer keyboard focus state without replaying presses
 
-Based on Gamescope 3.16.28 (fa0b4d3342078f01eadff0193e09c3b561f40c03).
+Based on Gamescope 3.16.28 (fa0b4d3342078f01eadff0193e09c3b561f40c03),
+with declaration context compatible with 3.16.29.
 
 A key that dismisses another application can still be held when Gamescope
 receives keyboard focus. Sending it through HandleKey creates a second
@@ -145,17 +146,17 @@ diff --git a/src/wlserver.hpp b/src/wlserver.hpp
  	std::unordered_map<struct wlr_surface *, std::pair<int, int>> current_dropdown_surfaces;
  	double mouse_surface_cursorx = 0.0f;
  	double mouse_surface_cursory = 0.0f;
-@@ -247,6 +248,10 @@
- 
- void wlserver_keyboardfocus( struct wlr_surface *surface, bool bConstrain = true );
- void wlserver_key( uint32_t key, bool press, uint32_t time );
+@@ -261,6 +262,10 @@
+ void wlserver_lock(void);
+ void wlserver_unlock(bool flush = true);
+ bool wlserver_is_lock_held(void);
 +void wlserver_nested_keyboard_leave();
 +bool wlserver_nested_keyboard_enter( const uint32_t *keys, size_t count );
 +bool wlserver_nested_keyboard_modifiers( xkb_keymap *keymap, const struct wlr_keyboard_modifiers *mods, bool enter );
 +void wlserver_nested_key( uint32_t key, bool press, uint32_t time, bool hotkeys = true );
  
- void wlserver_mousefocus( struct wlr_surface *wlrsurface, int x = 0, int y = 0 );
- void wlserver_clear_dropdowns();
+ void wlserver_keyboardfocus( struct wlr_surface *surface, bool bConstrain = true );
+ void wlserver_key( uint32_t key, bool press, uint32_t time );
 diff --git a/src/Backends/WaylandBackend.cpp b/src/Backends/WaylandBackend.cpp
 --- a/src/Backends/WaylandBackend.cpp
 +++ b/src/Backends/WaylandBackend.cpp
