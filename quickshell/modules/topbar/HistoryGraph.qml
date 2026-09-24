@@ -13,6 +13,7 @@ Rectangle {
     property var labels: [title]
     property var colours: [Theme.Palette.secondary, Theme.Palette.tertiary]
     property string unit: "%"
+    property string details: ""
     property real minimumMaximum: unit === "B/s" ? 1024 : 100
     readonly property var latest: history.length && now - history[history.length - 1].time < 3000
         ? history[history.length - 1].values : []
@@ -46,13 +47,24 @@ Rectangle {
 
     Text {
         x: 10; y: 8
-        width: parent.width - 20
+        width: parent.width - detailsText.width - (root.details ? 30 : 20)
         text: root.title
         elide: Text.ElideRight
         color: Theme.Palette.foreground
         font.family: "JetBrainsMono Nerd Font"
         font.pixelSize: 11
         font.bold: true
+    }
+
+    Text {
+        id: detailsText
+        anchors.right: parent.right
+        anchors.rightMargin: 10
+        y: 9
+        text: root.details
+        color: Theme.Palette.muted
+        font.family: "JetBrainsMono Nerd Font"
+        font.pixelSize: 9
     }
 
     Row {

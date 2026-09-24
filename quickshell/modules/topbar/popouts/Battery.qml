@@ -156,14 +156,6 @@ Flickable {
             onMoved: root.brightness.setBrightness(value)
         }
 
-        Toggle {
-            id: keepAwake
-            width: parent.width
-            text: "Keep awake"
-            checked: root.powerState.keepAwake
-            onToggled: root.powerState.keepAwake = checked
-        }
-
         SectionLabel { text: "Power profile" }
 
         Row {
@@ -198,6 +190,14 @@ Flickable {
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 10
             wrapMode: Text.Wrap
+        }
+
+        Toggle {
+            id: keepAwake
+            width: parent.width
+            text: "Keep awake"
+            checked: root.powerState.keepAwake
+            onToggled: root.powerState.keepAwake = checked
         }
 
         SectionLabel {

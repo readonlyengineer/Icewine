@@ -29,6 +29,39 @@ assert.equal(m.cpu("broken"), null)
 assert.equal(m.memoryUsage("MemTotal: 1000 kB\nMemAvailable: 250 kB\n"), 75)
 assert.equal(m.memoryUsage("MemTotal: 0 kB\nMemAvailable: 0 kB"), null)
 assert.equal(m.memoryUsage("MemTotal: 100 kB"), null)
+assert.deepEqual(m.memory("MemTotal: 2097152 kB\nMemAvailable: 524288 kB\n"),
+    { usage: 75, usedGiB: 1.5, totalGiB: 2 })
+assert.equal(m.memory("MemTotal: 100 kB"), null)
+
+const definitions = m.sensorDefinitions([
+    "temperature\t/sys/class/hwmon/hwmon0/temp1_input\tcpu\tcpu\tacpitz\ttemp1",
+    "temperature\t/sys/class/hwmon/hwmon1/temp2_input\tcpu\tcpu\tcoretemp\tCore 0",
+    "temperature\t/sys/class/hwmon/hwmon1/temp1_input\tcpu\tcpu\tcoretemp\tPackage id 0",
+    "usage\t/sys/class/drm/card0/device/gpu_busy_percent\tgpu\t0000:03:00.0\tdrm\tUsage",
+    "temperature\t/sys/class/drm/card0/device/hwmon/hwmon2/temp2_input\tgpu\t0000:03:00.0\tamdgpu\tjunction",
+    "temperature\t/sys/class/drm/card0/device/hwmon/hwmon2/temp1_input\tgpu\t0000:03:00.0\tamdgpu\tedge",
+    "temperature\t/sys/class/drm/card1/device/hwmon/hwmon3/temp1_input\tgpu\t0000:04:00.0\tnouveau\tGPU",
+    "temperature\t/sys/class/hwmon/hwmon4/temp1_input\tgpu\tbad\tamdgpu\tedge",
+    "broken"
+].join("\n"))
+assert.deepEqual(definitions, [
+    { kind: "temperature", path: "/sys/class/hwmon/hwmon1/temp1_input", role: "cpu",
+        device: "cpu", title: "CPU", label: "Package" },
+    { kind: "usage", path: "/sys/class/drm/card0/device/gpu_busy_percent", role: "gpu",
+        device: "0000:03:00.0", title: "GPU 0000:03:00.0", label: "Usage" },
+    { kind: "temperature", path: "/sys/class/drm/card0/device/hwmon/hwmon2/temp1_input",
+        role: "gpu", device: "0000:03:00.0", title: "GPU 0000:03:00.0", label: "Edge" },
+    { kind: "temperature", path: "/sys/class/drm/card1/device/hwmon/hwmon3/temp1_input",
+        role: "gpu", device: "0000:04:00.0", title: "GPU 0000:04:00.0", label: "GPU" }
+])
+const samplers = definitions.map(definition => ({ ...definition,
+    kind: definition.kind === "usage" ? "gpu" : definition.kind }))
+assert.deepEqual(m.gpuGroups(samplers), [
+    { device: "0000:03:00.0", title: "GPU 0000:03:00.0",
+        usage: samplers[1], temperature: samplers[2] },
+    { device: "0000:04:00.0", title: "GPU 0000:04:00.0",
+        usage: null, temperature: samplers[3] }
+])
 assert.equal(m.sensor("45000\n", true), 45)
 assert.equal(m.sensor("-5000\n", true), -5)
 assert.equal(m.sensor("-300000\n", true), null)

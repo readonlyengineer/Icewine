@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import ".." as Bar
+import "../Metrics.js" as Metrics
 import qs.theme as Theme
 
 Flickable {
@@ -41,6 +42,9 @@ Flickable {
             width: parent.width
             title: "CPU usage"
             labels: ["CPU"]
+            details: root.metrics.cpuTemperature
+                ? `${root.metrics.cpuTemperature.label} ${Metrics.format(root.metrics.cpuTemperature.current, "°C")}`
+                : "Temperature —"
             history: root.metrics.cpu.history
             now: root.metrics.now
         }
@@ -50,35 +54,57 @@ Flickable {
             title: "RAM usage"
             labels: ["RAM"]
             colours: [Theme.Palette.tertiary]
+            details: root.metrics.memory.current
+                ? `${root.metrics.memory.current.usedGiB.toFixed(1)} / ${root.metrics.memory.current.totalGiB.toFixed(1)} GiB`
+                : "— / — GiB"
             history: root.metrics.memory.history
             now: root.metrics.now
         }
 
         Repeater {
-            model: root.metrics.sensors
-            Bar.HistoryGraph {
+            model: root.metrics.gpus
+            Column {
                 required property var modelData
                 width: content.width
-                title: modelData.title
-                labels: [modelData.kind === "temperature" ? "Temp" : "GPU"]
-                unit: modelData.kind === "temperature" ? "°C" : "%"
-                colours: [modelData.kind === "temperature" ? Theme.Palette.warning : Theme.Palette.secondary]
-                history: modelData.history
-                now: root.metrics.now
+                Bar.HistoryGraph {
+                    visible: modelData.usage !== null
+                    width: parent.width
+                    title: modelData.title
+                    labels: ["Usage"]
+                    details: modelData.temperature
+                        ? `${modelData.temperature.label} ${Metrics.format(modelData.temperature.current, "°C")}`
+                        : "Temperature —"
+                    history: modelData.usage?.history ?? []
+                    now: root.metrics.now
+                }
+                Rectangle {
+                    visible: modelData.usage === null
+                    width: parent.width
+                    height: 54
+                    radius: 9
+                    color: Theme.Palette.surface
+                    Text {
+                        x: 10; y: 8
+                        text: modelData.title
+                        color: Theme.Palette.foreground
+                        font.family: "JetBrainsMono Nerd Font"
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
+                    Text {
+                        x: 10; y: 30
+                        text: `Usage —  ·  ${modelData.temperature?.label ?? "Temperature"} ${Metrics.format(modelData.temperature?.current, "°C")}`
+                        color: Theme.Palette.muted
+                        font.family: "JetBrainsMono Nerd Font"
+                        font.pixelSize: 9
+                    }
+                }
             }
         }
 
         Text {
-            visible: !root.metrics.sensors.some(sensor => sensor.kind === "gpu")
-            text: "GPU usage · Unavailable"
-            color: Theme.Palette.muted
-            font.family: "JetBrainsMono Nerd Font"
-            font.pixelSize: 10
-        }
-
-        Text {
-            visible: !root.metrics.sensors.some(sensor => sensor.kind === "temperature")
-            text: "Temperatures · Unavailable"
+            visible: root.metrics.gpus.length === 0
+            text: "GPU · Unavailable"
             color: Theme.Palette.muted
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 10

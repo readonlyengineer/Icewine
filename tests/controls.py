@@ -93,10 +93,12 @@ ShellRoot {
             onHandoffRequested: root.handedOff = true
             metrics: ({ now: root.now,
                 cpu: { history: [{ time: root.now, values: [25] }] },
-                memory: { history: [{ time: root.now, values: [60] }] },
-                sensors: [{ title: "CPU temperature", kind: "temperature",
-                    history: [{ time: root.now - 1000, values: [-5] },
-                        { time: root.now, values: [5] }] }]
+                cpuTemperature: { label: "Package", current: 48 },
+                memory: { current: { usedGiB: 9, totalGiB: 16 },
+                    history: [{ time: root.now, values: [60] }] },
+                gpus: [{ title: "GPU 0000:03:00.0",
+                    usage: { history: [{ time: root.now, values: [40] }] },
+                    temperature: { label: "Edge", current: 52 } }]
             })
         }
     }
@@ -114,7 +116,7 @@ ShellRoot {
             if (!button) throw new Error("Missing btop button")
             button.click()
             performance.metrics = { now: root.now, cpu: { history: [] },
-                memory: { history: [] }, sensors: [] }
+                cpuTemperature: null, memory: { current: null, history: [] }, gpus: [] }
             finish.start()
         }
     }
@@ -144,6 +146,11 @@ ShellRoot {
 """
 
 source = Path(sys.argv[1]).resolve()
+notifications = (source / "quickshell/modules/topbar/popouts/Notifications.qml").read_text()
+battery = (source / "quickshell/modules/topbar/popouts/Battery.qml").read_text()
+assert 'text: "Do Not Distrub"' in notifications
+assert battery.index('id: keepAwake') > battery.index('text: `Performance limited')
+assert battery.index('id: keepAwake') < battery.index('text: "Battery condition"')
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     (root / "modules").symlink_to(source / "quickshell/modules")

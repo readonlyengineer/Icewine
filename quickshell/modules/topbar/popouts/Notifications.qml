@@ -55,7 +55,7 @@ Item {
             leftMargin: 12
             rightMargin: 12
         }
-        text: "Do not disturb (except critical)"
+        text: "Do Not Distrub"
         checked: root.notificationService.doNotDisturb
         onToggled: root.notificationService.doNotDisturb = checked
     }

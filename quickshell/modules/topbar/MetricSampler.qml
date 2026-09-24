@@ -11,6 +11,7 @@ Scope {
     required property string kind
     property var interfaces: []
     property var history: []
+    property var current: null
     property var previous: null
     property double previousTime: 0
     property bool busy: false
@@ -28,10 +29,12 @@ Scope {
             values = [seconds > 0 && seconds <= 3 ? Metrics.cpuUsage(current, previous) : null]
             previous = current
         } else if (kind === "memory") {
-            values = [Metrics.memoryUsage(text)]
+            current = Metrics.memory(text)
+            values = [current?.usage ?? null]
         } else {
             values = [Metrics.sensor(text, kind === "temperature")]
         }
+        if (kind !== "memory") current = values[0]
         previousTime = now
         history = Metrics.append(history, now, values)
         busy = false
@@ -54,6 +57,7 @@ Scope {
         onLoaded: root.record(text())
         onLoadFailed: {
             root.previous = null
+            root.current = null
             root.history = Metrics.append(root.history, Date.now(),
                 root.kind === "network" ? [null, null] : [null])
             root.busy = false

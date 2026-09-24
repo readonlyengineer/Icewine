@@ -5,6 +5,7 @@ import QtQml.Models
 import Quickshell
 import Quickshell.Io
 import Quickshell.Networking
+import "Metrics.js" as Metrics
 
 Scope {
     id: root
@@ -15,6 +16,8 @@ Scope {
     readonly property alias memory: memory
     property var sensorDefinitions: []
     property var sensors: []
+    readonly property var cpuTemperature: sensors.find(sensor => sensor.role === "cpu") ?? null
+    readonly property var gpus: Metrics.gpuGroups(sensors)
     signal tick()
 
     Timer {
@@ -46,30 +49,42 @@ Scope {
     Process {
         running: true
         command: ["sh", "-c", `
-            for card in /sys/class/drm/card[0-9]*; do
-                file="$card/device/gpu_busy_percent"
-                [ -r "$file" ] || continue
-                printf 'gpu\\t%s\\tGPU %s\\n' "$file" "\${card##*/}"
-            done
             for chip in /sys/class/hwmon/hwmon*; do
-                file="$chip/temp1_input"
-                [ -r "$file" ] || continue
+                [ -r "$chip/name" ] || continue
                 IFS= read -r name < "$chip/name" || continue
-                label=Temperature
-                if [ -r "$chip/temp1_label" ]; then
-                    IFS= read -r label < "$chip/temp1_label"
-                fi
-                printf 'temperature\\t%s\\t%s · %s\\n' "$file" "$name" "$label"
+                for file in "$chip"/temp*_input; do
+                    [ -r "$file" ] || continue
+                    label_file="\${file%_input}_label"
+                    [ -r "$label_file" ] || continue
+                    IFS= read -r label < "$label_file" || continue
+                    printf 'temperature\\t%s\\tcpu\\tcpu\\t%s\\t%s\\n' "$file" "$name" "$label"
+                done
+            done
+            seen='|'
+            for card in /sys/class/drm/card[0-9]*; do
+                device=$(readlink -f "$card/device") || continue
+                key="\${device##*/}"
+                case "$seen" in *"|$device|"*) continue;; esac
+                seen="$seen$device|"
+                file="$card/device/gpu_busy_percent"
+                [ ! -r "$file" ] || printf 'usage\\t%s\\tgpu\\t%s\\tdrm\\tUsage\\n' "$file" "$key"
+                for chip in "$card/device"/hwmon/hwmon*; do
+                    [ -r "$chip/name" ] || continue
+                    IFS= read -r name < "$chip/name" || continue
+                    for file in "$chip"/temp*_input; do
+                        [ -r "$file" ] || continue
+                        label_file="\${file%_input}_label"
+                        [ -r "$label_file" ] || continue
+                        IFS= read -r label < "$label_file" || continue
+                        printf 'temperature\\t%s\\tgpu\\t%s\\t%s\\t%s\\n' "$file" "$key" "$name" "$label"
+                    done
+                done
             done
             exit 0
         `]
         stdout: StdioCollector {
             onStreamFinished: {
-                root.sensorDefinitions = text.trim().split("\n").map(line => line.split("\t"))
-                    .filter(fields => fields.length === 3
-                        && /^(gpu|temperature)$/.test(fields[0])
-                        && /^\/sys\/class\/(drm|hwmon)\//.test(fields[1]))
-                    .map(fields => ({ kind: fields[0], path: fields[1], title: fields[2] }))
+                root.sensorDefinitions = Metrics.sensorDefinitions(text)
             }
         }
     }
@@ -79,9 +94,12 @@ Scope {
         delegate: MetricSampler {
             required property var modelData
             readonly property string title: modelData.title
+            readonly property string role: modelData.role
+            readonly property string device: modelData.device
+            readonly property string label: modelData.label
             clock: root
             path: modelData.path
-            kind: modelData.kind
+            kind: modelData.kind === "usage" ? "gpu" : modelData.kind
         }
         onObjectAdded: (index, object) => root.sensors = root.sensors.concat([object])
         onObjectRemoved: (index, object) => root.sensors = root.sensors.filter(sensor => sensor !== object)
