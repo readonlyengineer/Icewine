@@ -24,6 +24,8 @@ hl = {
 }
 local policy = dofile(assert(arg[1], "Pass the WindowPolicy.lua path"))
 local normal = { width = 1920, height = 1080 }
+local boundary = { width = 2560, height = 1280 }
+local intermediate = { width = 2560, height = 1200 }
 local wide = { width = 5120, height = 1440 }
 local function window(monitor, width, fullscreen)
 	active = {
@@ -63,6 +65,18 @@ policy.toggle_fullscreen()
 check(1.0, true)
 policy.adjust_width(-0.05)
 check(0.95, false)
+
+-- Exactly 2:1 remains fullscreen; only a strictly wider monitor uses half width.
+window(boundary, 1.0, false)
+events["window.open"](active)
+check(1.0, true)
+policy.toggle_fullscreen()
+check(1.0, false)
+
+-- A monitor just above 2:1 uses half width and stays tiled.
+window(intermediate, 1.0, false)
+events["window.open"](active)
+check(0.5, false)
 
 -- Adopt a user's explicit width/fullscreen choice, then move to a wide monitor.
 window(normal, 0.7, false)

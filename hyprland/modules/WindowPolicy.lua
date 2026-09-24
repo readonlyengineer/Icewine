@@ -37,7 +37,7 @@ end
 
 local function default_width_for_monitor(mon)
 	if not mon or not mon.width or not mon.height or mon.height == 0 then return 1.0 end
-	return mon.width / mon.height >= 32 / 9 and 0.5 or 1.0
+	return mon.width / mon.height > 2 and 0.5 or 1.0
 end
 
 local function monitor_opens_fullscreen(mon)
