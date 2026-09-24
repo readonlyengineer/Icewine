@@ -289,27 +289,6 @@ function M.toggle_floating()
 	apply_window(win)
 end
 
-function M.self_check()
-	local width, fullscreen = target_for({}, 0.5)
-	local normal_width, normal_fullscreen = target_for({}, 1.0)
-	local custom_width, custom_fullscreen = target_for({ width = 0.7, fullscreen = false }, 0.5)
-	local normal_monitor = { width = 1920, height = 1080 }
-	local wide_monitor = { width = 5120, height = 1440 }
-
-	return same_number(width, 0.5) and not fullscreen
-		and same_number(normal_width, 1.0) and normal_fullscreen
-		and same_number(custom_width, 0.7) and not custom_fullscreen
-		and not toggled_fullscreen({ fullscreen = true }, 1.0)
-		and toggled_fullscreen({ fullscreen = false }, 1.0)
-		and same_number(adjusted_width(0.5, 0.05), 0.55)
-		and same_number(adjusted_width(1.0, -0.05), 0.95)
-		and monitor_opens_fullscreen(normal_monitor)
-		and not monitor_opens_fullscreen(wide_monitor)
-		and not monitor_opens_fullscreen({})
-end
-
-assert(M.self_check(), "window policy self-check failed")
-
 hl.on("hyprland.start", function()
 	sync_default_width(hl.get_active_monitor())
 end)

@@ -19,7 +19,8 @@ let
     } } })
   '';
   hyprTree = pkgs.runCommand "icewine-hyprland" { } ''
-    cp -r ${../hyprland} $out
+    mkdir -p $out
+    cp -r ${../hyprland}/hyprland.lua ${../hyprland}/modules ${../hyprland}/deck $out/
     chmod -R u+w $out
     cp ${hyprTheme} $out/modules/Theme.lua
     ${lib.optionalString cfg.handheld.enable ''

@@ -72,6 +72,7 @@ in {
     lua hyprland/tests/docking.lua hyprland/modules/Docking.lua
     lua hyprland/tests/workspace-navigation.lua hyprland/modules/Binds.lua
     lua hyprland/tests/steam.lua
+    lua hyprland/tests/window-policy.lua hyprland/modules/WindowPolicy.lua
     touch "$out"
   '';
   modules =
@@ -87,6 +88,8 @@ in {
     assert !handheld.services.openssh.enable;
     assert !desktop.networking.networkmanager.enable;
     pkgs.runCommand "icewine-module-checks" { } ''
+      test ! -e ${((home desktop).xdg.configFile."hypr").source}/tests
+      test ! -e ${((home handheld).xdg.configFile."hypr").source}/tests
       test -f ${((home desktop).xdg.configFile."hypr").source}/modules/Theme.lua
       cmp ${../hyprland/modules/Autostart.lua} ${((home desktop).xdg.configFile."hypr").source}/modules/host.lua
       test ! -e ${((home desktop).xdg.configFile."hypr").source}/modules/Deck.lua

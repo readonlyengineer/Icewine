@@ -116,7 +116,19 @@ identifier retain their upstream names.
 
 ## Development
 
+Run the window-policy regression test without a compositor from the repository
+root with Lua installed:
+
 ```sh
+lua hyprland/tests/window-policy.lua hyprland/modules/WindowPolicy.lua
+```
+
+The `logic` check runs this alongside the existing JavaScript/Lua suites;
+`modules` checks desktop/handheld packaging, including exclusion of developer
+tests from the deployed Hyprland configuration:
+
+```sh
+nix build --no-link path:.#checks.x86_64-linux.logic path:.#checks.x86_64-linux.modules
 nix flake check path:.
 # In the consuming configuration, test a local checkout without changing its pin:
 nix build .#nixosConfigurations.HOST.config.system.build.toplevel \
