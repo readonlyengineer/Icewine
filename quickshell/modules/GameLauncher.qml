@@ -3,7 +3,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import Quickshell.Wayland
 import qs.theme as Theme
 import "GameLauncher.js" as Launcher
 
@@ -123,13 +122,7 @@ Scope {
         root.steamSplashVisible = false
         root.steamSplashScreen = ""
         root.pendingSteamCommand = null
-        steamSplashTimeout.stop()
         steamLaunchTimeout.stop()
-    }
-
-    function hideSteamSplash() {
-        root.steamSplashVisible = false
-        root.steamSplashScreen = ""
     }
 
     function startSteamProcess() {
@@ -142,16 +135,6 @@ Scope {
         } catch (error) {
             console.warn("Could not start Steam Gamescope:", error)
             root.finishSteamLaunch()
-        }
-    }
-
-    function checkSteamLaunch() {
-        if (!root.steamLaunching)
-            return
-        var window = Launcher.gamescopeWindow(compositor.toplevels)
-        if (window) {
-            root.finishSteamLaunch()
-            compositor.activateWindow(window.address)
         }
     }
 
@@ -177,7 +160,6 @@ Scope {
         root.pendingSteamCommand = [
             "uwsm", "app", "-u", "icewine-steam-gamescope.scope", "--"
         ].concat(plan.arguments)
-        steamSplashTimeout.restart()
         steamLaunchTimeout.restart()
         return JSON.stringify(plan, null, 2)
     }
@@ -215,12 +197,6 @@ Scope {
     }
 
     Timer {
-        id: steamSplashTimeout
-        interval: 30000
-        onTriggered: root.hideSteamSplash()
-    }
-
-    Timer {
         id: steamLaunchTimeout
         interval: 120000
         onTriggered: root.finishSteamLaunch()
@@ -238,11 +214,6 @@ Scope {
         function onMonitorsChanged() {
             root.probeMonitorCapabilities()
         }
-
-        function onToplevelsChanged() {
-            root.checkSteamLaunch()
-        }
-
     }
 
     Variants {
@@ -250,29 +221,20 @@ Scope {
             ? Quickshell.screens.filter(screen => screen.name === root.steamSplashScreen)
             : []
 
-        PanelWindow {
+        FloatingWindow {
             id: panel
             required property var modelData
             screen: modelData
             visible: true
+            title: "Icewine Steam launch"
+            implicitWidth: screen.width
+            implicitHeight: screen.height
             color: "#000000"
-            focusable: false
-            exclusionMode: ExclusionMode.Ignore
-            WlrLayershell.namespace: "quickshell:steam-launch"
-            WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-            mask: Region {}
+            onClosed: root.finishSteamLaunch()
 
             RenderReady {
                 item: panel.contentItem
                 onReady: root.startSteamProcess()
-            }
-
-            anchors {
-                top: true
-                bottom: true
-                left: true
-                right: true
             }
 
             Column {

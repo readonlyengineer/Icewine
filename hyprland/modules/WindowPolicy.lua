@@ -1,4 +1,4 @@
--- Monitor defaults and per-window user intent for the scrolling layout.
+-- Window placement, scrolling-layout intent and Steam's startup handoff.
 
 local M = {}
 
@@ -6,6 +6,36 @@ local epsilon = 0.02
 local states = {}
 local pending_fullscreen = {}
 local configured_default
+local steam_placeholder_title = "Icewine Steam launch"
+local steam_placeholder
+
+hl.window_rule({
+	name = "icewine-steam-placeholder",
+	match = { initial_title = "^Icewine Steam launch$" },
+	fullscreen = true,
+	no_anim = true,
+})
+local steam_placement = hl.window_rule({
+	name = "icewine-steam-placement",
+	match = { class = "^gamescope$" },
+	enabled = false,
+	no_initial_focus = true,
+	suppress_event = "activate activatefocus fullscreenoutput",
+	no_anim = true,
+})
+
+local function update_steam_placement()
+	if not steam_placeholder or not steam_placeholder.mapped then
+		steam_placement:set_enabled(false)
+		return
+	end
+	local ws = steam_placeholder.workspace
+	hl.window_rule({
+		name = "icewine-steam-placement",
+		enabled = true,
+		workspace = (ws.special and ws.name or tostring(ws.id)) .. " silent",
+	})
+end
 
 local function same_number(a, b)
 	return math.abs((a or 0) - (b or 0)) < epsilon
@@ -65,6 +95,7 @@ end
 
 local function is_policy_window(win)
 	if not win or win.hidden then return false end
+	if win.initial_title == steam_placeholder_title then return false end
 	if not win.workspace or win.workspace.special then return false end
 	return not win.workspace.tiled_layout or win.workspace.tiled_layout == "scrolling"
 end
@@ -113,7 +144,7 @@ local function toggled_fullscreen(state, fallback_width)
 	return not fullscreen
 end
 
-local function set_fullscreen(win, fullscreen)
+local function set_fullscreen(win, fullscreen, layout_aware)
 	local key = key_for(win)
 	if not key or fullscreen_of(win) == fullscreen then return false end
 
@@ -121,7 +152,7 @@ local function set_fullscreen(win, fullscreen)
 	hl.dispatch(hl.dsp.window.fullscreen({
 		action       = fullscreen and "set" or "unset",
 		mode         = "fullscreen",
-		layout_aware = true,
+		layout_aware = layout_aware ~= false,
 		window       = win,
 	}))
 	return true
@@ -224,8 +255,10 @@ end
 local function adopt_existing_windows()
 	states = {}
 	pending_fullscreen = {}
+	steam_placeholder = nil
 
 	for _, win in ipairs(hl.get_windows()) do
+		if win.mapped and win.initial_title == steam_placeholder_title then steam_placeholder = win end
 		local state = state_for(win)
 		if is_policy_window(win) then
 			local measured = not fullscreen_of(win) and current_width(win) or nil
@@ -235,6 +268,7 @@ local function adopt_existing_windows()
 			state.fullscreen = fullscreen_of(win)
 		end
 	end
+	update_steam_placement()
 end
 
 function M.adjust_width(delta)
@@ -313,6 +347,22 @@ hl.on("workspace.active", function(ws)
 end)
 
 hl.on("window.open", function(win)
+	if win.initial_title == steam_placeholder_title then
+		steam_placeholder = win
+		update_steam_placement()
+		return
+	end
+	if win.class == "gamescope" and steam_placeholder and steam_placeholder.mapped then
+		local placeholder = steam_placeholder
+		local focused = hl.get_active_window() == placeholder
+		state_for(win).fullscreen = true
+		-- Native fullscreen takeover, without swapping or resizing the placeholder.
+		set_fullscreen(win, true, false)
+		if not fullscreen_of(win) then return end
+		if focused then focus_window(win) end
+		hl.dispatch(hl.dsp.window.close({ window = placeholder }))
+		return
+	end
 	local state = state_for(win)
 	if win.floating then
 		state.fullscreen = false
@@ -323,6 +373,10 @@ hl.on("window.open", function(win)
 end)
 
 hl.on("window.close", function(win)
+	if win == steam_placeholder then
+		steam_placeholder = nil
+		update_steam_placement()
+	end
 	local key = key_for(win)
 	if not key then return end
 	states[key] = nil
@@ -330,6 +384,7 @@ hl.on("window.close", function(win)
 end)
 
 hl.on("window.move_to_workspace", function(win)
+	if win == steam_placeholder then update_steam_placement() end
 	apply_window(win)
 end)
 

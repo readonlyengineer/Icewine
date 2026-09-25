@@ -71,17 +71,16 @@ const steamContext = vm.createContext({
     compositor: steamCompositor,
     Launcher: launcher,
     Quickshell: { execDetached(command) { steamCommands.push(Array.from(command)) } },
-    steamSplashTimeout: { restart() { this.running = true }, stop() { this.running = false } },
     steamLaunchTimeout: { restart() { this.running = true }, stop() { this.running = false } },
     steamAutostartRetry: { restarts: 0, restart() { this.restarts++ }, stop() { this.running = false } },
     console,
     JSON
 })
-for (const name of ["gamescopePlan", "finishSteamLaunch", "hideSteamSplash", "startSteamProcess",
-        "checkSteamLaunch", "launchSteamGamescope", "autostartSteamGamescope"])
+for (const name of ["gamescopePlan", "finishSteamLaunch", "startSteamProcess",
+        "launchSteamGamescope", "autostartSteamGamescope"])
     vm.runInContext(qmlFunction(name), steamContext)
-for (const name of ["gamescopePlan", "finishSteamLaunch", "hideSteamSplash", "startSteamProcess",
-        "checkSteamLaunch", "launchSteamGamescope", "autostartSteamGamescope"])
+for (const name of ["gamescopePlan", "finishSteamLaunch", "startSteamProcess",
+        "launchSteamGamescope", "autostartSteamGamescope"])
     steamRoot[name] = steamContext[name].bind(steamRoot)
 
 steamRoot.autostartSteamGamescope()
@@ -107,15 +106,16 @@ assert.equal(steamCommands.length, 1, "The rendered splash starts exactly one se
 assert.deepEqual(steamCommands[0].slice(0, 6),
     ["uwsm", "app", "-u", "icewine-steam-gamescope.scope", "--", "gamescope"],
     "A stable collected UWSM scope rejects a duplicate after the QML timeout")
-steamRoot.hideSteamSplash()
-assert.equal(steamRoot.steamSplashVisible, false)
+assert.equal(steamRoot.steamSplashVisible, true)
 assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).pending, true,
-    "Visual timeout keeps the slow-launch deduplication guard")
+    "The placeholder reserves the launch position until handoff or launch timeout")
 assert.equal(steamCommands.length, 1)
 steamCompositor.toplevels = [existing]
-steamRoot.checkSteamLaunch()
-assert.equal(steamCompositor.activated, "0x1")
-assert.equal(steamRoot.steamLaunching, false, "Gamescope appearance dismisses the splash")
+vm.runInContext(source.match(/onClosed: (.+)/)[1], steamContext)
+assert.equal(steamCompositor.activated, undefined, "Hyprland owns conditional focus handoff")
+assert.equal(steamRoot.steamLaunching, false, "Closing the placeholder clears launch state")
+assert.equal(steamRoot.steamSplashVisible, false)
+assert.equal(steamContext.steamLaunchTimeout.running, false)
 assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).reused, true)
 assert.equal(steamCommands.length, 1, "Existing Gamescope is focused without another session")
 steamRoot.steamLaunching = true
@@ -127,8 +127,12 @@ assert.equal(steamRoot.pendingSteamCommand, null, "Timeout cleanup drops stale l
 assert.equal((deckShell.match(/gameLauncher\.autostartSteamGamescope\(\)/g) || []).length, 1,
     "Handheld autostart runs once from the Topbar first-frame hook")
 
-assert.match(source, /onToplevelsChanged[\s\S]*root\.checkSteamLaunch\(\)/,
-    "Gamescope window appearance drives splash dismissal")
+assert.match(source, /FloatingWindow\s*\{/,
+    "The placeholder is a managed window, below shell overlays")
+assert.match(source, /title: "Icewine Steam launch"/,
+    "The placeholder identity matches the compositor's placement policy")
+assert.doesNotMatch(source, /PanelWindow|WlrLayershell|steamSplashTimeout|checkSteamLaunch/,
+    "No overlay, early reservation expiry or second window-readiness watcher remains")
 assert.match(source, /RenderReady[\s\S]*onReady: root\.startSteamProcess\(\)/,
     "The host splash renders before Gamescope starts")
 assert.doesNotMatch(source, /GAMESCOPE_FOCUSED_APP_GFX|icewine-steam-session/,
