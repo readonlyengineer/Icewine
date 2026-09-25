@@ -34,7 +34,7 @@ hl = {
 			events["window.close"](closed)
 		else
 			assert(request.mode == "fullscreen")
-			if request.layout_aware then assert(request.window == active) end
+			assert(request.layout_aware, "Fullscreen must remain managed by the scrolling layout")
 			assert(request.action == "set" or request.action == "unset")
 			assert(request.window.initial_title ~= "Icewine Steam launch",
 				"Handoff must not toggle the placeholder's fullscreen state")
@@ -127,6 +127,8 @@ print("window policy: defaults, user overrides, toggles, adjustments and invalid
 
 local placement = rules["icewine-steam-placement"]
 assert(not placement.enabled and placement.no_initial_focus)
+assert(not placement.no_anim and not rules["icewine-steam-placeholder"].no_anim,
+	"Steam and its placeholder must retain normal navigation animations")
 assert(placement.suppress_event:find("fullscreenoutput", 1, true))
 local function placeholder(id)
 	local win = window(normal, 1, true)

@@ -13,7 +13,6 @@ hl.window_rule({
 	name = "icewine-steam-placeholder",
 	match = { initial_title = "^Icewine Steam launch$" },
 	fullscreen = true,
-	no_anim = true,
 })
 local steam_placement = hl.window_rule({
 	name = "icewine-steam-placement",
@@ -21,7 +20,6 @@ local steam_placement = hl.window_rule({
 	enabled = false,
 	no_initial_focus = true,
 	suppress_event = "activate activatefocus fullscreenoutput",
-	no_anim = true,
 })
 
 local function update_steam_placement()
@@ -144,7 +142,7 @@ local function toggled_fullscreen(state, fallback_width)
 	return not fullscreen
 end
 
-local function set_fullscreen(win, fullscreen, layout_aware)
+local function set_fullscreen(win, fullscreen)
 	local key = key_for(win)
 	if not key or fullscreen_of(win) == fullscreen then return false end
 
@@ -152,7 +150,7 @@ local function set_fullscreen(win, fullscreen, layout_aware)
 	hl.dispatch(hl.dsp.window.fullscreen({
 		action       = fullscreen and "set" or "unset",
 		mode         = "fullscreen",
-		layout_aware = layout_aware ~= false,
+		layout_aware = true,
 		window       = win,
 	}))
 	return true
@@ -356,8 +354,8 @@ hl.on("window.open", function(win)
 		local placeholder = steam_placeholder
 		local focused = hl.get_active_window() == placeholder
 		state_for(win).fullscreen = true
-		-- Native fullscreen takeover, without swapping or resizing the placeholder.
-		set_fullscreen(win, true, false)
+		-- Keep Gamescope in the scrolling layout's fullscreen handling.
+		set_fullscreen(win, true)
 		if not fullscreen_of(win) then return end
 		if focused then focus_window(win) end
 		hl.dispatch(hl.dsp.window.close({ window = placeholder }))
