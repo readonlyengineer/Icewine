@@ -31,7 +31,6 @@ let
     cp ${hyprTheme} $out/modules/Theme.lua
     ${lib.optionalString cfg.handheld.enable ''
       cp ${../hyprland/deck/Deck.lua} $out/modules/Deck.lua
-      cp ${../hyprland/deck/Autostart.lua} $out/modules/Autostart.lua
     ''}
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
       "cp ${lib.escapeShellArg "${source}"} \"$out/modules/\"${lib.escapeShellArg name}"
@@ -48,7 +47,6 @@ in {
     "quickshell/adapters".source = ../quickshell/adapters;
     "quickshell/modules".source = ../quickshell/modules;
     "quickshell/startup/shell.qml".source = ../quickshell/startup/shell.qml;
-    "quickshell/startup/StartupSplash.js".source = ../quickshell/startup/StartupSplash.js;
     "quickshell/startup/theme/Palette.qml".source = quickshellPalette;
     "quickshell/DeckOverlay.qml" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckOverlay.qml; };
     "quickshell/DeckMenu.js" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckMenu.js; };

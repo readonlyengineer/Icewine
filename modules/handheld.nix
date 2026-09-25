@@ -57,31 +57,6 @@ let
     '';
   };
 
-  icewineSteamGamescope = pkgs.writeShellApplication {
-    name = "icewine-steam-gamescope";
-    runtimeInputs = [
-      pkgs.coreutils
-      pkgs.gamescope
-      pkgs.jq
-      pkgs.quickshell
-    ];
-    text = ''
-      plan=
-      for _ in $(seq 1 40); do
-        if plan=$(qs ipc call gameLauncher gamescopePlan 2>/dev/null) \
-          && jq -e '.ok == true and (.arguments | length > 0) and all(.arguments[]; type == "string")' \
-            <<< "$plan" >/dev/null; then
-          mapfile -t command < <(jq -r '.arguments[]' <<< "$plan")
-          command=("''${command[0]}" --backend wayland --default-touch-mode 1 "''${command[@]:1}")
-          exec "''${command[@]}"
-        fi
-        sleep 0.25
-      done
-
-      echo "QuickShell did not provide a valid Steam Gamescope plan" >&2
-      exit 1
-    '';
-  };
 in {
   config = lib.mkIf (cfg.enable && cfg.handheld.enable) {
   nixpkgs.overlays = lib.mkAfter [
@@ -112,7 +87,7 @@ in {
 
     services.pipewire.alsa.support32Bit = true;
     environment.systemPackages = [ pkgs.inputplumber pkgs.squeekboard
-      icewineInputplumberIntercept icewineKeyboardToggle icewineSteamGamescope ];
+      icewineInputplumberIntercept icewineKeyboardToggle ];
   environment.etc."inputplumber/profiles/icewine-hyprland.yaml".source =
     ../inputplumber/inputplumber-hyprland.yaml;
   environment.etc."inputplumber/profiles/icewine-desktop.yaml".source =

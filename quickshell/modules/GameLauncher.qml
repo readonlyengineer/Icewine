@@ -3,15 +3,23 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
+import qs.theme as Theme
 import "GameLauncher.js" as Launcher
 
 Scope {
     id: root
 
     required property var compositor
+    property bool handheld: false
 
     readonly property var monitors: compositor.getMonitors().map(monitor => monitorRecord(monitor))
     property var monitorCapabilities: ({})
+    property bool steamLaunching: false
+    property bool steamSplashVisible: false
+    property string steamSplashScreen: ""
+    property var pendingSteamCommand: null
+    property int steamAutostartRetries: 0
 
     function monitorRecord(m) {
         var capabilities = monitorCapabilities[String(m.name || "")] || {}
@@ -58,7 +66,7 @@ Scope {
     }
 
     function gamescopePlan(appCommand, steamIntegration) {
-        var monitor = focusedMonitor()
+        var monitor = root.focusedMonitor()
         var width = Math.round(Number(monitor && monitor.width || 0))
         var height = Math.round(Number(monitor && monitor.height || 0))
         if (!monitor || width <= 0 || height <= 0) {
@@ -69,13 +77,15 @@ Scope {
             }
         }
 
-        var args = [
-            "gamescope",
+        var args = ["gamescope"]
+        if (steamIntegration && root.handheld)
+            args.push("--backend", "wayland", "--default-touch-mode", "1")
+        args.push(
             "-W", String(width),
             "-H", String(height),
             "-w", String(width),
             "-h", String(height)
-        ]
+        )
         var refreshHz = Math.round(Number(monitor.refreshHz || 0))
         if (refreshHz > 0)
             args.push("-r", String(refreshHz))
@@ -108,12 +118,80 @@ Scope {
         return JSON.stringify(plan, null, 2)
     }
 
-    function focusExistingGamescope() {
-        var window = Launcher.existingSteamWindow(compositor.toplevels)
-        if (!window)
-            return false
-        compositor.activateWindow(window.address)
-        return true
+    function finishSteamLaunch() {
+        root.steamLaunching = false
+        root.steamSplashVisible = false
+        root.steamSplashScreen = ""
+        root.pendingSteamCommand = null
+        steamSplashTimeout.stop()
+        steamLaunchTimeout.stop()
+    }
+
+    function hideSteamSplash() {
+        root.steamSplashVisible = false
+        root.steamSplashScreen = ""
+    }
+
+    function startSteamProcess() {
+        if (!root.steamLaunching || root.pendingSteamCommand === null)
+            return
+        var command = root.pendingSteamCommand
+        root.pendingSteamCommand = null
+        try {
+            Quickshell.execDetached(command)
+        } catch (error) {
+            console.warn("Could not start Steam Gamescope:", error)
+            root.finishSteamLaunch()
+        }
+    }
+
+    function checkSteamLaunch() {
+        if (!root.steamLaunching)
+            return
+        var window = Launcher.gamescopeWindow(compositor.toplevels)
+        if (window) {
+            root.finishSteamLaunch()
+            compositor.activateWindow(window.address)
+        }
+    }
+
+    function launchSteamGamescope() {
+        var decision = Launcher.steamLaunchAction(compositor.toplevels, root.steamLaunching)
+        if (decision.action === "focus") {
+            root.finishSteamLaunch()
+            compositor.activateWindow(decision.window.address)
+            return JSON.stringify({ok: true, reused: true}, null, 2)
+        }
+        if (decision.action === "wait")
+            return JSON.stringify({ok: true, pending: true}, null, 2)
+
+        var plan = root.gamescopePlan(["icewine-steam"], true)
+        if (!plan.ok)
+            return JSON.stringify(plan, null, 2)
+
+        root.steamSplashScreen = plan.monitor.name
+        root.steamLaunching = true
+        root.steamSplashVisible = true
+        // The stable collected scope is the duplicate guard after QML's
+        // bounded launch state expires; systemd rejects a second active unit.
+        root.pendingSteamCommand = [
+            "uwsm", "app", "-u", "icewine-steam-gamescope.scope", "--"
+        ].concat(plan.arguments)
+        steamSplashTimeout.restart()
+        steamLaunchTimeout.restart()
+        return JSON.stringify(plan, null, 2)
+    }
+
+    function autostartSteamGamescope() {
+        var result = JSON.parse(root.launchSteamGamescope())
+        if (result.ok) {
+            root.steamAutostartRetries = 0
+            steamAutostartRetry.stop()
+        } else if (++root.steamAutostartRetries < 40) {
+            steamAutostartRetry.restart()
+        } else {
+            root.steamAutostartRetries = 0
+        }
     }
 
     Process {
@@ -136,6 +214,24 @@ Scope {
         }
     }
 
+    Timer {
+        id: steamSplashTimeout
+        interval: 30000
+        onTriggered: root.hideSteamSplash()
+    }
+
+    Timer {
+        id: steamLaunchTimeout
+        interval: 120000
+        onTriggered: root.finishSteamLaunch()
+    }
+
+    Timer {
+        id: steamAutostartRetry
+        interval: 250
+        onTriggered: root.autostartSteamGamescope()
+    }
+
     Connections {
         target: compositor
 
@@ -143,6 +239,71 @@ Scope {
             root.probeMonitorCapabilities()
         }
 
+        function onToplevelsChanged() {
+            root.checkSteamLaunch()
+        }
+
+    }
+
+    Variants {
+        model: root.steamSplashVisible
+            ? Quickshell.screens.filter(screen => screen.name === root.steamSplashScreen)
+            : []
+
+        PanelWindow {
+            id: panel
+            required property var modelData
+            screen: modelData
+            visible: true
+            color: "#000000"
+            focusable: false
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.namespace: "quickshell:steam-launch"
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+            mask: Region {}
+
+            RenderReady {
+                item: panel.contentItem
+                onReady: root.startSteamProcess()
+            }
+
+            anchors {
+                top: true
+                bottom: true
+                left: true
+                right: true
+            }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 20
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: ""
+                    color: Theme.Palette.foreground
+                    font.family: "JetBrainsMono Nerd Font"
+                    font.pixelSize: 64
+                }
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: ""
+                    color: Theme.Palette.primary
+                    font.family: "JetBrainsMono Nerd Font"
+                    font.pixelSize: 32
+
+                    RotationAnimator on rotation {
+                        from: 0
+                        to: 360
+                        duration: 900
+                        loops: Animation.Infinite
+                        running: true
+                    }
+                }
+            }
+        }
     }
 
     IpcHandler {
@@ -156,13 +317,11 @@ Scope {
         }
 
         function gamescopePlan(): string {
-            return JSON.stringify(root.gamescopePlan(["icewine-steam-session"], true), null, 2)
+            return JSON.stringify(root.gamescopePlan(["icewine-steam"], true), null, 2)
         }
 
         function launchSteamGamescope(): string {
-            if (root.focusExistingGamescope())
-                return JSON.stringify({ok: true, reused: true}, null, 2)
-            return root.launchGamescope(["icewine-steam-session"], true)
+            return root.launchSteamGamescope()
         }
 
         function launchCommand(commandJson: string): string {
@@ -178,7 +337,5 @@ Scope {
         }
     }
 
-    Component.onCompleted: {
-        probeMonitorCapabilities()
-    }
+    Component.onCompleted: root.probeMonitorCapabilities()
 }

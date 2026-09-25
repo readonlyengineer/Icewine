@@ -15,5 +15,12 @@ function existingSteamWindow(toplevels) {
     return gamescopeWindow(toplevels) ?? steamWindow(toplevels)
 }
 
+function steamLaunchAction(toplevels, launching) {
+    const window = existingSteamWindow(toplevels)
+    if (window)
+        return { action: "focus", window }
+    return { action: launching ? "wait" : "launch", window: null }
+}
+
 if (typeof module !== "undefined")
-    module.exports = { existingSteamWindow, gamescopeWindow, steamWindow }
+    module.exports = { existingSteamWindow, gamescopeWindow, steamLaunchAction, steamWindow }

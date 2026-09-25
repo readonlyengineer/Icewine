@@ -26,9 +26,16 @@ ShellRoot {
         sessionLocked: session.locked
         fullWidth: true
         excludeSteamApps: true
-        onRendered: stopStartupSplash.exec(["systemctl", "--user", "stop", "icewine-session-splash.service"])
+        onRendered: {
+            stopStartupSplash.exec(["systemctl", "--user", "stop", "icewine-session-splash.service"])
+            gameLauncher.autostartSteamGamescope()
+        }
     }
-    Modules.GameLauncher { compositor: hyprlandAdapter }
+    Modules.GameLauncher {
+        id: gameLauncher
+        compositor: hyprlandAdapter
+        handheld: true
+    }
     DeckOverlay {
         id: deckOverlay
         compositor: hyprlandAdapter

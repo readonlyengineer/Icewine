@@ -4,8 +4,22 @@ const fs = require("node:fs")
 const path = require("node:path")
 const vm = require("node:vm")
 const source = fs.readFileSync(path.join(__dirname, "../modules/GameLauncher.qml"), "utf8")
+const deckShell = fs.readFileSync(path.join(__dirname, "../deck/shell.qml"), "utf8")
 const launcher = require("../modules/GameLauncher.js")
-const startup = require("../startup/StartupSplash.js")
+
+function qmlFunction(name) {
+    const start = source.indexOf(`    function ${name}(`)
+    assert.notEqual(start, -1, `Missing QML function ${name}`)
+    const brace = source.indexOf("{", start)
+    let depth = 0
+    for (let end = brace; end < source.length; end++) {
+        if (source[end] === "{") depth++
+        if (source[end] === "}" && --depth === 0)
+            return source.slice(start, end + 1).replace(/: string(?=\s*\{|\s*[,)])/g, "")
+    }
+    throw new Error(`Unterminated QML function ${name}`)
+}
+
 const method = source.match(/        function launchCommand\(commandJson: string\): string \{[\s\S]*?^        \}/m)[0]
 const launches = []
 const context = vm.createContext({root: {launchGamescope(argv, steam) {
@@ -20,10 +34,8 @@ assert.equal(launches.length, 0, "Malformed commands must not launch")
 assert.equal(JSON.parse(context.launchCommand(JSON.stringify(["app", "a b", "$(touch /tmp/no)"]))).ok, true)
 assert.deepEqual(launches, [{argv: ["app", "a b", "$(touch /tmp/no)"], steam: false}],
     "Commands pass as argument arrays, without shell expansion")
-assert.match(source, /root\.gamescopePlan\(\["icewine-steam-session"\], true\)/,
-    "Handheld Steam selection belongs to the session wrapper")
-assert.match(source, /root\.launchGamescope\(\["icewine-steam-session"\], true\)/,
-    "Desktop Steam selection belongs to the session wrapper")
+assert.match(source, /root\.gamescopePlan\(\["icewine-steam"\], true\)/,
+    "Steam launches directly after the host splash starts")
 
 const existing = {address: "0x1", wayland: {appId: "gamescope"}}
 assert.equal(launcher.gamescopeWindow([{lastIpcObject: {class: "steam"}}, existing]), existing,
@@ -33,9 +45,91 @@ for (const identity of ["Steam", "steam", "com.valvesoftware.Steam"])
         identity, "An already-running outer Steam window is reused")
 assert.equal(launcher.existingSteamWindow([{lastIpcObject: {class: "steam"}}, existing]), existing,
     "Managed Gamescope takes precedence over an outer Steam window")
-assert.equal(startup.steamUiReady("GAMESCOPE_FOCUSED_APP_GFX(CARDINAL) = 769"), true,
-    "The splash closes for Gamescope's committed graphical Steam UI")
-for (const line of ["GAMESCOPE_FOCUSED_APP_GFX: not found.",
-        "GAMESCOPE_FOCUSED_APP_GFX(CARDINAL) = 0", "GAMESCOPE_FOCUSED_APP(CARDINAL) = 769", "= 1769"])
-    assert.equal(startup.steamUiReady(line), false,
-        "Other focus state keeps startup feedback visible")
+assert.equal(launcher.steamLaunchAction([existing], false).action, "focus",
+    "An existing Gamescope window is focused without opening a splash")
+assert.equal(launcher.steamLaunchAction([], true).action, "wait",
+    "A repeated request cannot start a duplicate session")
+assert.equal(launcher.steamLaunchAction([], false).action, "launch",
+    "A new session starts only when no window or launch is pending")
+
+const steamCommands = []
+const steamRoot = {
+    handheld: true,
+    steamLaunching: false,
+    steamSplashVisible: false,
+    steamSplashScreen: "",
+    pendingSteamCommand: null,
+    steamAutostartRetries: 0,
+    focusedMonitor() { return null }
+}
+const steamCompositor = {
+    toplevels: [],
+    activateWindow(address) { this.activated = address }
+}
+const steamContext = vm.createContext({
+    root: steamRoot,
+    compositor: steamCompositor,
+    Launcher: launcher,
+    Quickshell: { execDetached(command) { steamCommands.push(Array.from(command)) } },
+    steamSplashTimeout: { restart() { this.running = true }, stop() { this.running = false } },
+    steamLaunchTimeout: { restart() { this.running = true }, stop() { this.running = false } },
+    steamAutostartRetry: { restarts: 0, restart() { this.restarts++ }, stop() { this.running = false } },
+    console,
+    JSON
+})
+for (const name of ["gamescopePlan", "finishSteamLaunch", "hideSteamSplash", "startSteamProcess",
+        "checkSteamLaunch", "launchSteamGamescope", "autostartSteamGamescope"])
+    vm.runInContext(qmlFunction(name), steamContext)
+for (const name of ["gamescopePlan", "finishSteamLaunch", "hideSteamSplash", "startSteamProcess",
+        "checkSteamLaunch", "launchSteamGamescope", "autostartSteamGamescope"])
+    steamRoot[name] = steamContext[name].bind(steamRoot)
+
+steamRoot.autostartSteamGamescope()
+assert.equal(steamRoot.steamAutostartRetries, 1)
+assert.equal(steamContext.steamAutostartRetry.restarts, 1,
+    "Handheld autostart waits when monitor geometry is not ready")
+steamRoot.focusedMonitor = () => ({
+    name: "eDP-1", width: 1280, height: 800, refreshHz: 60, hdr: false, vrr: true
+})
+const plan = steamRoot.gamescopePlan(["icewine-steam"], true)
+assert.deepEqual(Array.from(plan.arguments).slice(0, 7),
+    ["gamescope", "--backend", "wayland", "--default-touch-mode", "1", "-W", "1280"],
+    "Handheld launch flags remain in the shared monitor-aware plan")
+steamRoot.autostartSteamGamescope()
+assert.equal(steamRoot.steamAutostartRetries, 0)
+assert.equal(steamRoot.steamLaunching, true)
+assert.equal(steamRoot.steamSplashVisible, true)
+assert.equal(steamRoot.steamSplashScreen, "eDP-1")
+assert.equal(steamCommands.length, 0, "Gamescope waits for the splash's first frame")
+assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).pending, true)
+steamRoot.startSteamProcess()
+assert.equal(steamCommands.length, 1, "The rendered splash starts exactly one session")
+assert.deepEqual(steamCommands[0].slice(0, 6),
+    ["uwsm", "app", "-u", "icewine-steam-gamescope.scope", "--", "gamescope"],
+    "A stable collected UWSM scope rejects a duplicate after the QML timeout")
+steamRoot.hideSteamSplash()
+assert.equal(steamRoot.steamSplashVisible, false)
+assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).pending, true,
+    "Visual timeout keeps the slow-launch deduplication guard")
+assert.equal(steamCommands.length, 1)
+steamCompositor.toplevels = [existing]
+steamRoot.checkSteamLaunch()
+assert.equal(steamCompositor.activated, "0x1")
+assert.equal(steamRoot.steamLaunching, false, "Gamescope appearance dismisses the splash")
+assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).reused, true)
+assert.equal(steamCommands.length, 1, "Existing Gamescope is focused without another session")
+steamRoot.steamLaunching = true
+steamRoot.pendingSteamCommand = ["must-not-run"]
+steamRoot.finishSteamLaunch()
+assert.equal(steamRoot.steamLaunching, false)
+assert.equal(steamRoot.pendingSteamCommand, null, "Timeout cleanup drops stale launch work")
+
+assert.equal((deckShell.match(/gameLauncher\.autostartSteamGamescope\(\)/g) || []).length, 1,
+    "Handheld autostart runs once from the Topbar first-frame hook")
+
+assert.match(source, /onToplevelsChanged[\s\S]*root\.checkSteamLaunch\(\)/,
+    "Gamescope window appearance drives splash dismissal")
+assert.match(source, /RenderReady[\s\S]*onReady: root\.startSteamProcess\(\)/,
+    "The host splash renders before Gamescope starts")
+assert.doesNotMatch(source, /GAMESCOPE_FOCUSED_APP_GFX|icewine-steam-session/,
+    "Steam readiness no longer waits for an inner X11 property")

@@ -26,11 +26,6 @@ let
     if cfg.handheld.bookmarksCommand == [ ] then "printf '[]\\n'"
     else ''exec ${lib.escapeShellArgs cfg.handheld.bookmarksCommand} "$@"''
   );
-  steamSession = pkgs.writeShellApplication {
-    name = "icewine-steam-session";
-    runtimeInputs = [ pkgs.quickshell pkgs.xorg.xprop ];
-    text = builtins.readFile ../scripts/steam-session.sh;
-  };
 in {
   imports = [ ./handheld.nix ];
 
@@ -123,8 +118,8 @@ in {
       quickshell hyprshutdown hyprpolkitagent glib jq procps systemd
       grim slurp wl-clipboard libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl playerctl
-      bluetui impala wiremix btop xdg-utils
-    ]) ++ launchers ++ [ bookmarks screenshot steamSession ]
+      bluetui impala wiremix btop xdg-utils gamescope
+    ]) ++ launchers ++ [ bookmarks screenshot ]
       ++ lib.optionals cfg.gtk.enable (lib.optional (config.home-manager.users.${cfg.user}.gtk.theme.package != null) config.home-manager.users.${cfg.user}.gtk.theme.package);
 
     home-manager.users.${cfg.user}.imports = [ ./home.nix ];

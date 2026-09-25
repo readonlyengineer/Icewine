@@ -66,10 +66,9 @@ in {
   '';
   terminal = import ./terminal.nix { inherit self nixpkgs; };
   logic = pkgs.runCommand "icewine-logic-checks" {
-    nativeBuildInputs = [ pkgs.bash pkgs.gamescope pkgs.nodejs pkgs.lua ];
+    nativeBuildInputs = [ pkgs.nodejs pkgs.lua ];
   } ''
     cd ${self}
-    bash tests/steam-session.sh scripts/steam-session.sh gamescopereaper
     for test in quickshell/tests/*.js quickshell/deck/test-demo.js; do node "$test"; done
     lua hyprland/tests/docking.lua hyprland/modules/Docking.lua
     lua hyprland/tests/workspace-navigation.lua hyprland/modules/Binds.lua
@@ -79,6 +78,8 @@ in {
   '';
   modules =
     assert nixpkgs.lib.elem pkgs.btop desktop.environment.systemPackages;
+    assert nixpkgs.lib.elem desktopSystem.pkgs.gamescope desktop.environment.systemPackages;
+    assert nixpkgs.lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
     assert (home desktop).systemd.user.services ? icewine;
     assert !((home desktop).systemd.user.services ? quickshell);
     assert !((home desktop).systemd.user.services ? icewine-inputplumber-hyprland);
