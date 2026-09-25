@@ -1,12 +1,9 @@
 import Quickshell
-import Quickshell.Io
 import qs.config as Config
 import "adapters" as Adapters
 import "modules" as Modules
 
 ShellRoot {
-    Process { id: stopStartupSplash }
-
     Modules.Wallpaper {}
 
     Modules.SessionControl {
@@ -32,7 +29,6 @@ ShellRoot {
         compositor: compositor
         notificationService: notifications
         sessionLocked: session.locked
-        onRendered: stopStartupSplash.exec(["systemctl", "--user", "stop", "icewine-session-splash.service"])
     }
 
     Modules.GameLauncher {

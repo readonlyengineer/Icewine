@@ -1,10 +1,8 @@
 import Quickshell
-import Quickshell.Io
 import qs.config as Config
 import "adapters" as Adapters
 import "modules" as Modules
 ShellRoot {
-    Process { id: stopStartupSplash }
     Modules.Wallpaper {}
     Modules.SessionControl {
         id: session
@@ -26,10 +24,7 @@ ShellRoot {
         sessionLocked: session.locked
         fullWidth: true
         excludeSteamApps: true
-        onRendered: {
-            stopStartupSplash.exec(["systemctl", "--user", "stop", "icewine-session-splash.service"])
-            gameLauncher.autostartSteamGamescope()
-        }
+        onRendered: gameLauncher.autostartSteamGamescope()
     }
     Modules.GameLauncher {
         id: gameLauncher
