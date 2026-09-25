@@ -126,8 +126,6 @@ hl.bind("ALT + Tab", function()
 end, { repeating = true })
 
 -- Scratchpad
-hl.bind(mainMod .. " + S",         hl.dsp.workspace.toggle_special("magic"))
-hl.bind(mainMod .. " + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }))
 
 -- Mouse drag binds (LMB move, RMB resize)
 local function supress_mouse_binds(enabled)
