@@ -37,7 +37,7 @@ in {
       initExtra = lib.mkAfter (
         lib.optionalString cfg.fastfetch.enable "${lib.getExe config.programs.fastfetch.package}\n"
         + lib.optionalString cfg.blesh.enable ''
-          source -- ${pkgs.blesh}/share/blesh/ble.sh
+          source -- ${pkgs.blesh}/share/blesh/ble.sh 2>/dev/null
           bleopt exec_errexit_mark=
           bleopt exec_elapsed_mark=
           bleopt complete_menu_style=desc
