@@ -85,13 +85,43 @@ Rectangle {
     }
 
     Controls.Button {
+        id: dismissButton
+
+        anchors { top: parent.top; right: parent.right; margins: 8 }
+        width: 36
+        height: 36
+        focusPolicy: Qt.StrongFocus
+        Accessible.role: Accessible.Button
+        Accessible.name: "Dismiss"
+        Controls.ToolTip.visible: hovered
+        Controls.ToolTip.text: "Dismiss"
+        onClicked: root.dismissRequested()
+
+        background: Rectangle {
+            radius: 9
+            color: dismissButton.down ? Theme.Palette.primaryDark
+                : dismissButton.hovered ? Theme.Palette.selection : "transparent"
+            border.width: dismissButton.activeFocus ? 1 : 0
+            border.color: Theme.Palette.primary
+        }
+
+        contentItem: Text {
+            text: "×"
+            color: Theme.Palette.foreground
+            font.pixelSize: 20
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
+    Controls.Button {
         id: sourceButton
 
         anchors {
             top: parent.top
-            right: parent.right
+            right: dismissButton.left
             topMargin: 8
-            rightMargin: 8
+            rightMargin: 4
         }
         visible: root.sourceWindowAddress !== ""
         width: 36
@@ -133,7 +163,7 @@ Rectangle {
             right: parent.right
             topMargin: 9
             leftMargin: 10
-            rightMargin: sourceButton.visible ? 52 : 11
+            rightMargin: sourceButton.visible ? 92 : 52
         }
         spacing: 2
 
