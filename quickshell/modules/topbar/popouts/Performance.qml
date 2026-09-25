@@ -11,6 +11,7 @@ Flickable {
     required property var metrics
     readonly property Item initialFocus: root
     signal advancedRequested(string tool)
+    implicitHeight: contentHeight
     contentHeight: content.implicitHeight + 24
     clip: true
     boundsBehavior: Flickable.StopAtBounds

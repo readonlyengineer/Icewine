@@ -23,6 +23,7 @@ ShellRoot {
     property var items: []
     property double now: Date.now()
     property bool handedOff: false
+    property real performanceHeightBefore: 0
     signal tick()
     QtObject {
         id: compositor
@@ -115,6 +116,7 @@ ShellRoot {
             const button = root.findButton(performance)
             if (!button) throw new Error("Missing btop button")
             button.click()
+            root.performanceHeightBefore = performance.implicitHeight
             performance.metrics = { now: root.now, cpu: { history: [] },
                 cpuTemperature: null, memory: { current: null, history: [] }, gpus: [] }
             finish.start()
@@ -129,6 +131,9 @@ ShellRoot {
             if (network.history.length !== 2 || network.history[1].values[0] !== 0)
                 throw new Error("Network sampler did not read counters")
             if (!root.handedOff) throw new Error("btop launch did not hand off focus")
+            if (performance.implicitHeight <= 0
+                    || performance.implicitHeight >= root.performanceHeightBefore)
+                throw new Error("Performance popup did not shrink after GPU removal")
             if (coldGraph.minimum !== -5 || coldGraph.maximum !== 100)
                 throw new Error("Temperature axis must include negative values and expire old samples")
             for (const sampler of [systemMetrics.cpu, systemMetrics.memory]) {

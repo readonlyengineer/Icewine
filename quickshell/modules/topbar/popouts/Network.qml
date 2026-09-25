@@ -11,6 +11,8 @@ Item {
     id: root
 
     required property var metrics
+    implicitHeight: Math.max(content.implicitHeight + 24,
+        passwordNetwork ? passwordContent.implicitHeight + 36 : 0)
 
     readonly property Item initialFocus: wifiToggle
     readonly property var wifiDevice: Networking.devices.values.find(device =>
@@ -225,6 +227,7 @@ Item {
         radius: 10
 
         Column {
+            id: passwordContent
             anchors {
                 left: parent.left
                 right: parent.right

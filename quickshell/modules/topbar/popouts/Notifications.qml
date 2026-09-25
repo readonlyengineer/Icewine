@@ -13,6 +13,10 @@ Item {
     readonly property Item initialFocus: dnd
     signal sourceRequested(string address)
 
+    implicitHeight: header.y + header.height + dnd.implicitHeight + 4
+        + (root.notificationService.count > 0
+            ? Math.max(0, list.contentHeight) : emptyState.implicitHeight + 24) + 12
+
     Item {
         id: header
 
@@ -122,6 +126,7 @@ Item {
     }
 
     Text {
+        id: emptyState
         anchors.centerIn: list
         visible: root.notificationService.count === 0
         text: "󰂜\nAll caught up"

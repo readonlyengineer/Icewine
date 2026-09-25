@@ -34,8 +34,7 @@ Widget {
     }
 
     width: 380
-    implicitHeight: currentPage === "performance" ? 620
-        : currentPage === "battery" ? 420 : currentPage === "media" ? 340 : 456
+    implicitHeight: Math.min(620, pageLoader.item?.implicitHeight ?? 0)
 
     Rectangle {
         anchors.fill: parent

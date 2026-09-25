@@ -3,12 +3,17 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import qs.theme as Theme
 
-Item {
+Flickable {
     id: root
 
     required property var player
     readonly property Item initialFocus: playPause
     signal raiseRequested()
+
+    implicitHeight: contentHeight
+    contentHeight: content.implicitHeight + 32
+    clip: true
+    boundsBehavior: Flickable.StopAtBounds
 
     Timer {
         running: root.visible && (root.player?.isPlaying ?? false)
@@ -18,10 +23,10 @@ Item {
     }
 
     Column {
-        anchors {
-            fill: parent
-            margins: 16
-        }
+        id: content
+        x: 16
+        y: 16
+        width: root.width - 32
         spacing: 8
 
         Text {

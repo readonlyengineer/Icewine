@@ -30,6 +30,7 @@ Flickable {
         }
     }
 
+    implicitHeight: contentHeight
     contentHeight: content.implicitHeight + 24
     clip: true
     boundsBehavior: Flickable.StopAtBounds

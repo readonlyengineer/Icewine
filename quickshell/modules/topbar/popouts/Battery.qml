@@ -34,6 +34,7 @@ Flickable {
             === PerformanceDegradationReason.LapDetected
             ? "Lap detected" : ""
 
+    implicitHeight: contentHeight
     contentHeight: content.implicitHeight + 24
     clip: true
     boundsBehavior: Flickable.StopAtBounds
