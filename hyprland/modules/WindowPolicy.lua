@@ -352,12 +352,11 @@ hl.on("window.open", function(win)
 	end
 	if win.class == "gamescope" and steam_placeholder and steam_placeholder.mapped then
 		local placeholder = steam_placeholder
-		local focused = hl.get_active_window() == placeholder
 		state_for(win).fullscreen = true
 		-- Keep Gamescope in the scrolling layout's fullscreen handling.
 		set_fullscreen(win, true)
 		if not fullscreen_of(win) then return end
-		if focused then focus_window(win) end
+		focus_window(win)
 		hl.dispatch(hl.dsp.window.close({ window = placeholder }))
 		return
 	end

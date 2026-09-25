@@ -138,7 +138,7 @@ local function placeholder(id)
 	return win
 end
 
--- Map in the reserved workspace even after focus moves elsewhere.
+-- Keep the reserved workspace, but follow Steam when startup completes.
 local splash = placeholder(2)
 assert(placement.enabled and placement.workspace == "2 silent")
 local elsewhere = window(normal, 1, true)
@@ -148,7 +148,8 @@ game.class, game.workspace = "gamescope", splash.workspace
 active = elsewhere -- the no-initial-focus rule keeps this window active at map.
 local before = focuses
 events["window.open"](game)
-assert(active == elsewhere and focuses == before, "Background startup stole focus")
+assert(active == game and focuses == before + 1, "Startup did not focus Steam")
+assert(game.workspace.id == 2, "Steam lost its reserved workspace")
 assert(game.fullscreen and closed == splash and not placement.enabled)
 
 -- Moving the placeholder updates placement; reloading preserves the reservation.
