@@ -16,7 +16,7 @@ ShellRoot {
         PanelWindow {
             required property var modelData
             screen: modelData
-            color: Theme.Palette.background
+            color: "#000000"
             focusable: false
             exclusionMode: ExclusionMode.Ignore
             WlrLayershell.layer: WlrLayer.Overlay
@@ -59,13 +59,6 @@ ShellRoot {
                     }
                 }
 
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: "Starting Icewine"
-                    color: Theme.Palette.foreground
-                    font.family: "JetBrainsMono Nerd Font"
-                    font.pixelSize: 20
-                }
             }
         }
     }
