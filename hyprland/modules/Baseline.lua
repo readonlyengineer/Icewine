@@ -28,6 +28,7 @@ hl.config({
 		focus_on_activate       = true,
 		force_default_wallpaper = -1,
 		disable_hyprland_logo   = true,
+		no_update_news         = true,
 	},
 
 	input = {
