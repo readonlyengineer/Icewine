@@ -41,7 +41,6 @@ Item {
 
         ActionButton {
             anchors.right: parent.right
-            anchors.rightMargin: 30
             width: 82
             height: 30
             visible: root.notificationService.count > 0
