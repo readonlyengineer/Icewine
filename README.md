@@ -49,10 +49,6 @@ Monitor layout and hardware-specific settings belong on the host too. Extra
 Hyprland Lua modules can be supplied through `services.icewine.hyprland.extraModules`.
 
 For example:
-  hosts/PC/
-  ├── default.nix
-  └── hypr/
-      └── host.lua
 ```nix
 services.icewine.hyprland.extraModules."host.lua" = ./hypr/host.lua;
 ```
