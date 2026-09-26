@@ -14,6 +14,15 @@ check(new Set(reachable).size === rootEntries.length,
     "Every root action remains reachable with the eight digital directions")
 check(rootEntries[Menu.sector(0, -1, rootEntries.length, 0)].label === "Steam", "Steam is up")
 const applications = count => Array.from({length: count}, (_, index) => ({name: "App " + index}))
+const filtered = Menu.buildPages([
+    { id: "steam" }, { id: "com.valvesoftware.Steam.desktop" }, { id: "kitty" },
+    ...applications(8)
+])
+assert.deepEqual(filtered["launcher-0"].map(entry => entry.application), applications(8),
+    "Dedicated shortcuts are excluded before pagination")
+check(!filtered["launcher-1"], "Excluded shortcuts do not create an extra page")
+check(rootEntries.some(entry => entry.action === "steam")
+    && rootEntries.some(entry => entry.action === "terminal"), "Parent shortcuts remain")
 for (const count of [0, 8]) {
     const pages = Menu.buildPages(applications(count))
     check(pages["launcher-0"].length === count, count + " applications need no More")

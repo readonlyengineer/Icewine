@@ -9,6 +9,8 @@ var rootEntries = [
 ]
 
 function buildPages(applications) {
+    applications = applications.filter(application =>
+        !["steam", "com.valvesoftware.Steam", "kitty"].includes(String(application.id || "").replace(/\.desktop$/, "")))
     var pages = { root: rootEntries }
     var offset = 0
     var page = 0

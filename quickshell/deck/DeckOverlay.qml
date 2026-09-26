@@ -4,6 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
+import Quickshell.Widgets
 import qs.theme as Theme
 import "DeckMenu.js" as Menu
 import "modules/topbar" as Bar
@@ -415,8 +416,17 @@ Scope {
                             border.color: choice.selected ? Theme.Palette.foreground
                                 : Theme.Palette.alpha(Theme.Palette.border, 0.33)
 
+                            IconImage {
+                                anchors.centerIn: parent
+                                implicitSize: radial.buttonSize < 80 ? 24 : 31
+                                visible: choice.modelData.action === "application"
+                                source: visible ? Quickshell.iconPath(
+                                    choice.modelData.application.icon, "application-x-executable") : ""
+                            }
+
                             Text {
                                 anchors.centerIn: parent
+                                visible: choice.modelData.action !== "application"
                                 text: choice.modelData.icon || "󰋜"
                                 color: choice.selected ? Theme.Palette.backgroundDark : Theme.Palette.foreground
                                 font.family: "JetBrainsMono Nerd Font"
