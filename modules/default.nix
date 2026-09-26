@@ -76,6 +76,7 @@ in {
         gamescope = prev.gamescope.overrideAttrs (old: {
           patches = (old.patches or [ ]) ++ [
             ../patches/gamescope/preserve-keyboard-focus-state.patch
+            ../patches/gamescope/dynamic-resolution.patch
           ];
         });
       })

@@ -24,7 +24,8 @@ in {
     assert pkgs.lib.all (system:
       pkgs.lib.count (patch:
         toString patch == toString ../patches/gamescope/preserve-keyboard-focus-state.patch
-      ) system.pkgs.gamescope.patches == 1
+        || toString patch == toString ../patches/gamescope/dynamic-resolution.patch
+      ) system.pkgs.gamescope.patches == 2
     ) [ desktopSystem handheldSystem ];
     pkgs.runCommand "icewine-gamescope-focus-check" {
       nativeBuildInputs = [ pkgs.python3 pkgs.stdenv.cc pkgs.patch ];
@@ -37,6 +38,7 @@ in {
           cd ${name}
           ${pkgs.lib.concatMapStringsSep "\n" (patch: "patch -p1 < ${patch}") gamescope.patches}
           python3 ${../patches/gamescope/check-focus.py} .
+          python3 ${../patches/gamescope/check-dynamic-resolution.py} .
           test -x ${gamescope}/bin/gamescope
           cd ..
         ''

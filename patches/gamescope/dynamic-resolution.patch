@@ -1,0 +1,151 @@
+diff --git a/src/Backends/WaylandBackend.cpp b/src/Backends/WaylandBackend.cpp
+index 4d68370..56b2152 100644
+--- a/src/Backends/WaylandBackend.cpp
++++ b/src/Backends/WaylandBackend.cpp
+@@ -1739,6 +1739,13 @@ namespace gamescope
+         g_nOutputWidth  = WaylandScaleToPhysical( nWidth, uScale );
+         g_nOutputHeight = WaylandScaleToPhysical( nHeight, uScale );
+ 
++        if ( g_bDynamicResolution )
++        {
++            wlserver_lock();
++            wlserver_set_dynamic_resolution( g_nOutputWidth, g_nOutputHeight );
++            wlserver_unlock();
++        }
++
+         CommitLibDecor( pConfiguration );
+ 
+         force_repaint();
+@@ -1929,6 +1936,12 @@ namespace gamescope
+             {
+                 g_nOutputWidth  = ( g_nOutputWidth  * uScale ) / m_uFractionalScale;
+                 g_nOutputHeight = ( g_nOutputHeight * uScale ) / m_uFractionalScale;
++                if ( g_bDynamicResolution )
++                {
++                    wlserver_lock();
++                    wlserver_set_dynamic_resolution( g_nOutputWidth, g_nOutputHeight );
++                    wlserver_unlock();
++                }
+             }
+ 
+             s_uGlobalFractionalScale = uScale;
+diff --git a/src/main.cpp b/src/main.cpp
+index 0bd0cb4..19a0d88 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -73,6 +73,7 @@ const struct option *gamescope_options = (struct option[]){
+ 	{ "rt", no_argument, nullptr, 0 },
+ 	{ "prefer-vk-device", required_argument, 0 },
+ 	{ "expose-wayland", no_argument, 0 },
++	{ "dynamic-resolution", no_argument, 0 },
+ 	{ "mouse-sensitivity", required_argument, nullptr, 's' },
+ 	{ "mangoapp", no_argument, nullptr, 0 },
+ 	{ "adaptive-sync", no_argument, nullptr, 0 },
+@@ -181,6 +182,7 @@ const char usage[] =
+ 	"                                     nis => NVIDIA Image Scaling v1.0.3\n"
+ 	"  --sharpness, --fsr-sharpness   upscaler sharpness from 0 (max) to 20 (min)\n"
+ 	"  --expose-wayland               support wayland clients using xdg-shell\n"
++	"  --dynamic-resolution           follow nested Wayland output size for Xwayland modes\n"
+ 	"  -s, --mouse-sensitivity        multiply mouse movement by given decimal number\n"
+ 	"  --backend                      select rendering backend\n"
+ 	"                                     auto => autodetect (default)\n"
+@@ -709,6 +711,7 @@ static void UpdateCompatEnvVars()
+ int g_nPreferredOutputWidth = 0;
+ int g_nPreferredOutputHeight = 0;
+ bool g_bExposeWayland = false;
++bool g_bDynamicResolution = false;
+ const char *g_sOutputName = nullptr;
+ bool g_bDebugLayers = false;
+ bool g_bForceDisableColorMgmt = false;
+@@ -842,6 +845,8 @@ int main(int argc, char **argv)
+ 					cv_adaptive_sync = true;
+ 				} else if (strcmp(opt_name, "expose-wayland") == 0) {
+ 					g_bExposeWayland = true;
++				} else if (strcmp(opt_name, "dynamic-resolution") == 0) {
++					g_bDynamicResolution = true;
+ 				} else if (strcmp(opt_name, "backend") == 0) {
+ 					eCurrentBackend = parse_backend_name( optarg );
+ 				} else if (strcmp(opt_name, "cursor-scale-height") == 0) {
+@@ -1064,6 +1069,13 @@ int main(int argc, char **argv)
+ 	if ( g_nNestedWidth == 0 )
+ 		g_nNestedWidth = g_nNestedHeight * 16 / 9;
+ 
++	if ( g_bDynamicResolution )
++	{
++		// Dynamic output size deliberately overrides explicit -w/-h.
++		g_nNestedWidth = g_nOutputWidth;
++		g_nNestedHeight = g_nOutputHeight;
++	}
++
+ 	if ( !wlserver_init() )
+ 	{
+ 		fprintf( stderr, "Failed to initialize wlserver\n" );
+diff --git a/src/main.hpp b/src/main.hpp
+index b4fc902..a10e47c 100644
+--- a/src/main.hpp
++++ b/src/main.hpp
+@@ -68,6 +68,7 @@ extern int g_upscaleFilterSharpness;
+ extern bool g_bBorderlessOutputWindow;
+ 
+ extern bool g_bExposeWayland;
++extern bool g_bDynamicResolution;
+ 
+ extern bool g_bRt;
+ 
+@@ -76,4 +77,3 @@ extern bool g_bNoTouchPointerEmulation;
+ 
+ extern uint32_t g_preferVendorID;
+ extern uint32_t g_preferDeviceID;
+-
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index dff50b6..c72a749 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -8986,7 +8986,7 @@ steamcompmgr_main(int argc, char **argv)
+ 			 currentHDROutput != g_bOutputHDREnabled ||
+ 			 currentHDRForce != g_bForceHDRSupportDebug )
+ 		{
+-			if ( g_nXWaylandCount > 1 )
++			if ( g_nXWaylandCount > 1 && !g_bDynamicResolution )
+ 			{
+ 				g_nNestedHeight = ( g_nNestedWidth * g_nOutputHeight ) / g_nOutputWidth;
+ 				wlserver_lock();
+diff --git a/src/wlserver.cpp b/src/wlserver.cpp
+index 1512b71..29c303f 100644
+--- a/src/wlserver.cpp
++++ b/src/wlserver.cpp
+@@ -3311,6 +3311,22 @@ void wlserver_set_xwayland_server_mode( size_t idx, int w, int h, int nRefreshmH
+ 	wl_log.infof("Updating mode for xwayland server #%zu: %dx%d@%d", idx, w, h, gamescope::ConvertmHzToHz( nRefreshmHz ) );
+ }
+ 
++void wlserver_set_dynamic_resolution( int w, int h )
++{
++	assert( wlserver_is_lock_held() );
++
++	if ( g_nNestedWidth == w && g_nNestedHeight == h )
++		return;
++
++	g_nNestedWidth = w;
++	g_nNestedHeight = h;
++	for ( size_t i = 0; i < wlserver.wlr.xwayland_servers.size(); i++ )
++	{
++		gamescope_xwayland_server_t *server = wlserver_get_xwayland_server( i );
++		wlserver_set_xwayland_server_mode( i, w, h, server->get_output()->refresh );
++	}
++}
++
+ // Definitely not very efficient if we end up with
+ // a lot of Wayland windows in the future.
+ //
+diff --git a/src/wlserver.hpp b/src/wlserver.hpp
+index b8bda18..02da3c7 100644
+--- a/src/wlserver.hpp
++++ b/src/wlserver.hpp
+@@ -284,6 +284,7 @@ void wlserver_x11_surface_info_init( struct wlserver_x11_surface_info *surf, gam
+ void wlserver_x11_surface_info_finish( struct wlserver_x11_surface_info *surf );
+ 
+ void wlserver_set_xwayland_server_mode( size_t idx, int w, int h, int refresh );
++void wlserver_set_dynamic_resolution( int w, int h );
+ 
+ extern std::atomic<bool> g_bPendingTouchMovement;
+ 
