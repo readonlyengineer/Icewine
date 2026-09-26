@@ -144,22 +144,6 @@ in {
         Install.WantedBy = [ "graphical-session.target" ];
       };
 
-      xdg.desktopEntries.steam-gamescope = {
-        name = "Steam";
-        comment = "Open Steam inside monitor-aware Gamescope";
-        exec = "${pkgs.hyprland}/bin/hyprctl eval \"require('modules.Deck').focus_or_start_gamescope()\"";
-        icon = "steam";
-        categories = [ "Game" ];
-        terminal = false;
-      };
-      xdg.dataFile."applications/steam.desktop".text = ''
-        [Desktop Entry]
-        Type=Application
-        Name=Steam
-        NoDisplay=true
-        Hidden=true
-      '';
-
       # Normal exits and crashes both leave the gamepad muted, while native
       # trackpads and the keyboard-mapped R5 remain usable for recovery.
       systemd.user.services.icewine.Service.ExecStopPost =

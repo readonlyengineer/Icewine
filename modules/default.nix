@@ -35,6 +35,9 @@ in {
       description = "Existing user whose Home Manager configuration receives Icewine.";
     };
     handheld.enable = lib.mkEnableOption "handheld shell, controller routing and on-screen keyboard";
+    steam.enable = lib.mkEnableOption "Steam (Gamescope) launcher and ordinary Steam entry hiding" // {
+      default = cfg.handheld.enable;
+    };
     authenticationRequired = lib.mkOption {
       type = lib.types.bool;
       default = true;

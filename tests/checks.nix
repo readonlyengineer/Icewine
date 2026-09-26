@@ -33,6 +33,15 @@ let
       services.icewine.applications.browser = [ "custom-browser" ];
     } ];
   }).config;
+  steamDesktop = (desktopSystem.extendModules {
+    modules = [ {
+      services.icewine.steam.enable = true;
+      services.icewine.applications.steam = [ "flatpak" "run" "com.valvesoftware.Steam" ];
+    } ];
+  }).config;
+  steamOptOut = (handheldSystem.extendModules {
+    modules = [ { services.icewine.steam.enable = false; } ];
+  }).config;
   browserMatches = c: app:
     c.services.flatpak.enable
     && builtins.any (p: p.appId == app && p.origin == "flathub") c.services.flatpak.packages
@@ -106,6 +115,19 @@ in {
     touch "$out"
   '';
   modules =
+    assert !((home desktop).xdg.desktopEntries ? steam-gamescope);
+    assert !((home steamOptOut).xdg.desktopEntries ? steam-gamescope);
+    assert !((home steamOptOut).xdg.dataFile ? "applications/steam.desktop");
+    assert !steamDesktop.programs.steam.enable;
+    assert (home steamDesktop).xdg.desktopEntries.steam-gamescope.icon == "com.valvesoftware.Steam";
+    assert (home handheld).xdg.desktopEntries.steam-gamescope.icon == "steam";
+    assert nixpkgs.lib.all (c:
+      (home c).xdg.desktopEntries.steam-gamescope.exec
+        == "${pkgs.quickshell}/bin/qs ipc call gameLauncher launchSteamGamescope"
+      && (home c).xdg.dataFile."applications/steam.desktop".text
+        == (home c).xdg.dataFile."applications/com.valvesoftware.Steam.desktop".text
+      && nixpkgs.lib.hasInfix "Hidden=true" (home c).xdg.dataFile."applications/steam.desktop".text
+    ) [ steamDesktop handheld ];
     assert browserMatches desktop "org.mozilla.firefox";
     assert browserMatches librewolf "io.gitlab.librewolf-community";
     assert !(builtins.any (p: p.appId == "org.mozilla.firefox") librewolf.services.flatpak.packages);

@@ -3,6 +3,36 @@ let
   cfg = osConfig.services.icewine;
   palette = import ../theme/palette.nix;
 in {
+  xdg.desktopEntries.steam-gamescope = lib.mkIf cfg.steam.enable {
+    name = "Steam (Gamescope)";
+    comment = "Launch Steam inside monitor-aware Gamescope";
+    exec = "${pkgs.quickshell}/bin/qs ipc call gameLauncher launchSteamGamescope";
+    icon = if builtins.elem "com.valvesoftware.Steam" cfg.applications.steam
+      then "com.valvesoftware.Steam" else "steam";
+    categories = [ "Game" ];
+    terminal = false;
+  };
+  xdg.dataFile = {
+    # uuctl is bundled with UWSM, so mask only its unwanted launcher entry.
+    "applications/uuctl.desktop".text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=uuctl
+      NoDisplay=true
+      Hidden=true
+    '';
+  } // lib.genAttrs [
+    "applications/steam.desktop"
+    "applications/com.valvesoftware.Steam.desktop"
+  ] (_: lib.mkIf cfg.steam.enable {
+    text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=Steam
+      NoDisplay=true
+      Hidden=true
+    '';
+  });
   programs.yazi = lib.mkIf (cfg.fileManager.preset == "yazi") {
     enable = true;
     enableBashIntegration = lib.mkDefault false;
@@ -53,14 +83,6 @@ in {
     ];
   };
   systemd.user.services.batsignal = lib.mkIf cfg.battery.enable { Service.Restart = lib.mkForce "no"; };
-  # uuctl is bundled with UWSM, so mask only its unwanted launcher entry.
-  xdg.dataFile."applications/uuctl.desktop".text = ''
-    [Desktop Entry]
-    Type=Application
-    Name=uuctl
-    NoDisplay=true
-    Hidden=true
-  '';
   systemd.user.services.hypridle = lib.mkIf cfg.idle.enable {
     Service = {
       Restart = lib.mkForce "on-failure";
