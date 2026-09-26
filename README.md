@@ -1,8 +1,13 @@
 # Icewine
 
-Icewine is a Hyprland and Quickshell desktop environment for NixOS.
+Icewine is a unified Hyprland desktop for Desktop/Laptop/Handheld/HTPC; developed NixOS-first.
+
+It is deeply experimental at the moment; it will move fast and break things. 
+Use at your own risk. 
 
 ## Setup
+
+NixOS may be installed with the standard calamares installer before the following edits are made: 
 
 Add Icewine to your system flake:
 
@@ -10,7 +15,9 @@ Add Icewine to your system flake:
 inputs.icewine.url = "github:readonlyengineer/Icewine/main";
 ```
 
-Import the module and configure an existing user:
+Disable your existing desktop environment and display manager in your NixOS
+configuration, then import Icewine and select an existing user. Importing Icewine
+does not disable the old desktop for you.
 
 ```nix
 imports = [ inputs.icewine.nixosModules.default ];
@@ -26,55 +33,76 @@ screen, with `hyprland-uwsm` as the overridable default session. SDDM uses its
 default X11 greeter; the desktop session runs on Wayland. Login and locking
 share the same QtQuick layout and palette, with separate authentication.
 
-Set `services.icewine.login.enable = false;` to use another display manager or
-a console login. Icewine does not create users or configure autologin, storage,
-networking, kernel, or binary caches. Hosts choose those policies through the
-standard NixOS options, including `services.displayManager.autoLogin` and
-`services.displayManager.defaultSession`.
+### Host responsibilities
 
-To use the latest Icewine `main` before rebuilding, update only that flake
-input:
-
-```sh
-nix flake update --flake /path/to/nixos/desktop icewine
-```
-
-### Host overrides
-
-Import Icewine directly from each host and keep that host's `services.icewine`
-settings together. `hyprland.extraModules` accepts explicitly named Lua files;
-Icewine loads an optional `host.lua` after its desktop defaults. Use it for panel
-modes, calibration, rotation and other hardware-specific settings. Brightness
-keys, touchpad defaults and three-finger navigation are supplied by Icewine.
-
-### Browser
-
-Icewine installs Firefox from Flathub and uses it for the browser launcher,
-web links, HTML and PDFs. Replace it with another Flathub browser using one
-setting:
+Users, passwords, autologin, networking, Bluetooth, hardware drivers, storage and
+persistence remain the host's responsibility. Icewine includes network and
+Bluetooth controls, but their underlying services must be enabled in your NixOS
+configuration. For example:
 
 ```nix
-services.icewine.browser.flatpak = "io.gitlab.librewolf-community";
+networking.networkmanager.enable = true;
+hardware.bluetooth.enable = true;
 ```
 
-Set `browser.flatpak = null;` and `applications.browser = [ "your-browser" ];`
-to manage installation and associations yourself. Flatpak updates, permissions,
-profile persistence and migrations remain host policy. Installation uses
-[nix-flatpak](https://github.com/gmodena/nix-flatpak); it requires network access
-after activation and is not part of the Nix build.
+Monitor layout and hardware-specific settings belong on the host too. Extra
+Hyprland Lua modules can be supplied through `services.icewine.hyprland.extraModules`.
 
-If the host already has a nix-flatpak input, share it:
-
+For example:
+  hosts/PC/
+  ├── default.nix
+  └── hypr/
+      └── host.lua
 ```nix
-inputs.icewine.inputs.nix-flatpak.follows = "nix-flatpak";
+services.icewine.hyprland.extraModules."host.lua" = ./hypr/host.lua;
 ```
+
+Refer to Hyprland wiki for options and syntax. 
 
 ### Handheld
 
-Enable the handheld interface on a host that already provides its hardware
-support, controller service and native Steam installation:
+Enable the handheld interface and its native Steam and InputPlumber dependencies:
 
 ```nix
+services.icewine.handheld.enable = true;
+```
+
+This enables the Quickshell handheld elements, native Steam and the InputPlumber
+service. Selection of kernel and hardware drivers remains with the host.
+
+#### Controller inputs
+
+Controller input passes through while Gamescope is focused. On the desktop or overlay
+it is mapped to keyboard and mouse controls.
+
+Icewine's Steam launcher starts Steam inside Gamescope, or focuses an existing
+Steam session. 
+
+Non-Steam games and emulators added to Steam can use the same controller
+passthrough when that session runs inside Gamescope. The easiest way to do this is 
+to add them as "non-steam games" within steam. To do this, open the launcher while 
+Steam/Gamecope is running, select Background Applications, Steam Actions, Exit Big Picture. 
+
+### Steam
+
+For desktop systems, we recommend Steam’s Flatpak package for its application sandbox:
+
+```nix 
+services.flatpak.packages = [
+  "com.valvesoftware.Steam"
+  "com.valvesoftware.Steam.CompatibilityTool.Proton-GE"
+];
+
+services.icewine.steam.enable = true;
+services.icewine.applications.steam = [
+  "flatpak" "run" "com.valvesoftware.Steam"
+];
+```
+
+For handheld systems, Icewine installs native Steam as part of its Gamescope and controller integration. Steam is proprietary, so allow unfree packages on the host:
+
+```nix
+nixpkgs.config.allowUnfree = true;
 services.icewine.handheld.enable = true;
 ```
 
@@ -82,7 +110,7 @@ services.icewine.handheld.enable = true;
 
 | Key | Action |
 | --- | --- |
-| <kbd>Super</kbd>+<kbd>`</kbd> (hold) | Display topbar |
+| ``Super+` `` (hold) | display topbar |
 | `Super+Space` | Terminal |
 | `Super+Return` | Launcher |
 | `Super+E` | File manager |
@@ -95,26 +123,46 @@ services.icewine.handheld.enable = true;
 | `Super+1…0` | Switch workspace |
 | `Super+Shift+1…0` | Move window to workspace |
 
-## For users who have already configured Home Manager
+## Further configuration
 
-Make Icewine use the same Home Manager input as your system flake:
+### Browser
+
+Icewine installs Firefox from Flathub and uses it for the browser launcher,
+web links, HTML and PDFs. 
+
+It can be replaced with flatpak alternatives using the example syntax:
+```nix
+services.icewine.browser.flatpak = "io.gitlab.librewolf-community";
+```
+
+### For users who have already configured thier flake
+
+Icewine configures and uses Home Manager for dotfiles. 
+To make Icewine use the same Home Manager input as your system flake:
 
 ```nix
 inputs.icewine.inputs.home-manager.follows = "home-manager";
+```
+If the host already has a nix-flatpak input, share it:
+
+```nix
+inputs.icewine.inputs.nix-flatpak.follows = "nix-flatpak";
 ```
 
 ### Supported alternative software
 
 #### Neovim
 
-The accompanying NixOS desktop configuration includes a Nixvim configuration.
-Enable its editor command with:
+Nano is installed by default. To use Neovim, install and configure it yourself,
+then point Icewine at it:
 
 ```nix
 services.icewine.applications.editor = [ "nvim" ];
 ```
+This selects the editor command; it does not install Neovim or supply a
+configuration. An optional preconfigured Neovim setup may come later.
 
-## Opt-outs
+#### Opt-outs
 
 These settings belong under `services.icewine`. They stop Icewine managing the
 feature; they do not disable another module's configuration or delete user data.
