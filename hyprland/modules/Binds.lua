@@ -1,6 +1,5 @@
 -- All keybindings and mouse drag binds.
--- Hardware-conditional binds (lid switch, brightness keys, touchpad gestures)
--- live in the corresponding hardware module instead.
+-- Lid switches and display calibration remain in host hardware modules.
 
 local mainMod  = "SUPER"
 local apps     = require("modules.DefaultApps")
@@ -161,5 +160,22 @@ hl.bind("XF86AudioNext",  hl.dsp.exec_cmd("playerctl next"),       { locked = tr
 hl.bind("XF86AudioPause", hl.dsp.exec_cmd("playerctl play-pause"), { locked = true })
 hl.bind("XF86AudioPlay",  hl.dsp.exec_cmd("playerctl play-pause"), { locked = true })
 hl.bind("XF86AudioPrev",  hl.dsp.exec_cmd("playerctl previous"),   { locked = true })
+
+-- Brightness keys and three-finger desktop navigation.
+hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd("brightnessctl -e4 -n2 set 5%+"), { locked = true, repeating = true })
+hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightnessctl -e4 -n2 set 5%-"), { locked = true, repeating = true })
+
+hl.gesture({ fingers = 3, direction = "left", action = function()
+	hl.dispatch(hl.dsp.layout("focus r"))
+end })
+hl.gesture({ fingers = 3, direction = "right", action = function()
+	hl.dispatch(hl.dsp.layout("focus l"))
+end })
+hl.gesture({ fingers = 3, direction = "up", action = function()
+	hl.dispatch(hl.dsp.focus({ workspace = "r+1" }))
+end })
+hl.gesture({ fingers = 3, direction = "down", action = function()
+	hl.dispatch(hl.dsp.focus({ workspace = "r-1" }))
+end })
 
 return { supress_mouse_binds = supress_mouse_binds }

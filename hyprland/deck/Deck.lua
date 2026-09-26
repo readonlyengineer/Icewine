@@ -12,13 +12,7 @@ hl.config({
 
 	input = {
 		kb_options = "fkeys:basic_13-24", -- Keep rear-button F13–F16 as function-key symbols.
-		touchpad = {
-			natural_scroll          = true,
-			disable_while_typing    = false,
-			tap_to_click            = true,
-			scroll_factor           = 1.0,
-			middle_button_emulation = true,
-		},
+		touchpad = { disable_while_typing = false },
 	},
 })
 

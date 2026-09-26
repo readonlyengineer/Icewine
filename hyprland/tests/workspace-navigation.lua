@@ -6,16 +6,39 @@ local stub = setmetatable({}, {
 package.loaded["modules.DefaultApps"] = {}
 package.loaded["modules.WindowPolicy"] = stub
 local binds, workspaces, active, target = {}, {}, nil, nil
-local options = {}
+local options, gestures, lastDispatch = {}, {}, nil
 hl = {
 	dsp = stub,
+	gesture = function(gesture)
+		assert(gesture.fingers == 3 and not gestures[gesture.direction])
+		gestures[gesture.direction] = gesture.action
+	end,
 	bind = function(key, callback, opts) binds[key], options[key] = callback, opts or {} end,
 	unbind = function(key) binds[key] = nil end,
 	get_workspaces = function() return workspaces end,
 	get_active_workspace = function() return active end,
-	dispatch = function(request) target = request.workspace.id end,
+	dispatch = function(request)
+		lastDispatch = request
+		if type(request) == "table" and type(request.workspace) == "table" then
+			target = request.workspace.id
+		end
+	end,
 }
 local module = dofile(assert(arg[1], "Pass the Binds.lua path"))
+for key, command in pairs({
+	XF86MonBrightnessUp = "brightnessctl -e4 -n2 set 5%+",
+	XF86MonBrightnessDown = "brightnessctl -e4 -n2 set 5%-",
+}) do
+	assert(binds[key] == command and options[key].locked and options[key].repeating)
+end
+for direction, command in pairs({ left = "focus r", right = "focus l" }) do
+	gestures[direction]()
+	assert(lastDispatch == command)
+end
+for direction, workspace in pairs({ up = "r+1", down = "r-1" }) do
+	gestures[direction]()
+	assert(lastDispatch.workspace == workspace)
+end
 assert(binds["SUPER + SHIFT + P"] == "qs ipc call topbar performance")
 -- Hyprland shadows Lua bindings after intervening input unless transparent.
 for _, key in ipairs({"SUPER + grave", "SUPER_L", "SUPER_R"}) do

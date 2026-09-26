@@ -39,6 +39,14 @@ input:
 nix flake update --flake /path/to/nixos/desktop icewine
 ```
 
+### Host overrides
+
+Import Icewine directly from each host and keep that host's `services.icewine`
+settings together. `hyprland.extraModules` accepts explicitly named Lua files;
+Icewine loads an optional `host.lua` after its desktop defaults. Use it for panel
+modes, calibration, rotation and other hardware-specific settings. Brightness
+keys, touchpad defaults and three-finger navigation are supplied by Icewine.
+
 ### Handheld
 
 Enable the handheld interface on a host that already provides its hardware

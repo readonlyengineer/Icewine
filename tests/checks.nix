@@ -103,6 +103,8 @@ in {
     assert nixpkgs.lib.elem desktopSystem.pkgs.gamescope desktop.environment.systemPackages;
     assert desktop.home-manager.users.demo.home.stateVersion == "26.05";
     assert nixpkgs.lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
+    assert (home desktop).xdg.configFile."hypr".recursive;
+    assert (home handheld).xdg.configFile."hypr".recursive;
     assert (home desktop).systemd.user.services ? icewine;
     assert nixpkgs.lib.elem "QT_IM_MODULE=qtvirtualkeyboard"
       (home desktop).systemd.user.services.icewine.Service.Environment;

@@ -45,7 +45,7 @@ in {
   home.sessionVariables.EDITOR = lib.mkDefault (lib.escapeShellArgs cfg.applications.editor);
 
   xdg.configFile = {
-    "hypr".source = hyprTree;
+    "hypr" = { source = hyprTree; recursive = true; };
     "uwsm/env".source = ../session/env;
     "quickshell/shell.qml".source = if cfg.handheld.enable
       then ../quickshell/deck/shell.qml else ../quickshell/shell.qml;

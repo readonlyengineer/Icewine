@@ -42,6 +42,13 @@ hl.config({
 		kb_rules     = "",
 		follow_mouse = 0,
 		sensitivity  = 0,
+		touchpad = {
+			natural_scroll = true,
+			disable_while_typing = true,
+			tap_to_click = true,
+			scroll_factor = 1.0,
+			middle_button_emulation = true,
+		},
 	},
 
 	render = {
