@@ -20,6 +20,7 @@ ShellRoot {
         id: topbar
         compositor: hyprlandAdapter
         notificationService: notifications
+        session: session
         radial: deckOverlay
         sessionLocked: session.locked
         fullWidth: true

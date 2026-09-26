@@ -10,6 +10,7 @@ Widget {
 
     required property var compositor
     required property var notificationService
+    required property var session
     required property var player
     required property var powerState
     required property var metrics
@@ -91,6 +92,7 @@ Widget {
         id: batteryPage
         Popouts.Battery {
             powerState: root.powerState
+            session: root.session
             brightness: monitorBrightness
         }
     }

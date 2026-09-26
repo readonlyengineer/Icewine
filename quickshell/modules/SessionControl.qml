@@ -34,6 +34,18 @@ Scope {
         Quickshell.execDetached(["loginctl", "lock-session", logindSessionId])
     }
 
+    function requestSleep() {
+        Quickshell.execDetached(["systemctl", "suspend"])
+    }
+
+    function requestReboot() {
+        Quickshell.execDetached(["systemctl", "reboot"])
+    }
+
+    function requestShutdown() {
+        Quickshell.execDetached(["systemctl", "poweroff"])
+    }
+
     function releaseLock(notifyLogind) {
         if (!sessionLock.locked)
             return

@@ -15,6 +15,7 @@ Scope {
 
     required property var compositor
     required property var notificationService
+    required property var session
     property bool keepAwake: false
     property bool sessionLocked: false
     property var radial: null
@@ -356,6 +357,7 @@ Scope {
                     height: Math.min(implicitHeight, panel.height - y - 8)
                     compositor: root.compositor
                     notificationService: root.notificationService
+                    session: root.session
                     powerState: root
                     metrics: metrics
                     monitorName: panel.screen.name

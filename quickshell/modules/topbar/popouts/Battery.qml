@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls as Controls
 import Quickshell.Services.UPower
 import "StatusModel.js" as StatusModel
 import qs.theme as Theme
@@ -9,10 +10,13 @@ Flickable {
     id: root
 
     required property var powerState
+    required property var session
     required property var brightness
-    readonly property Item initialFocus: brightnessSlider.enabled ? brightnessSlider : keepAwake
+    readonly property Item initialFocus: lockButton
 
-    readonly property var battery: UPower.displayDevice
+    property var batteryDevice: UPower.displayDevice
+    readonly property var battery: batteryDevice
+    readonly property bool batteryPresent: battery?.isLaptopBattery ?? false
     readonly property int percentage: Math.round((battery?.percentage ?? 0) * 100)
     readonly property bool charging: battery?.state === UPowerDeviceState.Charging
         || battery?.state === UPowerDeviceState.PendingCharge
@@ -48,15 +52,74 @@ Flickable {
         spacing: 8
 
         Text {
-            text: root.battery?.isLaptopBattery ? "Battery" : "Power"
+            text: "Power"
             color: root.stateColour
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true
         }
 
+        Row {
+            width: parent.width
+            spacing: 6
+
+            ActionButton {
+                id: lockButton
+                width: (parent.width - parent.spacing) / 2
+                text: "󰍁"
+                Accessible.role: Accessible.Button
+                Accessible.name: "Lock"
+                Controls.ToolTip.visible: hovered || activeFocus
+                Controls.ToolTip.text: "Lock"
+                onClicked: root.session.requestLock()
+            }
+
+            ActionButton {
+                width: (parent.width - parent.spacing) / 2
+                text: "󰒲"
+                Accessible.role: Accessible.Button
+                Accessible.name: "Sleep"
+                Controls.ToolTip.visible: hovered || activeFocus
+                Controls.ToolTip.text: "Sleep"
+                onClicked: root.session.requestSleep()
+            }
+        }
+
+        Row {
+            width: parent.width
+            spacing: 6
+
+            ActionButton {
+                width: (parent.width - parent.spacing) / 2
+                text: "󰑐"
+                Accessible.role: Accessible.Button
+                Accessible.name: "Reboot"
+                Controls.ToolTip.visible: hovered || activeFocus
+                Controls.ToolTip.text: "Reboot"
+                onClicked: root.session.requestReboot()
+            }
+
+            ActionButton {
+                width: (parent.width - parent.spacing) / 2
+                text: "󰐥"
+                Accessible.role: Accessible.Button
+                Accessible.name: "Shutdown"
+                Controls.ToolTip.visible: hovered || activeFocus
+                Controls.ToolTip.text: "Shutdown"
+                onClicked: root.session.requestShutdown()
+            }
+        }
+
+        Toggle {
+            id: keepAwake
+            width: parent.width
+            text: "Keep awake"
+            checked: root.powerState.keepAwake
+            onToggled: root.powerState.keepAwake = checked
+        }
+
         Rectangle {
-            visible: root.battery?.isLaptopBattery ?? false
+            visible: root.batteryPresent
             width: parent.width
             height: 98
             radius: 10
@@ -127,7 +190,7 @@ Flickable {
         }
 
         Text {
-            visible: root.battery?.isLaptopBattery ?? false
+            visible: root.batteryPresent
             text: root.rate > 0.05
                 ? `${root.charging ? "Charging" : root.discharging ? "Discharging" : "Power"} at ${root.rate.toFixed(1)} W`
                 : "Power rate unavailable"
@@ -136,9 +199,13 @@ Flickable {
             font.pixelSize: 11
         }
 
-        SectionLabel { text: `Display · ${root.brightness.monitorName}` }
+        SectionLabel {
+            visible: root.brightness.available
+            text: `Display · ${root.brightness.monitorName}`
+        }
 
         Text {
+            visible: root.brightness.available
             text: root.brightness.available ? `Brightness  ${root.brightness.value}%`
                 : root.brightness.error || "Reading brightness…"
             color: root.brightness.available ? Theme.Palette.foreground : Theme.Palette.muted
@@ -148,6 +215,7 @@ Flickable {
 
         Slider {
             id: brightnessSlider
+            visible: root.brightness.available
             width: parent.width
             enabled: root.brightness.available
             from: 0
@@ -193,23 +261,17 @@ Flickable {
             wrapMode: Text.Wrap
         }
 
-        Toggle {
-            id: keepAwake
-            width: parent.width
-            text: "Keep awake"
-            checked: root.powerState.keepAwake
-            onToggled: root.powerState.keepAwake = checked
-        }
-
         SectionLabel {
-            visible: root.battery?.healthSupported
+            visible: root.batteryPresent && (root.battery?.healthSupported
                 || (root.battery?.energyCapacity ?? 0) > 0
+            )
             text: "Battery condition"
         }
 
         Text {
-            visible: root.battery?.healthSupported
+            visible: root.batteryPresent && (root.battery?.healthSupported
                 || (root.battery?.energyCapacity ?? 0) > 0
+            )
             width: parent.width
             text: [
                 root.battery?.healthSupported

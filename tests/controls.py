@@ -24,11 +24,27 @@ ShellRoot {
     property double now: Date.now()
     property bool handedOff: false
     property real performanceHeightBefore: 0
+    property string sessionAction: ""
     signal tick()
     QtObject {
         id: compositor
         readonly property var toplevels: []
         function activateWindow(address) {}
+    }
+    QtObject {
+        id: session
+        function requestLock() { root.sessionAction = "lock" }
+        function requestSleep() { root.sessionAction = "sleep" }
+        function requestReboot() { root.sessionAction = "reboot" }
+        function requestShutdown() { root.sessionAction = "shutdown" }
+    }
+    QtObject {
+        id: unavailableBrightness
+        readonly property bool available: false
+        readonly property int value: 0
+        readonly property string monitorName: "DP-2"
+        readonly property string error: "Brightness unavailable"
+        function setBrightness(value) {}
     }
     Bar.SystemMetrics { id: systemMetrics }
     Bar.HistoryGraph {
@@ -73,7 +89,22 @@ ShellRoot {
         monitorName: "DP-1"
         active: true
     }
-    Popouts.Battery { width: 380; height: 420; powerState: root; brightness: brightness }
+    Popouts.Battery {
+        id: battery
+        width: 380; height: 420
+        powerState: root
+        session: session
+        brightness: brightness
+        batteryDevice: null
+    }
+    Popouts.Battery {
+        id: unavailableBattery
+        width: 380; height: 420
+        powerState: root
+        session: session
+        brightness: unavailableBrightness
+        batteryDevice: null
+    }
     Popouts.Notifications {
         width: 380; height: 456
         compositor: compositor
@@ -88,6 +119,7 @@ ShellRoot {
             currentPage: "performance"
             compositor: compositor
             notificationService: root
+            session: session
             player: null
             powerState: root
             monitorName: "DP-1"
@@ -107,6 +139,34 @@ ShellRoot {
         interval: 400
         running: true
         onTriggered: {
+            const actionNames = ["Lock", "Sleep", "Reboot", "Shutdown"]
+            for (const name of actionNames) {
+                const button = root.findAccessible(battery, name)
+                if (!button) throw new Error("Missing power action: " + name)
+                if (button.focusPolicy !== Qt.StrongFocus)
+                    throw new Error("Power action is not keyboard focusable: " + name)
+                button.click()
+                if (root.sessionAction !== name.toLowerCase())
+                    throw new Error("Incorrect power action: " + name)
+            }
+            const lock = root.findAccessible(battery, "Lock")
+            if (battery.initialFocus !== lock)
+                throw new Error("Power panel initial focus must be Lock")
+            if (root.findVisible(unavailableBattery,
+                    item => typeof item.text === "string" && item.text.startsWith("Display")))
+                throw new Error("Unavailable brightness heading remained visible")
+            if (root.findVisible(unavailableBattery,
+                    item => typeof item.text === "string" && item.text.startsWith("Brightness")))
+                throw new Error("Unavailable brightness status remained visible")
+            if (root.findVisible(unavailableBattery,
+                    item => item.from === 0 && item.to === 100))
+                throw new Error("Unavailable brightness slider remained visible")
+            if (root.findVisible(battery,
+                    item => item.height === 98 && item.radius === 10))
+                throw new Error("Battery card remained visible without a laptop battery")
+            if (root.findVisible(battery,
+                    item => typeof item.text === "string" && item.text.startsWith("Power rate")))
+                throw new Error("Battery rate remained visible without a laptop battery")
             if (!brightness.available || brightness.value !== 37)
                 throw new Error("Initial brightness failed")
             brightness.setBrightness(55)
@@ -121,6 +181,23 @@ ShellRoot {
                 cpuTemperature: null, memory: { current: null, history: [] }, gpus: [] }
             finish.start()
         }
+    }
+
+    function findAccessible(item, name) {
+        if (item.Accessible?.name === name) return item
+        for (const child of item.children ?? []) {
+            const result = findAccessible(child, name)
+            if (result) return result
+        }
+        return null
+    }
+    function findVisible(item, predicate) {
+        if (item.visible && predicate(item)) return item
+        for (const child of item.children ?? []) {
+            const result = findVisible(child, predicate)
+            if (result) return result
+        }
+        return null
     }
     Timer {
         id: finish
@@ -154,8 +231,16 @@ source = Path(sys.argv[1]).resolve()
 notifications = (source / "quickshell/modules/topbar/popouts/Notifications.qml").read_text()
 battery = (source / "quickshell/modules/topbar/popouts/Battery.qml").read_text()
 assert 'text: "Do Not Distrub"' in notifications
-assert battery.index('id: keepAwake') > battery.index('text: `Performance limited')
+assert battery.index('text: "Power"') < battery.index('id: lockButton')
+assert battery.index('id: lockButton') < battery.index('id: keepAwake')
+assert battery.index('id: keepAwake') < battery.index('visible: root.batteryPresent')
 assert battery.index('id: keepAwake') < battery.index('text: "Battery condition"')
+for action in ["Lock", "Sleep", "Reboot", "Shutdown"]:
+    assert f'Accessible.name: "{action}"' in battery
+    assert f'Controls.ToolTip.text: "{action}"' in battery
+action_button = (source / "quickshell/modules/topbar/popouts/ActionButton.qml").read_text()
+assert 'focusPolicy: Qt.StrongFocus' in action_button
+assert 'Keys.onReleased' in action_button
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     (root / "modules").symlink_to(source / "quickshell/modules")

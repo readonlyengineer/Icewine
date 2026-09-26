@@ -28,6 +28,7 @@ ShellRoot {
         id: topbar
         compositor: compositor
         notificationService: notifications
+        session: session
         sessionLocked: session.locked
     }
 
