@@ -82,7 +82,7 @@ Item {
 
             anchors.horizontalCenter: parent.horizontalCenter
             text: Qt.formatTime(now, "HH:mm")
-            color: Theme.Palette.foreground
+            color: Theme.Palette.primary
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 180 * root.scaleFactor
             font.weight: Font.Thin
@@ -98,7 +98,7 @@ Item {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: Qt.formatDate(clock.now, "dddd, MMMM d").toUpperCase()
-            color: Theme.Palette.foregroundDark
+            color: Theme.Palette.success
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 18 * root.scaleFactor
             font.letterSpacing: 12 * root.scaleFactor
