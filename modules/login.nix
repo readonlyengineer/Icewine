@@ -6,6 +6,7 @@
 
   config = lib.mkIf (config.services.icewine.enable && config.services.icewine.login.enable) {
     services.xserver.enable = true;
+    services.xserver.excludePackages = [ pkgs.xterm ];
     services.displayManager = {
       defaultSession = lib.mkDefault "hyprland-uwsm";
       logToJournal = true;
