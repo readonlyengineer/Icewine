@@ -11,7 +11,6 @@ let
         handheld.enable = handheld;
         hyprland.extraModules."host.lua" = ../hyprland/modules/Autostart.lua;
       };
-      home-manager.users.demo.home.stateVersion = "26.05";
       system.stateVersion = "26.05";
     } ];
   };
@@ -79,6 +78,7 @@ in {
   modules =
     assert nixpkgs.lib.elem pkgs.btop desktop.environment.systemPackages;
     assert nixpkgs.lib.elem desktopSystem.pkgs.gamescope desktop.environment.systemPackages;
+    assert desktopSystem.home-manager.users.demo.home.stateVersion == "26.05";
     assert nixpkgs.lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
     assert (home desktop).systemd.user.services ? icewine;
     assert !((home desktop).systemd.user.services ? quickshell);

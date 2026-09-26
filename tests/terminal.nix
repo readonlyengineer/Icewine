@@ -7,7 +7,6 @@ let
     modules = [ self.nixosModules.default {
       users.users.demo.isNormalUser = true;
       services.icewine = { enable = true; user = "demo"; };
-      home-manager.users.demo.home.stateVersion = "26.05";
       system.stateVersion = "26.05";
     } extra ];
   }).config;
@@ -68,6 +67,9 @@ assert lib.elem pkgs.ffmpegthumbnailer (home defaults).programs.yazi.extraPackag
 assert lib.elem pkgs._7zz (home defaults).programs.yazi.extraPackages;
 assert defaults.services.gvfs.enable;
 assert defaults.services.icewine.applications.fileManager == [ "icewine-terminal-exec" "yazi" ];
+assert defaults.services.icewine.applications.editor == [ "nano" ];
+assert lib.elem pkgs.nano defaults.environment.systemPackages;
+assert (home defaults).home.sessionVariables.EDITOR == "nano";
 assert (home defaults).home.sessionVariables ? LS_COLORS;
 assert (home defaults).xdg.dataFile ? "applications/uuctl.desktop";
 assert !((home defaults).systemd.user.services ? waybar);

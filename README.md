@@ -8,8 +8,6 @@ Add Icewine to your system flake:
 
 ```nix
 inputs.icewine.url = "github:readonlyengineer/Icewine/main";
-inputs.icewine.inputs.nixpkgs.follows = "nixpkgs";
-inputs.icewine.inputs.home-manager.follows = "home-manager";
 ```
 
 Import the module and configure an existing user:
@@ -23,9 +21,9 @@ services.icewine = {
 };
 ```
 
-Set the user's Home Manager `home.stateVersion`, then select the
-`hyprland-uwsm` session at login. Icewine does not create users or configure
-your login manager, autologin, storage, networking, kernel, or binary caches.
+Icewine configures its own Home Manager integration and starts the
+`hyprland-uwsm` session by default. It does not create users or configure
+autologin, storage, networking, kernel, or binary caches.
 
 To use the latest Icewine `main` before rebuilding, update only that flake
 input:
@@ -59,3 +57,22 @@ services.icewine.handheld.enable = true;
 | `Super+Ctrl+Arrow` | Resize window |
 | `Super+1…0` | Switch workspace |
 | `Super+Shift+1…0` | Move window to workspace |
+
+## For users who have already configured Home Manager
+
+Make Icewine use the same Home Manager input as your system flake:
+
+```nix
+inputs.icewine.inputs.home-manager.follows = "home-manager";
+```
+
+### Supported alternative software
+
+#### Neovim
+
+The accompanying NixOS desktop configuration includes a Nixvim configuration.
+Enable its editor command with:
+
+```nix
+services.icewine.applications.editor = [ "nvim" ];
+```

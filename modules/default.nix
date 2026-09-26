@@ -59,7 +59,7 @@ in {
     applications = {
       terminal = command "Terminal command; supplied by the preset, or installed and specified by the host." (lib.optional (cfg.terminal.preset == "kitty") "kitty");
       terminalExecute = command "Terminal command prefix for running an application." (cfg.applications.terminal ++ [ "-e" ]);
-      editor = command "Editor command used by compositor bindings." [ "vi" ];
+      editor = command "Editor command used by compositor bindings." [ "nano" ];
       fileManager = command "File manager command." (if cfg.fileManager.preset == "yazi" then [ "icewine-terminal-exec" "yazi" ] else [ "xdg-open" "." ]);
       steam = command "Steam command used inside Gamescope; installed by the host." [ "steam" ];
     };
@@ -106,13 +106,16 @@ in {
 
     fonts.packages = with pkgs; [ dejavu_fonts nerd-fonts.jetbrains-mono noto-fonts-color-emoji rubik ];
     environment.systemPackages = (with pkgs; [
-      quickshell hyprshutdown hyprpolkitagent glib jq procps systemd
+      quickshell hyprshutdown hyprpolkitagent glib jq nano procps systemd
       grim slurp wl-clipboard libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl playerctl
       bluetui impala wiremix btop xdg-utils gamescope
     ]) ++ launchers ++ [ screenshot ]
       ++ lib.optionals cfg.gtk.enable (lib.optional (config.home-manager.users.${cfg.user}.gtk.theme.package != null) config.home-manager.users.${cfg.user}.gtk.theme.package);
 
-    home-manager.users.${cfg.user}.imports = [ ./home.nix ];
+    home-manager.users.${cfg.user} = {
+      home.stateVersion = lib.mkDefault config.system.stateVersion;
+      imports = [ ./home.nix ];
+    };
   };
 }

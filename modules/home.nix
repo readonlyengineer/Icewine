@@ -39,6 +39,8 @@ let
 in {
   imports = [ ./terminal.nix ./shell.nix ./gtk.nix ./desktop.nix ];
 
+  home.sessionVariables.EDITOR = lib.mkDefault (lib.escapeShellArgs cfg.applications.editor);
+
   xdg.configFile = {
     "hypr".source = hyprTree;
     "uwsm/env".source = ../session/env;
