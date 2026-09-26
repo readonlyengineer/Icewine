@@ -6,6 +6,8 @@ import Quickshell.Hyprland
 import Quickshell.Io
 import qs.theme as Theme
 import "DeckMenu.js" as Menu
+import "modules/topbar" as Bar
+import "modules/topbar/LauncherSearch.js" as LauncherSearch
 
 Scope {
     id: root
@@ -15,8 +17,12 @@ Scope {
     property bool opened: false
     required property var shell
     property bool draining: false
+    property string page: "root"
     property int selected: 0
-    property var entries: Menu.rootEntries
+    readonly property var applications: LauncherSearch.applications(
+        DesktopEntries.applications.values, "", shell.excludeSteamApps, steamShortcuts.commands)
+    property var menuPages: Menu.buildPages(applications)
+    property var entries: menuPages[page] || []
     property var held: ({})
     property bool acceptArmed: false
     property var pendingEntry: null
@@ -32,6 +38,13 @@ Scope {
         gamescopeFocused, opened || shell.widgetEngaged, sessionLocked, draining, streamReady)
     readonly property bool captured: appliedRoute === "overlay" && !gate.running && wantedRoute === "overlay"
 
+    Bar.SteamShortcuts { id: steamShortcuts }
+
+    onMenuPagesChanged: {
+        if (!menuPages[page]) page = "root"
+        selected = Math.min(selected, Math.max(0, entries.length - 1))
+    }
+
     function reconcile() {
         if (gate.running)
             return
@@ -43,6 +56,7 @@ Scope {
     function open() {
         if (opened || sessionLocked)
             return
+        page = "root"
         selected = 0
         acceptArmed = false
         pendingEntry = null
@@ -55,6 +69,8 @@ Scope {
         opened = true
         // Also verify capture when the gamepad was already muted on desktop.
         reconcile()
+        if (shell.excludeSteamApps)
+            steamShortcuts.refresh()
     }
 
     function dismiss() {
@@ -73,7 +89,12 @@ Scope {
         if (!opened || draining || index < 0 || index >= entries.length)
             return
         var entry = entries[index]
-        if (entry.action === "terminal" && workspace <= 0) {
+        if (entry.page) {
+            page = entry.page
+            selected = 0
+            return
+        }
+        if ((entry.action === "terminal" || entry.action === "application") && workspace <= 0) {
             inputError = "Cannot determine the launch workspace. Close and retry."
             return
         }
@@ -127,7 +148,9 @@ Scope {
         } else if (entry.action === "fullscreen") {
             compositor.toggleFullscreen()
         } else {
-            var expression = Menu.launchExpression(entry, launchWorkspace)
+            var options = entry.action === "application"
+                ? LauncherSearch.launchOptions(entry.application, Quickshell.env("HOME")) : null
+            var expression = Menu.launchExpression(entry, launchWorkspace, options)
             if (expression)
                 compositor.dispatch(expression)
         }
@@ -252,7 +275,7 @@ Scope {
                 if ([Qt.Key_Escape, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space].includes(event.key))
                     actionKey = event.key
                 else if (event.key === Qt.Key_Tab)
-                    root.selected = (root.selected + 1) % root.entries.length
+                    root.selected = root.entries.length ? (root.selected + 1) % root.entries.length : 0
                 else if (event.key === Qt.Key_Up)
                     root.selected = Menu.sector(0, -1, root.entries.length, root.selected)
                 else if (event.key === Qt.Key_Right)
@@ -334,7 +357,7 @@ Scope {
                         Text {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
-                            text: "NIXDECK"
+                            text: root.page.indexOf("launcher-") === 0 ? "LAUNCHER" : "NIXDECK"
                             color: Theme.Palette.secondary
                             font.family: "JetBrainsMono Nerd Font"
                             font.pixelSize: 13

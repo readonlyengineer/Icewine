@@ -30,6 +30,19 @@ assert.strictEqual(search.applications(ranked, "term")[0], ranked[4])
 assert.deepEqual(search.applications(ranked, "missing"), [])
 assert.deepEqual(search.applications([], "term"), [])
 
+assert.deepEqual(search.launchOptions({
+    command: ["demo", "--flag", "an argument"],
+    runInTerminal: true,
+    workingDirectory: "/work here"
+}, "/home/demo"), {
+    command: ["uwsm", "app", "--", "icewine-terminal-exec", "demo", "--flag", "an argument"],
+    workingDirectory: "/work here"
+})
+assert.deepEqual(search.launchOptions({command: ["demo"]}, "/home/demo"), {
+    command: ["uwsm", "app", "--", "demo"],
+    workingDirectory: "/home/demo"
+})
+
 const steamReader = require("../modules/topbar/SteamShortcuts.js")
 const z = text => Buffer.from(text + "\0")
 const stringField = (key, value) => Buffer.concat([Buffer.from([1]), z(key), z(value)])

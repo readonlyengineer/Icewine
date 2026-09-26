@@ -72,5 +72,17 @@ function applications(entries, rawQuery, excludeSteam = false, shortcuts = []) {
         .map(result => result.entry)
 }
 
+function launchOptions(entry, home) {
+    if (!entry)
+        return null
+
+    return {
+        command: ["uwsm", "app", "--"]
+            .concat(entry.runInTerminal ? ["icewine-terminal-exec"] : [])
+            .concat(Array.from(entry.command || [])),
+        workingDirectory: entry.workingDirectory || home
+    }
+}
+
 if (typeof module !== "undefined")
-    module.exports = { applications, rank }
+    module.exports = { applications, launchOptions, rank }

@@ -1,11 +1,34 @@
 // InputPlumber 0.78 supplies eight digital directions rather than raw XY.
 var rootEntries = [
     { label: "Steam", icon: "", action: "steam" },
+    { label: "Launcher", icon: "󰀻", page: "launcher-0" },
     { label: "Terminal", icon: "", action: "terminal" },
     { label: "Fullscreen", icon: "󰊓", action: "fullscreen" },
     { label: "Close", icon: "󰅖", action: "close" },
     { label: "Keyboard", icon: "󰌌", action: "keyboard" }
 ]
+
+function buildPages(applications) {
+    var pages = { root: rootEntries }
+    var offset = 0
+    var page = 0
+
+    do {
+        var remaining = applications.length - offset
+        var count = remaining > 8 ? 7 : 8
+        var entries = applications.slice(offset, offset + count).map(function(application) {
+            return { label: application.name, icon: "󰀻", action: "application",
+                application: application }
+        })
+        offset += count
+        if (offset < applications.length)
+            entries.push({ label: "More", icon: "󰇘", page: "launcher-" + (page + 1) })
+        pages["launcher-" + page] = entries
+        page++
+    } while (offset < applications.length)
+
+    return pages
+}
 
 function inputRoute(gamescopeFocused, shellEngaged, sessionLocked, draining, streamReady) {
     if (sessionLocked || shellEngaged || draining || (gamescopeFocused && !streamReady))
@@ -22,7 +45,7 @@ function parseInput(line, target) {
 }
 
 function sector(x, y, count, previous) {
-    if (x === 0 && y === 0)
+    if (count <= 0 || (x === 0 && y === 0))
         return previous
     var angle = (Math.atan2(y, x) + Math.PI / 2 + 2 * Math.PI) % (2 * Math.PI)
     return Math.floor(angle * count / (2 * Math.PI) + 0.5) % count
@@ -55,7 +78,7 @@ function shellQuote(value) {
     return "'" + String(value).replace(/'/g, "'\\''") + "'"
 }
 
-function launchExpression(entry, workspace) {
+function launchExpression(entry, workspace, applicationOptions) {
     if (!entry || !Number.isInteger(workspace) || workspace <= 0)
         return null
 
@@ -64,6 +87,10 @@ function launchExpression(entry, workspace) {
         command = "hyprctl eval " + shellQuote('require("modules.Deck").focus_or_start_gamescope()')
     } else if (entry.action === "terminal") {
         command = "uwsm app -- icewine-terminal"
+    } else if (entry.action === "application" && applicationOptions
+            && applicationOptions.command.length && applicationOptions.workingDirectory) {
+        command = "cd -- " + shellQuote(applicationOptions.workingDirectory)
+            + " && exec " + applicationOptions.command.map(shellQuote).join(" ")
     } else {
         return null
     }
@@ -73,5 +100,5 @@ function launchExpression(entry, workspace) {
 }
 
 if (typeof module !== "undefined")
-    module.exports = { rootEntries, inputRoute, parseInput, sector, controllerEvent,
+    module.exports = { rootEntries, buildPages, inputRoute, parseInput, sector, controllerEvent,
         neutral, shellQuote, launchExpression }

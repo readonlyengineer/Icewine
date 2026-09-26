@@ -42,12 +42,7 @@ Widget {
             return
 
         handoffRequested()
-        Quickshell.execDetached({
-            command: ["uwsm", "app", "--"]
-                .concat(entry.runInTerminal ? ["icewine-terminal-exec"] : [])
-                .concat(entry.command),
-            workingDirectory: entry.workingDirectory || Quickshell.env("HOME")
-        })
+        Quickshell.execDetached(LauncherSearch.launchOptions(entry, Quickshell.env("HOME")))
     }
 
     onVisibleChanged: {
