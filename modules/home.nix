@@ -29,7 +29,7 @@ let
   );
   hyprTree = pkgs.runCommand "icewine-hyprland" { } ''
     mkdir -p $out
-    cp -r ${../hyprland}/hyprland.lua ${../hyprland}/modules ${../hyprland}/deck $out/
+    cp -r ${../hyprland}/hyprland.lua ${../hyprland}/modules $out/
     chmod -R u+w $out
     cp ${hyprTheme} $out/modules/Theme.lua
     ${lib.optionalString cfg.handheld.enable ''
