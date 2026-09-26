@@ -95,11 +95,7 @@ the host installs applications selected by these options:
 - `applications.terminal`: defaults to Kitty; required when the preset is null.
 - `applications.terminalExecute`: terminal prefix for running a command;
   defaults to the terminal command followed by `-e`.
-- `applications.browser`, `browserHome`, `editor`, `fileManager`, `steam`:
-  application commands. `browserHome` defaults to `browser`.
-- `handheld.bookmarksCommand`: optional command returning a JSON array of
-  `{ "label": "Example", "url": "https://example.com" }` records. Empty by
-  default; Icewine does not read browser profiles itself.
+- `applications.editor`, `fileManager`, `steam`: application commands.
 - `authenticationRequired`: defaults to `true`; uses the `icewine` PAM service.
 - `hyprland.extraModules`: Lua files keyed by filename, overlaid into the
   generated `modules/` directory. Optional `host.lua` and `Personal.lua` run

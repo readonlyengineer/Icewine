@@ -95,11 +95,10 @@ Open descriptors and resources inherited across execution can also retain
 authority. AppArmor is additive to Unix permissions and does not revoke an
 already opened resource merely because a later transition is narrower.
 
-Host customisation is a policy input. `applications.*`,
-`handheld.bookmarksCommand`, Hyprland `extraModules`, desktop entries, Steam
+Host customisation is a policy input. `applications.*`, Hyprland `extraModules`, desktop entries, Steam
 shortcuts, wallpapers and monitor/device topology vary by host or user. The
-Hyprland modules execute inside the compositor; the bookmark command and
-desktop entries can execute through Quickshell. Allowing arbitrary host paths
+Hyprland modules execute inside the compositor; desktop entries can execute
+through Quickshell. Allowing arbitrary host paths
 or commands broadly defeats a fixed allow-list, while denying them breaks
 documented extension points. A profile must either expose explicit host-owned
 include fragments or declare those extension points incompatible with

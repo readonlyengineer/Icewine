@@ -15,10 +15,8 @@ Scope {
     property bool opened: false
     required property var shell
     property bool draining: false
-    property string page: "root"
     property int selected: 0
-    property var menuPages: Menu.buildPages([])
-    property var entries: menuPages[page] || []
+    property var entries: Menu.rootEntries
     property var held: ({})
     property bool acceptArmed: false
     property var pendingEntry: null
@@ -45,7 +43,6 @@ Scope {
     function open() {
         if (opened || sessionLocked)
             return
-        page = "root"
         selected = 0
         acceptArmed = false
         pendingEntry = null
@@ -58,7 +55,6 @@ Scope {
         opened = true
         // Also verify capture when the gamepad was already muted on desktop.
         reconcile()
-        refreshBookmarks()
     }
 
     function dismiss() {
@@ -77,21 +73,11 @@ Scope {
         if (!opened || draining || index < 0 || index >= entries.length)
             return
         var entry = entries[index]
-        if (entry.page) {
-            page = entry.page
-            selected = 0
-        } else {
-            if ((entry.action === "terminal" || entry.action === "bookmark") && workspace <= 0) {
-                inputError = "Cannot determine the launch workspace. Close and retry."
-                return
-            }
-            requestClose(entry)
+        if (entry.action === "terminal" && workspace <= 0) {
+            inputError = "Cannot determine the launch workspace. Close and retry."
+            return
         }
-    }
-
-    function refreshBookmarks() {
-        if (!bookmarkProbe.running)
-            bookmarkProbe.running = true
+        requestClose(entry)
     }
 
     function requestClose(entry) {
@@ -227,25 +213,6 @@ Scope {
         }
     }
 
-    Process {
-        id: bookmarkProbe
-        command: ["icewine-bookmarks"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                try {
-                    var bookmarks = JSON.parse(this.text || "[]")
-                    if (Array.isArray(bookmarks))
-                        root.menuPages = Menu.buildPages(bookmarks)
-                } catch (error) {
-                    console.warn("Icewine bookmarks:", error)
-                }
-            }
-        }
-        onExited: function(code) {
-            if (code !== 0)
-                console.warn("Icewine bookmark query exited with", code)
-        }
-    }
     Connections {
         target: root.compositor
         function onMonitorsChanged() {
@@ -267,7 +234,7 @@ Scope {
             return "ok"
         }
         function status(): string {
-            return JSON.stringify({ open: root.opened, draining: root.draining, page: root.page,
+            return JSON.stringify({ open: root.opened, draining: root.draining,
                 workspace: root.workspace, streamReady: root.streamReady,
                 wantedRoute: root.wantedRoute, appliedRoute: root.appliedRoute, error: root.inputError })
         }
@@ -367,7 +334,7 @@ Scope {
                         Text {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
-                            text: root.page.indexOf("web-") === 0 ? "WEB" : "NIXDECK"
+                            text: "NIXDECK"
                             color: Theme.Palette.secondary
                             font.family: "JetBrainsMono Nerd Font"
                             font.pixelSize: 13
@@ -425,21 +392,8 @@ Scope {
                             border.color: choice.selected ? Theme.Palette.foreground
                                 : Theme.Palette.alpha(Theme.Palette.border, 0.33)
 
-                            Image {
-                                id: bookmarkIcon
-                                anchors.centerIn: parent
-                                width: radial.buttonSize < 80 ? 24 : 31
-                                height: width
-                                source: choice.modelData.iconSource || ""
-                                sourceSize.width: width
-                                sourceSize.height: height
-                                fillMode: Image.PreserveAspectFit
-                                visible: status === Image.Ready
-                            }
-
                             Text {
                                 anchors.centerIn: parent
-                                visible: bookmarkIcon.status !== Image.Ready
                                 text: choice.modelData.icon || "󰋜"
                                 color: choice.selected ? Theme.Palette.backgroundDark : Theme.Palette.foreground
                                 font.family: "JetBrainsMono Nerd Font"
@@ -480,7 +434,6 @@ Scope {
         }
     }
     Component.onCompleted: {
-        refreshBookmarks()
         reconcile()
         events.running = true
     }

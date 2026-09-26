@@ -1,63 +1,11 @@
 // InputPlumber 0.78 supplies eight digital directions rather than raw XY.
-// Keep each page to eight sectors; overflow bookmarks advance through pages.
 var rootEntries = [
     { label: "Steam", icon: "", action: "steam" },
-    { label: "Web", icon: "󰖟", page: "web-0" },
     { label: "Terminal", icon: "", action: "terminal" },
     { label: "Fullscreen", icon: "󰊓", action: "fullscreen" },
     { label: "Close", icon: "󰅖", action: "close" },
     { label: "Keyboard", icon: "󰌌", action: "keyboard" }
 ]
-
-var startingBookmarks = [
-    { label: "Home", icon: "󰇧", action: "bookmark", url: "" }
-]
-
-function validBookmark(bookmark) {
-    return bookmark && typeof bookmark.label === "string"
-        && typeof bookmark.url === "string"
-        && /^https?:\/\//.test(bookmark.url)
-}
-
-function buildPages(bookmarks) {
-    var pages = { root: rootEntries }
-    var seen = {}
-    var entries = startingBookmarks.slice()
-
-    for (var i = 0; i < entries.length; i++)
-        seen[entries[i].url] = true
-
-    for (var j = 0; j < bookmarks.length; j++) {
-        var bookmark = bookmarks[j]
-        if (!validBookmark(bookmark) || seen[bookmark.url])
-            continue
-        seen[bookmark.url] = true
-        entries.push({
-            label: bookmark.label.trim() || bookmark.url,
-            icon: "󰈹",
-            iconSource: typeof bookmark.iconSource === "string"
-                && /^data:image\/(?:png|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/.test(bookmark.iconSource)
-                ? bookmark.iconSource : "",
-            action: "bookmark",
-            url: bookmark.url
-        })
-    }
-
-    var offset = 0
-    var page = 0
-    while (offset < entries.length) {
-        var remaining = entries.length - offset
-        var count = remaining > 8 ? 7 : 8
-        var pageEntries = entries.slice(offset, offset + count)
-        offset += count
-        if (offset < entries.length)
-            pageEntries.push({ label: "More", icon: "󰇘", page: "web-" + (page + 1) })
-        pages["web-" + page] = pageEntries
-        page++
-    }
-
-    return pages
-}
 
 function inputRoute(gamescopeFocused, shellEngaged, sessionLocked, draining, streamReady) {
     if (sessionLocked || shellEngaged || draining || (gamescopeFocused && !streamReady))
@@ -116,10 +64,6 @@ function launchExpression(entry, workspace) {
         command = "hyprctl eval " + shellQuote('require("modules.Deck").focus_or_start_gamescope()')
     } else if (entry.action === "terminal") {
         command = "uwsm app -- icewine-terminal"
-    } else if (entry.action === "bookmark"
-            && (entry.url === "" || /^https?:\/\//.test(entry.url))) {
-        command = entry.url ? "uwsm app -- icewine-browser " + shellQuote(entry.url)
-                            : "uwsm app -- icewine-browser-home"
     } else {
         return null
     }
@@ -129,5 +73,5 @@ function launchExpression(entry, workspace) {
 }
 
 if (typeof module !== "undefined")
-    module.exports = { rootEntries, startingBookmarks, buildPages, inputRoute, parseInput,
-        sector, controllerEvent, neutral, shellQuote, launchExpression }
+    module.exports = { rootEntries, inputRoute, parseInput, sector, controllerEvent,
+        neutral, shellQuote, launchExpression }

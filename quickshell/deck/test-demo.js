@@ -5,47 +5,14 @@ function check(condition, message) {
     assert.ok(condition, message)
 }
 
-const initialPages = Menu.buildPages([])
-check(initialPages.root.map(x => x.label).join(",") === "Steam,Web,Terminal,Fullscreen,Close,Keyboard",
-    "Steam joins the root actions")
+const rootEntries = Menu.rootEntries
+check(rootEntries.map(x => x.label).join(",") === "Steam,Terminal,Fullscreen,Close,Keyboard",
+    "Root actions stay available")
 const directions = [[0,-1], [1,-1], [1,0], [1,1], [0,1], [-1,1], [-1,0], [-1,-1]]
-const reachable = directions.map(([x,y]) => Menu.sector(x, y, initialPages.root.length, 0))
-check(new Set(reachable).size === initialPages.root.length,
+const reachable = directions.map(([x,y]) => Menu.sector(x, y, rootEntries.length, 0))
+check(new Set(reachable).size === rootEntries.length,
     "Every root action remains reachable with the eight digital directions")
-check(initialPages.root[Menu.sector(0, -1, initialPages.root.length, 0)].label === "Steam", "Steam is up")
-check(initialPages["web-0"].map(x => x.label).join(",") === "Home",
-    "Home is the only preset web shortcut")
-check(initialPages["web-0"][0].url === "", "Home landing page stays up")
-
-const userPages = Menu.buildPages([
-    { label: "Example", url: "https://example.com/" },
-    { label: "YouTube", url: "https://www.youtube.com/" },
-    { label: "Duplicate", url: "https://www.youtube.com/" },
-    { label: "Local file", url: "file:///tmp/private" }
-])
-check(userPages["web-0"].some(x => x.label === "Example"), "Add user bookmarks")
-check(userPages["web-0"].filter(x => x.url === "https://www.youtube.com/").length === 1,
-    "Deduplicate browser bookmarks")
-check(!userPages["web-0"].some(x => x.url === "file:///tmp/private"), "Reject non-web bookmarks")
-
-const iconPages = Menu.buildPages([
-    { label: "Cached", url: "https://example.com/", iconSource: "data:image/png;base64,YQ==" },
-    { label: "SVG", url: "https://example.org/", iconSource: "data:image/svg+xml;base64,YQ==" },
-    { label: "Remote", url: "https://example.net/", iconSource: "https://example.net/favicon.ico" }
-])
-check(iconPages["web-0"][1].iconSource === "data:image/png;base64,YQ==", "Keep cached PNG icons")
-check(iconPages["web-0"][2].iconSource === "data:image/svg+xml;base64,YQ==", "Keep cached SVG icons")
-check(iconPages["web-0"][3].iconSource === "", "Reject remote icon requests")
-check(userPages["web-0"][1].iconSource === "", "Missing icons retain the glyph")
-
-const manyBookmarks = Array.from({ length: 10 }, (_, index) => ({
-    label: `Bookmark ${index}`,
-    url: `https://example.com/${index}`
-}))
-const paged = Menu.buildPages(manyBookmarks)
-check(paged["web-0"].length === 8 && paged["web-0"][7].page === "web-1",
-    "Reserve the eighth direction for More")
-check(Object.values(paged).every(entries => entries.length <= 8), "Never exceed digital directions")
+check(rootEntries[Menu.sector(0, -1, rootEntries.length, 0)].label === "Steam", "Steam is up")
 check(Menu.inputRoute(false, false, false, false, true) === "desktop", "Desktop mapping")
 check(Menu.inputRoute(true, false, false, false, true) === "game", "Focused game passthrough")
 check(Menu.inputRoute(true, true, false, false, true) === "overlay", "Overlay wins over focus")
@@ -55,9 +22,9 @@ check(Menu.inputRoute(true, false, false, false, false) === "overlay", "Stream l
 check(Menu.inputRoute(false, false, false, false, false) === "desktop", "Desktop survives stream loss")
 
 const target = "/org/shadowblip/InputPlumber/devices/target/dbus0"
-const line = `${target}: org.shadowblip.Input.DBusDevice.InputEvent ('ui_accept', 1.0)`
+const line = target + ": org.shadowblip.Input.DBusDevice.InputEvent ('ui_accept', 1.0)"
 check(Menu.parseInput(line, target).pressed, "Parse button press")
-check(Menu.parseInput(line, `${target}1`) === null, "Ignore other controller")
+check(Menu.parseInput(line, target + "1") === null, "Ignore other controller")
 check(Menu.parseInput(line.replace("1.0", "NaN"), target) === null, "Reject bad values")
 check(Menu.parseInput(line.replace("InputEvent", "TouchEvent"), target) === null, "Ignore other signals")
 check(Menu.parseInput(line, "") === null, "Require a discovered target")
@@ -90,11 +57,7 @@ check(Menu.launchExpression({ action: "terminal" }, 2).includes("uwsm app -- ice
     "Launch Kitty from the terminal action")
 check(Menu.launchExpression({ action: "steam" }, 2).includes("focus_or_start_gamescope()"),
     "Steam uses the same focus-or-launch action as Guide and the topbar")
-check(Menu.launchExpression(initialPages["web-0"][0], 1).includes("icewine-browser"),
-    "Pin new browser window")
-check(Menu.shellQuote("a'b") === "'a'\\''b'", "Shell-quote bookmark URLs")
-check(Menu.launchExpression({ action: "bookmark", url: "javascript:alert(1)" }, 1) === null,
-    "Reject active bookmark schemes")
+check(Menu.shellQuote("a'b") === "'a'\\''b'", "Shell-quote command values")
 check(Menu.launchExpression({ action: "close" }, 1) === null, "Reject non-launch actions")
 for (const invalid of [NaN, -1, 0, 1.5])
     check(Menu.launchExpression({ action: "terminal" }, invalid) === null, "Reject invalid workspace")

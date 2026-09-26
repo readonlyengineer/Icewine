@@ -8,8 +8,6 @@ let
   commands = {
     terminal = cfg.applications.terminal;
     terminal-exec = cfg.applications.terminalExecute;
-    browser = cfg.applications.browser;
-    browser-home = cfg.applications.browserHome;
     editor = cfg.applications.editor;
     file-manager = cfg.applications.fileManager;
     steam = cfg.applications.steam;
@@ -22,10 +20,6 @@ let
     runtimeInputs = with pkgs; [ coreutils grim slurp wl-clipboard libnotify xdg-user-dirs ];
     text = builtins.readFile ../scripts/screenshot;
   };
-  bookmarks = pkgs.writeShellScriptBin "icewine-bookmarks" (
-    if cfg.handheld.bookmarksCommand == [ ] then "printf '[]\\n'"
-    else ''exec ${lib.escapeShellArgs cfg.handheld.bookmarksCommand} "$@"''
-  );
 in {
   imports = [ ./handheld.nix ];
 
@@ -37,7 +31,6 @@ in {
       description = "Existing user whose Home Manager configuration receives Icewine.";
     };
     handheld.enable = lib.mkEnableOption "handheld shell, controller routing and on-screen keyboard";
-    handheld.bookmarksCommand = command "Optional command returning a JSON array of {label, url, iconSource?} bookmarks." [ ];
     authenticationRequired = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -66,8 +59,6 @@ in {
     applications = {
       terminal = command "Terminal command; supplied by the preset, or installed and specified by the host." (lib.optional (cfg.terminal.preset == "kitty") "kitty");
       terminalExecute = command "Terminal command prefix for running an application." (cfg.applications.terminal ++ [ "-e" ]);
-      browser = command "Browser command; URLs are appended as a single argument." [ "xdg-open" ];
-      browserHome = command "Browser command for opening the home page without a URL." cfg.applications.browser;
       editor = command "Editor command used by compositor bindings." [ "vi" ];
       fileManager = command "File manager command." (if cfg.fileManager.preset == "yazi" then [ "icewine-terminal-exec" "yazi" ] else [ "xdg-open" "." ]);
       steam = command "Steam command used inside Gamescope; installed by the host." [ "steam" ];
@@ -119,7 +110,7 @@ in {
       grim slurp wl-clipboard libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl playerctl
       bluetui impala wiremix btop xdg-utils gamescope
-    ]) ++ launchers ++ [ bookmarks screenshot ]
+    ]) ++ launchers ++ [ screenshot ]
       ++ lib.optionals cfg.gtk.enable (lib.optional (config.home-manager.users.${cfg.user}.gtk.theme.package != null) config.home-manager.users.${cfg.user}.gtk.theme.package);
 
     home-manager.users.${cfg.user}.imports = [ ./home.nix ];
