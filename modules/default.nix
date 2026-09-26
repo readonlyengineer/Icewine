@@ -9,6 +9,7 @@ let
     terminal = cfg.applications.terminal;
     terminal-exec = cfg.applications.terminalExecute;
     editor = cfg.applications.editor;
+    browser = cfg.applications.browser;
     file-manager = cfg.applications.fileManager;
     steam = cfg.applications.steam;
   };
@@ -60,6 +61,7 @@ in {
       starship.git.enable = lib.mkEnableOption "Starship's default Git prompt modules" // { default = true; };
     };
     applications = {
+      browser = command "Browser command; installed by the host." [ "firefox" ];
       terminal = command "Terminal command; supplied by the preset, or installed and specified by the host." (lib.optional (cfg.terminal.preset == "kitty") "kitty");
       terminalExecute = command "Terminal command prefix for running an application." (cfg.applications.terminal ++ [ "-e" ]);
       editor = command "Editor command used by compositor bindings." [ "nano" ];
