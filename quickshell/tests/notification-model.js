@@ -19,7 +19,7 @@ assert.match(card, /Accessible\.role:\s*Accessible\.Button/,
     "Source navigation must expose button semantics")
 assert.match(card, /Controls\.ToolTip\.text:\s*"Go to source window"/,
     "Source navigation must explain itself on hover")
-const sourceButton = card.match(/Controls\.Button\s*\{([\s\S]+?)\n    \}\n\n    Column/)[1]
+const sourceButton = card.match(/Controls\.Button\s*\{\s*id:\s*sourceButton\b([\s\S]+?)\n    \}\n\n    Column/)[1]
 assert.match(sourceButton, /root\.sourceRequested\(address\)/,
     "Source navigation must use its isolated action")
 assert.doesNotMatch(sourceButton, /root\.dismissRequested\(\)/,

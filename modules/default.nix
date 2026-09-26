@@ -20,6 +20,9 @@ let
     runtimeInputs = with pkgs; [ coreutils grim slurp wl-clipboard libnotify xdg-user-dirs ];
     text = builtins.readFile ../scripts/screenshot;
   };
+  quickshell = pkgs.quickshell.overrideAttrs (old: {
+    buildInputs = old.buildInputs ++ (with pkgs.qt6; [ qtmultimedia qtvirtualkeyboard ]);
+  });
 in {
   imports = [ ./handheld.nix ];
 

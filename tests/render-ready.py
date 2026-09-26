@@ -10,11 +10,13 @@ import tempfile
 
 source = Path(sys.argv[1]).resolve()
 qml = """import QtQuick
+import QtMultimedia
 import Quickshell
 import "modules" as Modules
 ShellRoot {
     id: root
     property int launches: 0
+    property var winterChildren: []
     QtObject {
         id: compositor
         readonly property var toplevels: []
@@ -26,12 +28,56 @@ ShellRoot {
         function activateWindow(address) { throw new Error("Unexpected focus request") }
     }
     Modules.GameLauncher { id: launcher; compositor: compositor }
+    Modules.Greeter { id: greeter }
+    Modules.SessionControl { id: session; authenticationRequired: false }
+    Modules.WinterScreen {
+        id: winter
+        width: 1000; height: 500
+        controller: greeter
+        videoSource: "missing.mp4"
+    }
+    function winterChild(predicate) {
+        for (const child of winter.children ?? []) {
+            if (predicate(child)) return child
+        }
+        return null
+    }
     Component.onCompleted: launcher.launchSteamGamescope()
     Timer {
         interval: 100
         running: true
         repeat: true
         onTriggered: {
+            if (root.winterChildren.length === 0) {
+                if (greeter.users.length !== 1 || greeter.userLabel !== "Demo"
+                        || greeter.sessions.length !== 1 || greeter.sessionLabel !== "hyprland")
+                    throw new Error("Greeter settings bindings failed")
+                if (typeof session.keyboardVisible !== "boolean"
+                        || !Number.isFinite(session.keyboardHeight))
+                    throw new Error("SessionControl keyboard bindings failed")
+                const fallback = root.winterChild(item => item.color !== undefined
+                    && String(item.color).toLowerCase() === "#000000"
+                    && item.width === winter.width && item.height === winter.height)
+                const video = root.winterChild(item => item.contentRect !== undefined
+                    && item.fillMode !== undefined)
+                const shade = root.winterChild(item => item.gradient !== undefined
+                    && item.gradient !== null)
+                if (!fallback || !video || !shade)
+                    throw new Error("Winter video fallback structure failed to load")
+                if (video.fillMode !== VideoOutput.PreserveAspectFit)
+                    throw new Error("Winter video must preserve its aspect ratio")
+                if (shade.x !== video.contentRect.x || shade.y !== video.contentRect.y
+                        || shade.width !== video.contentRect.width
+                        || shade.height !== video.contentRect.height)
+                    throw new Error("Winter shade is not bound to the video content rectangle")
+                root.winterChildren = Array.from(winter.children)
+                session.keyboardHost = winter
+                greeter.keyboardHost = winter
+                greeter.keyboardHeight = 123
+                greeter.keyboardVisible = true
+                winter.width = 800
+                winter.height = 600
+            }
             if (launcher.pendingSteamCommand !== null) return
             if (!launcher.steamLaunching || !launcher.steamSplashVisible)
                 throw new Error("Missing launch state after the placeholder's first frame")
@@ -41,6 +87,18 @@ ShellRoot {
             if (launcher.steamLaunching || launcher.steamSplashVisible)
                 throw new Error("Teardown did not clear launch state")
             if (++root.launches === 2) {
+                const fallback = root.winterChild(item => item.color !== undefined
+                    && String(item.color).toLowerCase() === "#000000")
+                const keyboard = root.winterChild(item => !root.winterChildren.includes(item))
+                if (winter.scaleFactor !== 5 / 12
+                        || fallback.width !== 800 || fallback.height !== 600)
+                    throw new Error("Winter size bindings failed")
+                if (winter.keyboardInset !== 123)
+                    throw new Error("Winter keyboard inset binding failed")
+                if (!keyboard || keyboard.width !== winter.width
+                        || keyboard.y !== winter.height - keyboard.height
+                        || session.keyboardHeight !== keyboard.height)
+                    throw new Error("SessionControl keyboard host bindings failed")
                 console.log("RENDER_READY_PASSED")
                 Qt.quit()
             } else {
@@ -58,10 +116,28 @@ with tempfile.TemporaryDirectory() as directory:
     palette = (source / "quickshell/theme/Palette.qml.in").read_text()
     (root / "theme/Palette.qml").write_text(re.sub(r"@\w+@", "7aa2f7", palette))
     (root / "theme/qmldir").write_text("singleton Palette 1.0 Palette.qml\n")
+    (root / "config").mkdir()
+    (root / "config/qmldir").write_text("singleton Settings 1.0 Settings.qml\n")
+    (root / "config/Settings.qml").write_text("""pragma Singleton
+import QtQml
+QtObject {
+    readonly property var users: [{ name: "demo", label: "Demo" }]
+    readonly property var sessions: ["hyprland"]
+    readonly property string defaultUser: "demo"
+    readonly property string defaultSession: "hyprland"
+    readonly property var sessionCommand: ["uwsm", "start"]
+}
+""")
     (root / "bin").mkdir()
     for name, body in {
         "uwsm": 'printf "%s\\n" "$*" >> "$TEST_LAUNCHES"\n',
         "icewine-monitor-capabilities": "exit 0\n",
+        "gdbus": '''if [[ "$1" == "call" ]]; then
+    printf "(objectpath '/org/freedesktop/login1/session/_test',)\\n"
+else
+    exec sleep 10
+fi
+''',
     }.items():
         command = root / "bin" / name
         command.write_text("#!" + shutil.which("bash") + "\n" + body)
@@ -81,6 +157,7 @@ with tempfile.TemporaryDirectory() as directory:
     output = result.stdout + result.stderr
     assert result.returncode == 0 and "RENDER_READY_PASSED" in output, output
     assert "Failed to load configuration" not in output, output
+    assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
     launches = (root / "launches").read_text().splitlines()
     assert len(launches) == 2 and all(
         line.startswith("app -u icewine-steam-gamescope.scope -- gamescope ")

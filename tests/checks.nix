@@ -19,6 +19,9 @@ let
   handheldSystem = example true;
   handheld = handheldSystem.config;
   home = c: c.home-manager.users.demo;
+  quickshell = pkgs.quickshell.overrideAttrs (old: {
+    buildInputs = old.buildInputs ++ (with pkgs.qt6; [ qtmultimedia qtvirtualkeyboard ]);
+  });
 in {
   gamescope-focus =
     assert pkgs.lib.all (system:
@@ -59,7 +62,7 @@ in {
     touch "$out"
   '';
   controls = pkgs.runCommand "icewine-control-checks" {
-    nativeBuildInputs = [ pkgs.python3 pkgs.quickshell ];
+    nativeBuildInputs = [ pkgs.nodejs pkgs.python3 quickshell ];
   } ''
     python3 ${./controls.py} ${self}
     python3 ${./render-ready.py} ${self}
@@ -83,6 +86,8 @@ in {
     assert desktopSystem.home-manager.users.demo.home.stateVersion == "26.05";
     assert nixpkgs.lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
     assert (home desktop).systemd.user.services ? icewine;
+    assert nixpkgs.lib.elem "QT_IM_MODULE=qtvirtualkeyboard"
+      (home desktop).systemd.user.services.icewine.Service.Environment;
     assert !((home desktop).systemd.user.services ? quickshell);
     assert !((home desktop).systemd.user.services ? icewine-inputplumber-hyprland);
     assert (home handheld).systemd.user.services ? icewine-inputplumber-hyprland;

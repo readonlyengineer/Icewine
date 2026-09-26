@@ -2,6 +2,9 @@
 let
   cfg = osConfig.services.icewine;
   palette = import ../theme/palette.nix;
+  quickshell = pkgs.quickshell.overrideAttrs (old: {
+    buildInputs = old.buildInputs ++ (with pkgs.qt6; [ qtmultimedia qtvirtualkeyboard ]);
+  });
   monitorCapabilities = pkgs.writeShellApplication {
     name = "icewine-monitor-capabilities";
     runtimeInputs = [ pkgs.edid-decode ];
@@ -48,6 +51,7 @@ in {
       then ../quickshell/deck/shell.qml else ../quickshell/shell.qml;
     "quickshell/adapters".source = ../quickshell/adapters;
     "quickshell/modules".source = ../quickshell/modules;
+    "quickshell/assets".source = ../quickshell/assets;
     "quickshell/DeckOverlay.qml" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckOverlay.qml; };
     "quickshell/DeckMenu.js" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckMenu.js; };
     "quickshell/config/qmldir".text = "singleton Settings 1.0 Settings.qml\n";
@@ -69,8 +73,11 @@ in {
       Conflicts = [ "mako.service" ];
     };
     Service = {
-      ExecStart = "${pkgs.quickshell}/bin/qs";
-      Environment = "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness ]}";
+      ExecStart = "${quickshell}/bin/qs";
+      Environment = [
+        "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness ]}"
+        "QT_IM_MODULE=qtvirtualkeyboard"
+      ];
       Restart = "on-failure";
     };
     Install.WantedBy = [ "graphical-session.target" ];

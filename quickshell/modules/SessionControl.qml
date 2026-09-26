@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.VirtualKeyboard
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Pam
@@ -20,6 +21,18 @@ Scope {
     // For simultaneous graphical sessions, supply an explicit XDG_SESSION_ID.
     readonly property string logindSessionId: Quickshell.env("XDG_SESSION_ID") || "auto"
     property string logindSessionPath: ""
+    property var keyboardHost: null
+    readonly property bool keyboardVisible: Qt.inputMethod.visible
+    property real keyboardHeight: keyboard.height
+
+    function toggleKeyboard(host) {
+        if (keyboardVisible && keyboardHost === host) {
+            Qt.inputMethod.hide()
+        } else {
+            keyboardHost = host
+            Qt.inputMethod.show()
+        }
+    }
 
     function lockFromLogind() {
         if (sessionLock.locked)
@@ -106,13 +119,22 @@ Scope {
         id: sessionLock
 
         WlSessionLockSurface {
-            color: "#171a21"
+            color: "#000000"
 
             LockScreenSurface {
                 anchors.fill: parent
                 session: root
             }
         }
+    }
+
+    InputPanel {
+        id: keyboard
+        parent: root.keyboardHost
+        width: parent?.width ?? 0
+        y: (parent?.height ?? 0) - height
+        z: 100
+        visible: active && parent !== null
     }
 
     Process {
