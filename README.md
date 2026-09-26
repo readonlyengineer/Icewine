@@ -106,6 +106,21 @@ nixpkgs.config.allowUnfree = true;
 services.icewine.handheld.enable = true;
 ```
 
+### Software and packages
+
+For users new to NixOS, it is recommended to use flatpak where possible. 
+Flatpaks can be added declaratively in your nix configuration or downloaded direclty. 
+The example below provides both an example of how to declaratively add a flatpak, and guides the user to Bazaar, a traditional appstore for flatpaks. 
+
+```nix
+services.flatpak.packages = [
+  "io.github.kolunmi.Bazaar"
+];
+```
+Icewine does not install Bazaar. 
+
+System packages must be installed via the system configuration, refer to the nix wiki page for the package. 
+
 ## Basic hotkeys
 
 | Key | Action |
