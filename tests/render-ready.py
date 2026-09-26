@@ -71,6 +71,20 @@ ShellRoot {
         onTriggered: {
             if (root.winterChildren.length === 0) {
                 const controller = winter.controller
+                const inputPanel = Array.from(login.children).find(child => child.active !== undefined)
+                if (controller.keyboardEnabled !== false || controller.keyboardVisible
+                        || !inputPanel || inputPanel.visible)
+                    throw new Error("SDDM keyboard must start hidden")
+                if (inputPanel.width > 900 || inputPanel.width > login.width
+                        || inputPanel.width > login.height * 1.5
+                        || inputPanel.x !== (login.width - inputPanel.width) / 2)
+                    throw new Error("SDDM keyboard size or centring failed")
+                controller.toggleKeyboard(winter)
+                if (!controller.keyboardEnabled)
+                    throw new Error("SDDM keyboard explicit enable failed")
+                controller.toggleKeyboard(winter)
+                if (controller.keyboardEnabled || inputPanel.visible)
+                    throw new Error("SDDM keyboard explicit disable failed")
                 if (controller.userCount !== 2 || controller.userLabel !== "Demo"
                         || controller.sessionCount !== 2 || controller.sessionLabel !== "Hyprland")
                     throw new Error("SDDM model bindings failed")

@@ -39,7 +39,8 @@ Item {
         readonly property string prompt: "Password"
         property string message: ""
         readonly property var keyboardHost: screen
-        readonly property bool keyboardVisible: keyboard.active
+        property bool keyboardEnabled: false
+        readonly property bool keyboardVisible: keyboard.visible
         readonly property real keyboardHeight: keyboard.height
         readonly property bool canReboot: sddm.canReboot
         readonly property bool canShutdown: sddm.canPowerOff
@@ -65,8 +66,9 @@ Item {
         function requestReboot() { sddm.reboot() }
         function requestShutdown() { sddm.powerOff() }
         function toggleKeyboard(host) {
-            if (keyboardVisible) Qt.inputMethod.hide()
-            else Qt.inputMethod.show()
+            keyboardEnabled = !keyboardEnabled
+            if (keyboardEnabled) Qt.inputMethod.show()
+            else Qt.inputMethod.hide()
         }
     }
 
@@ -91,8 +93,9 @@ Item {
     }
     InputPanel {
         id: keyboard
-        width: parent.width
+        width: Math.min(parent.width, 900, parent.height * 1.5)
+        anchors.horizontalCenter: parent.horizontalCenter
         y: parent.height - height
-        visible: active
+        visible: active && controller.keyboardEnabled
     }
 }
