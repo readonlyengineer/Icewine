@@ -85,8 +85,10 @@ in {
   ];
 
 
+    programs.steam.enable = true;
+    services.inputplumber.enable = true;
     services.pipewire.alsa.support32Bit = true;
-    environment.systemPackages = [ pkgs.inputplumber pkgs.squeekboard
+    environment.systemPackages = [ pkgs.squeekboard
       icewineInputplumberIntercept icewineKeyboardToggle ];
   environment.etc."inputplumber/profiles/icewine-hyprland.yaml".source =
     ../inputplumber/inputplumber-hyprland.yaml;

@@ -5,6 +5,8 @@ let
     system = "x86_64-linux";
     modules = [ self.nixosModules.default {
       users.users.demo.isNormalUser = true;
+      nixpkgs.config.allowUnfreePredicate = pkg:
+        builtins.elem (nixpkgs.lib.getName pkg) [ "steam" "steam-unwrapped" "steam-run" ];
       services.icewine = {
         enable = true;
         user = "demo";
@@ -139,6 +141,12 @@ in {
     assert desktop.hardware.i2c.enable;
     assert desktop.security.pam.services ? icewine;
     assert handheld.services.icewine.authenticationRequired;
+    assert handheld.programs.steam.enable;
+    assert handheld.services.inputplumber.enable;
+    assert !desktop.programs.steam.enable;
+    assert !desktop.services.inputplumber.enable;
+    assert !disabled.programs.steam.enable;
+    assert !disabled.services.inputplumber.enable;
     assert !handheld.services.openssh.enable;
     assert !desktop.networking.networkmanager.enable;
     pkgs.runCommand "icewine-module-checks" { } ''
