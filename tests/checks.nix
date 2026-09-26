@@ -22,6 +22,23 @@ let
   disabled = (desktopSystem.extendModules {
     modules = [ { services.icewine.enable = nixpkgs.lib.mkForce false; } ];
   }).config;
+  librewolf = (desktopSystem.extendModules {
+    modules = [ { services.icewine.browser.flatpak = "io.gitlab.librewolf-community"; } ];
+  }).config;
+  unmanaged = (desktopSystem.extendModules {
+    modules = [ {
+      services.icewine.browser.flatpak = null;
+      services.icewine.applications.browser = [ "custom-browser" ];
+    } ];
+  }).config;
+  browserMatches = c: app:
+    c.services.flatpak.enable
+    && builtins.any (p: p.appId == app && p.origin == "flathub") c.services.flatpak.packages
+    && c.services.icewine.applications.browser == [ "flatpak" "run" app ]
+    && (home c).xdg.mimeApps.enable
+    && nixpkgs.lib.all (mime:
+      (home c).xdg.mimeApps.defaultApplications.${mime} == [ "${app}.desktop" ]
+    ) [ "x-scheme-handler/http" "x-scheme-handler/https" "text/html" "application/xhtml+xml" "application/pdf" ];
   handheldSystem = example true;
   handheld = handheldSystem.config;
   home = c: c.home-manager.users.demo;
@@ -87,6 +104,13 @@ in {
     touch "$out"
   '';
   modules =
+    assert browserMatches desktop "org.mozilla.firefox";
+    assert browserMatches librewolf "io.gitlab.librewolf-community";
+    assert !(builtins.any (p: p.appId == "org.mozilla.firefox") librewolf.services.flatpak.packages);
+    assert !unmanaged.services.flatpak.enable;
+    assert !(home unmanaged).xdg.mimeApps.enable;
+    assert unmanaged.services.icewine.applications.browser == [ "custom-browser" ];
+    assert !disabled.services.flatpak.enable;
     assert nixpkgs.lib.all (config:
       config.services.displayManager.sddm.enable
       && config.services.xserver.enable

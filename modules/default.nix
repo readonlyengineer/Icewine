@@ -25,7 +25,7 @@ let
     buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
 in {
-  imports = [ ./handheld.nix ./login.nix ];
+  imports = [ ./browser.nix ./handheld.nix ./login.nix ];
 
   options.services.icewine = {
     enable = lib.mkEnableOption "Icewine desktop environment";
@@ -61,7 +61,7 @@ in {
       starship.git.enable = lib.mkEnableOption "Starship's default Git prompt modules" // { default = true; };
     };
     applications = {
-      browser = command "Browser command; installed by the host." [ "firefox" ];
+      browser = command "Browser command; supplied by browser.flatpak, or installed and specified by the host." (lib.optionals (cfg.browser.flatpak != null) [ "flatpak" "run" cfg.browser.flatpak ]);
       terminal = command "Terminal command; supplied by the preset, or installed and specified by the host." (lib.optional (cfg.terminal.preset == "kitty") "kitty");
       terminalExecute = command "Terminal command prefix for running an application." (cfg.applications.terminal ++ [ "-e" ]);
       editor = command "Editor command used by compositor bindings." [ "nano" ];
@@ -91,7 +91,7 @@ in {
       { assertion = cfg.user != "" && builtins.hasAttr cfg.user config.users.users;
         message = "Icewine requires services.icewine.user to name an existing user."; }
       { assertion = lib.all (argv: argv != [ ] && builtins.head argv != "") (builtins.attrValues commands);
-        message = "Icewine application commands must be nonempty; set applications.terminal and install it downstream."; }
+        message = "Icewine application commands must be nonempty; set the corresponding applications command when disabling its managed preset."; }
       { assertion = lib.all (name: builtins.match "[A-Za-z0-9_-]+\\.lua" name != null) (builtins.attrNames cfg.hyprland.extraModules);
         message = "Icewine extraModules keys must be Lua filenames without directory components."; }
     ];

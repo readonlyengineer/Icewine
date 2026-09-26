@@ -3,7 +3,8 @@
     "root": {
       "inputs": {
         "nixpkgs": "nixpkgs_3",
-        "home-manager": "home-manager"
+        "home-manager": "home-manager",
+        "nix-flatpak": "nix-flatpak"
       }
     },
     "nixpkgs_3": {
@@ -39,6 +40,21 @@
       "original": {
         "owner": "nix-community",
         "repo": "home-manager",
+        "type": "github"
+      }
+    },
+    "nix-flatpak": {
+      "locked": {
+        "lastModified": 1789496567,
+        "narHash": "sha256-f9ze1ph2u0lk/Hm7/w/OvC0ESL1z0LbQ5UDgcOwQzLM=",
+        "owner": "gmodena",
+        "repo": "nix-flatpak",
+        "rev": "07e8980c2fe421c93c0749f6246db34422827f67",
+        "type": "github"
+      },
+      "original": {
+        "owner": "gmodena",
+        "repo": "nix-flatpak",
         "type": "github"
       }
     }
