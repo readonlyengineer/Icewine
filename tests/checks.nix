@@ -16,6 +16,12 @@ let
   };
   desktopSystem = example false;
   desktop = desktopSystem.config;
+  noLogin = (desktopSystem.extendModules {
+    modules = [ { services.icewine.login.enable = false; } ];
+  }).config;
+  disabled = (desktopSystem.extendModules {
+    modules = [ { services.icewine.enable = nixpkgs.lib.mkForce false; } ];
+  }).config;
   handheldSystem = example true;
   handheld = handheldSystem.config;
   home = c: c.home-manager.users.demo;
@@ -81,9 +87,21 @@ in {
     touch "$out"
   '';
   modules =
+    assert nixpkgs.lib.all (config:
+      config.services.displayManager.sddm.enable
+      && config.services.xserver.enable
+      && !config.services.displayManager.sddm.wayland.enable
+      && config.services.displayManager.sddm.theme == "icewine"
+      && config.services.displayManager.defaultSession == "hyprland-uwsm"
+      && !config.services.displayManager.autoLogin.enable
+    ) [ desktop handheld ];
+    assert !noLogin.services.displayManager.sddm.enable;
+    assert !noLogin.services.xserver.enable;
+    assert !disabled.services.displayManager.sddm.enable;
+    assert !disabled.services.xserver.enable;
     assert nixpkgs.lib.elem pkgs.btop desktop.environment.systemPackages;
     assert nixpkgs.lib.elem desktopSystem.pkgs.gamescope desktop.environment.systemPackages;
-    assert desktopSystem.home-manager.users.demo.home.stateVersion == "26.05";
+    assert desktop.home-manager.users.demo.home.stateVersion == "26.05";
     assert nixpkgs.lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
     assert (home desktop).systemd.user.services ? icewine;
     assert nixpkgs.lib.elem "QT_IM_MODULE=qtvirtualkeyboard"

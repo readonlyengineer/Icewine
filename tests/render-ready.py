@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise Steam's real first-frame launch and placeholder teardown offscreen."""
+"""Exercise Steam launch, shared winter visuals and the SDDM adapter offscreen."""
 import os
 from pathlib import Path
 import re
@@ -12,6 +12,7 @@ source = Path(sys.argv[1]).resolve()
 qml = """import QtQuick
 import Quickshell
 import "modules" as Modules
+import "sddm" as Sddm
 ShellRoot {
     id: root
     property int launches: 0
@@ -27,13 +28,35 @@ ShellRoot {
         function activateWindow(address) { throw new Error("Unexpected focus request") }
     }
     Modules.GameLauncher { id: launcher; compositor: compositor }
-    Modules.Greeter { id: greeter }
-    Modules.SessionControl { id: session; authenticationRequired: false }
-    Modules.WinterScreen {
-        id: winter
-        width: 1000; height: 500
-        controller: greeter
+    ListModel {
+        id: userModel
+        property int lastIndex: 0
+        ListElement { name: "demo"; realName: "Demo" }
+        ListElement { name: "guest"; realName: "" }
     }
+    ListModel {
+        id: sessionModel
+        property int lastIndex: 1
+        ListElement { name: "Other" }
+        ListElement { name: "Hyprland" }
+    }
+    QtObject {
+        id: sddm
+        readonly property bool canReboot: true
+        readonly property bool canPowerOff: true
+        property int logins: 0
+        signal loginFailed()
+        signal loginSucceeded()
+        function login(user, password, session) {
+            if (user !== "guest" || password !== "test-secret" || session !== 0)
+                throw new Error("Wrong SDDM login arguments")
+            logins++
+        }
+    }
+    Sddm.Main { id: login; width: 1000; height: 500 }
+    property var winter: Array.from(login.children).find(child => child.controller !== undefined)
+    Modules.SessionControl { id: session; authenticationRequired: false }
+    Modules.LockScreenSurface { width: 1000; height: 500; session: session }
     function winterChild(predicate) {
         for (const child of winter.children ?? []) {
             if (predicate(child)) return child
@@ -47,9 +70,28 @@ ShellRoot {
         repeat: true
         onTriggered: {
             if (root.winterChildren.length === 0) {
-                if (greeter.users.length !== 1 || greeter.userLabel !== "Demo"
-                        || greeter.sessions.length !== 1 || greeter.sessionLabel !== "hyprland")
-                    throw new Error("Greeter settings bindings failed")
+                const controller = winter.controller
+                if (controller.userCount !== 2 || controller.userLabel !== "Demo"
+                        || controller.sessionCount !== 2 || controller.sessionLabel !== "Hyprland")
+                    throw new Error("SDDM model bindings failed")
+                controller.password = "discard-on-user-change"
+                controller.nextUser()
+                controller.nextSession()
+                if (controller.password !== "" || controller.userLabel !== "guest")
+                    throw new Error("SDDM user selection failed")
+                controller.password = "test-secret"
+                controller.submit()
+                controller.submit()
+                if (sddm.logins !== 1 || !controller.busy || controller.password !== "")
+                    throw new Error("SDDM submission guard failed")
+                sddm.loginFailed()
+                if (controller.busy || !controller.failed)
+                    throw new Error("SDDM failure recovery failed")
+                controller.password = "test-secret"
+                controller.submit()
+                sddm.loginSucceeded()
+                if (sddm.logins !== 2 || controller.failed || !controller.busy)
+                    throw new Error("SDDM retry failed")
                 if (typeof session.keyboardVisible !== "boolean"
                         || !Number.isFinite(session.keyboardHeight))
                     throw new Error("SessionControl keyboard bindings failed")
@@ -60,11 +102,8 @@ ShellRoot {
                     throw new Error("Winter black background failed to load")
                 root.winterChildren = Array.from(winter.children)
                 session.keyboardHost = winter
-                greeter.keyboardHost = winter
-                greeter.keyboardHeight = 123
-                greeter.keyboardVisible = true
-                winter.width = 800
-                winter.height = 600
+                login.width = 800
+                login.height = 600
             }
             if (launcher.pendingSteamCommand !== null) return
             if (!launcher.steamLaunching || !launcher.steamSplashVisible)
@@ -81,8 +120,6 @@ ShellRoot {
                 if (winter.scaleFactor !== 5 / 12
                         || background.width !== 800 || background.height !== 600)
                     throw new Error("Winter size bindings failed")
-                if (winter.keyboardInset !== 123)
-                    throw new Error("Winter keyboard inset binding failed")
                 if (!keyboard || keyboard.width !== winter.width
                         || keyboard.y !== winter.height - keyboard.height
                         || session.keyboardHeight !== keyboard.height)
@@ -104,16 +141,16 @@ with tempfile.TemporaryDirectory() as directory:
     palette = (source / "quickshell/theme/Palette.qml.in").read_text()
     (root / "theme/Palette.qml").write_text(re.sub(r"@\w+@", "7aa2f7", palette))
     (root / "theme/qmldir").write_text("singleton Palette 1.0 Palette.qml\n")
+    (root / "sddm").mkdir()
+    (root / "sddm/Main.qml").symlink_to(source / "sddm/Main.qml")
+    (root / "sddm/modules").symlink_to(source / "quickshell/modules")
+    (root / "sddm/theme").symlink_to(root / "theme")
     (root / "config").mkdir()
     (root / "config/qmldir").write_text("singleton Settings 1.0 Settings.qml\n")
     (root / "config/Settings.qml").write_text("""pragma Singleton
 import QtQml
 QtObject {
-    readonly property var users: [{ name: "demo", label: "Demo" }]
-    readonly property var sessions: ["hyprland"]
-    readonly property string defaultUser: "demo"
-    readonly property string defaultSession: "hyprland"
-    readonly property var sessionCommand: ["uwsm", "start"]
+    readonly property bool authenticationRequired: false
 }
 """)
     (root / "bin").mkdir()
@@ -151,4 +188,4 @@ fi
         line.startswith("app -u icewine-steam-gamescope.scope -- gamescope ")
         for line in launches
     ), launches
-    print("Steam first-frame launch, duplicate guard, teardown and relaunch passed")
+    print("Steam launch, winter visuals, locker and SDDM adapter checks passed")

@@ -21,9 +21,16 @@ services.icewine = {
 };
 ```
 
-Icewine configures its own Home Manager integration and starts the
-`hyprland-uwsm` session by default. It does not create users or configure
-autologin, storage, networking, kernel, or binary caches.
+Icewine configures its own Home Manager integration and a standard SDDM login
+screen, with `hyprland-uwsm` as the overridable default session. SDDM uses its
+default X11 greeter; the desktop session runs on Wayland. Login and locking
+share the same QtQuick layout and palette, with separate authentication.
+
+Set `services.icewine.login.enable = false;` to use another display manager or
+a console login. Icewine does not create users or configure autologin, storage,
+networking, kernel, or binary caches. Hosts choose those policies through the
+standard NixOS options, including `services.displayManager.autoLogin` and
+`services.displayManager.defaultSession`.
 
 To use the latest Icewine `main` before rebuilding, update only that flake
 input:

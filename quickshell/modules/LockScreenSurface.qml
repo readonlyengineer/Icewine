@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
+import qs.theme as Theme
 
 Item {
     id: root
@@ -10,12 +11,11 @@ Item {
 
     QtObject {
         id: controller
-        readonly property var users: [{
-            name: Quickshell.env("USER") || "user",
-            label: Quickshell.env("USER") || "User"
-        }]
-        readonly property var sessions: []
-        readonly property string userLabel: users[0].label
+        readonly property int userCount: 1
+        readonly property int sessionCount: 0
+        readonly property string userLabel: Quickshell.env("USER") || "User"
+        readonly property bool canReboot: true
+        readonly property bool canShutdown: true
         readonly property string sessionLabel: ""
         property string password: root.session.password
         readonly property bool authenticationRequired: root.session.authenticationRequired
@@ -52,5 +52,6 @@ Item {
     WinterScreen {
         anchors.fill: parent
         controller: controller
+        palette: Theme.Palette
     }
 }
