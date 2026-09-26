@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls as Controls
-import QtMultimedia
 import qs.theme as Theme
 import "WinterModel.js" as WinterModel
 
@@ -10,7 +9,6 @@ Item {
     id: root
 
     required property var controller
-    property url videoSource: Qt.resolvedUrl("../assets/winter-bg.mp4")
     readonly property real scaleFactor: WinterModel.scaleFactor(width, height)
     readonly property real keyboardInset: WinterModel.keyboardInset(controller.keyboardHost,
         root, controller.keyboardVisible, controller.keyboardHeight)
@@ -18,33 +16,6 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: "#000000"
-    }
-
-    MediaPlayer {
-        id: player
-        source: root.videoSource
-        videoOutput: video
-        loops: MediaPlayer.Infinite
-        audioOutput: AudioOutput { muted: true }
-        Component.onCompleted: play()
-    }
-
-    VideoOutput {
-        id: video
-        anchors.fill: parent
-        fillMode: VideoOutput.PreserveAspectFit
-    }
-
-    Rectangle {
-        x: video.contentRect.x
-        y: video.contentRect.y
-        width: video.contentRect.width
-        height: video.contentRect.height
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#00000000" }
-            GradientStop { position: 0.5; color: "#00000000" }
-            GradientStop { position: 1.0; color: Theme.Palette.alpha(Theme.Palette.backgroundDark, 0.67) }
-        }
     }
 
     component TextButton: Controls.Button {

@@ -3,7 +3,7 @@ let
   cfg = osConfig.services.icewine;
   palette = import ../theme/palette.nix;
   quickshell = pkgs.quickshell.overrideAttrs (old: {
-    buildInputs = old.buildInputs ++ (with pkgs.qt6; [ qtmultimedia qtvirtualkeyboard ]);
+    buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
   monitorCapabilities = pkgs.writeShellApplication {
     name = "icewine-monitor-capabilities";
@@ -51,7 +51,6 @@ in {
       then ../quickshell/deck/shell.qml else ../quickshell/shell.qml;
     "quickshell/adapters".source = ../quickshell/adapters;
     "quickshell/modules".source = ../quickshell/modules;
-    "quickshell/assets".source = ../quickshell/assets;
     "quickshell/DeckOverlay.qml" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckOverlay.qml; };
     "quickshell/DeckMenu.js" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckMenu.js; };
     "quickshell/config/qmldir".text = "singleton Settings 1.0 Settings.qml\n";

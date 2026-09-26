@@ -22,7 +22,7 @@ let
     text = builtins.readFile ../scripts/screenshot;
   };
   quickshell = pkgs.quickshell.overrideAttrs (old: {
-    buildInputs = old.buildInputs ++ (with pkgs.qt6; [ qtmultimedia qtvirtualkeyboard ]);
+    buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
 in {
   imports = [ ./handheld.nix ];

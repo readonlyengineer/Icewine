@@ -20,7 +20,7 @@ let
   handheld = handheldSystem.config;
   home = c: c.home-manager.users.demo;
   quickshell = pkgs.quickshell.overrideAttrs (old: {
-    buildInputs = old.buildInputs ++ (with pkgs.qt6; [ qtmultimedia qtvirtualkeyboard ]);
+    buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
 in {
   gamescope-focus =

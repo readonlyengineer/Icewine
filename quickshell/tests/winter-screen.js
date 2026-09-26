@@ -11,8 +11,6 @@ const session = fs.readFileSync(path.join(__dirname, "../modules/SessionControl.
 const greeterEntry = fs.readFileSync(path.join(__dirname, "../greeter.qml"), "utf8")
 
 assert.match(screen, /color: "#000000"/)
-assert.match(screen, /fillMode: VideoOutput\.PreserveAspectFit/)
-assert.match(screen, /x: video\.contentRect\.x/)
 assert.match(screen, /WinterModel\.scaleFactor\(width, height\)/)
 assert.doesNotMatch(screen, /InputPanel/)
 assert.equal((session.match(/InputPanel/g) || []).length, 1)

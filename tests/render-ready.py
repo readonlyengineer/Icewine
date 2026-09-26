@@ -10,7 +10,6 @@ import tempfile
 
 source = Path(sys.argv[1]).resolve()
 qml = """import QtQuick
-import QtMultimedia
 import Quickshell
 import "modules" as Modules
 ShellRoot {
@@ -34,7 +33,6 @@ ShellRoot {
         id: winter
         width: 1000; height: 500
         controller: greeter
-        videoSource: "missing.mp4"
     }
     function winterChild(predicate) {
         for (const child of winter.children ?? []) {
@@ -55,21 +53,11 @@ ShellRoot {
                 if (typeof session.keyboardVisible !== "boolean"
                         || !Number.isFinite(session.keyboardHeight))
                     throw new Error("SessionControl keyboard bindings failed")
-                const fallback = root.winterChild(item => item.color !== undefined
+                const background = root.winterChild(item => item.color !== undefined
                     && String(item.color).toLowerCase() === "#000000"
                     && item.width === winter.width && item.height === winter.height)
-                const video = root.winterChild(item => item.contentRect !== undefined
-                    && item.fillMode !== undefined)
-                const shade = root.winterChild(item => item.gradient !== undefined
-                    && item.gradient !== null)
-                if (!fallback || !video || !shade)
-                    throw new Error("Winter video fallback structure failed to load")
-                if (video.fillMode !== VideoOutput.PreserveAspectFit)
-                    throw new Error("Winter video must preserve its aspect ratio")
-                if (shade.x !== video.contentRect.x || shade.y !== video.contentRect.y
-                        || shade.width !== video.contentRect.width
-                        || shade.height !== video.contentRect.height)
-                    throw new Error("Winter shade is not bound to the video content rectangle")
+                if (!background)
+                    throw new Error("Winter black background failed to load")
                 root.winterChildren = Array.from(winter.children)
                 session.keyboardHost = winter
                 greeter.keyboardHost = winter
@@ -87,11 +75,11 @@ ShellRoot {
             if (launcher.steamLaunching || launcher.steamSplashVisible)
                 throw new Error("Teardown did not clear launch state")
             if (++root.launches === 2) {
-                const fallback = root.winterChild(item => item.color !== undefined
+                const background = root.winterChild(item => item.color !== undefined
                     && String(item.color).toLowerCase() === "#000000")
                 const keyboard = root.winterChild(item => !root.winterChildren.includes(item))
                 if (winter.scaleFactor !== 5 / 12
-                        || fallback.width !== 800 || fallback.height !== 600)
+                        || background.width !== 800 || background.height !== 600)
                     throw new Error("Winter size bindings failed")
                 if (winter.keyboardInset !== 123)
                     throw new Error("Winter keyboard inset binding failed")
