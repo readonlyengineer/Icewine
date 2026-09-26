@@ -69,7 +69,7 @@ in {
       terminalExecute = command "Terminal command prefix for running an application." (cfg.applications.terminal ++ [ "-e" ]);
       editor = command "Editor command used by compositor bindings." [ "nano" ];
       fileManager = command "File manager command." (if cfg.fileManager.preset == "yazi" then [ "icewine-terminal-exec" "yazi" ] else [ "xdg-open" "." ]);
-      steam = command "Steam command used inside Gamescope; installed by the host." [ "steam" ];
+      steam = command "Steam command used inside Gamescope; installed by handheld mode or the host." ([ "steam" ] ++ lib.optional cfg.handheld.enable "-gamepadui");
     };
     hyprland.extraModules = lib.mkOption {
       type = lib.types.attrsOf lib.types.path;

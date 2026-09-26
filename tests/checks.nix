@@ -115,6 +115,9 @@ in {
     touch "$out"
   '';
   modules =
+    assert desktop.services.icewine.applications.steam == [ "steam" ];
+    assert handheld.services.icewine.applications.steam == [ "steam" "-gamepadui" ];
+    assert steamDesktop.services.icewine.applications.steam == [ "flatpak" "run" "com.valvesoftware.Steam" ];
     assert !((home desktop).xdg.desktopEntries ? steam-gamescope);
     assert !((home steamOptOut).xdg.desktopEntries ? steam-gamescope);
     assert !((home steamOptOut).xdg.dataFile ? "applications/steam.desktop");
