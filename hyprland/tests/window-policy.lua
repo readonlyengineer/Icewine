@@ -1,5 +1,5 @@
 -- Run: lua hyprland/tests/window-policy.lua hyprland/modules/WindowPolicy.lua
-local events, active, windows, configured = {}, nil, {}, nil
+local events, active, windows, workspaces, configured = {}, nil, {}, {}, nil
 local rules, closed, focuses = {}, nil, 0
 hl = {
 	on = function(event, callback) events[event] = callback end,
@@ -13,6 +13,8 @@ hl = {
 	get_active_window = function() return active end,
 	get_active_monitor = function() return active.monitor end,
 	get_windows = function() return windows end,
+	get_workspaces = function() return workspaces end,
+	get_workspace_windows = function(ws) return ws.windows or {} end,
 	config = function(config) configured = config.scrolling.column_width end,
 	dsp = {
 		layout = function(command) return command end,
@@ -98,6 +100,17 @@ check(1.0, false)
 -- A monitor just above 2:1 uses half width and stays tiled.
 window(intermediate, 1.0, false)
 events["window.open"](active)
+check(0.5, false)
+
+-- A default-width established window follows its workspace to a wide monitor.
+-- The saved fullscreen choice is false, so it was previously skipped here.
+local moved = window(normal, 1.0, false)
+moved.workspace.active, moved.workspace.windows = true, { moved }
+workspaces = { moved.workspace }
+events["window.open"](moved)
+policy.toggle_fullscreen()
+moved.monitor, moved.size = wide, { w = wide.width }
+events["monitor.layout_changed"]()
 check(0.5, false)
 
 -- Adopt a user's explicit width/fullscreen choice, then move to a wide monitor.

@@ -231,9 +231,7 @@ local function reconcile_workspace(ws)
 	local focused = active and active.workspace == ws and active or ws.last_window
 	local changed = false
 	for _, win in ipairs(hl.get_workspace_windows(ws)) do
-		if is_policy_window(win) and (fullscreen_of(win) or wants_fullscreen(win)) then
-			changed = apply_window(win) or changed
-		end
+		changed = apply_window(win) or changed
 	end
 
 	if changed and focused and not focused.hidden then
