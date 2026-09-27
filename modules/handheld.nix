@@ -68,19 +68,6 @@ in {
             --replace-fail ZWLR_LAYER_SHELL_V1_LAYER_TOP ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY
         '';
       });
-      gamescope = prev.gamescope.overrideAttrs (old: {
-        # Experimental upstream touch patches for handhelds.
-        patches = (old.patches or [ ]) ++ [
-          (prev.fetchurl {
-            url = "https://github.com/ValveSoftware/gamescope/commit/8a0c26e594c9186adbaed742cafcbdfc612f3c50.patch";
-            hash = "sha256-MRXtXlK0fx7S7i7+AWg2yvdMKNWJa3IFdawYCx7rdK0=";
-          })
-          (prev.fetchurl {
-            url = "https://github.com/ValveSoftware/gamescope/commit/a2240d66eb8e98e510cdb5149dfc3251184c73a3.patch";
-            hash = "sha256-bvr6Z09eXZa98XFJ8iOytY1UxuEDrKiMllBSGrvB/ZM=";
-          })
-        ];
-      });
     })
   ];
 

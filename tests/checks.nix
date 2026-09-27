@@ -57,29 +57,6 @@ let
     buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
 in {
-  gamescope-focus =
-    assert pkgs.lib.all (system:
-      pkgs.lib.count (patch:
-        toString patch == toString ../patches/gamescope/preserve-keyboard-focus-state.patch
-      ) system.pkgs.gamescope.patches == 1
-    ) [ desktopSystem handheldSystem ];
-    pkgs.runCommand "icewine-gamescope-focus-check" {
-      nativeBuildInputs = [ pkgs.python3 pkgs.stdenv.cc pkgs.patch ];
-    } ''
-      ${pkgs.lib.concatStringsSep "\n" (pkgs.lib.mapAttrsToList (name: system:
-        let gamescope = system.pkgs.gamescope;
-        in ''
-          cp -R ${gamescope.src} ${name}
-          chmod -R u+w ${name}
-          cd ${name}
-          ${pkgs.lib.concatMapStringsSep "\n" (patch: "patch -p1 < ${patch}") gamescope.patches}
-          python3 ${../patches/gamescope/check-focus.py} .
-          test -x ${gamescope}/bin/gamescope
-          cd ..
-        ''
-      ) { desktop = desktopSystem; handheld = handheldSystem; })}
-      touch "$out"
-    '';
   screenshot = pkgs.runCommand "icewine-screenshot-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
   } ''

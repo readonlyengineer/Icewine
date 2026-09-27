@@ -1,5 +1,9 @@
 # Gamescope patches
 
+These resources are archived. Icewine no longer applies Gamescope patches or
+exports the `gamescope-focus` check. The descriptions and verification records
+below document the former integration, not the current configuration.
+
 Icewine owns the keyboard-focus patch and applies it in `modules/default.nix`
 whenever `services.icewine.enable` is enabled, including laptops and handhelds.
 The experimental upstream touch patches remain in `modules/handheld.nix` and
