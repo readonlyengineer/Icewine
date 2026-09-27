@@ -35,9 +35,15 @@ Widget {
     }
 
     function capture(mode, target) {
+        const page = pageLoader.item
+        if (!page || (!page.saveClipboard && !page.savePictures)) return
+        const command = ["icewine-screenshot", mode, target,
+            page.delayed ? "3" : "0",
+            page.saveClipboard ? "1" : "0",
+            page.savePictures ? "1" : "0"]
         handoffRequested()
         // The popout must be gone before grimblast freezes the selection surface.
-        Qt.callLater(() => Quickshell.execDetached(["icewine-screenshot", mode, target]))
+        Qt.callLater(() => Quickshell.execDetached(command))
     }
 
     width: 380

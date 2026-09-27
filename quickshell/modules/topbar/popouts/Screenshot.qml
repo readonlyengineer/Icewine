@@ -13,10 +13,13 @@ Item {
     readonly property var monitors: compositor.getMonitors()
     readonly property var windows: ScreenshotModel.windows(compositor.toplevels)
     property string view: "actions"
+    readonly property bool delayed: delay.checked
+    readonly property bool saveClipboard: clipboard.checked
+    readonly property bool savePictures: pictures.checked
 
     signal captureRequested(string mode, string target)
 
-    implicitHeight: header.height + 12 + (actions.visible ? actions.implicitHeight : selectorList.height) + 12
+    implicitHeight: options.y + options.implicitHeight + 12
 
     function chooseMonitor() {
         if (monitors.length === 1)
@@ -60,6 +63,7 @@ Item {
         id: actions
         anchors { top: header.bottom; left: parent.left; right: parent.right; margins: 12 }
         visible: root.view === "actions"
+        enabled: root.saveClipboard || root.savePictures
         spacing: 6
 
         ActionButton {
@@ -85,6 +89,7 @@ Item {
         id: selectorList
         anchors { top: header.bottom; left: parent.left; right: parent.right; margins: 12 }
         visible: root.view !== "actions"
+        enabled: root.saveClipboard || root.savePictures
         height: Math.min(contentHeight, 300)
         spacing: 6
         clip: true
@@ -99,6 +104,33 @@ Item {
                 : `${modelData.title}${modelData.subtitle ? " · " + modelData.subtitle : ""}`
             onClicked: root.captureRequested(root.view === "monitors" ? "monitor" : "window",
                 root.view === "monitors" ? modelData.name : modelData.stableId)
+        }
+    }
+
+    Column {
+        id: options
+        x: 12
+        y: (actions.visible ? actions.y + actions.implicitHeight
+            : selectorList.y + selectorList.height) + 12
+        width: parent.width - 24
+        spacing: 6
+
+        Toggle {
+            id: delay
+            width: parent.width
+            text: "3-second delay"
+        }
+        Toggle {
+            id: clipboard
+            width: parent.width
+            text: "Save to clipboard"
+            checked: true
+        }
+        Toggle {
+            id: pictures
+            width: parent.width
+            text: "Save to Pictures"
+            checked: true
         }
     }
 }
