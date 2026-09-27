@@ -61,7 +61,6 @@ Item {
         anchors { top: header.bottom; left: parent.left; right: parent.right; margins: 12 }
         visible: root.view === "actions"
         spacing: 6
-        implicitHeight: monitor.implicitHeight
 
         ActionButton {
             id: monitor
