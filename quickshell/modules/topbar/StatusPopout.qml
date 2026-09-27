@@ -34,6 +34,12 @@ Widget {
         Quickshell.execDetached(["uwsm", "app", "--", "icewine-terminal-exec", tool])
     }
 
+    function capture(mode, target) {
+        handoffRequested()
+        // The popout must be gone before grimblast freezes the selection surface.
+        Qt.callLater(() => Quickshell.execDetached(["icewine-screenshot", mode, target]))
+    }
+
     width: 380
     implicitHeight: Math.min(620, pageLoader.item?.implicitHeight ?? 0)
 
@@ -49,8 +55,9 @@ Widget {
             sourceComponent: root.currentPage === "audio" ? audioPage
                 : root.currentPage === "performance" ? performancePage
                 : root.currentPage === "network" ? networkPage
-                    : root.currentPage === "bluetooth" ? bluetoothPage
+                        : root.currentPage === "bluetooth" ? bluetoothPage
                         : root.currentPage === "battery" ? batteryPage
+                            : root.currentPage === "screenshot" ? screenshotPage
                             : root.currentPage === "media" ? mediaPage : notificationsPage
         }
     }
@@ -94,6 +101,13 @@ Widget {
             powerState: root.powerState
             session: root.session
             brightness: monitorBrightness
+        }
+    }
+    Component {
+        id: screenshotPage
+        Popouts.Screenshot {
+            compositor: root.compositor
+            onCaptureRequested: (mode, target) => root.capture(mode, target)
         }
     }
     Component {

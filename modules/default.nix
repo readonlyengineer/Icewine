@@ -18,7 +18,7 @@ let
   '') commands;
   screenshot = pkgs.writeShellApplication {
     name = "icewine-screenshot";
-    runtimeInputs = with pkgs; [ coreutils grim slurp wl-clipboard libnotify xdg-user-dirs ];
+    runtimeInputs = with pkgs; [ coreutils grim grimblast wl-clipboard libnotify xdg-user-dirs ];
     text = builtins.readFile ../scripts/screenshot;
   };
   quickshell = pkgs.quickshell.overrideAttrs (old: {

@@ -82,6 +82,13 @@ Rectangle {
         }
 
         StatusButton {
+            page: "screenshot"
+            icon: "󰄀"
+            colour: Theme.Palette.secondary
+            onActivated: root.popoutActivated("screenshot")
+        }
+
+        StatusButton {
             page: "network"
             icon: root.wifiConnected ? "" : root.networkConnected ? "" : "󰯡"
             colour: root.networkConnected ? Theme.Palette.secondary : Theme.Palette.muted
