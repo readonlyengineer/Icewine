@@ -387,6 +387,7 @@ Scope {
         function audio(): void { root.openWidget("audio", true, root.focusedScreenName()) }
         function network(): void { root.openWidget("network", true, root.focusedScreenName()) }
         function performance(): void { root.openWidget("performance", true, root.focusedScreenName()) }
+        function screenshot(): void { root.openWidget("screenshot", true, root.focusedScreenName()) }
         function bluetooth(): void { root.openWidget("bluetooth", true, root.focusedScreenName()) }
         function battery(): void { root.openWidget("battery", true, root.focusedScreenName()) }
         function launcher(): void { root.openWidget("launcher", true, root.focusedScreenName()) }

@@ -52,6 +52,13 @@ send({type: "dismiss"})
 assert.equal(State.barVisible(state, false, false), false)
 
 // Execute the actual QML controller methods, with only platform I/O replaced.
+send({type: "open", page: "screenshot", engaged: true, screen: "external"})
+assert.equal(state.page, "screenshot")
+assert.equal(state.engaged, true)
+assert.equal(state.screen, "external")
+send({type: "dismiss"})
+assert.equal(State.barVisible(state, false, false), false)
+
 function controller(file, properties) {
     const context = vm.createContext(properties)
     context.root = context

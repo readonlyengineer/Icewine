@@ -75,8 +75,8 @@ hl.bind(mainMod .. " + J", hl.dsp.layout("consume_or_expel next"))
 hl.bind(mainMod .. " + F", windows.toggle_fullscreen)
 hl.bind(mainMod .. " + M", windows.toggle_width)
 
--- Screenshot to file and clipboard; preserve the previous capture on failure.
-hl.bind(mainMod .. " + Print", hl.dsp.exec_cmd("icewine-screenshot"))
+-- Screenshot menu: monitor, region or window.
+hl.bind(mainMod .. " + Print", topbar("screenshot"))
 
 -- Focus movement. Scrolling uses layout focus for l/r tape movement.
 hl.bind(mainMod .. " + left",  hl.dsp.layout("focus l"))

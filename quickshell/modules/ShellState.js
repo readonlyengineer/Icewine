@@ -11,7 +11,7 @@ function reduce(state, event) {
     case "release":
         return Object.assign({}, state, { held: false })
     case "open":
-        if (!["launcher", "audio", "network", "performance", "bluetooth", "battery", "media", "notifications"].includes(event.page))
+        if (!["launcher", "audio", "network", "performance", "bluetooth", "battery", "media", "notifications", "screenshot"].includes(event.page))
             return state
         // Hover cannot replace a widget the user is interacting with.
         if (state.engaged && !event.engaged)
