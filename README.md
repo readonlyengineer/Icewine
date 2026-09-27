@@ -138,13 +138,8 @@ System packages must be installed via the system configuration, refer to the nix
 
 ### Browser
 
-Icewine installs Firefox from Flathub and uses it for the browser launcher,
-web links, HTML and PDFs. 
-
-It can be replaced with flatpak alternatives using the example syntax:
-```nix
-services.icewine.browser.flatpak = "io.gitlab.librewolf-community";
-```
+Icewine installs native Firefox and uses it for the browser launcher, web links,
+HTML and PDFs.
 
 ### For users who have already configured thier flake
 
@@ -153,11 +148,6 @@ To make Icewine use the same Home Manager input as your system flake:
 
 ```nix
 inputs.icewine.inputs.home-manager.follows = "home-manager";
-```
-If the host already has a nix-flatpak input, share it:
-
-```nix
-inputs.icewine.inputs.nix-flatpak.follows = "nix-flatpak";
 ```
 
 ### Supported alternative software
@@ -180,7 +170,7 @@ feature; they do not disable another module's configuration or delete user data.
 
 | Setting | What Icewine stops providing |
 | --- | --- |
-| `browser.flatpak = null;` | Browser installation and web/PDF associations; also set `applications.browser` to your replacement command. |
+| `browser.enable = false;` | Firefox installation and web/PDF associations; also set `applications.browser` to your replacement command. |
 | `terminal.preset = null;` | Kitty installation and configuration; also set `applications.terminal` to your replacement command. |
 | `fileManager.preset = null;` | Yazi and its GVfs default; `applications.fileManager` falls back to `xdg-open .`, or can name your replacement. |
 | `login.enable = false;` | SDDM login screen; provide another display manager or use console login. |

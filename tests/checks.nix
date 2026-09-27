@@ -24,12 +24,9 @@ let
   disabled = (desktopSystem.extendModules {
     modules = [ { services.icewine.enable = nixpkgs.lib.mkForce false; } ];
   }).config;
-  librewolf = (desktopSystem.extendModules {
-    modules = [ { services.icewine.browser.flatpak = "io.gitlab.librewolf-community"; } ];
-  }).config;
   unmanaged = (desktopSystem.extendModules {
     modules = [ {
-      services.icewine.browser.flatpak = null;
+      services.icewine.browser.enable = false;
       services.icewine.applications.browser = [ "custom-browser" ];
     } ];
   }).config;
@@ -42,13 +39,12 @@ let
   steamOptOut = (handheldSystem.extendModules {
     modules = [ { services.icewine.steam.enable = false; } ];
   }).config;
-  browserMatches = c: app:
-    c.services.flatpak.enable
-    && builtins.any (p: p.appId == app && p.origin == "flathub") c.services.flatpak.packages
-    && c.services.icewine.applications.browser == [ "flatpak" "run" app ]
+  nativeBrowserMatches = c:
+    c.programs.firefox.enable
+    && c.services.icewine.applications.browser == [ "firefox" ]
     && (home c).xdg.mimeApps.enable
     && nixpkgs.lib.all (mime:
-      (home c).xdg.mimeApps.defaultApplications.${mime} == [ "${app}.desktop" ]
+      (home c).xdg.mimeApps.defaultApplications.${mime} == [ "firefox.desktop" ]
     ) [ "x-scheme-handler/http" "x-scheme-handler/https" "text/html" "application/xhtml+xml" "application/pdf" ];
   handheldSystem = example true;
   handheld = handheldSystem.config;
@@ -106,9 +102,9 @@ in {
         == (home c).xdg.dataFile."applications/com.valvesoftware.Steam.desktop".text
       && nixpkgs.lib.hasInfix "Hidden=true" (home c).xdg.dataFile."applications/steam.desktop".text
     ) [ steamDesktop handheld ];
-    assert browserMatches desktop "org.mozilla.firefox";
-    assert browserMatches librewolf "io.gitlab.librewolf-community";
-    assert !(builtins.any (p: p.appId == "org.mozilla.firefox") librewolf.services.flatpak.packages);
+    assert nativeBrowserMatches desktop;
+    assert !desktop.services.flatpak.enable;
+    assert !unmanaged.programs.firefox.enable;
     assert !unmanaged.services.flatpak.enable;
     assert !(home unmanaged).xdg.mimeApps.enable;
     assert unmanaged.services.icewine.applications.browser == [ "custom-browser" ];

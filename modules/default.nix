@@ -25,7 +25,7 @@ let
     buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
 in {
-  imports = [ ./browser.nix ./handheld.nix ./login.nix ];
+  imports = [ ./handheld.nix ./login.nix ];
 
   options.services.icewine = {
     enable = lib.mkEnableOption "Icewine desktop environment";
@@ -35,6 +35,7 @@ in {
       description = "Existing user whose Home Manager configuration receives Icewine.";
     };
     handheld.enable = lib.mkEnableOption "handheld shell, controller routing and on-screen keyboard";
+    browser.enable = lib.mkEnableOption "Icewine's native Firefox browser" // { default = true; };
     steam.enable = lib.mkEnableOption "Steam (Gamescope) launcher and ordinary Steam entry hiding" // {
       default = cfg.handheld.enable;
     };
@@ -64,7 +65,7 @@ in {
       starship.git.enable = lib.mkEnableOption "Starship's default Git prompt modules" // { default = true; };
     };
     applications = {
-      browser = command "Browser command; supplied by browser.flatpak, or installed and specified by the host." (lib.optionals (cfg.browser.flatpak != null) [ "flatpak" "run" cfg.browser.flatpak ]);
+      browser = command "Browser command; supplied by Firefox, or specified by the host." (lib.optional cfg.browser.enable "firefox");
       terminal = command "Terminal command; supplied by the preset, or installed and specified by the host." (lib.optional (cfg.terminal.preset == "kitty") "kitty");
       terminalExecute = command "Terminal command prefix for running an application." (cfg.applications.terminal ++ [ "-e" ]);
       editor = command "Editor command used by compositor bindings." [ "nano" ];
@@ -89,6 +90,7 @@ in {
     ];
 
     programs.hyprland = { enable = true; withUWSM = true; };
+    programs.firefox.enable = lib.mkDefault cfg.browser.enable;
     security.pam.services.icewine = { };
     security.polkit.enable = true;
     services.pipewire = {
@@ -114,6 +116,16 @@ in {
     home-manager.users.${cfg.user} = {
       home.stateVersion = lib.mkDefault config.system.stateVersion;
       imports = [ ./home.nix ];
+      xdg.mimeApps = lib.mkIf cfg.browser.enable {
+        enable = true;
+        defaultApplications = lib.genAttrs [
+          "x-scheme-handler/http"
+          "x-scheme-handler/https"
+          "text/html"
+          "application/xhtml+xml"
+          "application/pdf"
+        ] (_: lib.mkDefault [ "firefox.desktop" ]);
+      };
     };
   };
 }
