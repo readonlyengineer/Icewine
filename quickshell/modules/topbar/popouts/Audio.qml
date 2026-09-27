@@ -37,7 +37,7 @@ Flickable {
 
         Text {
             text: "Audio"
-            color: Theme.Palette.primary
+            color: Theme.Palette.tertiary
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true

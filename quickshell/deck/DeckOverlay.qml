@@ -95,7 +95,7 @@ Scope {
             selected = 0
             return
         }
-        if ((entry.action === "terminal" || entry.action === "application") && workspace <= 0) {
+        if (entry.action === "application" && workspace <= 0) {
             inputError = "Cannot determine the launch workspace. Close and retry."
             return
         }
@@ -144,7 +144,11 @@ Scope {
             return
         }
         shell.handoff()
-        if (entry.action === "close") {
+        if (entry.action === "screenshot") {
+            Qt.callLater(() => Quickshell.execDetached([
+                "icewine-screenshot", "monitor", "eDP-1", "0", "1", "1"
+            ]))
+        } else if (entry.action === "close") {
             compositor.dispatch("hl.dsp.window.close()")
         } else if (entry.action === "fullscreen") {
             compositor.toggleFullscreen()

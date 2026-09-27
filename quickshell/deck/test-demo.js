@@ -6,7 +6,7 @@ function check(condition, message) {
 }
 
 const rootEntries = Menu.rootEntries
-check(rootEntries.map(x => x.label).join(",") === "Steam,Launcher,Terminal,Fullscreen,Close,Keyboard",
+check(rootEntries.map(x => x.label).join(",") === "Steam,Launcher,Screenshot,Fullscreen,Close,Keyboard",
     "Root actions stay available")
 const directions = [[0,-1], [1,-1], [1,0], [1,1], [0,1], [-1,1], [-1,0], [-1,-1]]
 const reachable = directions.map(([x,y]) => Menu.sector(x, y, rootEntries.length, 0))
@@ -15,14 +15,16 @@ check(new Set(reachable).size === rootEntries.length,
 check(rootEntries[Menu.sector(0, -1, rootEntries.length, 0)].label === "Steam", "Steam is up")
 const applications = count => Array.from({length: count}, (_, index) => ({name: "App " + index}))
 const filtered = Menu.buildPages([
-    { id: "steam" }, { id: "com.valvesoftware.Steam.desktop" }, { id: "kitty" },
+    { id: "steam" }, { id: "com.valvesoftware.Steam.desktop" },
     ...applications(8)
 ])
 assert.deepEqual(filtered["launcher-0"].map(entry => entry.application), applications(8),
     "Dedicated shortcuts are excluded before pagination")
 check(!filtered["launcher-1"], "Excluded shortcuts do not create an extra page")
 check(rootEntries.some(entry => entry.action === "steam")
-    && rootEntries.some(entry => entry.action === "terminal"), "Parent shortcuts remain")
+    && rootEntries.some(entry => entry.action === "screenshot"), "Parent shortcuts remain")
+check(Menu.buildPages([{id: "kitty"}])["launcher-0"][0].application.id === "kitty",
+    "Terminal remains available through the launcher")
 for (const count of [0, 8]) {
     const pages = Menu.buildPages(applications(count))
     check(pages["launcher-0"].length === count, count + " applications need no More")
@@ -74,12 +76,6 @@ check(!Menu.neutral(held), "Keep interception until stick release")
 Menu.controllerEvent(held, { action: "ui_right", pressed: false }, 3, 0)
 check(Menu.neutral(held), "Release barrier clears")
 
-check(Menu.launchExpression({ action: "terminal" }, 2).includes('workspace = "2"'),
-    "Pin terminal to opening workspace")
-check(Menu.launchExpression({ action: "terminal" }, 2).startsWith("hl.dsp.exec_cmd("),
-    "Build a native Hyprland dispatcher")
-check(Menu.launchExpression({ action: "terminal" }, 2).includes("uwsm app -- icewine-terminal"),
-    "Launch Kitty from the terminal action")
 check(Menu.launchExpression({ action: "steam" }, 2).includes("focus_or_start_gamescope()"),
     "Steam uses the same focus-or-launch action as Guide and the topbar")
 const appExpression = Menu.launchExpression({ action: "application" }, 3, {
@@ -93,6 +89,6 @@ check(appExpression.includes('workspace = "3"'), "Pin applications to the openin
 check(Menu.shellQuote("a'b") === "'a'\\''b'", "Shell-quote command values")
 check(Menu.launchExpression({ action: "close" }, 1) === null, "Reject non-launch actions")
 for (const invalid of [NaN, -1, 0, 1.5])
-    check(Menu.launchExpression({ action: "terminal" }, invalid) === null, "Reject invalid workspace")
+    check(Menu.launchExpression({ action: "steam" }, invalid) === null, "Reject invalid workspace")
 
 console.log("Icewine demo: menu, routing, parser, release and launch checks passed.")

@@ -2,7 +2,7 @@
 var rootEntries = [
     { label: "Steam", icon: "", action: "steam" },
     { label: "Launcher", icon: "󰀻", page: "launcher-0" },
-    { label: "Terminal", icon: "", action: "terminal" },
+    { label: "Screenshot", icon: "󰄀", action: "screenshot" },
     { label: "Fullscreen", icon: "󰊓", action: "fullscreen" },
     { label: "Close", icon: "󰅖", action: "close" },
     { label: "Keyboard", icon: "󰌌", action: "keyboard" }
@@ -10,7 +10,7 @@ var rootEntries = [
 
 function buildPages(applications) {
     applications = applications.filter(application =>
-        !["steam", "com.valvesoftware.Steam", "kitty"].includes(String(application.id || "").replace(/\.desktop$/, "")))
+        !["steam", "com.valvesoftware.Steam"].includes(String(application.id || "").replace(/\.desktop$/, "")))
     var pages = { root: rootEntries }
     var offset = 0
     var page = 0
@@ -87,8 +87,6 @@ function launchExpression(entry, workspace, applicationOptions) {
     var command = ""
     if (entry.action === "steam") {
         command = "hyprctl eval " + shellQuote('require("modules.Deck").focus_or_start_gamescope()')
-    } else if (entry.action === "terminal") {
-        command = "uwsm app -- icewine-terminal"
     } else if (entry.action === "application" && applicationOptions
             && applicationOptions.command.length && applicationOptions.workingDirectory) {
         command = "cd -- " + shellQuote(applicationOptions.workingDirectory)

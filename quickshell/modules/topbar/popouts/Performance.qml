@@ -33,7 +33,7 @@ Flickable {
 
         Text {
             text: "Performance"
-            color: Theme.Palette.secondary
+            color: Theme.Palette.caution
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true

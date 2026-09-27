@@ -126,7 +126,7 @@ Item {
 
             Text {
                 text: "Network"
-                color: Theme.Palette.secondary
+                color: Theme.Palette.success
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 15
                 font.bold: true
@@ -239,7 +239,7 @@ Item {
             Text {
                 width: parent.width
                 text: `Connect to ${root.passwordNetwork?.name ?? "network"}`
-                color: Theme.Palette.secondary
+                color: Theme.Palette.success
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 14
                 font.bold: true

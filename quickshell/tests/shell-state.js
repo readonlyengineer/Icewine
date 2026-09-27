@@ -107,7 +107,7 @@ assert.equal(raises, 1)
 const target = "/org/shadowblip/InputPlumber/devices/target/dbus0"
 const deck = controller("../deck/DeckOverlay.qml", {
     Menu, opened: true, draining: false, held: {}, acceptArmed: false,
-    captured: true, entries: [{action: "terminal"}], selected: 0,
+    captured: true, entries: [{action: "screenshot"}], selected: 0,
     workspace: 1, pendingEntry: null, eventTarget: target,
     sessionLocked: false, shell, inputError: "",
     Quickshell: {execDetached() {}},
@@ -149,13 +149,22 @@ deck.captured = true
 input("ui_accept", false)
 assert.equal(choices, 1, "Press before capture confirmation cannot select an action")
 
+const captures = []
+deck.Quickshell.execDetached = command => captures.push(Array.from(command))
+deck.activate({action: "screenshot"}, 0)
+assert.equal(captures.length, 0, "Dismiss the shell before capture")
+flush()
+assert.deepEqual(captures, [
+    ["icewine-screenshot", "monitor", "eDP-1", "0", "1", "1"]
+], "Capture the built-in panel immediately to both destinations")
+
 let launches = 0
 deck.activate = () => launches++
-deck.requestClose({action: "terminal"})
+deck.requestClose({action: "screenshot"})
 deck.opened = true // Reopening cancels the deferred action.
 flush()
 assert.equal(launches, 0)
-deck.requestClose({action: "terminal"})
+deck.requestClose({action: "screenshot"})
 deck.sessionLocked = true
 flush()
 assert.equal(launches, 0, "Lock cancels deferred launches")
