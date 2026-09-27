@@ -99,6 +99,20 @@ in {
 
 
     home-manager.users.${cfg.user} = {
+      systemd.user.services.icewine-controller-idle = lib.mkIf cfg.idle.enable {
+        Unit = {
+          Description = "Keep Icewine awake during controller activity";
+          PartOf = [ "graphical-session.target" ];
+          After = [ "graphical-session.target" ];
+        };
+        Service = {
+          ExecStart = "${pkgs.wljoywake}/bin/wljoywake -t 5";
+          Restart = "on-failure";
+          RestartSec = "2s";
+        };
+        Install.WantedBy = [ "graphical-session.target" ];
+      };
+
       systemd.user.services.icewine-inputplumber-hyprland = {
         Unit = {
           Description = "Steam Deck InputPlumber profile for Hyprland";
