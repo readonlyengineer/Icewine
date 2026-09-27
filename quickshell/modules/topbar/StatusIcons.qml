@@ -77,7 +77,7 @@ Rectangle {
         StatusButton {
             page: "performance"
             icon: "󰓅"
-            colour: Theme.Palette.secondary
+            colour: Theme.Palette.caution
             onActivated: root.popoutActivated("performance")
         }
 
@@ -91,7 +91,7 @@ Rectangle {
         StatusButton {
             page: "network"
             icon: root.wifiConnected ? "" : root.networkConnected ? "" : "󰯡"
-            colour: root.networkConnected ? Theme.Palette.secondary : Theme.Palette.muted
+            colour: root.networkConnected ? Theme.Palette.success : Theme.Palette.muted
             onActivated: root.popoutActivated("network")
         }
 
