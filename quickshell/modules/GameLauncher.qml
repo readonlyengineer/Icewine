@@ -155,10 +155,13 @@ Scope {
         root.steamSplashScreen = plan.monitor.name
         root.steamLaunching = true
         root.steamSplashVisible = true
-        // The stable collected scope is the duplicate guard after QML's
-        // bounded launch state expires; systemd rejects a second active unit.
+        // The stable service prevents duplicates after QML's launch timeout.
+        // Follow Gamescope's lifetime and clean up Steam when it exits;
+        // UWSM otherwise defaults services to ExitType=cgroup.
         root.pendingSteamCommand = [
-            "uwsm", "app", "-u", "icewine-steam-gamescope.scope", "--"
+            "uwsm", "app", "-t", "service",
+            "-u", "icewine-steam-gamescope.service",
+            "-p", "ExitType=main", "-p", "KillMode=control-group", "--"
         ].concat(plan.arguments)
         steamLaunchTimeout.restart()
         return JSON.stringify(plan, null, 2)

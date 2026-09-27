@@ -103,9 +103,11 @@ assert.equal(steamCommands.length, 0, "Gamescope waits for the splash's first fr
 assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).pending, true)
 steamRoot.startSteamProcess()
 assert.equal(steamCommands.length, 1, "The rendered splash starts exactly one session")
-assert.deepEqual(steamCommands[0].slice(0, 6),
-    ["uwsm", "app", "-u", "icewine-steam-gamescope.scope", "--", "gamescope"],
-    "A stable collected UWSM scope rejects a duplicate after the QML timeout")
+assert.deepEqual(steamCommands[0].slice(0, 12),
+    ["uwsm", "app", "-t", "service",
+        "-u", "icewine-steam-gamescope.service",
+        "-p", "ExitType=main", "-p", "KillMode=control-group", "--", "gamescope"],
+    "A stable UWSM service prevents duplicates and cleans up children when Gamescope exits")
 assert.equal(steamRoot.steamSplashVisible, true)
 assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).pending, true,
     "The placeholder reserves the launch position until handoff or launch timeout")

@@ -199,7 +199,9 @@ fi
     assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
     launches = (root / "launches").read_text().splitlines()
     assert len(launches) == 2 and all(
-        line.startswith("app -u icewine-steam-gamescope.scope -- gamescope ")
+        line.startswith("app -t service -u icewine-steam-gamescope.service "
+                        "-p ExitType=main -p KillMode=control-group "
+                        "-- gamescope ")
         for line in launches
     ), launches
     print("Steam launch, winter visuals, locker and SDDM adapter checks passed")
