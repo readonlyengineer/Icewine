@@ -5,39 +5,6 @@ whenever `services.icewine.enable` is enabled, including laptops and handhelds.
 The experimental upstream touch patches remain in `modules/handheld.nix` and
 apply only to handhelds. Host configurations do not carry the patches.
 
-## Dynamic resolution
-
-`dynamic-resolution.patch` targets Gamescope 3.16.28, upstream commit
-`fa0b4d3342078f01eadff0193e09c3b561f40c03`. It adds the opt-in
-`--dynamic-resolution` flag. With the Wayland backend, the initial output and
-every subsequent real output-size change set the nested dimensions and update
-each Xwayland headless-output mode through Gamescope's existing locked setter.
-It overrides explicit `-w/-h`; without the flag, fixed nested-size behaviour is
-unchanged.
-
-Icewine currently does not add the flag to its launcher. Validate it manually
-with, for example:
-
-```sh
-gamescope --backend wayland -f --expose-wayland --dynamic-resolution -- steam
-```
-
-Native Wayland support is intentionally best effort. Native output events take
-the same shared-dimension update path, but the patch sends no new xdg-shell
-configures because that would also resize shared surfaces; it also does not
-reconfigure layer-shell overlays. Clients may retain their buffer size or
-otherwise ignore a runtime change. This does not alter fit, fill, stretch or
-integer scaling: those continue to scale client content when it differs from
-the current nested/output dimensions.
-
-The nested Wayland configure path can update dimensions during continuous
-resizes, but identical dimensions do not commit a new Xwayland mode. Actual
-Xwayland mode delivery, native-client configure behaviour, docking, and game
-render-resolution choices require runtime/device validation. Refresh-rate,
-HDR, and VRR remain unchanged: resolution updates preserve each Xwayland
-output's committed refresh, while host refresh observation, HDR metadata, and
-adaptive-sync propagation remain separate backend/protocol work.
-
 ## Preserve keyboard focus state
 
 `preserve-keyboard-focus-state.patch` targets Gamescope 3.16.28, upstream commit
