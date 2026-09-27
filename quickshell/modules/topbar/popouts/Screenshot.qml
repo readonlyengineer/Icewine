@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import Quickshell
 import "ScreenshotModel.js" as ScreenshotModel
 import qs.theme as Theme
 
