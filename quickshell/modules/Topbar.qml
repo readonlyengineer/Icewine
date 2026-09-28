@@ -40,6 +40,7 @@ Scope {
     property string previousWindow: ""
     property int focusGeneration: 0
     property bool reportedRender: false
+    property bool oskVisible: false
 
     signal widgetDismissed()
     signal focusWidgetRequested(string screenName)
@@ -219,7 +220,7 @@ Scope {
 
             // Hidden means no input region, including at the top edge.
             mask: Region {
-                Region { item: panel.modal && !root.sessionLocked ? input : null }
+                Region { item: panel.modal && !root.oskVisible && !root.sessionLocked ? input : null }
                 Region { item: root.barVisible ? surface : null }
                 Region { item: launcher.visible ? launcher : null }
                 Region { item: statusPopout.visible ? statusPopout : null }
@@ -381,6 +382,7 @@ Scope {
 
     IpcHandler {
         target: "topbar"
+        function osk(visible: bool): void { root.oskVisible = visible }
         function press(): void { root.pressBar() }
         function release(): void { root.releaseBar() }
         function hide(): void { root.dismiss() }

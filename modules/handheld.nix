@@ -43,7 +43,7 @@ let
 
   icewineKeyboardToggle = pkgs.writeShellApplication {
     name = "icewine-keyboard-toggle";
-    runtimeInputs = [ pkgs.systemd ];
+    runtimeInputs = [ pkgs.systemd pkgs.quickshell ];
     text = ''
       systemctl --user start icewine-keyboard.service
 
@@ -54,6 +54,7 @@ let
       esac
 
       busctl --user --timeout=2 call sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0 SetVisible b "$visible"
+      ${pkgs.quickshell}/bin/qs ipc call topbar osk "$visible" || true
     '';
   };
 
