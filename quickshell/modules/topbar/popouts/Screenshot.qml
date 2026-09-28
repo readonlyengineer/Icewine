@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
-import "ScreenshotModel.js" as ScreenshotModel
 import qs.theme as Theme
 
 Item {
@@ -11,7 +10,6 @@ Item {
     required property var compositor
     readonly property Item initialFocus: actions.visible ? monitor : selectorList
     readonly property var monitors: compositor.getMonitors()
-    readonly property var windows: ScreenshotModel.windows(compositor.toplevels)
     property string view: "actions"
     readonly property bool delayed: delay.checked
     readonly property bool saveClipboard: clipboard.checked
@@ -28,13 +26,6 @@ Item {
             view = "monitors"
     }
 
-    function chooseWindow() {
-        if (windows.length === 1)
-            captureRequested("window", windows[0].stableId)
-        else
-            view = "windows"
-    }
-
     Item {
         id: header
         anchors { top: parent.top; left: parent.left; right: parent.right; margins: 12 }
@@ -42,7 +33,7 @@ Item {
 
         Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: root.view === "actions" ? "Screenshot" : root.view === "monitors" ? "Choose monitor" : "Choose window"
+            text: root.view === "actions" ? "Screenshot" : "Choose monitor"
             color: Theme.Palette.secondary
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
@@ -68,20 +59,14 @@ Item {
 
         ActionButton {
             id: monitor
-            width: (actions.width - actions.spacing * 2) / 3
+            width: (actions.width - actions.spacing) / 2
             text: "Monitor"
             onClicked: root.chooseMonitor()
         }
         ActionButton {
-            width: (actions.width - actions.spacing * 2) / 3
-            text: "Region"
+            width: (actions.width - actions.spacing) / 2
+            text: "Region/Window"
             onClicked: root.captureRequested("region", "")
-        }
-        ActionButton {
-            width: (actions.width - actions.spacing * 2) / 3
-            text: "Window"
-            enabled: root.windows.length > 0
-            onClicked: root.chooseWindow()
         }
     }
 
@@ -94,16 +79,13 @@ Item {
         spacing: 6
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        model: ScriptModel { values: root.view === "monitors" ? root.monitors : root.windows }
+        model: ScriptModel { values: root.monitors }
 
         delegate: ActionButton {
             required property var modelData
             width: selectorList.width
-            text: root.view === "monitors"
-                ? `${modelData.name} · ${modelData.description || "Monitor"}`
-                : `${modelData.title}${modelData.subtitle ? " · " + modelData.subtitle : ""}`
-            onClicked: root.captureRequested(root.view === "monitors" ? "monitor" : "window",
-                root.view === "monitors" ? modelData.name : modelData.stableId)
+            text: `${modelData.name} · ${modelData.description || "Monitor"}`
+            onClicked: root.captureRequested("monitor", modelData.name)
         }
     }
 
