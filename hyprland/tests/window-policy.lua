@@ -1,6 +1,7 @@
 -- Run: lua hyprland/tests/window-policy.lua hyprland/modules/WindowPolicy.lua
 local events, active, windows, workspaces, configured = {}, nil, {}, {}, nil
 local rules, closed, focuses = {}, nil, 0
+local fitted = {}
 hl = {
 	on = function(event, callback) events[event] = callback end,
 	window_rule = function(rule)
@@ -25,7 +26,10 @@ hl = {
 		},
 	},
 	dispatch = function(request)
-		if type(request) == "string" then
+		if request == "fit_into_view" then
+			assert(active and active.workspace.tiled_layout == "scrolling")
+			fitted[#fitted + 1] = active
+		elseif type(request) == "string" then
 			local width = assert(tonumber(request:match("^colresize (.+)$")))
 			active.size = { w = width * active.monitor.width }
 		elseif request.focus then
@@ -112,6 +116,8 @@ policy.toggle_fullscreen()
 moved.monitor, moved.size = wide, { w = wide.width }
 events["monitor.layout_changed"]()
 check(0.5, false)
+assert(#fitted == 1 and fitted[1] == moved,
+	"Expected one view adjustment of the resized active window")
 
 -- Adopt a user's explicit width/fullscreen choice, then move to a wide monitor.
 window(normal, 0.7, false)
