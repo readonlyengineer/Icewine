@@ -32,9 +32,12 @@ function buildPages(applications) {
     return pages
 }
 
-function inputRoute(gamescopeFocused, shellEngaged, sessionLocked, draining, streamReady) {
+function inputRoute(gamescopeFocused, shellEngaged, sessionLocked, draining, streamReady,
+                    oskVisible) {
     if (sessionLocked || shellEngaged || draining || (gamescopeFocused && !streamReady))
         return "overlay"
+    if (oskVisible)
+        return "desktop"
     return gamescopeFocused ? "game" : "desktop"
 }
 

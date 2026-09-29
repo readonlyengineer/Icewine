@@ -36,7 +36,8 @@ Scope {
     property string requestedRoute: "overlay"
     property string inputError: ""
     readonly property string wantedRoute: Menu.inputRoute(
-        gamescopeFocused, opened || shell.widgetEngaged, sessionLocked, draining, streamReady)
+        gamescopeFocused, opened || shell.widgetEngaged, sessionLocked, draining, streamReady,
+        shell.oskVisible)
     readonly property bool captured: appliedRoute === "overlay" && !gate.running && wantedRoute === "overlay"
 
     Bar.SteamShortcuts { id: steamShortcuts }

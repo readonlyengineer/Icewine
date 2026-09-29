@@ -42,6 +42,8 @@ check(Object.values(many).every(entries => entries.length <= 8), "Pages fit the 
 check(Menu.sector(1, 0, 0, 0) === 0, "Empty pages preserve selection")
 check(Menu.inputRoute(false, false, false, false, true) === "desktop", "Desktop mapping")
 check(Menu.inputRoute(true, false, false, false, true) === "game", "Focused game passthrough")
+check(Menu.inputRoute(true, false, false, false, true, true) === "desktop",
+    "Visible OSK uses desktop controller mapping over Gamescope")
 check(Menu.inputRoute(true, true, false, false, true) === "overlay", "Overlay wins over focus")
 check(Menu.inputRoute(false, false, true, false, true) === "overlay", "Lock captures input")
 check(Menu.inputRoute(false, false, false, true, true) === "overlay", "Hold capture until controller release")
