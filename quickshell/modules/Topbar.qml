@@ -41,6 +41,7 @@ Scope {
     property int focusGeneration: 0
     property bool reportedRender: false
     property bool oskVisible: false
+    property bool instantBarHide: false
 
     signal widgetDismissed()
     signal focusWidgetRequested(string screenName)
@@ -120,6 +121,12 @@ Scope {
     function handoff() {
         yieldFocus()
         dismiss()
+    }
+
+    function instantHandoff() {
+        instantBarHide = true
+        handoff()
+        Qt.callLater(() => instantBarHide = false)
     }
 
     function raiseMedia() {
@@ -330,8 +337,8 @@ Scope {
                             else if (root.hoveredScreen === panel.screen.name) root.hoveredScreen = ""
                         }
                     }
-                    Behavior on y { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                    Behavior on opacity { NumberAnimation { duration: 140 } }
+                    Behavior on y { NumberAnimation { duration: root.instantBarHide ? 0 : 160; easing.type: Easing.OutCubic } }
+                    Behavior on opacity { NumberAnimation { duration: root.instantBarHide ? 0 : 140 } }
                 }
 
                 Bar.Launcher {
@@ -366,6 +373,7 @@ Scope {
                     onEngageRequested: root.engageWidget()
                     onDismissRequested: root.dismissWidget()
                     onHandoffRequested: root.handoff()
+                    onInstantHandoffRequested: root.instantHandoff()
                     onMediaRequested: root.raiseMedia()
                 }
             }
