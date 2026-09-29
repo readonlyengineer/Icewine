@@ -19,8 +19,9 @@ Rectangle {
     readonly property color accent: notification?.urgency === NotificationUrgency.Critical
         ? Theme.Palette.error : notification?.urgency === NotificationUrgency.Normal
             ? Theme.Palette.secondary : Theme.Palette.muted
-    readonly property string iconSource: notification?.image
-        || Quickshell.iconPath(notification?.appIcon ?? "", true)
+    readonly property string iconSource: notification?.appIcon === "battery-low"
+        ? Quickshell.iconPath(notification.appIcon, true)
+        : notification?.image || Quickshell.iconPath(notification?.appIcon ?? "", true)
 
     signal dismissRequested()
     signal sourceRequested(string address)
@@ -146,7 +147,7 @@ Rectangle {
         }
 
         contentItem: Text {
-            text: "↗"
+            text: "󰅂"
             color: Theme.Palette.foreground
             font.pixelSize: 18
             horizontalAlignment: Text.AlignHCenter
