@@ -116,7 +116,7 @@ in {
 
     fonts.packages = with pkgs; [ dejavu_fonts nerd-fonts.jetbrains-mono noto-fonts-color-emoji rubik ];
     environment.systemPackages = (with pkgs; [
-      quickshell hyprshutdown hyprpolkitagent glib jq nano procps systemd
+      quickshell hyprshutdown hyprpolkitagent glib jq nano systemd
       grim slurp wl-clipboard libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl playerctl
       bluetui impala wiremix btop xdg-utils gamescope
