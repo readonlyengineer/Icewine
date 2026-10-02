@@ -6,3 +6,74 @@ bold = true
 [mode.normal_alt]
 fg = "#@highlight@"
 bg = "#@highlightDark@"
+
+[mgr]
+cwd = { fg = "#@highlight@" }
+
+[tabs]
+active = { fg = "#@background@", bg = "#@highlight@", bold = true }
+inactive = { fg = "#@highlight@", bg = "#@surface@" }
+
+[which]
+border = { fg = "#@highlight@" }
+
+[confirm]
+border = { fg = "#@highlight@" }
+title = { fg = "#@highlight@" }
+
+[spot]
+border = { fg = "#@highlight@" }
+title = { fg = "#@highlight@" }
+tbl_col = { fg = "#@highlight@" }
+
+[pick]
+border = { fg = "#@highlight@" }
+
+[input]
+border = { fg = "#@highlight@" }
+
+[cmp]
+border = { fg = "#@highlight@" }
+
+[tasks]
+border = { fg = "#@highlight@" }
+
+[help]
+border = { fg = "#@highlight@" }
+
+[filetype]
+rules = [
+  { mime = "**/image/*", fg = "#@caution@" },
+  { mime = "**/{audio,video}/*", fg = "#@secondaryHighlight@" },
+  { mime = "**/application/{zip,rar,7z*,tar,gzip,xz,zstd,bzip*,lzma,compress,archive,cpio,arj,xar,ms-cab*}", fg = "#@error@" },
+  { mime = "**/application/{pdf,doc,rtf}", fg = "#@info@" },
+  { mime = "vfs/{absent,stale}", fg = "#@muted@" },
+  { url = "*", is = "orphan", bg = "#@error@" },
+  { url = "*", is = "exec", fg = "#@success@" },
+  { url = "*", is = "dummy", bg = "#@error@" },
+  { url = "*/", is = "dummy", bg = "#@error@" },
+  { url = "*/", fg = "#@highlight@" },
+]
+
+[icon]
+# Preserve the special folder glyphs while following Icewine's accent.
+prepend_dirs = [
+  { name = ".config", text = "", fg = "#@highlight@" },
+  { name = ".git", text = "", fg = "#@highlight@" },
+  { name = ".github", text = "", fg = "#@highlight@" },
+  { name = ".npm", text = "", fg = "#@highlight@" },
+  { name = "Desktop", text = "", fg = "#@highlight@" },
+  { name = "Development", text = "", fg = "#@highlight@" },
+  { name = "Documents", text = "", fg = "#@highlight@" },
+  { name = "Downloads", text = "", fg = "#@highlight@" },
+  { name = "Library", text = "", fg = "#@highlight@" },
+  { name = "Movies", text = "", fg = "#@highlight@" },
+  { name = "Music", text = "", fg = "#@highlight@" },
+  { name = "Pictures", text = "", fg = "#@highlight@" },
+  { name = "Public", text = "", fg = "#@highlight@" },
+  { name = "Videos", text = "", fg = "#@highlight@" },
+]
+prepend_conds = [
+  { if = "dir & !link & !dummy & hovered", text = "", fg = "#@highlight@" },
+  { if = "dir & !link & !dummy", text = "", fg = "#@highlight@" },
+]
