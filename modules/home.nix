@@ -23,6 +23,7 @@ let
     name = "icewine-theme";
     runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd pkgs.glib ];
     text = ''
+      export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_ASSETS=${themeAssets}/share/icewine
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
