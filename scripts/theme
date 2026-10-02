@@ -275,6 +275,41 @@ def install_gtk_theme(config, theme_id):
     atomic_link(path, target)
 
 
+def install_flatpak_theme(state, theme_id, files):
+    flatpak = shutil.which("flatpak")
+    if not flatpak:
+        return
+    try:
+        arch = subprocess.run([flatpak, "--default-arch"], check=True, capture_output=True,
+                              text=True, timeout=10).stdout.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]+", arch):
+            raise ValueError("invalid Flatpak architecture")
+        # Native architecture only; add runtime-architecture discovery if needed.
+        root = xdg("XDG_DATA_HOME", ".local/share") / "flatpak/extension"
+        path = root / ("org.gtk.Gtk3theme.Icewine-" + theme_id) / arch / "3.22/gtk.css"
+        if any(part.is_symlink() for part in (path, *path.parents)):
+            raise ValueError(f"preserving symlinked extension path: {path}")
+        record = state / "flatpak-themes" / arch / (theme_id + ".sha256")
+        contents = files["gtk3-theme.css"]
+        digest = hashlib.sha256(contents.encode("utf-8")).hexdigest()
+        if path.exists():
+            if not path.is_file():
+                raise ValueError(f"preserving non-file extension: {path}")
+            current = hashlib.sha256(path.read_bytes()).hexdigest()
+            previous = record.read_text(encoding="utf-8").strip() if record.is_file() else None
+            if current not in (digest, previous):
+                raise ValueError(f"preserving edited extension: {path}")
+            if current == digest:
+                atomic_text(record, digest + "\n")
+                return
+        atomic_text(path, contents)
+        atomic_text(record, digest + "\n")
+        print(f"installed Flatpak GTK theme: {path}")
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        # Optional Flatpak integration must not prevent the desktop shell starting.
+        print(f"pending Flatpak GTK theme: {error}", file=sys.stderr)
+
+
 def sync_gtk_settings(theme_id, appearance):
     if not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
         print("Pending: GTK settings will be published at next session login.", file=sys.stderr)
@@ -383,6 +418,7 @@ def main(argv):
     if command in {"init", "reset", "theme", "transparency"}:
         install_links(config, state, command == "reset", app)
     if gtk_enabled and app in (None, "gtk"):
+        install_flatpak_theme(state, theme_id, files)
         appearance = json.loads(themes[theme_id].read_text(encoding="utf-8"))["appearance"]
         sync_gtk_settings(theme_id, appearance)
     print(f"Effective theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else ""))

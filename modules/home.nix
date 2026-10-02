@@ -21,7 +21,8 @@ let
   };
   themeCli = pkgs.writeShellApplication {
     name = "icewine-theme";
-    runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd pkgs.glib ];
+    runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd pkgs.glib ]
+      ++ lib.optional osConfig.services.flatpak.enable pkgs.flatpak;
     text = ''
       export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}

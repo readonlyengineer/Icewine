@@ -135,9 +135,20 @@ shared GTK and portal appearance; no browser profile is changed. Select
 Icewine publishes a named GTK3 theme under `$XDG_DATA_HOME/themes` and updates
 `org.gnome.desktop.interface` GTK theme and light/dark settings using `gsettings`.
 The Settings portal must use a backend that exposes these settings (the NixOS
-module selects GTK). Flatpak browsers need read-only access to the GTK config,
-Icewine's generated files and the user themes directory. Browser colour mapping
-remains browser-controlled; web content and privacy preferences are unchanged.
+module selects GTK). When `flatpak` is available, Icewine also publishes the same
+GTK3 CSS as a local Flatpak theme extension at
+`$XDG_DATA_HOME/flatpak/extension/org.gtk.Gtk3theme.Icewine-THEME/ARCH/3.22/gtk.css`.
+This uses Flatpak's documented externally managed ("unmaintained") extension
+mechanism: no remote, per-app copies or host-theme filesystem grants are needed.
+Compatible GTK3 runtimes discover it when apps launch; restart browsers after a
+theme change. Native architecture is supported; GTK4 and Qt are outside this
+extension's scope. Theme changes, login, `icewine init gtk`, and full/GTK resets
+refresh the extension. Edited extension files and symlinked paths are preserved
+and reported, including on reset; ownership hashes are saved under
+`$XDG_STATE_HOME/icewine/flatpak-themes/`. Extension failures are reported without
+blocking desktop startup. If Flatpak is installed later, run `icewine init gtk`.
+Browser colour mapping remains browser-controlled; web content and privacy
+preferences are unchanged.
 Explicit Home Manager Fastfetch, Starship and Yazi settings retain their own
 config files; Icewine skips those paths when applying or resetting a theme.
 Icewine ships JSON palette data and app-native templates in `theme/assets`.
