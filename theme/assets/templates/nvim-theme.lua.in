@@ -1,0 +1,14 @@
+local theme = "@themeId@"
+if theme == "dracula" then
+  require("dracula").setup({ transparent_bg = true })
+  vim.cmd.colorscheme("dracula")
+else
+  require("tokyonight").setup({
+    style = "night",
+    transparent = true,
+    styles = { sidebars = "transparent", floats = "transparent" },
+  })
+  vim.cmd.colorscheme("tokyonight")
+end
+vim.api.nvim_set_hl(0, "NormalFloat", { bg = "NONE" })
+vim.api.nvim_set_hl(0, "FloatBorder", { fg = "#@highlightDark@", bg = "NONE" })

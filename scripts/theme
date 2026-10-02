@@ -36,6 +36,7 @@ TEMPLATES = {
     "Palette.qml": "Palette.qml.in",
     "Theme.lua": "Theme.lua.in",
     "kitty.conf": "kitty.conf.in",
+    "nvim-theme.lua": "nvim-theme.lua.in",
     "kitty-base.conf": "kitty-base.conf",
     "gtk.css": "gtk.css.in",
     "gtk-settings.ini": "gtk-settings.ini.in",
@@ -108,6 +109,7 @@ def render_theme(assets, palette_file):
     if not isinstance(palette, dict) or not all(isinstance(value, str) for value in palette.values()):
         raise ValueError(f"invalid theme data: {palette_file}")
     values = dict(palette)
+    values["themeId"] = palette_file.stem
     for key in ("highlightRgb", "mutedRgb"):
         values[key.removesuffix("Rgb") + "Sgr"] = values[key].replace(", ", ";")
     git_enabled = os.environ.get("ICEWINE_THEME_GIT_ENABLE", "true") == "true"
@@ -255,7 +257,7 @@ def reload_session():
     else:
         pending.append("Icewine shell at login")
     print("Applied: persisted selection and linked theme files.")
-    print("Restart needed: GTK and Flatpak apps, browsers, Kitty, Yazi, Fastfetch, and new shells.")
+    print("Restart needed: GTK and Flatpak apps, browsers, Kitty, Neovim, Yazi, Fastfetch, and new shells.")
     if pending:
         print("Pending: " + ", ".join(pending), file=sys.stderr)
     return bool(pending) and bool(os.environ.get("WAYLAND_DISPLAY"))

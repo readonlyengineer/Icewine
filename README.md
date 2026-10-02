@@ -112,7 +112,7 @@ overrides the CLI choice; otherwise the CLI choice wins, then Tokyo Night.
 the CLI choice. It leaves the separately selected wallpaper alone. Theme
 changes update the generated palette and report live reload failures and
 which applications need a restart. GTK applications, browsers, Kitty, Yazi,
-Fastfetch and new shells use the new theme when restarted; an active Hyprland
+Fastfetch, Neovim and new shells use the new theme when restarted; an active Hyprland
 and Quickshell session is refreshed where available. Browser chrome uses
 shared GTK and portal appearance; no browser profile is changed.
 Explicit Home Manager Fastfetch, Starship and Yazi settings retain their own

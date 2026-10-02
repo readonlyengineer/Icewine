@@ -65,6 +65,8 @@ with tempfile.TemporaryDirectory() as temporary:
     migration = list((state / "icewine").glob("migration-*/quickshell/theme/Palette.qml"))
     assert len(migration) == 1 and os.readlink(migration[0]) == legacy_target
     assert (config / "icewine/current").is_symlink()
+    nvim_theme = config / "icewine/current/nvim-theme.lua"
+    assert 'local theme = "tokyo-night"' in nvim_theme.read_text()
     fastfetch = json.loads((config / "icewine/current/fastfetch.jsonc").read_text())
     assert not any(item.get("key", "").endswith("Nixpkgs") for item in fastfetch["modules"] if isinstance(item, dict))
     assert tomllib.loads((config / "icewine/current/starship.toml").read_text())["git_branch"]["disabled"] is False
@@ -92,6 +94,7 @@ with tempfile.TemporaryDirectory() as temporary:
     result = run("theme", "dracula")
     assert result.returncode == 0, result.stderr
     assert (state / "icewine/theme").read_text() == "dracula\n"
+    assert 'local theme = "dracula"' in nvim_theme.read_text()
     assert 'primary: "#bd93f9"' in legacy.read_text()
     assert unrelated.is_symlink() and os.readlink(unrelated) == "/nix/store/" + "b" * 32 + "-user-css"
     assert edited.read_text() == "user edit\n"
@@ -111,6 +114,7 @@ with tempfile.TemporaryDirectory() as temporary:
     result = run("theme", "tokyo-night", policy="dracula")
     assert result.returncode == 0, result.stderr
     assert "Nix policy overrides CLI selection" in result.stdout
+    assert 'local theme = "dracula"' in nvim_theme.read_text()
     assert (state / "icewine/theme").read_text() == "tokyo-night\n"
     assert 'primary: "#bd93f9"' in legacy.read_text()
 
