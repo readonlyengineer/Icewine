@@ -2,6 +2,8 @@
 """Manage only Icewine's user-owned theme files and selection."""
 
 import os
+import hashlib
+import json
 import re
 import secrets
 import shutil
@@ -19,17 +21,38 @@ OWNED = {
     "gtk-4.0/settings.ini": "gtk-settings.ini",
     "gtk-4.0/gtk.css": "gtk.css",
     "yazi/theme.toml": "yazi-theme.toml",
+    "yazi/keymap.toml": "yazi-keymap.toml",
     "fastfetch/config.jsonc": "fastfetch.jsonc",
     "starship.toml": "starship.toml",
 }
-REQUIRED = set(OWNED.values()) | {"Theme.lua", "kitty.conf", "ls-colors.sh"}
+APPS = {
+    "quickshell": ("quickshell/theme/Palette.qml",),
+    "gtk": tuple(relative for relative in OWNED if relative.startswith("gtk-")),
+    "yazi": ("yazi/theme.toml", "yazi/keymap.toml"),
+    "fastfetch": ("fastfetch/config.jsonc",),
+    "starship": ("starship.toml",),
+}
+TEMPLATES = {
+    "Palette.qml": "Palette.qml.in",
+    "Theme.lua": "Theme.lua.in",
+    "kitty.conf": "kitty.conf.in",
+    "kitty-base.conf": "kitty-base.conf",
+    "gtk.css": "gtk.css.in",
+    "gtk-settings.ini": "gtk-settings.ini.in",
+    "yazi-theme.toml": "yazi-theme.toml.in",
+    "yazi-keymap.toml": "yazi-keymap.toml",
+    "fastfetch.jsonc": "fastfetch.jsonc.in",
+    "starship.toml": "starship.toml.in",
+    "ls-colors.sh": "ls-colors.sh.in",
+}
 LEGACY_MANAGED = set(OWNED) - {"gtk-4.0/gtk.css"}
 STORE_DIR = Path("/nix/store")
 
 
-def owned():
+def owned(app=None):
     skipped = set(filter(None, os.environ.get("ICEWINE_THEME_SKIP", "").split(":")))
-    return {relative: name for relative, name in OWNED.items() if relative not in skipped}
+    selected = APPS[app] if app else OWNED
+    return {relative: OWNED[relative] for relative in selected if relative not in skipped}
 
 
 def xdg(name, fallback):
@@ -62,13 +85,50 @@ def atomic_link(path, target):
 
 
 def installed(assets):
-    if not assets.is_dir():
+    themes = assets / "themes"
+    if not themes.is_dir() or not (assets / "templates").is_dir():
         raise ValueError(f"theme assets are unavailable: {assets}")
     return {
-        item.name: item for item in assets.iterdir()
-        if item.is_dir() and re.fullmatch(r"[a-z0-9][a-z0-9-]*", item.name)
-        and all((item / name).is_file() for name in REQUIRED)
+        item.stem: item for item in themes.glob("*.json")
+        if re.fullmatch(r"[a-z0-9][a-z0-9-]*", item.stem)
     }
+
+
+def render(source, values):
+    def replace(match):
+        key = match.group(1)
+        if key not in values:
+            raise ValueError(f"unknown template value: {key}")
+        return values[key]
+    return re.sub(r"@([A-Za-z][A-Za-z0-9]*)@", replace, source)
+
+
+def render_theme(assets, palette_file):
+    palette = json.loads(palette_file.read_text(encoding="utf-8"))
+    if not isinstance(palette, dict) or not all(isinstance(value, str) for value in palette.values()):
+        raise ValueError(f"invalid theme data: {palette_file}")
+    values = dict(palette)
+    for key in ("highlightRgb", "mutedRgb"):
+        values[key.removesuffix("Rgb") + "Sgr"] = values[key].replace(", ", ";")
+    git_enabled = os.environ.get("ICEWINE_THEME_GIT_ENABLE", "true") == "true"
+    values["gitFormat"] = "$git_branch$git_commit$git_state$git_metrics$git_status" if git_enabled else ""
+    values["gitDisabled"] = "false" if git_enabled else "true"
+    templates = assets / "templates"
+    last_modified = os.environ.get("ICEWINE_NIXPKGS_LAST_MODIFIED")
+    if last_modified is not None and not re.fullmatch(r"[0-9]+", last_modified):
+        raise ValueError("invalid Nixpkgs timestamp")
+    kernel = "kernel-nix.sh" if last_modified is not None else "kernel.sh"
+    values["kernelCommandJson"] = json.dumps((templates / kernel).read_text(encoding="utf-8"))
+    values["nixpkgsRow"] = ""
+    if last_modified is not None:
+        values["nixpkgsLastModified"] = last_modified
+        age_command = render((templates / "nixpkgs-age.sh.in").read_text(encoding="utf-8"), values)
+        values["nixpkgsCommandJson"] = json.dumps(age_command)
+        values["nixpkgsRow"] = render((templates / "fastfetch-nixpkgs-row.json.in").read_text(encoding="utf-8"), values)
+    files = {name: render((templates / template).read_text(encoding="utf-8"), values)
+             for name, template in TEMPLATES.items()}
+    json.loads(files["fastfetch.jsonc"])
+    return files
 
 
 def selection(state):
@@ -91,11 +151,32 @@ def effective(state, themes):
     raise AssertionError("unreachable")
 
 
-def publish(config, theme):
+def publish(config, files):
     current = config / "icewine/current"
     if current.exists() and not current.is_symlink():
         raise ValueError(f"refusing to replace non-link: {current}")
-    atomic_link(current, theme)
+    root = config / "icewine/rendered"
+    root.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256("".join(f"{name}\0{files[name]}\0" for name in sorted(files)).encode()).hexdigest()
+    destination = root / digest
+    if not destination.exists():
+        temporary = Path(tempfile.mkdtemp(prefix=".render-", dir=root))
+        try:
+            for name, contents in files.items():
+                (temporary / name).write_text(contents, encoding="utf-8")
+                (temporary / name).chmod(0o444)
+            try:
+                temporary.rename(destination)
+            except FileExistsError:
+                pass
+        finally:
+            if temporary.exists():
+                shutil.rmtree(temporary)
+    if not destination.is_dir() or any((destination / name).read_text(encoding="utf-8") != contents
+                                        for name, contents in files.items()):
+        raise ValueError(f"rendered theme files were modified: {destination}")
+    # Old content-addressed generations remain recoverable; prune only with a dedicated lifecycle policy.
+    atomic_link(current, destination)
 
 
 def managed_link(path, config):
@@ -113,12 +194,12 @@ def managed_link(path, config):
             and store_path.parts[1:] == relative.parts)
 
 
-def install_links(config, state, replace):
+def install_links(config, state, replace, app=None):
     if not replace:
-        migration = [config / relative for relative in owned()
+        migration = [config / relative for relative in owned(app)
                      if managed_link(config / relative, config)]
         backup_owned(config, state, migration, "migration-")
-    for relative, name in owned().items():
+    for relative, name in owned(app).items():
         path = config / relative
         target = config / "icewine/current" / name
         if path.is_symlink() and os.readlink(path) == str(target):
@@ -182,13 +263,16 @@ def reload_session():
 
 def main(argv):
     if not argv or argv[0] not in {"init", "reset", "theme", "apply"}:
-        raise ValueError("Usage: icewine {init|reset|theme [THEME_ID]}")
+        raise ValueError("Usage: icewine {init [APP]|reset [APP]|theme [THEME_ID]}")
     command, *args = argv
-    if len(args) > (1 if command == "theme" else 0):
+    if len(args) > (0 if command == "apply" else 1):
         raise ValueError("unexpected arguments")
+    app = args[0] if command in {"init", "reset"} and args else None
+    if app and app not in APPS:
+        raise ValueError(f"unsupported app: {app}; choose {', '.join(APPS)}")
     config = xdg("XDG_CONFIG_HOME", ".config")
     state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
-    assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine/themes"))
+    assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine"))
     themes = installed(assets)
     if DEFAULT not in themes:
         raise ValueError("Tokyo Night assets are missing")
@@ -196,6 +280,7 @@ def main(argv):
         theme_id, policy = effective(state, themes)
         print("Installed: " + ", ".join(sorted(themes)))
         print(f"Effective: {theme_id}" + (" (Nix policy)" if policy else ""))
+        print("Apps: " + ", ".join(APPS))
         return 0
     if command == "theme":
         requested = args[0]
@@ -204,12 +289,15 @@ def main(argv):
         atomic_text(state / "theme", requested + "\n")
     elif command == "reset":
         state.mkdir(parents=True, exist_ok=True)
-        backup_owned(config, state)
-        (state / "theme").unlink(missing_ok=True)
+        backup_owned(config, state, [config / relative for relative in owned(app)
+                                     if (config / relative).exists() or (config / relative).is_symlink()])
+        if app is None:
+            (state / "theme").unlink(missing_ok=True)
     theme_id, policy = effective(state, themes)
-    publish(config, themes[theme_id])
+    files = render_theme(assets, themes[theme_id])
+    publish(config, files)
     if command in {"init", "reset", "theme"}:
-        install_links(config, state, command == "reset")
+        install_links(config, state, command == "reset", app)
     print(f"Effective theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else ""))
     if command in {"theme", "reset", "apply"}:
         return int(reload_session())

@@ -1,11 +1,11 @@
 { runCommand, writeText }:
 let
-  palette = import ../theme/palette.nix;
+  palette = builtins.fromJSON (builtins.readFile ../theme/assets/themes/tokyo-night.json);
   paletteQml = writeText "icewine-palette.qml" (
     builtins.replaceStrings
       (map (name: "@${name}@") (builtins.attrNames palette))
       (builtins.attrValues palette)
-      (builtins.readFile ../quickshell/theme/Palette.qml.in)
+      (builtins.readFile ../theme/assets/templates/Palette.qml.in)
   );
 in
 runCommand "icewine-sddm-theme" { } ''

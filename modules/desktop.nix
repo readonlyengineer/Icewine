@@ -39,13 +39,6 @@ in {
       ffmpegthumbnailer
       _7zz
     ];
-    keymap.mgr.prepend_keymap = [
-      {
-        on = "M";
-        run = "plugin mount";
-        desc = "Mount/unmount removable drives (mount.yazi)";
-      }
-    ];
     plugins.mount = pkgs.yaziPlugins.mount;
   };
   services.hypridle = lib.mkIf cfg.idle.enable {

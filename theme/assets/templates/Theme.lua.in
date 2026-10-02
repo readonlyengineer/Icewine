@@ -1,0 +1,4 @@
+hl.config({ general = { col = {
+  active_border = { colors = { "rgba(@highlight@ee)", "rgba(@secondaryHighlight@ee)" }, angle = 45 },
+  inactive_border = "rgba(@background@aa)",
+} } })

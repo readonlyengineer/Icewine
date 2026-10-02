@@ -97,6 +97,10 @@ there is no saved selection; the old Nix-store-backed default is not migrated.
 replaces recognized old Home Manager links. It preserves user-edited files.
 Recognized links are backed up under `$XDG_STATE_HOME/icewine/migration-*`;
 unrecognized symlinks remain untouched and are reported as conflicts.
+`icewine init APP` installs missing files for one of `quickshell`, `gtk`,
+`yazi`, `fastfetch`, or `starship`. `icewine reset APP` backs up and refreshes
+only that app's files without clearing the selected theme; plain `reset`
+restores every Icewine-owned file and clears the CLI selection.
 `icewine theme` lists the installed themes and effective selection;
 `icewine theme tokyo-night` and `icewine theme dracula` save a choice under
 `$XDG_STATE_HOME/icewine/theme`. On NixOS, `services.icewine.theme` accepts
@@ -113,6 +117,10 @@ and Quickshell session is refreshed where available. Browser chrome uses
 shared GTK and portal appearance; no browser profile is changed.
 Explicit Home Manager Fastfetch, Starship and Yazi settings retain their own
 config files; Icewine skips those paths when applying or resetting a theme.
+Icewine ships JSON palette data and app-native templates in `theme/assets`.
+The CLI renders them into `$XDG_CONFIG_HOME/icewine/rendered/`; Nix packages
+those source files and supplies optional policy/host metadata. On non-Nix
+Linux, Fastfetch uses a generic kernel report and omits the Nixpkgs age row.
 
 ### Steam
 

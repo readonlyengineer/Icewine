@@ -10,7 +10,7 @@
       imports = [ home-manager.nixosModules.home-manager ./modules/default.nix ];
       home-manager.extraSpecialArgs.nixpkgsLastModified = nixpkgs.lastModified or 0;
     };
-    lib.palette = import ./theme/palette.nix;
+    lib.palette = builtins.fromJSON (builtins.readFile ./theme/assets/themes/tokyo-night.json);
     checks.x86_64-linux = import ./tests/checks.nix { inherit self nixpkgs; };
   };
 }

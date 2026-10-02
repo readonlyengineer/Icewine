@@ -1,0 +1,34 @@
+command_timeout = 100
+format = "$time$directory@gitFormat@$cmd_duration$character"
+add_newline = true
+
+[git_branch]
+disabled = @gitDisabled@
+[git_commit]
+disabled = @gitDisabled@
+[git_state]
+disabled = @gitDisabled@
+[git_status]
+disabled = @gitDisabled@
+[git_metrics]
+disabled = true
+
+[directory]
+truncation_length = 3
+truncate_to_repo = false
+style = "bold #@highlight@"
+
+[cmd_duration]
+min_time = 2000
+style = "bold #@muted@"
+format = "[took $duration ]($style)"
+
+[time]
+disabled = false
+time_format = "%I:%M:%S %p"
+style = "bold #@muted@"
+format = "[$time]($style) "
+
+[character]
+success_symbol = "[⮐](bold #@highlight@)\n[➜](bold #@highlight@)"
+error_symbol = "[⮐](bold #@error@)\n[➜](bold #@error@)"

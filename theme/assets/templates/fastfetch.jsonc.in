@@ -1,0 +1,31 @@
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/master/doc/json_schema.json",
+  "logo": {
+    "type": "auto",
+    "color": { "1": "#@highlight@", "2": "#@secondaryHighlight@" },
+    "padding": { "top": 1, "right": 3 }
+  },
+  "display": { "separator": "   ", "key": { "width": 20 } },
+  "modules": [
+    "break",
+    { "type": "custom", "format": "{#38;2;@highlightSgr@}󰟀   System{#}" },
+    { "type": "os", "key": "├─   OS", "keyColor": "#@muted@" },
+    { "type": "host", "key": "├─ 󰌢  Host", "keyColor": "#@muted@" },
+    { "type": "command", "key": "├─ 󰌽  Kernel", "keyColor": "#@muted@", "shell": "/bin/sh", "text": @kernelCommandJson@ },
+    @nixpkgsRow@
+    { "type": "uptime", "key": "└─ 󰔛  Uptime", "keyColor": "#@muted@" },
+    "break",
+    { "type": "custom", "format": "{#38;2;@highlightSgr@}󰢮   Hardware{#}" },
+    { "type": "cpu", "key": "├─ 󰍛  CPU", "keyColor": "#@muted@", "temp": { "green": 70, "yellow": 85 }, "format": "{name}{?temperature} · {temperature}{?}" },
+    { "type": "memory", "key": "├─ 󰘚  Memory", "keyColor": "#@muted@" },
+    { "type": "swap", "key": "├─ 󰓡  Swap", "keyColor": "#@muted@" },
+    { "type": "disk", "key": "├─ 󰋊  Disk", "keyColor": "#@muted@" },
+    { "type": "display", "key": "├─ 󰍹  Display(s)", "keyColor": "#@muted@", "format": "{name} · {width}x{height} @ {refresh-rate}Hz" },
+    { "type": "battery", "key": "└─ 󰂄  Battery", "keyColor": "#@muted@" },
+    "break",
+    { "type": "custom", "format": "{#38;2;@highlightSgr@}󰖟   Network{#}" },
+    { "type": "localip", "key": "├─ 󰩠  Local IP", "keyColor": "#@muted@" },
+    { "type": "wifi", "key": "└─ 󰖩  WiFi", "keyColor": "#@muted@", "format": "{ssid} ({signal-quality})" },
+    "break"
+  ]
+}

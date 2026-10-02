@@ -1,0 +1,8 @@
+[mode.normal_main]
+fg = "#@highlight@"
+bg = "#@highlightDark@"
+bold = true
+
+[mode.normal_alt]
+fg = "#@highlight@"
+bg = "#@highlightDark@"

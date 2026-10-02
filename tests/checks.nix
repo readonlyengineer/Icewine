@@ -86,7 +86,7 @@ in {
     lua hyprland/tests/workspace-navigation.lua hyprland/modules/Binds.lua
     lua hyprland/tests/steam.lua
     lua hyprland/tests/window-policy.lua hyprland/modules/WindowPolicy.lua
-    python3 tests/theme-cli.py scripts/theme scripts/icewine
+    python3 tests/theme-cli.py scripts/theme scripts/icewine theme/assets
     touch "$out"
   '';
   wallpaper = pkgs.runCommand "icewine-wallpaper-checks" {

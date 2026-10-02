@@ -1,14 +1,12 @@
 { config, lib, pkgs, osConfig, nixpkgsLastModified ? 0, ... }:
 let
   cfg = osConfig.services.icewine;
-  themeAssets = import ../theme/bundle.nix {
-    inherit pkgs lib nixpkgsLastModified;
-    gitEnable = cfg.shell.starship.git.enable;
-  };
+  themeAssets = import ../theme/bundle.nix { inherit pkgs; };
   hostThemeFiles =
     lib.optional (config.programs.fastfetch.settings != { }) "fastfetch/config.jsonc"
     ++ lib.optional (config.programs.starship.settings != { }) "starship.toml"
-    ++ lib.optional (config.programs.yazi.theme != { }) "yazi/theme.toml";
+    ++ lib.optional (config.programs.yazi.theme != { }) "yazi/theme.toml"
+    ++ lib.optional (config.programs.yazi.keymap != { }) "yazi/keymap.toml";
   quickshell = pkgs.quickshell.overrideAttrs (old: {
     buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
@@ -25,9 +23,11 @@ let
     name = "icewine-theme";
     runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd ];
     text = ''
-      export ICEWINE_THEME_ASSETS=${themeAssets}/share/icewine/themes
+      export ICEWINE_THEME_ASSETS=${themeAssets}/share/icewine
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" hostThemeFiles)}
+      export ICEWINE_THEME_GIT_ENABLE=${if cfg.shell.starship.git.enable then "true" else "false"}
+      export ICEWINE_NIXPKGS_LAST_MODIFIED=${toString nixpkgsLastModified}
       export XDG_CONFIG_HOME=''${XDG_CONFIG_HOME:-${config.xdg.configHome}}
       export XDG_STATE_HOME=''${XDG_STATE_HOME:-${config.xdg.stateHome}}
       exec python3 ${../scripts/theme} "$@"
@@ -68,9 +68,10 @@ in {
     XDG_DATA_HOME = lib.mkDefault config.xdg.dataHome;
     XDG_CONFIG_HOME = lib.mkDefault config.xdg.configHome;
     XDG_STATE_HOME = lib.mkDefault config.xdg.stateHome;
-  } // lib.optionalAttrs (cfg.shell.enable && cfg.shell.starship.enable && config.programs.starship.settings == { }) {
-    STARSHIP_CONFIG = lib.mkDefault "${config.xdg.configHome}/icewine/current/starship.toml";
+    ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";
   };
+  programs.starship.configPath = lib.mkIf (cfg.shell.enable && cfg.shell.starship.enable && config.programs.starship.settings == { })
+    (lib.mkDefault "${config.xdg.configHome}/icewine/current/starship.toml");
   home.packages = [ icewineCli ];
 
   home.activation.icewineThemeInit = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
@@ -99,14 +100,8 @@ in {
     "quickshell/modules".source = ../quickshell/modules;
     "quickshell/DeckOverlay.qml" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckOverlay.qml; };
     "quickshell/DeckMenu.js" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckMenu.js; };
-    "quickshell/config/qmldir".text = "singleton Settings 1.0 Settings.qml\n";
-    "quickshell/config/Settings.qml".text = ''
-      pragma Singleton
-      import QtQml
-      QtObject {
-        readonly property bool authenticationRequired: ${builtins.toJSON cfg.authenticationRequired}
-      }
-    '';
+    "quickshell/config/qmldir".source = ../quickshell/config/qmldir;
+    "quickshell/config/Settings.qml".source = ../quickshell/config/Settings.qml;
   };
 
   systemd.user.services.icewine = {
@@ -121,6 +116,7 @@ in {
       ExecStart = "${quickshell}/bin/qs";
       Environment = [
         "XDG_DATA_HOME=${config.xdg.dataHome}"
+        "ICEWINE_AUTHENTICATION_REQUIRED=${if cfg.authenticationRequired then "true" else "false"}"
         "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness ]}"
         "QT_IM_MODULE=qtvirtualkeyboard"
       ];

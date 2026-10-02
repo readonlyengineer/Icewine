@@ -57,11 +57,7 @@ let
     };
   };
   bashrc = (home startup).home.file.".bashrc".source;
-  themeAssets = gitEnable: import ../theme/bundle.nix {
-    inherit pkgs lib gitEnable;
-  };
-  gitTheme = themeAssets true;
-  noGitTheme = themeAssets false;
+  themeAssets = import ../theme/bundle.nix { inherit pkgs; };
 in
 assert lib.all (package: lib.isDerivation package) externalGtk.environment.systemPackages;
 assert !(home defaults).gtk.enable;
@@ -87,7 +83,7 @@ assert !unmanaged.services.gvfs.enable;
 assert !((home unmanaged).home.sessionVariables ? STARSHIP_CONFIG);
 assert (home customised).programs.yazi.theme.mode.normal_main.fg == "#112233";
 assert !(lib.hasInfix "fastfetch.jsonc" (home customised).programs.bash.initExtra);
-assert !((home customised).home.sessionVariables ? STARSHIP_CONFIG);
+assert (home customised).home.sessionVariables.STARSHIP_CONFIG != "${(home customised).xdg.configHome}/icewine/current/starship.toml";
 assert (home customised).services.batsignal.extraArgs == [ "-w" "25" ];
 assert (builtins.head (home customised).services.hypridle.settings.listener).timeout == 42;
 assert (home defaults).programs.kitty.enable;
@@ -112,9 +108,8 @@ assert !(home bareShell).programs.starship.enable;
 assert !(lib.elem pkgs.blesh (home bareShell).home.packages);
 assert (home customised).programs.kitty.font.size == 12;
 assert (home customised).programs.kitty.settings.background == "#112233";
-assert (home customised).programs.kitty.settings.background_blur == 1;
 pkgs.runCommand "icewine-terminal-checks" {
-  nativeBuildInputs = [ pkgs.bashInteractive pkgs.git pkgs.starship ];
+  nativeBuildInputs = [ pkgs.bashInteractive pkgs.git pkgs.starship pkgs.python3 ];
 } ''
   # No interactive output in ordinary commands, including the SSH environment.
   output=$(BASH_ENV=${bashrc} bash --noprofile --norc -c 'echo COMMAND_OK')
@@ -138,14 +133,24 @@ pkgs.runCommand "icewine-terminal-checks" {
   git add tracked
   git -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -qm initial
   touch untracked
-  . ${gitTheme}/share/icewine/themes/tokyo-night/ls-colors.sh
+  export HOME="$TMPDIR/home"
+  export XDG_CONFIG_HOME="$HOME/.config"
+  export XDG_STATE_HOME="$HOME/.local/state"
+  export ICEWINE_THEME_ASSETS=${themeAssets}/share/icewine
+  python3 ${../scripts/theme} init
+  test -f "$XDG_CONFIG_HOME/icewine/current/kitty-base.conf"
+  test -f "$XDG_CONFIG_HOME/yazi/keymap.toml"
+  . "$XDG_CONFIG_HOME/icewine/current/ls-colors.sh"
   tokyo_colors="$LS_COLORS"
-  . ${gitTheme}/share/icewine/themes/dracula/ls-colors.sh
+  python3 ${../scripts/theme} theme dracula
+  . "$XDG_CONFIG_HOME/icewine/current/ls-colors.sh"
   test "$LS_COLORS" != "$tokyo_colors"
-  prompt=$(STARSHIP_CONFIG=${gitTheme}/share/icewine/themes/tokyo-night/starship.toml starship prompt)
+  prompt=$(STARSHIP_CONFIG="$XDG_CONFIG_HOME/icewine/current/starship.toml" starship prompt)
   case "$prompt" in *icewine-check*) ;; *) exit 1 ;; esac
   case "$prompt" in *'?'*) ;; *) exit 1 ;; esac
-  prompt=$(STARSHIP_CONFIG=${noGitTheme}/share/icewine/themes/tokyo-night/starship.toml starship prompt)
+  export ICEWINE_THEME_GIT_ENABLE=false
+  python3 ${../scripts/theme} apply
+  prompt=$(STARSHIP_CONFIG="$XDG_CONFIG_HOME/icewine/current/starship.toml" starship prompt)
   case "$prompt" in *icewine-check*|*'?'*) exit 1 ;; esac
   touch "$out"
 ''

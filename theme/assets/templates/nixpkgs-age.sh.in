@@ -1,0 +1,8 @@
+m=@nixpkgsLastModified@
+[ "$m" -gt 0 ] 2>/dev/null || { printf 'unknown'; exit 0; }
+d=$(( ($(date +%s) - m) / 86400 ))
+if [ "$d" -gt 7 ]; then
+  printf '%sd old  \033[33m⚠ Update Overdue\033[0m' "$d"
+else
+  printf '%sd old' "$d"
+fi
