@@ -2,15 +2,14 @@ hl.config({ general = { col = {
   active_border = { colors = { "rgba(@highlight@ee)", "rgba(@secondaryHighlight@ee)" }, angle = 45 },
   inactive_border = "rgba(@background@aa)",
 } } })
+hl.config({ decoration = { inactive_opacity = @inactiveOpacity@ } })
 
 if os.getenv("ICEWINE_KITTY_PRESET") ~= "false" then
-  -- Keep Kitty's terminal alpha consistent on focus changes, and use the
-  -- palette border with subdued alpha for its themed window edge.
+  -- Keep Kitty's terminal alpha consistent on focus changes.
+  -- Use the shared border size and palette colours.
   hl.window_rule({
     name = "kitty-background-opacity",
     match = { class = "^kitty$" },
     opacity = "1.0 override 1.0 override 1.0 override",
-    border_size = 1,
-    border_color = "rgba(@border@80) rgba(@border@60)",
   })
 end

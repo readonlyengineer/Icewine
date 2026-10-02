@@ -15,7 +15,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#000000"
+        color: root.palette.dark ? "#000000" : root.palette.background
     }
 
     component TextButton: Controls.Button {

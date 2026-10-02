@@ -179,3 +179,55 @@ with tempfile.TemporaryDirectory() as temporary:
     assert 'primary: "#7aa2f7"' in old_link.read_text()
     saved = list((legacy_home / ".local/state/icewine").glob("migration-*/quickshell/theme/Palette.qml"))
     assert len(saved) == 1 and saved[0].read_text() == "old managed palette\n"
+
+    # Every shipped palette renders app-native files, including light mode.
+    for theme_id, background, appearance in [
+        ("tokyo-night", "1a1b26", "dark"), ("dracula", "282a36", "dark"),
+        ("nord", "2e3440", "dark"), ("gruvbox-light", "fbf1c7", "light"),
+        ("gruvbox-dark", "282828", "dark"),
+    ]:
+        result = run("theme", theme_id)
+        assert result.returncode == 0, result.stderr
+        current = config / "icewine/current"
+        assert f"background #{background}\n" in (current / "kitty.conf").read_text()
+        assert f'vim.opt.background = "{appearance}"' in nvim_theme.read_text()
+        assert f'dark: "{appearance}"' in (current / "Palette.qml").read_text()
+        assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}" in (current / "gtk-settings.ini").read_text()
+        for filename in ("starship.toml", "yazi-theme.toml", "yazi-keymap.toml"):
+            tomllib.loads((current / filename).read_text())
+    assert run("theme", "nord", policy="gruvbox-light").returncode == 0
+    assert 'local theme = "gruvbox-light"' in nvim_theme.read_text()
+
+    # Opacity is independent of theme selection and survives reapplication.
+    saved_theme = (state / "icewine/theme").read_text()
+    for level, kitty_opacity, inactive_opacity in [
+        ("off", "1.00", "1.00"), ("low", "0.92", "0.95"),
+        ("med", "0.84", "0.85"), ("high", "0.76", "0.75"),
+    ]:
+        result = run("transparency", level)
+        assert result.returncode == 0, result.stderr
+        assert (state / "icewine/theme").read_text() == saved_theme
+        assert (state / "icewine/transparency").read_text() == level + "\n"
+        for command_args in [("init",), ("apply",)]:
+            assert run(*command_args).returncode == 0
+            assert f"background_opacity {kitty_opacity}\n" in (current / "kitty.conf").read_text()
+            assert f"inactive_opacity = {inactive_opacity}" in (current / "Theme.lua").read_text()
+    assert run("theme", "dracula").returncode == 0
+    assert run("reset", "yazi").returncode == 0
+    assert "Transparency: high" in run("transparency").stdout
+    previous = os.readlink(current)
+    assert run("transparency", "invalid").returncode != 0
+    assert os.readlink(current) == previous
+    assert (state / "icewine/transparency").read_text() == "high\n"
+    (state / "icewine/transparency").write_text("broken\n")
+    assert run("init").returncode != 0
+    assert os.readlink(current) == previous
+    assert run("transparency", "off").returncode == 0
+    assert run("reset").returncode == 0
+    assert not (state / "icewine/transparency").exists()
+    assert "background_opacity 0.84\n" in (current / "kitty.conf").read_text()
+    assert "inactive_opacity = 0.85" in (current / "Theme.lua").read_text()
+    routed = subprocess.run(["bash", str(dispatcher), "transparency", "low"],
+                            env=dict(env, PATH=f"{fake_bin}:{os.environ['PATH']}"),
+                            text=True, capture_output=True)
+    assert routed.returncode == 0 and routed.stdout == "transparency\nlow\n", routed.stderr

@@ -14,6 +14,12 @@ from pathlib import Path
 
 
 DEFAULT = "tokyo-night"
+TRANSPARENCY = {
+    "off": ("1.00", "1.00"),
+    "low": ("0.92", "0.95"),
+    "med": ("0.84", "0.85"),
+    "high": ("0.76", "0.75"),
+}
 OWNED = {
     "quickshell/theme/Palette.qml": "Palette.qml",
     "gtk-3.0/settings.ini": "gtk-settings.ini",
@@ -104,12 +110,14 @@ def render(source, values):
     return re.sub(r"@([A-Za-z][A-Za-z0-9]*)@", replace, source)
 
 
-def render_theme(assets, palette_file):
+def render_theme(assets, palette_file, level="med"):
     palette = json.loads(palette_file.read_text(encoding="utf-8"))
     if not isinstance(palette, dict) or not all(isinstance(value, str) for value in palette.values()):
         raise ValueError(f"invalid theme data: {palette_file}")
     values = dict(palette)
     values["themeId"] = palette_file.stem
+    values["kittyOpacity"], values["inactiveOpacity"] = TRANSPARENCY[level]
+    values["gtkPreferDark"] = "0" if values["appearance"] == "light" else "1"
     for key in ("highlightRgb", "mutedRgb"):
         values[key.removesuffix("Rgb") + "Sgr"] = values[key].replace(", ", ";")
     git_enabled = os.environ.get("ICEWINE_THEME_GIT_ENABLE", "true") == "true"
@@ -141,6 +149,14 @@ def selection(state):
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", value):
         raise ValueError(f"invalid saved theme ID in {path}")
     return value
+
+
+def transparency_level(state):
+    path = state / "transparency"
+    level = path.read_text(encoding="utf-8").strip() if path.exists() else "med"
+    if level not in TRANSPARENCY:
+        raise ValueError(f"invalid saved transparency in {path}; choose off, low, med or high")
+    return level
 
 
 def effective(state, themes):
@@ -264,8 +280,8 @@ def reload_session():
 
 
 def main(argv):
-    if not argv or argv[0] not in {"init", "reset", "theme", "apply"}:
-        raise ValueError("Usage: icewine {init [APP]|reset [APP]|theme [THEME_ID]}")
+    if not argv or argv[0] not in {"init", "reset", "theme", "transparency", "apply"}:
+        raise ValueError("Usage: icewine {init [APP]|reset [APP]|theme [THEME_ID]|transparency [off|low|med|high]}")
     command, *args = argv
     if len(args) > (0 if command == "apply" else 1):
         raise ValueError("unexpected arguments")
@@ -278,6 +294,9 @@ def main(argv):
     themes = installed(assets)
     if DEFAULT not in themes:
         raise ValueError("Tokyo Night assets are missing")
+    if command == "transparency" and not args:
+        print(f"Transparency: {transparency_level(state)} (off, low, med, high)")
+        return 0
     if command == "theme" and not args:
         theme_id, policy = effective(state, themes)
         print("Installed: " + ", ".join(sorted(themes)))
@@ -289,19 +308,26 @@ def main(argv):
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", requested) or requested not in themes:
             raise ValueError(f"theme is not installed: {requested}")
         atomic_text(state / "theme", requested + "\n")
+    elif command == "transparency":
+        if args[0] not in TRANSPARENCY:
+            raise ValueError("invalid transparency; choose off, low, med or high")
+        atomic_text(state / "transparency", args[0] + "\n")
     elif command == "reset":
         state.mkdir(parents=True, exist_ok=True)
         backup_owned(config, state, [config / relative for relative in owned(app)
                                      if (config / relative).exists() or (config / relative).is_symlink()])
         if app is None:
             (state / "theme").unlink(missing_ok=True)
+            (state / "transparency").unlink(missing_ok=True)
     theme_id, policy = effective(state, themes)
-    files = render_theme(assets, themes[theme_id])
+    level = transparency_level(state)
+    files = render_theme(assets, themes[theme_id], level)
     publish(config, files)
-    if command in {"init", "reset", "theme"}:
+    if command in {"init", "reset", "theme", "transparency"}:
         install_links(config, state, command == "reset", app)
     print(f"Effective theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else ""))
-    if command in {"theme", "reset", "apply"}:
+    print(f"Transparency: {level}")
+    if command in {"theme", "reset", "transparency", "apply"}:
         return int(reload_session())
     return 0
 

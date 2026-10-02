@@ -3,6 +3,7 @@ pragma Singleton
 import QtQuick
 
 QtObject {
+    readonly property bool dark: "@appearance@" !== "light"
     readonly property color background: "#@background@"
     readonly property color backgroundDark: "#@backgroundDark@"
     readonly property color surface: "#@surface@"

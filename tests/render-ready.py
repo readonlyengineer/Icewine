@@ -138,6 +138,10 @@ ShellRoot {
                         || keyboard.y !== winter.height - keyboard.height
                         || session.keyboardHeight !== keyboard.height)
                     throw new Error("SessionControl keyboard host bindings failed")
+                winter.palette = Object.assign({}, winter.palette,
+                    { dark: false, background: "#fbf1c7" })
+                if (String(background.color).toLowerCase() !== "#fbf1c7")
+                    throw new Error("Light lock-screen background failed")
                 console.log("RENDER_READY_PASSED")
                 Qt.quit()
             } else {
