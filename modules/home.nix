@@ -69,6 +69,8 @@ in {
     XDG_CONFIG_HOME = lib.mkDefault config.xdg.configHome;
     XDG_STATE_HOME = lib.mkDefault config.xdg.stateHome;
     ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";
+  } // lib.optionalAttrs (cfg.terminal.preset == null) {
+    ICEWINE_KITTY_PRESET = "false";
   };
   programs.starship.configPath = lib.mkIf (cfg.shell.enable && cfg.shell.starship.enable && config.programs.starship.settings == { })
     (lib.mkDefault "${config.xdg.configHome}/icewine/current/starship.toml");

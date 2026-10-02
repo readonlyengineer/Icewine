@@ -1,6 +1,6 @@
 -- Palette-agnostic look and feel: window geometry, shadows, blur, animations,
--- cursor sizing, and bar layer rules. Pair with any palette module
--- (Theme.lua) that only sets the colours.
+-- cursor sizing, and bar layer rules. Pair with a palette module (Theme.lua)
+-- for colours and theme-dependent window rules.
 
 hl.config({
 	decoration = {

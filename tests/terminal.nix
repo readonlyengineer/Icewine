@@ -87,6 +87,7 @@ assert (home customised).home.sessionVariables.STARSHIP_CONFIG != "${(home custo
 assert (home customised).services.batsignal.extraArgs == [ "-w" "25" ];
 assert (builtins.head (home customised).services.hypridle.settings.listener).timeout == 42;
 assert (home defaults).programs.kitty.enable;
+assert !((home defaults).home.sessionVariables ? ICEWINE_KITTY_PRESET);
 assert (home defaults).programs.kitty.package != null;
 assert defaults.services.icewine.applications.terminal == [ "kitty" ];
 assert (home defaults).programs.bash.enable;
@@ -96,6 +97,7 @@ assert lib.elem pkgs.blesh (home defaults).home.packages;
 assert (home defaults).programs.starship.enable;
 assert (home defaults).home.sessionVariables.STARSHIP_CONFIG == "${(home defaults).xdg.configHome}/icewine/current/starship.toml";
 assert !(home unmanaged).programs.kitty.enable;
+assert (home unmanaged).home.sessionVariables.ICEWINE_KITTY_PRESET == "false";
 assert !(home unmanaged).programs.bash.enable;
 assert !(home unmanaged).programs.fastfetch.enable;
 assert !(home unmanaged).programs.starship.enable;
