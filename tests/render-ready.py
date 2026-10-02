@@ -152,7 +152,7 @@ with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     (root / "modules").symlink_to(source / "quickshell/modules")
     (root / "theme").mkdir()
-    palette = (source / "quickshell/theme/Palette.qml.in").read_text()
+    palette = (source / "theme/assets/templates/Palette.qml.in").read_text()
     (root / "theme/Palette.qml").write_text(re.sub(r"@\w+@", "7aa2f7", palette))
     (root / "theme/qmldir").write_text("singleton Palette 1.0 Palette.qml\n")
     (root / "sddm").mkdir()
