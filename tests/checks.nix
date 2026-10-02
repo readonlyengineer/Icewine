@@ -52,6 +52,9 @@ let
   quickshell = pkgs.quickshell.overrideAttrs (old: {
     buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
+  icewineCli = builtins.head (nixpkgs.lib.filter
+    (package: nixpkgs.lib.getName package == "icewine")
+    (home desktop).home.packages);
 in {
   screenshot = pkgs.runCommand "icewine-screenshot-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
@@ -83,6 +86,14 @@ in {
     lua hyprland/tests/workspace-navigation.lua hyprland/modules/Binds.lua
     lua hyprland/tests/steam.lua
     lua hyprland/tests/window-policy.lua hyprland/modules/WindowPolicy.lua
+    touch "$out"
+  '';
+  wallpaper = pkgs.runCommand "icewine-wallpaper-checks" {
+    nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.nodejs quickshell icewineCli ];
+  } ''
+    cd ${self}
+    node quickshell/tests/wallpaper.js
+    bash tests/wallpaper-selector.sh ${icewineCli}/bin/icewine
     touch "$out"
   '';
   modules =

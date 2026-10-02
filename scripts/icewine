@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: icewine wallpaper IMAGE
+EOF
+}
+
+case ${1:-} in
+    wallpaper)
+        shift
+        exec icewine-wallpaper "$@"
+        ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac

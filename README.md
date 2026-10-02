@@ -79,6 +79,18 @@ passthrough when that session runs inside Gamescope. The easiest way to do this 
 to add them as "non-steam games" within steam. To do this, open the launcher while 
 Steam/Gamecope is running, select Background Applications, Steam Actions, Exit Big Picture. 
 
+### Wallpaper
+
+Choose a local wallpaper with `icewine wallpaper "/path/to/image.png"`. The
+command validates and copies PNG, JPEG, GIF, or BMP images into
+`$XDG_DATA_HOME/icewine/wallpapers/selection.img`, then refreshes the running
+desktop and handheld shell. The original file can be moved or deleted. With no
+selection, Icewine uses the shipped
+`$XDG_DATA_HOME/wallpapers/default.jpg`. The selected copy follows Home Manager's
+`xdg.dataHome` and the NixOS persist allowlist. Legacy user-owned
+`wallpapers/current.jpg` images are copied during Home Manager activation when
+there is no saved selection; the old Nix-store-backed default is not migrated.
+
 ### Steam
 
 For desktop systems, we recommend Steam’s Flatpak package for its application sandbox:

@@ -5,6 +5,20 @@ let
   quickshell = pkgs.quickshell.overrideAttrs (old: {
     buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
+  wallpaperSelector = pkgs.writeShellApplication {
+    name = "icewine-wallpaper";
+    runtimeInputs = [ pkgs.coreutils quickshell ];
+    text = ''
+      export ICEWINE_WALLPAPER_VALIDATOR=${../quickshell/modules}/WallpaperValidator.qml
+      export ICEWINE_WALLPAPER_DATA_HOME=''${ICEWINE_WALLPAPER_DATA_HOME:-''${XDG_DATA_HOME:-${config.xdg.dataHome}}}
+      ${builtins.readFile ../scripts/wallpaper}
+    '';
+  };
+  icewineCli = pkgs.writeShellApplication {
+    name = "icewine";
+    runtimeInputs = [ wallpaperSelector ];
+    text = builtins.readFile ../scripts/icewine;
+  };
   monitorCapabilities = pkgs.writeShellApplication {
     name = "icewine-monitor-capabilities";
     runtimeInputs = [ pkgs.edid-decode ];
@@ -43,6 +57,16 @@ in {
   imports = [ ./terminal.nix ./shell.nix ./gtk.nix ./desktop.nix ];
 
   home.sessionVariables.EDITOR = lib.mkDefault (lib.escapeShellArgs cfg.applications.editor);
+  home.sessionVariables.XDG_DATA_HOME = lib.mkDefault config.xdg.dataHome;
+  home.packages = [ icewineCli ];
+
+  home.activation.icewineWallpaperMigration = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
+    if ! ${icewineCli}/bin/icewine wallpaper --migrate \
+      ${lib.escapeShellArg "${config.xdg.dataHome}/wallpapers/current.jpg"} \
+      ${lib.escapeShellArg config.xdg.dataHome}; then
+      echo "Icewine: legacy wallpaper could not be migrated; it was left unchanged." >&2
+    fi
+  '';
 
   xdg.configFile = {
     "hypr" = { source = hyprTree; recursive = true; };
@@ -74,6 +98,7 @@ in {
     Service = {
       ExecStart = "${quickshell}/bin/qs";
       Environment = [
+        "XDG_DATA_HOME=${config.xdg.dataHome}"
         "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness ]}"
         "QT_IM_MODULE=qtvirtualkeyboard"
       ];
