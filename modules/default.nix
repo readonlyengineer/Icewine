@@ -95,6 +95,11 @@ in {
     ];
 
     programs.hyprland = { enable = true; withUWSM = true; };
+    programs.dconf.enable = lib.mkIf cfg.gtk.enable (lib.mkDefault true);
+    xdg.portal = lib.mkIf cfg.gtk.enable {
+      extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+      config.hyprland."org.freedesktop.impl.portal.Settings" = [ "gtk" ];
+    };
     programs.firefox.enable = lib.mkDefault cfg.browser.enable;
     security.pam.services.icewine = { };
     security.polkit.enable = true;
@@ -115,7 +120,7 @@ in {
       grim slurp wl-clipboard libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl playerctl
       bluetui impala wiremix btop xdg-utils gamescope
-    ]) ++ launchers ++ [ screenshot ]
+    ]) ++ launchers ++ [ screenshot ] ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas
       ++ lib.optionals cfg.gtk.enable (lib.optional (config.home-manager.users.${cfg.user}.gtk.theme.package != null) config.home-manager.users.${cfg.user}.gtk.theme.package);
 
     home-manager.users.${cfg.user} = {

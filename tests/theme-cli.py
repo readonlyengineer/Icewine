@@ -26,6 +26,8 @@ with tempfile.TemporaryDirectory() as temporary:
     env = dict(os.environ, XDG_CONFIG_HOME=str(config), XDG_STATE_HOME=str(state),
                ICEWINE_THEME_ASSETS=str(assets), ICEWINE_THEME_POLICY="",
                HOME=str(root))
+    env["XDG_DATA_HOME"] = str(root / "data")
+    env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     env.pop("WAYLAND_DISPLAY", None)
     env.pop("HYPRLAND_INSTANCE_SIGNATURE", None)
 
@@ -127,7 +129,7 @@ with tempfile.TemporaryDirectory() as temporary:
     result = run("reset")
     assert result.returncode == 0, result.stderr
     assert not (state / "icewine/theme").exists()
-    assert "gtk-theme-name=Tokyonight-Dark" in edited.read_text()
+    assert "gtk-theme-name=Icewine-tokyo-night" in edited.read_text()
     assert wallpaper.read_bytes() == b"wallpaper is independent"
     backups = list((state / "icewine").glob("reset-*/gtk-3.0/settings.ini"))
     assert len(backups) == 1 and backups[0].read_text() == "user edit\n"

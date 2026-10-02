@@ -123,7 +123,14 @@ changes update the generated palette and report live reload failures and
 which applications need a restart. GTK applications, browsers, Kitty, Yazi,
 Fastfetch, Neovim and new shells use the new theme when restarted; an active Hyprland
 and Quickshell session is refreshed where available. Browser chrome uses
-shared GTK and portal appearance; no browser profile is changed.
+shared GTK and portal appearance; no browser profile is changed. Select
+"System theme — auto" in Firefox/LibreWolf and restart after changing palettes.
+Icewine publishes a named GTK3 theme under `$XDG_DATA_HOME/themes` and updates
+`org.gnome.desktop.interface` GTK theme and light/dark settings using `gsettings`.
+The Settings portal must use a backend that exposes these settings (the NixOS
+module selects GTK). Flatpak browsers need read-only access to the GTK config,
+Icewine's generated files and the user themes directory. Browser colour mapping
+remains browser-controlled; web content and privacy preferences are unchanged.
 Explicit Home Manager Fastfetch, Starship and Yazi settings retain their own
 config files; Icewine skips those paths when applying or resetting a theme.
 Icewine ships JSON palette data and app-native templates in `theme/assets`.

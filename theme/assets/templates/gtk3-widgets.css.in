@@ -1,0 +1,35 @@
+/* Explicit GTK3 widget colours, also sampled by Firefox System/Auto. */
+.background, window, dialog {
+  background-color: @palette_bg;
+  color: @palette_fg;
+}
+headerbar, .titlebar, menubar, toolbar {
+  background-image: none;
+  background-color: @palette_bg_highlight;
+  color: @palette_fg;
+}
+headerbar:backdrop, .titlebar:backdrop, menubar:backdrop, toolbar:backdrop {
+  background-color: @palette_bg_dark;
+  color: @palette_fg_dark;
+}
+menu, menuitem, popover, .sidebar {
+  background-color: @palette_bg;
+  color: @palette_fg;
+}
+entry, textview, textview text {
+  background-image: none;
+  background-color: @palette_bg_dark;
+  color: @palette_fg;
+}
+button {
+  background-image: none;
+  background-color: @palette_bg_highlight;
+  color: @palette_fg;
+  border-color: @borders;
+}
+button:hover { background-color: @palette_fg_gutter; }
+selection, *:selected, menuitem:hover {
+  background-color: @palette_highlight;
+  color: @palette_bg_dark;
+}
+*:disabled { color: @palette_comment; }

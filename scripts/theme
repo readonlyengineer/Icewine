@@ -24,7 +24,7 @@ OWNED = {
     "quickshell/theme/Palette.qml": "Palette.qml",
     "gtk-3.0/settings.ini": "gtk-settings.ini",
     "gtk-3.0/gtk.css": "gtk.css",
-    "gtk-4.0/settings.ini": "gtk-settings.ini",
+    "gtk-4.0/settings.ini": "gtk4-settings.ini",
     "gtk-4.0/gtk.css": "gtk.css",
     "yazi/theme.toml": "yazi-theme.toml",
     "yazi/keymap.toml": "yazi-keymap.toml",
@@ -137,6 +137,16 @@ def render_theme(assets, palette_file, level="med"):
         values["nixpkgsRow"] = render((templates / "fastfetch-nixpkgs-row.json.in").read_text(encoding="utf-8"), values)
     files = {name: render((templates / template).read_text(encoding="utf-8"), values)
              for name, template in TEMPLATES.items()}
+    files["gtk4-settings.ini"] = files["gtk-settings.ini"]
+    files["gtk-settings.ini"] = files["gtk-settings.ini"].replace(
+        "gtk-theme-name=" + values["gtkThemeName"], "gtk-theme-name=Icewine-" + palette_file.stem
+    )
+    variant = "-dark" if values["appearance"] == "dark" else ""
+    files["gtk3-theme.css"] = (
+        f'@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained{variant}.css");\n'
+        + files["gtk.css"]
+        + render((templates / "gtk3-widgets.css.in").read_text(encoding="utf-8"), values)
+    )
     json.loads(files["fastfetch.jsonc"])
     return files
 
@@ -200,6 +210,9 @@ def publish(config, files):
 def managed_link(path, config):
     if not path.is_symlink():
         return False
+    if (path == config / "gtk-4.0/settings.ini"
+            and os.readlink(path) == str(config / "icewine/current/gtk-settings.ini")):
+        return True
     try:
         if path.relative_to(config).as_posix() not in LEGACY_MANAGED:
             return False
@@ -249,6 +262,30 @@ def backup_owned(config, state, paths=None, prefix="reset-"):
         else:
             shutil.copy2(path, destination)
         print(f"saved: {path} -> {destination}")
+
+
+def install_gtk_theme(config, theme_id):
+    path = xdg("XDG_DATA_HOME", ".local/share") / "themes" / ("Icewine-" + theme_id) / "gtk-3.0/gtk.css"
+    target = config / "icewine/current/gtk3-theme.css"
+    if path.is_symlink() and os.readlink(path) == str(target):
+        return
+    if path.exists() or path.is_symlink():
+        raise ValueError(f"refusing to replace existing GTK theme: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_link(path, target)
+
+
+def sync_gtk_settings(theme_id, appearance):
+    if not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+        print("Pending: GTK settings will be published at next session login.", file=sys.stderr)
+        return
+    for key, value in (("gtk-theme", "Icewine-" + theme_id),
+                       ("color-scheme", "prefer-" + appearance)):
+        try:
+            subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", key, value],
+                           check=True, timeout=10)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise ValueError(f"theme files saved, but GTK setting {key} was not published: {error}") from error
 
 
 def reload_session():
@@ -322,9 +359,15 @@ def main(argv):
     theme_id, policy = effective(state, themes)
     level = transparency_level(state)
     files = render_theme(assets, themes[theme_id], level)
+    gtk_enabled = os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false"
+    if gtk_enabled:
+        install_gtk_theme(config, theme_id)
     publish(config, files)
     if command in {"init", "reset", "theme", "transparency"}:
         install_links(config, state, command == "reset", app)
+    if gtk_enabled and app in (None, "gtk"):
+        appearance = json.loads(themes[theme_id].read_text(encoding="utf-8"))["appearance"]
+        sync_gtk_settings(theme_id, appearance)
     print(f"Effective theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else ""))
     print(f"Transparency: {level}")
     if command in {"theme", "reset", "transparency", "apply"}:

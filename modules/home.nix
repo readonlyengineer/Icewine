@@ -21,8 +21,9 @@ let
   };
   themeCli = pkgs.writeShellApplication {
     name = "icewine-theme";
-    runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd ];
+    runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd pkgs.glib ];
     text = ''
+      export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_ASSETS=${themeAssets}/share/icewine
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" hostThemeFiles)}
