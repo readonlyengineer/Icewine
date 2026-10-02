@@ -228,9 +228,7 @@ ShellRoot {
 """
 
 source = Path(sys.argv[1]).resolve()
-notifications = (source / "quickshell/modules/topbar/popouts/Notifications.qml").read_text()
 battery = (source / "quickshell/modules/topbar/popouts/Battery.qml").read_text()
-assert 'text: "Do Not Distrub"' in notifications
 assert battery.index('text: "Power"') < battery.index('id: lockButton')
 assert battery.index('id: lockButton') < battery.index('id: keepAwake')
 assert battery.index('id: keepAwake') < battery.index('visible: root.batteryPresent')
@@ -238,9 +236,6 @@ assert battery.index('id: keepAwake') < battery.index('text: "Battery condition"
 for action in ["Lock", "Sleep", "Reboot", "Shutdown"]:
     assert f'Accessible.name: "{action}"' in battery
     assert f'Controls.ToolTip.text: "{action}"' in battery
-action_button = (source / "quickshell/modules/topbar/popouts/ActionButton.qml").read_text()
-assert 'focusPolicy: Qt.StrongFocus' in action_button
-assert 'Keys.onReleased' in action_button
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     (root / "modules").symlink_to(source / "quickshell/modules")

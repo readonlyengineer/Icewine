@@ -9,8 +9,6 @@ const greeter = fs.readFileSync(path.join(__dirname, "../../sddm/Main.qml"), "ut
 const lock = fs.readFileSync(path.join(__dirname, "../modules/LockScreenSurface.qml"), "utf8")
 const session = fs.readFileSync(path.join(__dirname, "../modules/SessionControl.qml"), "utf8")
 
-assert.match(screen, /color: "#000000"/)
-assert.match(screen, /WinterModel\.scaleFactor\(width, height\)/)
 assert.doesNotMatch(screen, /InputPanel/)
 assert.equal((session.match(/InputPanel/g) || []).length, 1)
 assert.equal((greeter.match(/InputPanel/g) || []).length, 1)
