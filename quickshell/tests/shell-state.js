@@ -15,6 +15,33 @@ assert.match(barBackground, /MouseArea\s*\{\s*anchors\.fill: parent\s*acceptedBu
 assert.match(barBackground, /onWheel: event => event\.accepted = true/,
     "Bar background must consume scrolling rather than passing it underneath")
 
+// Media-key IPC uses the panel's selection and respects player capabilities.
+const media = vm.createContext({Mpris: {players: {values: []}}, root: {}})
+const selection = topbar.match(/readonly property var player: ([\s\S]*?)\n\n/)[1]
+for (const [action, capability, method] of [
+    ["mediaNext", "canGoNext", "next"],
+    ["mediaPrevious", "canGoPrevious", "previous"],
+    ["mediaToggle", "canTogglePlaying", "togglePlaying"]
+]) {
+    const body = topbar.match(new RegExp(`function ${action}\\(\\): void \\{([^\\n]+)\\}`))[1]
+    const invoke = () => {
+        media.root.player = vm.runInContext(selection, media)
+        vm.runInContext(body, media)
+    }
+    const calls = []
+    const paused = {isPlaying: false, [capability]: true, [method]: () => calls.push("paused")}
+    const playing = {isPlaying: true, [capability]: true, [method]: () => calls.push("playing")}
+    media.Mpris.players.values = [paused, playing]
+    invoke()
+    playing[capability] = false
+    invoke() // Do not redirect an unsupported action to a different player.
+    media.Mpris.players.values = [paused]
+    invoke()
+    media.Mpris.players.values = []
+    invoke()
+    assert.deepEqual(calls, ["playing", "paused"], action)
+}
+
 let state = State.initial()
 const send = event => { state = State.reduce(state, event) }
 assert.equal(State.barVisible(state, false, false), false)

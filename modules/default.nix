@@ -118,7 +118,7 @@ in {
     environment.systemPackages = (with pkgs; [
       quickshell hyprshutdown hyprpolkitagent glib jq nano systemd
       grim slurp wl-clipboard libnotify libcanberra-gtk3
-      adwaita-icon-theme papirus-icon-theme brightnessctl playerctl
+      adwaita-icon-theme papirus-icon-theme brightnessctl
       bluetui impala wiremix btop xdg-utils gamescope
     ]) ++ launchers ++ [ screenshot ] ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas
       ++ lib.optionals cfg.gtk.enable (lib.optional (config.home-manager.users.${cfg.user}.gtk.theme.package != null) config.home-manager.users.${cfg.user}.gtk.theme.package);

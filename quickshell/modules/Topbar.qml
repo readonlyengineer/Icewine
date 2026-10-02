@@ -390,6 +390,9 @@ Scope {
 
     IpcHandler {
         target: "topbar"
+        function mediaNext(): void { if (root.player?.canGoNext) root.player.next() }
+        function mediaPrevious(): void { if (root.player?.canGoPrevious) root.player.previous() }
+        function mediaToggle(): void { if (root.player?.canTogglePlaying) root.player.togglePlaying() }
         function osk(visible: bool): void { root.oskVisible = visible }
         function press(): void { root.pressBar() }
         function release(): void { root.releaseBar() }
