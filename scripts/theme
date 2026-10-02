@@ -317,8 +317,8 @@ def reload_session():
 
 
 def main(argv):
-    if not argv or argv[0] not in {"init", "reset", "theme", "transparency", "apply"}:
-        raise ValueError("Usage: icewine {init [APP]|reset [APP]|theme [THEME_ID]|transparency [off|low|med|high]}")
+    if not argv or argv[0] not in {"init", "reset", "theme", "transparency", "autofullscreen", "apply"}:
+        raise ValueError("Usage: icewine {init [APP]|reset [APP]|theme [THEME_ID]|transparency [off|low|med|high]|autofullscreen [on|off]}")
     command, *args = argv
     if len(args) > (0 if command == "apply" else 1):
         raise ValueError("unexpected arguments")
@@ -327,6 +327,22 @@ def main(argv):
         raise ValueError(f"unsupported app: {app}; choose {', '.join(APPS)}")
     config = xdg("XDG_CONFIG_HOME", ".config")
     state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    if command == "autofullscreen":
+        path = state / "autofullscreen"
+        value = args[0] if args else (path.read_text(encoding="utf-8").strip() if path.exists() else "off")
+        if value not in {"on", "off"}:
+            raise ValueError("invalid autofullscreen setting; choose on or off")
+        if args:
+            atomic_text(path, value + "\n")
+            if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+                try:
+                    subprocess.run(["hyprctl", "reload"], check=True, timeout=10)
+                except (OSError, subprocess.SubprocessError) as error:
+                    raise ValueError(f"autofullscreen saved, but Hyprland reload failed: {error}") from error
+            else:
+                print("Pending: autofullscreen takes effect at next Hyprland login.")
+        print(f"Autofullscreen: {value}")
+        return 0
     assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine"))
     themes = installed(assets)
     if DEFAULT not in themes:
@@ -356,6 +372,7 @@ def main(argv):
         if app is None:
             (state / "theme").unlink(missing_ok=True)
             (state / "transparency").unlink(missing_ok=True)
+            (state / "autofullscreen").unlink(missing_ok=True)
     theme_id, policy = effective(state, themes)
     level = transparency_level(state)
     files = render_theme(assets, themes[theme_id], level)

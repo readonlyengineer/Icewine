@@ -49,6 +49,13 @@ hl = {
 		end
 	end,
 }
+local original_open = io.open
+io.open = function(path, mode)
+	if path:match("/icewine/autofullscreen$") then
+		return { read = function() return "on\n" end, close = function() end }
+	end
+	return original_open(path, mode)
+end
 local policy = dofile(assert(arg[1], "Pass the WindowPolicy.lua path"))
 local normal = { width = 1920, height = 1080 }
 local boundary = { width = 2560, height = 1280 }

@@ -6,6 +6,23 @@ local epsilon = 0.02
 local states = {}
 local pending_fullscreen = {}
 local configured_default
+local autofullscreen = false
+
+local function read_autofullscreen()
+	local state_home = os.getenv("XDG_STATE_HOME")
+	if not state_home or state_home == "" then
+		state_home = (os.getenv("HOME") or "") .. "/.local/state"
+	end
+	local file = io.open(state_home .. "/icewine/autofullscreen", "r")
+	autofullscreen = false
+	if file then
+		local value = file:read("*a")
+		file:close()
+		autofullscreen = value ~= nil and value:match("^%s*on%s*$") ~= nil
+	end
+end
+
+read_autofullscreen()
 local steam_placeholder_title = "Icewine Steam launch"
 local steam_placeholder
 
@@ -104,13 +121,13 @@ end
 
 local function opens_fullscreen_by_default(win)
 	local mon = monitor_for(win)
-	return is_resizable(win) and monitor_opens_fullscreen(mon)
+	return autofullscreen and is_resizable(win) and monitor_opens_fullscreen(mon)
 end
 
 local function target_for(state, fallback_width)
 	local width = state.width or fallback_width
 	local fullscreen = state.fullscreen
-	if fullscreen == nil then fullscreen = same_number(fallback_width, 1.0) end
+	if fullscreen == nil then fullscreen = autofullscreen and same_number(fallback_width, 1.0) end
 
 	return width, fullscreen
 end
@@ -288,7 +305,7 @@ function M.toggle_width()
 	else
 		local width = intended_width(win, state)
 		state.width = width > (1.0 + fallback) / 2 and fallback or 1.0
-		state.fullscreen = same_number(state.width, 1.0)
+		state.fullscreen = autofullscreen and same_number(state.width, 1.0)
 	end
 	apply_window(win)
 end
@@ -324,6 +341,7 @@ hl.on("hyprland.start", function()
 end)
 
 hl.on("config.reloaded", function()
+	read_autofullscreen()
 	adopt_existing_windows()
 	sync_default_width(hl.get_active_monitor())
 end)

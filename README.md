@@ -116,6 +116,13 @@ reloads where available; reopen Kitty to use its new background opacity.
 Blur remains unchanged. A full `icewine reset` restores `med`; targeted resets
 keep the preference.
 
+`icewine autofullscreen on|off` controls automatic fullscreen on ordinary
+windows and the width-toggle shortcut. The default is `off`; no argument shows
+the saved setting. It is stored at `$XDG_STATE_HOME/icewine/autofullscreen` and
+survives theme changes and login. The command reloads Hyprland when running.
+Existing windows keep their state; manual/application fullscreen and Steam's
+launch handoff are preserved. Full reset restores `off`; targeted resets keep it.
+
 `icewine reset` backs up the Icewine-owned config paths under
 `$XDG_STATE_HOME/icewine/reset-*`, restores their shipped defaults and clears
 the CLI choice. It leaves the separately selected wallpaper alone. Theme
