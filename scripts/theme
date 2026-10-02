@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""Manage only Icewine's user-owned theme files and selection."""
+
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+DEFAULT = "tokyo-night"
+OWNED = {
+    "quickshell/theme/Palette.qml": "Palette.qml",
+    "gtk-3.0/settings.ini": "gtk-settings.ini",
+    "gtk-3.0/gtk.css": "gtk.css",
+    "gtk-4.0/settings.ini": "gtk-settings.ini",
+    "gtk-4.0/gtk.css": "gtk.css",
+    "yazi/theme.toml": "yazi-theme.toml",
+    "fastfetch/config.jsonc": "fastfetch.jsonc",
+    "starship.toml": "starship.toml",
+}
+REQUIRED = set(OWNED.values()) | {"Theme.lua", "kitty.conf", "ls-colors.sh"}
+LEGACY_MANAGED = set(OWNED) - {"gtk-4.0/gtk.css"}
+STORE_DIR = Path("/nix/store")
+
+
+def owned():
+    skipped = set(filter(None, os.environ.get("ICEWINE_THEME_SKIP", "").split(":")))
+    return {relative: name for relative, name in OWNED.items() if relative not in skipped}
+
+
+def xdg(name, fallback):
+    value = os.environ.get(name)
+    return Path(value if value else Path.home() / fallback).expanduser()
+
+
+def atomic_text(path, contents):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".icewine-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def atomic_link(path, target):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.parent / (".icewine-" + secrets.token_hex(8))
+    try:
+        temporary.symlink_to(target)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def installed(assets):
+    if not assets.is_dir():
+        raise ValueError(f"theme assets are unavailable: {assets}")
+    return {
+        item.name: item for item in assets.iterdir()
+        if item.is_dir() and re.fullmatch(r"[a-z0-9][a-z0-9-]*", item.name)
+        and all((item / name).is_file() for name in REQUIRED)
+    }
+
+
+def selection(state):
+    path = state / "theme"
+    if not path.exists():
+        return None
+    value = path.read_text(encoding="utf-8").strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", value):
+        raise ValueError(f"invalid saved theme ID in {path}")
+    return value
+
+
+def effective(state, themes):
+    policy = os.environ.get("ICEWINE_THEME_POLICY", "")
+    for theme_id in (policy, selection(state) if not policy else None, DEFAULT):
+        if theme_id:
+            if theme_id not in themes:
+                raise ValueError(f"theme is not installed: {theme_id}")
+            return theme_id, bool(policy)
+    raise AssertionError("unreachable")
+
+
+def publish(config, theme):
+    current = config / "icewine/current"
+    if current.exists() and not current.is_symlink():
+        raise ValueError(f"refusing to replace non-link: {current}")
+    atomic_link(current, theme)
+
+
+def managed_link(path, config):
+    if not path.is_symlink():
+        return False
+    try:
+        if path.relative_to(config).as_posix() not in LEGACY_MANAGED:
+            return False
+        relative = path.relative_to(Path.home())
+        store_path = Path(os.readlink(path)).relative_to(STORE_DIR)
+    except ValueError:
+        return False
+    return (len(store_path.parts) > 1
+            and re.fullmatch(r"[a-z0-9]{32}-home-manager-files", store_path.parts[0]) is not None
+            and store_path.parts[1:] == relative.parts)
+
+
+def install_links(config, state, replace):
+    if not replace:
+        migration = [config / relative for relative in owned()
+                     if managed_link(config / relative, config)]
+        backup_owned(config, state, migration, "migration-")
+    for relative, name in owned().items():
+        path = config / relative
+        target = config / "icewine/current" / name
+        if path.is_symlink() and os.readlink(path) == str(target):
+            continue
+        if path.exists() or path.is_symlink():
+            if not replace and not managed_link(path, config):
+                if path.is_symlink():
+                    print(f"conflict: preserved unrecognized symlink: {path}", file=sys.stderr)
+                else:
+                    print(f"preserved edited file: {path}")
+                continue
+            path.unlink()
+        atomic_link(path, target)
+        print(f"installed: {path}")
+
+
+def backup_owned(config, state, paths=None, prefix="reset-"):
+    existing = paths if paths is not None else [config / relative for relative in owned()
+                                                if (config / relative).exists() or (config / relative).is_symlink()]
+    if not existing:
+        return
+    state.mkdir(parents=True, exist_ok=True)
+    backup = Path(tempfile.mkdtemp(prefix=prefix, dir=state))
+    for path in existing:
+        destination = backup / path.relative_to(config)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_symlink() and not path.exists():
+            destination.symlink_to(os.readlink(path))
+        else:
+            shutil.copy2(path, destination)
+        print(f"saved: {path} -> {destination}")
+
+
+def reload_session():
+    def succeeded(command):
+        try:
+            return subprocess.run(command, check=False, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL).returncode == 0
+        except FileNotFoundError:
+            return False
+
+    pending = []
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        if not succeeded(["hyprctl", "reload"]):
+            pending.append("Hyprland reload")
+    else:
+        pending.append("Hyprland at login")
+    if os.environ.get("WAYLAND_DISPLAY"):
+        if not succeeded(["systemctl", "--user", "is-active", "--quiet", "icewine.service"]):
+            pending.append("Icewine shell at login")
+        elif not succeeded(["systemctl", "--user", "try-restart", "icewine.service"]):
+            pending.append("Icewine shell restart")
+    else:
+        pending.append("Icewine shell at login")
+    print("Applied: persisted selection and linked theme files.")
+    print("Restart needed: GTK and Flatpak apps, browsers, Kitty, Yazi, Fastfetch, and new shells.")
+    if pending:
+        print("Pending: " + ", ".join(pending), file=sys.stderr)
+    return bool(pending) and bool(os.environ.get("WAYLAND_DISPLAY"))
+
+
+def main(argv):
+    if not argv or argv[0] not in {"init", "reset", "theme", "apply"}:
+        raise ValueError("Usage: icewine {init|reset|theme [THEME_ID]}")
+    command, *args = argv
+    if len(args) > (1 if command == "theme" else 0):
+        raise ValueError("unexpected arguments")
+    config = xdg("XDG_CONFIG_HOME", ".config")
+    state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine/themes"))
+    themes = installed(assets)
+    if DEFAULT not in themes:
+        raise ValueError("Tokyo Night assets are missing")
+    if command == "theme" and not args:
+        theme_id, policy = effective(state, themes)
+        print("Installed: " + ", ".join(sorted(themes)))
+        print(f"Effective: {theme_id}" + (" (Nix policy)" if policy else ""))
+        return 0
+    if command == "theme":
+        requested = args[0]
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", requested) or requested not in themes:
+            raise ValueError(f"theme is not installed: {requested}")
+        atomic_text(state / "theme", requested + "\n")
+    elif command == "reset":
+        state.mkdir(parents=True, exist_ok=True)
+        backup_owned(config, state)
+        (state / "theme").unlink(missing_ok=True)
+    theme_id, policy = effective(state, themes)
+    publish(config, themes[theme_id])
+    if command in {"init", "reset", "theme"}:
+        install_links(config, state, command == "reset")
+    print(f"Effective theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else ""))
+    if command in {"theme", "reset", "apply"}:
+        return int(reload_session())
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except (OSError, ValueError) as error:
+        print(f"icewine: {error}", file=sys.stderr)
+        sys.exit(1)

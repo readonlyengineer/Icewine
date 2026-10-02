@@ -1,7 +1,6 @@
 { lib, pkgs, osConfig, ... }:
 let
   cfg = osConfig.services.icewine;
-  palette = import ../theme/palette.nix;
 in {
   xdg.desktopEntries.steam-gamescope = lib.mkIf cfg.steam.enable {
     name = "Steam (Gamescope)";
@@ -47,10 +46,6 @@ in {
         desc = "Mount/unmount removable drives (mount.yazi)";
       }
     ];
-    theme.mode = lib.mapAttrsRecursive (_: lib.mkDefault) {
-      normal_main = { fg = "#${palette.highlight}"; bg = "#${palette.highlightDark}"; bold = true; };
-      normal_alt = { fg = "#${palette.highlight}"; bg = "#${palette.highlightDark}"; };
-    };
     plugins.mount = pkgs.yaziPlugins.mount;
   };
   services.hypridle = lib.mkIf cfg.idle.enable {

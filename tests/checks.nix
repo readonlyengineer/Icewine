@@ -78,7 +78,7 @@ in {
   '';
   terminal = import ./terminal.nix { inherit self nixpkgs; };
   logic = pkgs.runCommand "icewine-logic-checks" {
-    nativeBuildInputs = [ pkgs.nodejs pkgs.lua ];
+    nativeBuildInputs = [ pkgs.nodejs pkgs.lua pkgs.python3 ];
   } ''
     cd ${self}
     for test in quickshell/tests/*.js quickshell/deck/test-demo.js; do node "$test"; done
@@ -86,6 +86,7 @@ in {
     lua hyprland/tests/workspace-navigation.lua hyprland/modules/Binds.lua
     lua hyprland/tests/steam.lua
     lua hyprland/tests/window-policy.lua hyprland/modules/WindowPolicy.lua
+    python3 tests/theme-cli.py scripts/theme scripts/icewine
     touch "$out"
   '';
   wallpaper = pkgs.runCommand "icewine-wallpaper-checks" {
@@ -137,6 +138,10 @@ in {
     assert desktop.home-manager.users.demo.home.stateVersion == "26.05";
     assert nixpkgs.lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
     assert (home desktop).xdg.configFile."hypr".recursive;
+    assert !((home desktop).xdg.configFile ? "quickshell/theme/Palette.qml");
+    assert !((home desktop).xdg.configFile ? "gtk-3.0/settings.ini");
+    assert !((home desktop).xdg.configFile ? "fastfetch/config.jsonc");
+    assert !((home desktop).xdg.configFile ? "starship.toml");
     assert (home handheld).xdg.configFile."hypr".recursive;
     assert (home desktop).systemd.user.services ? icewine;
     assert nixpkgs.lib.elem "QT_IM_MODULE=qtvirtualkeyboard"
@@ -159,7 +164,7 @@ in {
     pkgs.runCommand "icewine-module-checks" { } ''
       test ! -e ${((home desktop).xdg.configFile."hypr").source}/tests
       test ! -e ${((home handheld).xdg.configFile."hypr").source}/tests
-      test -f ${((home desktop).xdg.configFile."hypr").source}/modules/Theme.lua
+      test -L ${((home desktop).xdg.configFile."hypr").source}/modules/Theme.lua
       cmp ${../hyprland/modules/Autostart.lua} ${((home desktop).xdg.configFile."hypr").source}/modules/host.lua
       test ! -e ${((home desktop).xdg.configFile."hypr").source}/modules/Deck.lua
       test -f ${((home handheld).xdg.configFile."hypr").source}/modules/Deck.lua

@@ -91,6 +91,29 @@ selection, Icewine uses the shipped
 `wallpapers/current.jpg` images are copied during Home Manager activation when
 there is no saved selection; the old Nix-store-backed default is not migrated.
 
+### Theme and user configuration
+
+`icewine init` creates missing Icewine config under `$XDG_CONFIG_HOME` and
+replaces recognized old Home Manager links. It preserves user-edited files.
+Recognized links are backed up under `$XDG_STATE_HOME/icewine/migration-*`;
+unrecognized symlinks remain untouched and are reported as conflicts.
+`icewine theme` lists the installed themes and effective selection;
+`icewine theme tokyo-night` and `icewine theme dracula` save a choice under
+`$XDG_STATE_HOME/icewine/theme`. On NixOS, `services.icewine.theme` accepts
+`null` (the default), `"tokyo-night"`, or `"dracula"`. An explicit Nix value
+overrides the CLI choice; otherwise the CLI choice wins, then Tokyo Night.
+
+`icewine reset` backs up the Icewine-owned config paths under
+`$XDG_STATE_HOME/icewine/reset-*`, restores their shipped defaults and clears
+the CLI choice. It leaves the separately selected wallpaper alone. Theme
+changes update the generated palette and report live reload failures and
+which applications need a restart. GTK applications, browsers, Kitty, Yazi,
+Fastfetch and new shells use the new theme when restarted; an active Hyprland
+and Quickshell session is refreshed where available. Browser chrome uses
+shared GTK and portal appearance; no browser profile is changed.
+Explicit Home Manager Fastfetch, Starship and Yazi settings retain their own
+config files; Icewine skips those paths when applying or resetting a theme.
+
 ### Steam
 
 For desktop systems, we recommend Steam’s Flatpak package for its application sandbox:

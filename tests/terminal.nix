@@ -41,6 +41,8 @@ let
     home-manager.users.demo.services.hypridle.settings.listener = [ { timeout = 42; on-timeout = "true"; } ];
     home-manager.users.demo.services.batsignal.extraArgs = [ "-w" "25" ];
     home-manager.users.demo.programs.yazi.theme.mode.normal_main.fg = "#112233";
+    home-manager.users.demo.programs.fastfetch.settings.display.separator = "HOST";
+    home-manager.users.demo.programs.starship.settings.format = "HOST";
     home-manager.users.demo.programs.kitty = {
       font.size = 12;
       settings.background = "#112233";
@@ -55,10 +57,14 @@ let
     };
   };
   bashrc = (home startup).home.file.".bashrc".source;
-  gitConfig = c: (home c).home.file.${(home c).programs.starship.configPath}.source;
+  themeAssets = gitEnable: import ../theme/bundle.nix {
+    inherit pkgs lib gitEnable;
+  };
+  gitTheme = themeAssets true;
+  noGitTheme = themeAssets false;
 in
 assert lib.all (package: lib.isDerivation package) externalGtk.environment.systemPackages;
-assert (home defaults).gtk.enable;
+assert !(home defaults).gtk.enable;
 assert (home defaults).services.hypridle.enable;
 assert (home defaults).services.batsignal.enable;
 assert (home defaults).programs.yazi.enable;
@@ -70,7 +76,7 @@ assert defaults.services.icewine.applications.fileManager == [ "icewine-terminal
 assert defaults.services.icewine.applications.editor == [ "nano" ];
 assert lib.elem pkgs.nano defaults.environment.systemPackages;
 assert (home defaults).home.sessionVariables.EDITOR == "nano";
-assert (home defaults).home.sessionVariables ? LS_COLORS;
+assert !((home defaults).home.sessionVariables ? LS_COLORS);
 assert (home defaults).xdg.dataFile ? "applications/uuctl.desktop";
 assert !((home defaults).systemd.user.services ? waybar);
 assert !(home unmanaged).gtk.enable;
@@ -78,8 +84,10 @@ assert !(home unmanaged).services.hypridle.enable;
 assert !(home unmanaged).services.batsignal.enable;
 assert !(home unmanaged).programs.yazi.enable;
 assert !unmanaged.services.gvfs.enable;
-assert !((home unmanaged).home.sessionVariables ? LS_COLORS);
+assert !((home unmanaged).home.sessionVariables ? STARSHIP_CONFIG);
 assert (home customised).programs.yazi.theme.mode.normal_main.fg == "#112233";
+assert !(lib.hasInfix "fastfetch.jsonc" (home customised).programs.bash.initExtra);
+assert !((home customised).home.sessionVariables ? STARSHIP_CONFIG);
 assert (home customised).services.batsignal.extraArgs == [ "-w" "25" ];
 assert (builtins.head (home customised).services.hypridle.settings.listener).timeout == 42;
 assert (home defaults).programs.kitty.enable;
@@ -90,7 +98,7 @@ assert (home defaults).programs.fastfetch.enable;
 assert (home defaults).programs.fastfetch.package != null;
 assert lib.elem pkgs.blesh (home defaults).home.packages;
 assert (home defaults).programs.starship.enable;
-assert !(home defaults).programs.starship.settings.git_status.disabled;
+assert (home defaults).home.sessionVariables.STARSHIP_CONFIG == "${(home defaults).xdg.configHome}/icewine/current/starship.toml";
 assert !(home unmanaged).programs.kitty.enable;
 assert !(home unmanaged).programs.bash.enable;
 assert !(home unmanaged).programs.fastfetch.enable;
@@ -105,8 +113,6 @@ assert !(lib.elem pkgs.blesh (home bareShell).home.packages);
 assert (home customised).programs.kitty.font.size == 12;
 assert (home customised).programs.kitty.settings.background == "#112233";
 assert (home customised).programs.kitty.settings.background_blur == 1;
-assert (home noGit).programs.starship.settings.git_branch.disabled;
-assert !(lib.hasInfix "$git_" (home noGit).programs.starship.settings.format);
 pkgs.runCommand "icewine-terminal-checks" {
   nativeBuildInputs = [ pkgs.bashInteractive pkgs.git pkgs.starship ];
 } ''
@@ -132,10 +138,14 @@ pkgs.runCommand "icewine-terminal-checks" {
   git add tracked
   git -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -qm initial
   touch untracked
-  prompt=$(STARSHIP_CONFIG=${gitConfig defaults} starship prompt)
+  . ${gitTheme}/share/icewine/themes/tokyo-night/ls-colors.sh
+  tokyo_colors="$LS_COLORS"
+  . ${gitTheme}/share/icewine/themes/dracula/ls-colors.sh
+  test "$LS_COLORS" != "$tokyo_colors"
+  prompt=$(STARSHIP_CONFIG=${gitTheme}/share/icewine/themes/tokyo-night/starship.toml starship prompt)
   case "$prompt" in *icewine-check*) ;; *) exit 1 ;; esac
   case "$prompt" in *'?'*) ;; *) exit 1 ;; esac
-  prompt=$(STARSHIP_CONFIG=${gitConfig noGit} starship prompt)
+  prompt=$(STARSHIP_CONFIG=${noGitTheme}/share/icewine/themes/tokyo-night/starship.toml starship prompt)
   case "$prompt" in *icewine-check*|*'?'*) exit 1 ;; esac
   touch "$out"
 ''

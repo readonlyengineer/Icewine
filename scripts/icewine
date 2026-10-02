@@ -2,11 +2,14 @@
 
 usage() {
     cat >&2 <<'EOF'
-Usage: icewine wallpaper IMAGE
+Usage: icewine {init|reset|theme [THEME_ID]|wallpaper IMAGE}
 EOF
 }
 
 case ${1:-} in
+    init|reset|theme)
+        exec icewine-theme "$@"
+        ;;
     wallpaper)
         shift
         exec icewine-wallpaper "$@"

@@ -1,4 +1,4 @@
-/* Tokyo Night palette values supplied by Icewine. */
+/* Active Icewine palette values. */
 
 @define-color palette_bg              #@background@;
 @define-color palette_bg_dark         #@backgroundDark@;

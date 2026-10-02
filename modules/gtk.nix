@@ -1,6 +1,5 @@
 { lib, pkgs, osConfig, ... }:
 let
-  palette = import ../theme/palette.nix;
   theme = pkgs.stdenvNoCC.mkDerivation {
     pname = "tokyonight-gtk-theme";
     version = "0-unstable-2025-10-23";
@@ -29,13 +28,8 @@ let
   };
 in {
   config = lib.mkIf osConfig.services.icewine.gtk.enable {
-    gtk = {
-      enable = true;
-      theme = { name = lib.mkDefault "Tokyonight-Dark"; package = lib.mkDefault theme; };
-      gtk3.extraCss = lib.mkDefault (builtins.replaceStrings
-        (map (name: "@${name}@") (builtins.attrNames palette))
-        (builtins.attrValues palette)
-        (builtins.readFile ../theme/gtk.css.in));
-    };
+    # The CLI owns settings.ini and gtk.css; GTK theme assets remain installed.
+    gtk.theme.package = lib.mkDefault theme;
+    home.packages = [ theme ];
   };
 }

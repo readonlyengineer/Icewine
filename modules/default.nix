@@ -45,6 +45,11 @@ in {
       description = "Require PAM authentication to unlock the session.";
     };
     gtk.enable = lib.mkEnableOption "Icewine GTK styling" // { default = true; };
+    theme = lib.mkOption {
+      type = lib.types.nullOr (lib.types.enum [ "tokyo-night" "dracula" ]);
+      default = null;
+      description = "Optional Icewine theme policy. Null lets the user's CLI selection win; Tokyo Night is the fallback.";
+    };
     idle.enable = lib.mkEnableOption "Icewine idle locking and suspend" // { default = true; };
     battery.enable = lib.mkEnableOption "Icewine battery warnings and critical suspend" // { default = true; };
     fileManager.preset = lib.mkOption {

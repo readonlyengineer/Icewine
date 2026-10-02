@@ -1,10 +1,6 @@
-{ lib, pkgs, osConfig, ... }:
+{ config, lib, pkgs, osConfig, ... }:
 let
-  palette = import ../theme/palette.nix;
-  theme = pkgs.writeText "icewine-kitty-theme.conf" (builtins.replaceStrings
-    (map (name: "@${name}@") (builtins.attrNames palette))
-    (builtins.attrValues palette)
-    (builtins.readFile ../theme/kitty.conf.in));
+  theme = "${config.xdg.configHome}/icewine/current/kitty.conf";
 in {
   config = lib.mkIf (osConfig.services.icewine.terminal.preset == "kitty") {
     programs.kitty = {

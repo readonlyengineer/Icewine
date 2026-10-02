@@ -1,7 +1,14 @@
-{ config, lib, pkgs, osConfig, ... }:
+{ config, lib, pkgs, osConfig, nixpkgsLastModified ? 0, ... }:
 let
   cfg = osConfig.services.icewine;
-  palette = import ../theme/palette.nix;
+  themeAssets = import ../theme/bundle.nix {
+    inherit pkgs lib nixpkgsLastModified;
+    gitEnable = cfg.shell.starship.git.enable;
+  };
+  hostThemeFiles =
+    lib.optional (config.programs.fastfetch.settings != { }) "fastfetch/config.jsonc"
+    ++ lib.optional (config.programs.starship.settings != { }) "starship.toml"
+    ++ lib.optional (config.programs.yazi.theme != { }) "yazi/theme.toml";
   quickshell = pkgs.quickshell.overrideAttrs (old: {
     buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
@@ -14,9 +21,21 @@ let
       ${builtins.readFile ../scripts/wallpaper}
     '';
   };
+  themeCli = pkgs.writeShellApplication {
+    name = "icewine-theme";
+    runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd ];
+    text = ''
+      export ICEWINE_THEME_ASSETS=${themeAssets}/share/icewine/themes
+      export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
+      export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" hostThemeFiles)}
+      export XDG_CONFIG_HOME=''${XDG_CONFIG_HOME:-${config.xdg.configHome}}
+      export XDG_STATE_HOME=''${XDG_STATE_HOME:-${config.xdg.stateHome}}
+      exec python3 ${../scripts/theme} "$@"
+    '';
+  };
   icewineCli = pkgs.writeShellApplication {
     name = "icewine";
-    runtimeInputs = [ wallpaperSelector ];
+    runtimeInputs = [ wallpaperSelector themeCli ];
     text = builtins.readFile ../scripts/icewine;
   };
   monitorCapabilities = pkgs.writeShellApplication {
@@ -29,23 +48,11 @@ let
     runtimeInputs = [ pkgs.coreutils pkgs.brightnessctl pkgs.ddcutil ];
     text = builtins.readFile ../quickshell/tools/monitor-brightness;
   };
-  hyprTheme = pkgs.writeText "icewine-theme.lua" ''
-    hl.config({ general = { col = {
-      active_border = { colors = { "rgba(${palette.highlight}ee)", "rgba(${palette.secondaryHighlight}ee)" }, angle = 45 },
-      inactive_border = "rgba(${palette.background}aa)",
-    } } })
-  '';
-  quickshellPalette = pkgs.writeText "icewine-palette.qml" (
-    builtins.replaceStrings
-      (map (name: "@${name}@") (builtins.attrNames palette))
-      (builtins.attrValues palette)
-      (builtins.readFile ../quickshell/theme/Palette.qml.in)
-  );
   hyprTree = pkgs.runCommand "icewine-hyprland" { } ''
     mkdir -p $out
     cp -r ${../hyprland}/hyprland.lua ${../hyprland}/modules $out/
     chmod -R u+w $out
-    cp ${hyprTheme} $out/modules/Theme.lua
+    ln -s ${config.xdg.configHome}/icewine/current/Theme.lua $out/modules/Theme.lua
     ${lib.optionalString cfg.handheld.enable ''
       cp ${../hyprland/deck/Deck.lua} $out/modules/Deck.lua
     ''}
@@ -56,9 +63,24 @@ let
 in {
   imports = [ ./terminal.nix ./shell.nix ./gtk.nix ./desktop.nix ];
 
-  home.sessionVariables.EDITOR = lib.mkDefault (lib.escapeShellArgs cfg.applications.editor);
-  home.sessionVariables.XDG_DATA_HOME = lib.mkDefault config.xdg.dataHome;
+  home.sessionVariables = {
+    EDITOR = lib.mkDefault (lib.escapeShellArgs cfg.applications.editor);
+    XDG_DATA_HOME = lib.mkDefault config.xdg.dataHome;
+    XDG_CONFIG_HOME = lib.mkDefault config.xdg.configHome;
+    XDG_STATE_HOME = lib.mkDefault config.xdg.stateHome;
+  } // lib.optionalAttrs (cfg.shell.enable && cfg.shell.starship.enable && config.programs.starship.settings == { }) {
+    STARSHIP_CONFIG = lib.mkDefault "${config.xdg.configHome}/icewine/current/starship.toml";
+  };
   home.packages = [ icewineCli ];
+
+  home.activation.icewineThemeInit = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
+    ${icewineCli}/bin/icewine init
+  '';
+  home.activation.icewineThemeApply = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+    if ! ${themeCli}/bin/icewine-theme apply; then
+      echo "Icewine: theme selection is saved; a running consumer needs a restart." >&2
+    fi
+  '';
 
   home.activation.icewineWallpaperMigration = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
     if ! ${icewineCli}/bin/icewine wallpaper --migrate \
@@ -85,7 +107,6 @@ in {
         readonly property bool authenticationRequired: ${builtins.toJSON cfg.authenticationRequired}
       }
     '';
-    "quickshell/theme/Palette.qml".source = quickshellPalette;
   };
 
   systemd.user.services.icewine = {
@@ -96,6 +117,7 @@ in {
       Conflicts = [ "mako.service" ];
     };
     Service = {
+      ExecStartPre = "${icewineCli}/bin/icewine init";
       ExecStart = "${quickshell}/bin/qs";
       Environment = [
         "XDG_DATA_HOME=${config.xdg.dataHome}"
