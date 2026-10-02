@@ -5,7 +5,7 @@
 }
 headerbar, .titlebar, menubar, toolbar {
   background-image: none;
-  background-color: @palette_bg_highlight;
+  background-color: shade(mix(@palette_bg_dark, @palette_highlight, 0.2), 0.8);
   color: @palette_fg;
 }
 headerbar:backdrop, .titlebar:backdrop, menubar:backdrop, toolbar:backdrop {
