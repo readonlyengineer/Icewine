@@ -48,7 +48,19 @@ Scope {
     }
 
     function requestSleep() {
-        Quickshell.execDetached(["systemctl", "suspend"])
+        if (sleep.running)
+            return false
+        sleep.running = true
+        return true
+    }
+
+    function reportSleepFailure(exitCode, exitStatus, message) {
+        if (exitCode === 0 && exitStatus === 0)
+            return
+        const reason = message.trim() || "Suspend is unavailable"
+        console.warn("Suspend failed: " + reason)
+        Quickshell.execDetached(["notify-send", "--app-name=Icewine", "-u", "critical",
+            "-i", "battery-low", "Suspend failed", reason])
     }
 
     function requestReboot() {
@@ -94,6 +106,14 @@ Scope {
         } else if (event === "resume") {
             wakeDisplay()
         }
+    }
+
+    Process {
+        id: sleep
+        command: ["systemctl", "suspend"]
+        stderr: StdioCollector { id: sleepErrors }
+        onExited: (exitCode, exitStatus) => root.reportSleepFailure(exitCode, exitStatus,
+            sleepErrors.text)
     }
 
     PamContext {

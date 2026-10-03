@@ -138,6 +138,7 @@ in {
         "ICEWINE_THEME_IDS=${lib.concatStringsSep ":" themeIds}"
         "ICEWINE_THEME_POLICY=${if cfg.theme == null then "" else cfg.theme}"
         "ICEWINE_AUTHENTICATION_REQUIRED=${if cfg.authenticationRequired then "true" else "false"}"
+        "ICEWINE_BATTERY_ENABLED=${if cfg.battery.enable then "true" else "false"}"
         "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness ]}"
         "QT_IM_MODULE=qtvirtualkeyboard"
       ];

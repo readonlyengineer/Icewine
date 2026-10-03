@@ -44,7 +44,6 @@ let
   ownShell = example { services.icewine.shell.enable = false; };
   customised = example {
     home-manager.users.demo.services.hypridle.settings.listener = [ { timeout = 42; on-timeout = "true"; } ];
-    home-manager.users.demo.services.batsignal.extraArgs = [ "-w" "25" ];
     home-manager.users.demo.programs.yazi.theme.mode.normal_main.fg = "#112233";
     home-manager.users.demo.programs.fastfetch.settings.display.separator = "HOST";
     home-manager.users.demo.programs.starship.settings.format = "HOST";
@@ -69,7 +68,9 @@ in
 assert lib.all (package: lib.isDerivation package) externalGtk.environment.systemPackages;
 assert !(home defaults).gtk.enable;
 assert (home defaults).services.hypridle.enable;
-assert (home defaults).services.batsignal.enable;
+assert defaults.services.upower.enable;
+assert !((home defaults).systemd.user.services ? batsignal);
+assert lib.elem "ICEWINE_BATTERY_ENABLED=true" (home defaults).systemd.user.services.icewine.Service.Environment;
 assert (home defaults).programs.yazi.enable;
 assert (home defaults).programs.yazi.plugins ? mount;
 assert lib.elem pkgs.ffmpegthumbnailer (home defaults).programs.yazi.extraPackages;
@@ -84,14 +85,15 @@ assert (home defaults).xdg.dataFile ? "applications/uuctl.desktop";
 assert !((home defaults).systemd.user.services ? waybar);
 assert !(home unmanaged).gtk.enable;
 assert !(home unmanaged).services.hypridle.enable;
-assert !(home unmanaged).services.batsignal.enable;
+assert unmanaged.services.upower.enable;
+assert !((home unmanaged).systemd.user.services ? batsignal);
+assert lib.elem "ICEWINE_BATTERY_ENABLED=false" (home unmanaged).systemd.user.services.icewine.Service.Environment;
 assert !(home unmanaged).programs.yazi.enable;
 assert !unmanaged.services.gvfs.enable;
 assert !((home unmanaged).home.sessionVariables ? STARSHIP_CONFIG);
 assert (home customised).programs.yazi.theme.mode.normal_main.fg == "#112233";
 assert !(lib.hasInfix "fastfetch.jsonc" (home customised).programs.bash.initExtra);
 assert (home customised).home.sessionVariables.STARSHIP_CONFIG != "${(home customised).xdg.configHome}/icewine/current/starship.toml";
-assert (home customised).services.batsignal.extraArgs == [ "-w" "25" ];
 assert (builtins.head (home customised).services.hypridle.settings.listener).timeout == 42;
 assert (home defaults).programs.kitty.enable;
 assert !((home defaults).home.sessionVariables ? ICEWINE_KITTY_PRESET);

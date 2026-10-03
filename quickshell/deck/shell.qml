@@ -13,6 +13,7 @@ ShellRoot {
     Modules.NotificationService {
         id: notifications
     }
+    Modules.BatteryAlert { session: session }
     Modules.NotificationToasts {
         compositor: hyprlandAdapter
         notificationService: notifications

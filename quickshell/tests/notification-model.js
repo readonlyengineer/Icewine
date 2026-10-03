@@ -49,8 +49,8 @@ assert.equal(notifications.sourceWindowAddress({ desktopEntry: "example" },
 assert.equal(notifications.sourceWindowAddress({ appName: "kitty" },
     [window("0x5", "kitty")], null), "",
     "A display name alone must not establish source identity")
-assert.equal(notifications.sourceWindowAddress({ desktopEntry: "batsignal" },
-    [window("0x6", "kitty")], { id: "batsignal", startupClass: "" }), "")
+assert.equal(notifications.sourceWindowAddress({ desktopEntry: "power-alert" },
+    [window("0x6", "kitty")], { id: "power-alert", startupClass: "" }), "")
 assert.equal(notifications.sourceWindowAddress(kitty, [], kittyEntry), "",
     "Closed source windows must not leave an actionable address")
 assert.equal(notifications.sourceWindowAddress(kitty,

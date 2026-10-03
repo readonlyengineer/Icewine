@@ -60,17 +60,6 @@ in {
       ];
     };
   };
-  # Warn notification at 20% / Critical notification 10% / Suspend at Danger 3%
-  # KDE/GNOME have native battery alerts
-  services.batsignal = lib.mkIf cfg.battery.enable {
-    enable = true;
-    extraArgs = lib.mkDefault [
-      "-w" "20" "-c" "10" "-d" "3" "-f" "0"
-      "-W" "Battery Low" "-C" "Battery Critical" "-D" "systemctl suspend"
-      "-I" "battery-low"
-    ];
-  };
-  systemd.user.services.batsignal = lib.mkIf cfg.battery.enable { Service.Restart = lib.mkForce "no"; };
   systemd.user.services.hypridle = lib.mkIf cfg.idle.enable {
     Service = {
       Restart = lib.mkForce "on-failure";

@@ -404,12 +404,21 @@ feature; they do not disable another module's configuration or delete user data.
 | `login.enable = false;` | SDDM login screen; provide another display manager or use console login. |
 | `gtk.enable = false;` | Icewine GTK styling. |
 | `idle.enable = false;` | Hypridle's automatic locking, display blanking and suspend hooks; manual locking remains available. |
-| `battery.enable = false;` | Battery warnings and critical-battery suspend. |
+| `battery.enable = false;` | Icewine battery warnings and automatic sleep; UPower remains available for battery data and host policy. |
 | `shell.enable = false;` | Icewine's Bash configuration and all shell integrations below. |
 | `shell.fastfetch.enable = false;` | Fastfetch installation and startup report. |
 | `shell.blesh.enable = false;` | ble.sh installation and integration. |
 | `shell.starship.enable = false;` | Starship installation and prompt. |
 | `shell.starship.git.enable = false;` | Git information in the Starship prompt. |
+
+Battery thresholds are editable in `quickshell/config/Settings.qml`: 20% low,
+10% critical and 5% danger warnings, then a 3% Suspend request by default.
+These replace former `services.batsignal.extraArgs` values; no current Nixos
+host sets an override. Icewine reads UPower's aggregate display battery, but
+does not change the host's UPower power policy. Warnings and the 3% sleep request
+require Quickshell to be running. Suspend uses the same session action as the
+Sleep button and reports a failed request; check notifications and sleep on
+real hardware without deliberately draining a battery.
 
 With the Kitty preset active, Icewine installs an editable
 `$XDG_CONFIG_HOME/kitty/kitty.conf` entry. Home Manager redirects its generated

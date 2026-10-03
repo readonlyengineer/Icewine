@@ -13,6 +13,8 @@ import tempfile
 QML = """import QtQuick
 import QtQuick.Window
 import Quickshell
+import Quickshell.Services.UPower
+import "modules" as Modules
 import "modules/topbar" as Bar
 import "modules/topbar/popouts" as Popouts
 ShellRoot {
@@ -25,6 +27,7 @@ ShellRoot {
     property bool handedOff: false
     property real performanceHeightBefore: 0
     property string sessionAction: ""
+    property int sleepCalls: 0
     signal tick()
     QtObject {
         id: compositor
@@ -34,7 +37,7 @@ ShellRoot {
     QtObject {
         id: session
         function requestLock() { root.sessionAction = "lock" }
-        function requestSleep() { root.sessionAction = "sleep" }
+        function requestSleep() { root.sessionAction = "sleep"; ++root.sleepCalls; return true }
         function requestReboot() { root.sessionAction = "reboot" }
         function requestShutdown() { root.sessionAction = "shutdown" }
     }
@@ -46,6 +49,20 @@ ShellRoot {
         readonly property string error: "Brightness unavailable"
         function setBrightness(value) {}
     }
+    QtObject {
+        id: measuredBattery
+        property bool isLaptopBattery: true
+        property real percentage: 0.21
+        property int state: UPowerDeviceState.Discharging
+    }
+    QtObject {
+        id: chargingBattery
+        property bool isLaptopBattery: true
+        property real percentage: 0.21
+        property int state: UPowerDeviceState.Discharging
+    }
+    Modules.BatteryAlert { session: session; batteryDevice: measuredBattery }
+    Modules.BatteryAlert { session: session; batteryDevice: chargingBattery }
     Bar.SystemMetrics { id: systemMetrics }
     Bar.HistoryGraph {
         id: coldGraph
@@ -172,6 +189,12 @@ ShellRoot {
             brightness.setBrightness(55)
             brightness.setBrightness(76)
             brightness.active = false
+            measuredBattery.percentage = 0.20
+            measuredBattery.percentage = 0.10
+            measuredBattery.percentage = 0.05
+            measuredBattery.percentage = 0.03
+            chargingBattery.percentage = 0.02
+            cancelSleep.start()
             root.tick()
             const button = root.findButton(performance)
             if (!button) throw new Error("Missing btop button")
@@ -181,6 +204,11 @@ ShellRoot {
                 cpuTemperature: null, memory: { current: null, history: [] }, gpus: [] }
             finish.start()
         }
+    }
+    Timer {
+        id: cancelSleep
+        interval: 100
+        onTriggered: chargingBattery.state = UPowerDeviceState.Charging
     }
 
     function findAccessible(item, name) {
@@ -205,6 +233,8 @@ ShellRoot {
         onTriggered: {
             if (!brightness.available || brightness.value !== 76)
                 throw new Error("Pending brightness did not survive popup closure")
+            if (root.sleepCalls !== 2)
+                throw new Error("Battery sleep was missed or repeated after charging")
             if (network.history.length !== 2 || network.history[1].values[0] !== 0)
                 throw new Error("Network sampler did not read counters")
             if (!root.handedOff) throw new Error("btop launch did not hand off focus")
@@ -243,6 +273,7 @@ with tempfile.TemporaryDirectory() as directory:
     palette = (source / "theme/assets/templates/Palette.qml.in").read_text()
     (root / "theme/Palette.qml").write_text(re.sub(r"@\w+@", "7aa2f7", palette))
     (root / "theme/qmldir").write_text("singleton Palette 1.0 Palette.qml\n")
+    (root / "config").symlink_to(source / "quickshell/config")
     (root / "bin").mkdir()
     mock = root / "bin/icewine-monitor-brightness"
     mock.write_text("#!" + shutil.which("bash") + '\necho "${2:-37}"\n')
@@ -250,9 +281,13 @@ with tempfile.TemporaryDirectory() as directory:
     uwsm = root / "bin/uwsm"
     uwsm.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$@" > "' + str(root / "launch") + '"\n')
     uwsm.chmod(0o755)
+    notify = root / "bin/notify-send"
+    notify.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$*" >> "' + str(root / "notifications") + '"\n')
+    notify.chmod(0o755)
     (root / "shell.qml").write_text(QML)
     (root / "network.txt").write_text("eth0: 100 0 0 0 0 0 0 0 50 0 0 0 0 0 0 0\n")
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen",
+               ICEWINE_BATTERY_ENABLED="true",
                DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(root / "no-session-bus"),
                DBUS_SYSTEM_BUS_ADDRESS="unix:path=" + str(root / "no-system-bus"),
                XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(root / "runtime"),
@@ -263,4 +298,9 @@ with tempfile.TemporaryDirectory() as directory:
     assert result.returncode == 0 and "CONTROL_CHECK_PASSED" in output, output
     assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
     assert (root / "launch").read_text().splitlines() == ["app", "--", "icewine-terminal-exec", "btop"]
+    notifications = (root / "notifications").read_text().splitlines()
+    assert len(notifications) == 4, notifications
+    assert any("-u normal Battery Low 20%" in call for call in notifications), notifications
+    assert any("-u critical Battery Critical 10%" in call for call in notifications), notifications
+    assert any("-u critical Battery Danger 5%" in call for call in notifications), notifications
     print("control lifecycle checks passed")

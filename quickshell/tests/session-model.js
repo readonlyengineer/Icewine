@@ -24,6 +24,22 @@ assert.equal(Session.logindEvent("unrelated signal", path), "")
 const fs = require("node:fs")
 const vm = require("node:vm")
 const source = fs.readFileSync(require("node:path").join(__dirname, "../modules/SessionControl.qml"), "utf8")
+const requestSleep = source.match(/    function requestSleep\(\) \{[\s\S]*?^    \}/m)[0]
+const reportSleepFailure = source.match(/    function reportSleepFailure\(exitCode, exitStatus, message\) \{[\s\S]*?^    \}/m)[0]
+const sleepRequests = vm.createContext({ sleep: { running: false },
+    Quickshell: { execDetached: args => sleepRequests.notices.push(args) },
+    console: { warn: message => sleepRequests.warnings.push(message) },
+    notices: [], warnings: [] })
+vm.runInContext(requestSleep + "\n" + reportSleepFailure, sleepRequests)
+assert.equal(sleepRequests.requestSleep(), true)
+assert.equal(sleepRequests.requestSleep(), false, "a pending Suspend must not be duplicated")
+sleepRequests.reportSleepFailure(0, 0, "")
+assert.equal(sleepRequests.notices.length, 0)
+sleepRequests.reportSleepFailure(1, 0, "Suspend is unsupported")
+assert.equal(sleepRequests.notices.length, 1)
+assert.equal(sleepRequests.notices[0][3], "critical")
+assert.equal(sleepRequests.notices[0].at(-1), "Suspend is unsupported")
+assert.equal(sleepRequests.warnings.length, 1)
 const handler = source.match(/    function handleLogind\(line\) \{[\s\S]*?^    \}/m)[0]
 const events = []
 const context = vm.createContext({

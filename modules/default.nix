@@ -52,7 +52,7 @@ in {
       description = "Optional Icewine theme policy. Null lets the user's CLI selection win; Tokyo Night is the fallback.";
     };
     idle.enable = lib.mkEnableOption "Icewine idle locking and suspend" // { default = true; };
-    battery.enable = lib.mkEnableOption "Icewine battery warnings and critical suspend" // { default = true; };
+    battery.enable = lib.mkEnableOption "Icewine Quickshell battery warnings and sleep" // { default = true; };
     fileManager.preset = lib.mkOption {
       type = lib.types.nullOr (lib.types.enum [ "yazi" ]);
       default = "yazi";
