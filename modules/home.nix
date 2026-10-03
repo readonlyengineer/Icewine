@@ -16,12 +16,15 @@ let
       cp ${../kitty/kitty.conf} $out/config/kitty/kitty.conf
     ''}
     cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
-    cp -r ${../quickshell/adapters} ${../quickshell/modules} $out/config/quickshell/
-    cp -r ${../quickshell/theme} $out/config/quickshell/
-    cp ${../quickshell/config/qmldir} ${../quickshell/config/Settings.qml} $out/config/quickshell/config/
+    cp -r ${../quickshell/adapters} $out/config/quickshell/adapters
+    cp -r ${../quickshell/modules} $out/config/quickshell/modules
+    cp -r ${../quickshell/theme} $out/config/quickshell/theme
+    cp ${../quickshell/config/qmldir} $out/config/quickshell/config/qmldir
+    cp ${../quickshell/config/Settings.qml} $out/config/quickshell/config/Settings.qml
     ${lib.optionalString cfg.handheld.enable ''
       cp ${../hyprland/deck/Deck.lua} $out/config/hypr/modules/Deck.lua
-      cp ${../quickshell/deck/DeckOverlay.qml} ${../quickshell/deck/DeckMenu.js} $out/config/quickshell/
+      cp ${../quickshell/deck/DeckOverlay.qml} $out/config/quickshell/DeckOverlay.qml
+      cp ${../quickshell/deck/DeckMenu.js} $out/config/quickshell/DeckMenu.js
     ''}
     chmod -R u+w $out
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
