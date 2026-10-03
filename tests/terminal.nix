@@ -35,6 +35,11 @@ let
   ownTerminal = example {
     services.icewine.terminal.preset = null;
     services.icewine.applications.terminal = [ "custom-terminal" ];
+    home-manager.backupFileExtension = "hm-bak";
+    home-manager.users.demo.programs.kitty = {
+      enable = true;
+      settings.background = "#abcdef";
+    };
   };
   ownShell = example { services.icewine.shell.enable = false; };
   customised = example {
@@ -44,8 +49,10 @@ let
     home-manager.users.demo.programs.fastfetch.settings.display.separator = "HOST";
     home-manager.users.demo.programs.starship.settings.format = "HOST";
     home-manager.users.demo.programs.kitty = {
-      font.size = 12;
+      font = { name = "JetBrains Mono"; size = 12; };
       settings.background = "#112233";
+      keybindings."ctrl+shift+t" = "new_tab";
+      extraConfig = "foreground #445566";
     };
   };
   # Only replace the report executable; exercise Home Manager's real bashrc.
@@ -89,6 +96,8 @@ assert (builtins.head (home customised).services.hypridle.settings.listener).tim
 assert (home defaults).programs.kitty.enable;
 assert !((home defaults).home.sessionVariables ? ICEWINE_KITTY_PRESET);
 assert (home defaults).programs.kitty.package != null;
+assert (home defaults).xdg.configFile."kitty/kitty.conf".target
+  == lib.removePrefix "${(home defaults).home.homeDirectory}/" "${(home defaults).xdg.configHome}/kitty/host.conf";
 assert defaults.services.icewine.applications.terminal == [ "kitty" ];
 assert (home defaults).programs.bash.enable;
 assert (home defaults).programs.fastfetch.enable;
@@ -102,7 +111,12 @@ assert !(home unmanaged).programs.bash.enable;
 assert !(home unmanaged).programs.fastfetch.enable;
 assert !(home unmanaged).programs.starship.enable;
 assert !(lib.elem pkgs.blesh (home unmanaged).home.packages);
-assert !(home ownTerminal).programs.kitty.enable && (home ownTerminal).programs.bash.enable;
+assert (home ownTerminal).programs.kitty.enable;
+assert (home ownTerminal).programs.kitty.settings.background == "#abcdef";
+assert ownTerminal.home-manager.backupFileExtension == "hm-bak";
+assert (home ownTerminal).xdg.configFile."kitty/kitty.conf".target
+  == lib.removePrefix "${(home ownTerminal).home.homeDirectory}/" "${(home ownTerminal).xdg.configHome}/kitty/kitty.conf";
+assert (home ownTerminal).programs.bash.enable;
 assert (home ownShell).programs.kitty.enable && !(home ownShell).programs.bash.enable;
 assert (home bareShell).programs.bash.enable;
 assert !(home bareShell).programs.fastfetch.enable;
@@ -110,6 +124,12 @@ assert !(home bareShell).programs.starship.enable;
 assert !(lib.elem pkgs.blesh (home bareShell).home.packages);
 assert (home customised).programs.kitty.font.size == 12;
 assert (home customised).programs.kitty.settings.background == "#112233";
+assert (home customised).xdg.configFile."kitty/kitty.conf".target
+  == lib.removePrefix "${(home customised).home.homeDirectory}/" "${(home customised).xdg.configHome}/kitty/host.conf";
+assert lib.hasInfix "font_size 12" (home customised).xdg.configFile."kitty/kitty.conf".text;
+assert lib.hasInfix "background #112233" (home customised).xdg.configFile."kitty/kitty.conf".text;
+assert lib.hasInfix "map ctrl+shift+t new_tab" (home customised).xdg.configFile."kitty/kitty.conf".text;
+assert lib.hasInfix "foreground #445566" (home customised).xdg.configFile."kitty/kitty.conf".text;
 pkgs.runCommand "icewine-terminal-checks" {
   nativeBuildInputs = [ pkgs.bashInteractive pkgs.git pkgs.starship pkgs.python3 ];
 } ''

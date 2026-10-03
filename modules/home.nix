@@ -8,6 +8,10 @@ let
     cp ${../hyprland}/hyprland.lua $out/config/hypr/hyprland.lua
     cp ${../session/env} $out/config/uwsm/env
     cp ${../nvim/init.lua} $out/config/nvim/init.lua
+    ${lib.optionalString (cfg.terminal.preset == "kitty") ''
+      mkdir -p $out/config/kitty
+      cp ${../kitty/kitty.conf} $out/config/kitty/kitty.conf
+    ''}
     cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
     cp -r ${../quickshell/adapters} ${../quickshell/modules} $out/config/quickshell/
     cp ${../quickshell/config/qmldir} ${../quickshell/config/Settings.qml} $out/config/quickshell/config/

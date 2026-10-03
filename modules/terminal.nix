@@ -1,7 +1,5 @@
-{ config, lib, pkgs, osConfig, ... }:
-let
-  theme = "${config.xdg.configHome}/icewine/current/kitty.conf";
-in {
+{ config, lib, osConfig, ... }:
+{
   config = lib.mkIf (osConfig.services.icewine.terminal.preset == "kitty") {
     programs.kitty = {
       enable = true;
@@ -11,11 +9,9 @@ in {
         enableFishIntegration = lib.mkDefault false;
         enableZshIntegration = lib.mkDefault false;
       };
-      # Home Manager emits settings at order 540; host colour overrides win.
-      extraConfig = lib.mkOrder 520 ''
-        include ${config.xdg.configHome}/icewine/current/kitty-base.conf
-        include ${theme}
-      '';
     };
+    # Keep all Home Manager Kitty options in a separate host-owned include.
+    # The editable kitty.conf remains Icewine's only owner of that path.
+    xdg.configFile."kitty/kitty.conf".target = lib.mkForce "${config.xdg.configHome}/kitty/host.conf";
   };
 }

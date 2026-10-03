@@ -34,6 +34,12 @@ with tempfile.TemporaryDirectory() as temporary:
         "config/btop/btop.conf": b"default btop\n",
         "config/user-dirs.locale": b"default locale\n",
         "config/nvim/init.lua": b"default nvim\n",
+        "config/kitty/kitty.conf": (
+            b"# Icewine's editable Kitty entry point.\n"
+            b"include ../icewine/current/kitty-base.conf\n"
+            b"include ../icewine/current/kitty.conf\n"
+            b"include host.conf\n"
+        ),
         "data/wallpapers/default.jpg": b"default wallpaper",
         "data/wallpapers/current_blurr.jpg": b"default blur",
     }.items():
@@ -73,6 +79,10 @@ with tempfile.TemporaryDirectory() as temporary:
     unknown_path.parent.mkdir(parents=True)
     unknown_target = "/nix/store/" + "d" * 32 + "-home-manager-files/.config/gtk-4.0/gtk.css"
     unknown_path.symlink_to(unknown_target)
+    kitty_entry = config / "kitty/kitty.conf"
+    kitty_entry.parent.mkdir(parents=True, exist_ok=True)
+    kitty_legacy_target = "/nix/store/" + "c" * 32 + "-home-manager-files/.config/kitty/kitty.conf"
+    kitty_entry.symlink_to(kitty_legacy_target)
 
     result = run("init")
     assert result.returncode == 0, result.stderr
@@ -98,6 +108,14 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (root / "data/wallpapers/default.jpg").read_bytes() == b"default wallpaper"
     assert not (config / "quickshell/modules/Thing.qml").is_symlink()
     assert (config / "nvim/init.lua").read_text() == "default nvim\n"
+    kitty_includes = [line for line in kitty_entry.read_text().splitlines() if line.startswith("include ")]
+    assert kitty_includes == [
+        "include ../icewine/current/kitty-base.conf",
+        "include ../icewine/current/kitty.conf",
+        "include host.conf",
+    ]
+    kitty_migration = list((state / "icewine").glob("defaults-migration-*/config/kitty/kitty.conf"))
+    assert len(kitty_migration) == 1 and os.readlink(kitty_migration[0]) == kitty_legacy_target
 
     (config / "quickshell/modules/Thing.qml").write_text("user module edit\n")
     (root / "data/wallpapers/default.jpg").write_bytes(b"user wallpaper")
@@ -111,6 +129,14 @@ with tempfile.TemporaryDirectory() as temporary:
     assert any(path.read_text() == "user nvim edit\n" for path in
                (state / "icewine").glob("defaults-reset-*/config/nvim/init.lua"))
     assert (root / "data/wallpapers/default.jpg").read_bytes() == b"user wallpaper"
+    kitty_entry.write_text("user Kitty entry edit\n")
+    assert run("init").returncode == 0
+    assert kitty_entry.read_text() == "user Kitty entry edit\n"
+    result = run("reset", "kitty")
+    assert result.returncode == 0, result.stderr
+    assert "include host.conf\n" in kitty_entry.read_text()
+    assert any(path.read_text() == "user Kitty entry edit\n" for path in
+               (state / "icewine").glob("defaults-reset-*/config/kitty/kitty.conf"))
 
     fastfetch_path = config / "fastfetch/config.jsonc"
     fastfetch_path.unlink()
@@ -254,6 +280,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert len(saved_init) == 1 and saved_init[0].read_text() == "old generated nvim\n"
 
     # Every shipped palette renders app-native files, including light mode.
+    kitty_entry.write_text("user Kitty theme edit\n")
     for theme_id, background, appearance in [
         ("tokyo-night", "1a1b26", "dark"), ("dracula", "282a36", "dark"),
         ("nord", "2e3440", "dark"), ("gruvbox-light", "fbf1c7", "light"),
@@ -267,6 +294,7 @@ with tempfile.TemporaryDirectory() as temporary:
         assert result.returncode == 0, result.stderr
         current = config / "icewine/current"
         assert f"background #{background}\n" in (current / "kitty.conf").read_text()
+        assert kitty_entry.read_text() == "user Kitty theme edit\n"
         assert f'vim.opt.background = "{appearance}"' in nvim_theme.read_text()
         assert f'dark: "{appearance}"' in (current / "Palette.qml").read_text()
         assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}" in (current / "gtk-settings.ini").read_text()

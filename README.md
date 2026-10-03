@@ -392,5 +392,17 @@ feature; they do not disable another module's configuration or delete user data.
 | `shell.starship.enable = false;` | Starship installation and prompt. |
 | `shell.starship.git.enable = false;` | Git information in the Starship prompt. |
 
+With the Kitty preset active, Icewine installs an editable
+`$XDG_CONFIG_HOME/kitty/kitty.conf` entry. Home Manager redirects its generated
+Kitty config, including host settings, fonts, bindings and extra config, to
+`kitty/host.conf`; the entry includes it after Icewine's base and theme files so
+host settings retain precedence without sharing the editable entry path. Shell
+integration remains managed through Home Manager's separate shell hooks.
+Setting `terminal.preset = null` leaves Home Manager's normal Kitty
+configuration path to the host. On the Nixos desktop, Home Manager's `hm-bak`
+policy backs up the editable entry when handing that path back to host settings;
+activation stops safely if that backup already exists. Other Home Manager
+consumers need a backup extension configured or must move the entry first.
+
 The handheld interface is opt-in (`handheld.enable = true;`), not enabled by
 default. There is no blanket exclusion list for core desktop dependencies.
