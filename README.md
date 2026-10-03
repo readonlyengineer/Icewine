@@ -5,33 +5,143 @@ Icewine is a unified Hyprland desktop for Desktop/Laptop/Handheld/HTPC; develope
 It is deeply experimental at the moment; it will move fast and break things. 
 Use at your own risk. 
 
-## Setup
+## Install on NixOS
 
-NixOS may be installed with the standard calamares installer before the following edits are made: 
+Start from an installed NixOS graphical system and open its terminal. The guide
+below targets Intel/AMD PCs (`x86_64-linux`) and keeps the users, disks and
+hardware configuration created by the installer. Icewine follows
+`nixos-unstable`; this moves the whole system onto that rolling branch.
 
-Add Icewine to your system flake:
+If you already use a system flake, skip to [Existing flakes](#existing-flakes).
+
+### 1. Back up your configuration and enable flakes
+
+Check your username and save the installer configuration:
+
+```sh
+id -un
+sudo cp -a /etc/nixos /etc/nixos.before-icewine
+sudo nano /etc/nixos/configuration.nix
+```
+
+Add this inside the existing configuration's final `{ ... }` block:
+
+```nix
+nix.settings.experimental-features = [ "nix-command" "flakes" ];
+```
+
+Apply that setting before creating a flake:
+
+```sh
+sudo nixos-rebuild switch
+```
+
+Keep `hardware-configuration.nix`, your user settings and `system.stateVersion`
+unchanged. Flakes are explained in the [NixOS guide](https://wiki.nixos.org/wiki/Flakes).
+
+### 2. Replace the installer desktop with Icewine
+
+Edit `/etc/nixos/configuration.nix` again. Remove the lines enabling the old
+desktop and display manager, such as GNOME/GDM or Plasma/SDDM, and any explicit
+old default session. Look for `services.desktopManager.gnome.enable`,
+`services.displayManager.gdm.enable`, `services.desktopManager.plasma6.enable`
+and `services.displayManager.sddm.enable`; older configurations may put these
+under `services.xserver`. Remove the matching enable lines already in your file.
+Leave `services.xserver.enable` and your networking and hardware settings in
+place. Icewine provides SDDM and Hyprland itself.
+
+Create `/etc/nixos/flake.nix` with `sudo nano /etc/nixos/flake.nix` and paste:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    icewine.url = "github:readonlyengineer/Icewine/main";
+    icewine.inputs.nixpkgs.follows = "nixpkgs";
+  };
+
+  outputs = { nixpkgs, icewine, ... }: {
+    nixosConfigurations.icewine = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        ./configuration.nix
+        icewine.nixosModules.default
+        {
+          services.icewine = {
+            enable = true;
+            user = "YOUR_USERNAME";
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
+Replace `YOUR_USERNAME` with the result of `id -un`. The `icewine` name is the
+configuration selected by the commands below; it does not rename your computer.
+Icewine includes Home Manager integration, so no separate installation is needed.
+
+### 3. Build, reboot and log in
+
+Build the configuration for your next boot, leaving the current desktop running:
+
+```sh
+sudo nixos-rebuild boot --flake path:/etc/nixos#icewine
+```
+
+The first build may take a while. If it fails, fix the reported error before
+rebooting. Once it succeeds:
+
+```sh
+sudo reboot
+```
+
+At SDDM, select **Hyprland (UWSM)** if it is not already selected, then log in
+with your existing username and password. Icewine installs its initial user
+configuration automatically; do not run `icewine init` with sudo.
+
+- `Super+Space` opens a terminal; `Super+Return` opens the launcher.
+- `icewine theme` lists themes; `icewine theme catppuccin-mocha` selects one.
+- `icewine wallpaper "/path/to/image.png"` selects a wallpaper.
+
+To recover from a bad boot, choose an earlier NixOS generation in the boot menu.
+The original configuration is also saved in `/etc/nixos.before-icewine`.
+
+For later configuration edits, use:
+
+```sh
+sudo nixos-rebuild switch --flake path:/etc/nixos#icewine
+```
+
+To update the rolling inputs first:
+
+```sh
+sudo nix flake update --flake path:/etc/nixos
+sudo nixos-rebuild boot --flake path:/etc/nixos#icewine
+```
+
+Reboot after that update succeeds. Keep `flake.lock` with your configuration;
+it records the revisions used by a rebuild.
+
+### Existing flakes
+
+Add the input below, import `icewine.nixosModules.default` in your existing
+`nixosSystem.modules`, and set `services.icewine.enable = true` and
+`services.icewine.user` to your existing username. Disable your old desktop and
+display manager as above, then rebuild your usual flake target.
 
 ```nix
 inputs.icewine.url = "github:readonlyengineer/Icewine/main";
+inputs.icewine.inputs.nixpkgs.follows = "nixpkgs";
 ```
 
-Disable your existing desktop environment and display manager in your NixOS
-configuration, then import Icewine and select an existing user. Importing Icewine
-does not disable the old desktop for you.
+Use a current `nixos-unstable` Nixpkgs input for Icewine's desktop dependencies.
+If your flake already imports Home Manager, share its input too:
 
 ```nix
-imports = [ inputs.icewine.nixosModules.default ];
-
-services.icewine = {
-  enable = true;
-  user = "alice";
-};
+inputs.icewine.inputs.home-manager.follows = "home-manager";
 ```
-
-Icewine configures its own Home Manager integration and a standard SDDM login
-screen, with `hyprland-uwsm` as the overridable default session. SDDM uses its
-default X11 greeter; the desktop session runs on Wayland. Login and locking
-share the same QtQuick layout and palette, with separate authentication.
 
 ### Host responsibilities
 
@@ -171,43 +281,53 @@ The CLI renders them into `$XDG_CONFIG_HOME/icewine/rendered/`; Nix packages
 those source files and supplies optional policy/host metadata. On non-Nix
 Linux, Fastfetch uses a generic kernel report and omits the Nixpkgs age row.
 
-### Steam
+### Applications and Steam
 
-For desktop systems, we recommend Steam’s Flatpak package for its application sandbox:
+Icewine installs Firefox, Kitty, Yazi and desktop controls. Add other native
+packages inside `/etc/nixos/configuration.nix`, then rebuild:
 
-```nix 
-services.flatpak.packages = [
-  "com.valvesoftware.Steam"
-  "com.valvesoftware.Steam.CompatibilityTool.Proton-GE"
-];
+```nix
+environment.systemPackages = with pkgs; [ vlc ];
+```
 
+For a graphical app store, enable Flatpak in that same configuration:
+
+```nix
+services.flatpak.enable = true;
+```
+
+Rebuild and log out/in, then add Flathub and install Bazaar as your normal user:
+
+```sh
+flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub io.github.kolunmi.Bazaar
+```
+
+Launch Bazaar from Icewine's launcher to install more applications. Icewine does
+not install Bazaar automatically. See the [NixOS Flatpak guide](https://wiki.nixos.org/wiki/Flatpak).
+
+For desktop Steam through Flatpak, install it from Bazaar or run:
+
+```sh
+flatpak install --user flathub com.valvesoftware.Steam
+```
+
+Then add these settings and rebuild:
+
+```nix
 services.icewine.steam.enable = true;
 services.icewine.applications.steam = [
   "flatpak" "run" "com.valvesoftware.Steam"
 ];
 ```
 
-For handheld systems, Icewine installs native Steam as part of its Gamescope and controller integration. Steam is proprietary, so allow unfree packages on the host:
+Handheld mode installs native Steam for its Gamescope/controller integration.
+Steam is proprietary, so allow unfree packages on the host:
 
 ```nix
 nixpkgs.config.allowUnfree = true;
 services.icewine.handheld.enable = true;
 ```
-
-### Software and packages
-
-For users new to NixOS, it is recommended to use flatpak where possible. 
-Flatpaks can be added declaratively in your nix configuration or downloaded direclty. 
-The example below provides both an example of how to declaratively add a flatpak, and guides the user to Bazaar, a traditional appstore for flatpaks. 
-
-```nix
-services.flatpak.packages = [
-  "io.github.kolunmi.Bazaar"
-];
-```
-Icewine does not install Bazaar. 
-
-System packages must be installed via the system configuration, refer to the nix wiki page for the package. 
 
 ## Basic hotkeys
 
@@ -232,15 +352,6 @@ System packages must be installed via the system configuration, refer to the nix
 
 Icewine installs native Firefox and uses it for the browser launcher, web links,
 HTML and PDFs.
-
-### For users who have already configured thier flake
-
-Icewine configures and uses Home Manager for dotfiles. 
-To make Icewine use the same Home Manager input as your system flake:
-
-```nix
-inputs.icewine.inputs.home-manager.follows = "home-manager";
-```
 
 ### Supported alternative software
 
