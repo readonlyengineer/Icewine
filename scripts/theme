@@ -123,6 +123,10 @@ def render_theme(assets, palette_file, level="high"):
         raise ValueError(f"invalid theme data: {palette_file}")
     values = dict(palette)
     values["themeId"] = palette_file.stem
+    values["terminalBackground"] = "".join(
+        f"{round(int(values['background'][i:i + 2], 16) * 0.9 + int(values['highlight'][i:i + 2], 16) * 0.1):02x}"
+        for i in (0, 2, 4)
+    )
     values["kittyOpacity"], values["inactiveOpacity"] = TRANSPARENCY[level]
     values["gtkPreferDark"] = "0" if values["appearance"] == "light" else "1"
     for key in ("highlightRgb", "mutedRgb"):

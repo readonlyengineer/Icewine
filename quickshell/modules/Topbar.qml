@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
@@ -293,6 +294,15 @@ Scope {
                     opacity: root.barVisible ? 1 : 0
                     enabled: root.barVisible
                     color: Theme.Palette.backgroundDark
+                    layer.enabled: visible
+                    layer.effect: MultiEffect {
+                        shadowEnabled: true
+                        shadowColor: "#000000"
+                        shadowOpacity: 0.35
+                        shadowBlur: 0.6
+                        blurMax: 16
+                        shadowVerticalOffset: 4
+                    }
                     bottomLeftRadius: root.radialVisible ? 0 : 10
                     bottomRightRadius: root.radialVisible ? 0 : 10
 
@@ -343,6 +353,15 @@ Scope {
 
                 Bar.Launcher {
                     id: launcher
+                    layer.enabled: visible
+                    layer.effect: MultiEffect {
+                        shadowEnabled: true
+                        shadowColor: "#000000"
+                        shadowOpacity: 0.35
+                        shadowBlur: 0.6
+                        blurMax: 16
+                        shadowVerticalOffset: 4
+                    }
                     excludeSteamApps: root.excludeSteamApps
                     visible: panel.widgetHere && root.ui.page === "launcher"
                     engaged: root.widgetEngaged
@@ -356,6 +375,15 @@ Scope {
                 }
                 Bar.StatusPopout {
                     id: statusPopout
+                    layer.enabled: visible
+                    layer.effect: MultiEffect {
+                        shadowEnabled: true
+                        shadowColor: "#000000"
+                        shadowOpacity: 0.35
+                        shadowBlur: 0.6
+                        blurMax: 16
+                        shadowVerticalOffset: 4
+                    }
                     visible: panel.widgetHere && root.ui.page !== "launcher"
                     engaged: root.widgetEngaged
                     currentPage: visible ? root.ui.page : "audio"

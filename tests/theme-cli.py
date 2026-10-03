@@ -289,13 +289,13 @@ with tempfile.TemporaryDirectory() as temporary:
     # Every shipped palette renders app-native files, including light mode.
     kitty_entry.write_text("user Kitty theme edit\n")
     for theme_id, background, appearance in [
-        ("tokyo-night", "1a1b26", "dark"), ("dracula", "282a36", "dark"),
-        ("nord", "2e3440", "dark"), ("gruvbox-light", "fbf1c7", "light"),
-        ("gruvbox-dark", "282828", "dark"),
-        ("catppuccin-latte", "eff1f5", "light"),
-        ("catppuccin-frappe", "303446", "dark"),
-        ("catppuccin-macchiato", "24273a", "dark"),
-        ("catppuccin-mocha", "1e1e2e", "dark"),
+        ("tokyo-night", "24283b", "dark"), ("dracula", "37354a", "dark"),
+        ("nord", "37424e", "dark"), ("gruvbox-light", "e3e3bf", "light"),
+        ("gruvbox-dark", "313433", "dark"),
+        ("catppuccin-latte", "dae3f5", "light"),
+        ("catppuccin-frappe", "394057", "dark"),
+        ("catppuccin-macchiato", "2e344d", "dark"),
+        ("catppuccin-mocha", "292d42", "dark"),
     ]:
         result = run("theme", theme_id)
         assert result.returncode == 0, result.stderr
