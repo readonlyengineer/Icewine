@@ -3,10 +3,11 @@ let
   cfg = osConfig.services.icewine;
   themeAssets = import ../theme/bundle.nix { inherit pkgs; };
   defaults = pkgs.runCommand "icewine-default-files" { } ''
-    mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/data
+    mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/config/nvim $out/data
     cp -r ${../hyprland}/modules/. $out/config/hypr/modules/
     cp ${../hyprland}/hyprland.lua $out/config/hypr/hyprland.lua
     cp ${../session/env} $out/config/uwsm/env
+    cp ${../nvim/init.lua} $out/config/nvim/init.lua
     cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
     cp -r ${../quickshell/adapters} ${../quickshell/modules} $out/config/quickshell/
     cp ${../quickshell/config/qmldir} ${../quickshell/config/Settings.qml} $out/config/quickshell/config/

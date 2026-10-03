@@ -217,8 +217,8 @@ NixOS; later activations and theme changes preserve local edits. Run
 defaults. Reset saves replaced content first. The generated Quickshell palette
 and Hyprland `Theme.lua` remain Icewine-managed links so theme selection works.
 `icewine init APP` installs missing files for one of `quickshell`, `gtk`,
-`yazi`, `fastfetch`, `starship`, `hypr`, `uwsm`, `btop`, `user-dirs`, or
-`wallpapers`. `icewine reset APP` backs up and refreshes
+`yazi`, `fastfetch`, `starship`, `hypr`, `uwsm`, `btop`, `user-dirs`,
+`wallpapers`, or `nvim`. `icewine reset APP` backs up and refreshes
 only that app's files without clearing the selected theme; plain `reset`
 restores every Icewine-owned file and clears the CLI selection.
 `icewine theme` lists the installed themes and effective selection;
@@ -357,14 +357,20 @@ HTML and PDFs.
 
 #### Neovim
 
-Nano is installed by default. To use Neovim, install and configure it yourself,
-then point Icewine at it:
+Nano remains the default editor command. Nixos desktop installs Neovim, plugins,
+parsers and language servers; select it for Icewine launchers with:
 
 ```nix
 services.icewine.applications.editor = [ "nvim" ];
 ```
-This selects the editor command; it does not install Neovim or supply a
-configuration. An optional preconfigured Neovim setup may come later.
+`icewine init nvim` installs the editable `$XDG_CONFIG_HOME/nvim/init.lua`;
+`icewine reset nvim` backs it up and copies the current shipped default. Theme
+changes update a separate generated fragment without replacing this file.
+Outside NixOS, install Neovim 0.11 or newer, nvim-treesitter with the shipped
+grammars (including `diff`), render-markdown.nvim, yazi.nvim with plenary.nvim,
+nvim-lspconfig, blink.cmp, the five colour schemes, Yazi and the six configured
+language servers. Provide the plugins through Neovim's native package path;
+the Lua config does not download them.
 
 #### Opt-outs
 

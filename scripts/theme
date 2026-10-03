@@ -42,6 +42,7 @@ APPS = {
     "btop": (),
     "wallpapers": (),
     "user-dirs": (),
+    "nvim": (),
 }
 TEMPLATES = {
     "Palette.qml": "Palette.qml.in",
@@ -304,7 +305,8 @@ def managed_static_link(path, root, root_name):
                    "quickshell/DeckMenu.js": "DeckMenu.js",
                    "quickshell/config/qmldir": "qmldir",
                    "quickshell/config/Settings.qml": "Settings.qml",
-                   "btop/btop.conf": "btop.conf.in", "user-dirs.locale": "user-dirs.locale"},
+                   "btop/btop.conf": "btop.conf.in", "user-dirs.locale": "user-dirs.locale",
+                   "nvim/init.lua": "init.lua"},
         "data": {"wallpapers/default.jpg": "tokyo-night-wallpaper.jpg",
                  "wallpapers/current_blurr.jpg": "tokyo-night-lockscreen.jpg"},
     }

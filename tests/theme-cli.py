@@ -33,6 +33,7 @@ with tempfile.TemporaryDirectory() as temporary:
         "config/quickshell/adapters/Adapter.qml": b"default adapter\n",
         "config/btop/btop.conf": b"default btop\n",
         "config/user-dirs.locale": b"default locale\n",
+        "config/nvim/init.lua": b"default nvim\n",
         "data/wallpapers/default.jpg": b"default wallpaper",
         "data/wallpapers/current_blurr.jpg": b"default blur",
     }.items():
@@ -96,11 +97,19 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (config / "quickshell/modules/Thing.qml").read_text() == "default module\n"
     assert (root / "data/wallpapers/default.jpg").read_bytes() == b"default wallpaper"
     assert not (config / "quickshell/modules/Thing.qml").is_symlink()
+    assert (config / "nvim/init.lua").read_text() == "default nvim\n"
 
     (config / "quickshell/modules/Thing.qml").write_text("user module edit\n")
     (root / "data/wallpapers/default.jpg").write_bytes(b"user wallpaper")
     assert run("init").returncode == 0
     assert (config / "quickshell/modules/Thing.qml").read_text() == "user module edit\n"
+    assert (root / "data/wallpapers/default.jpg").read_bytes() == b"user wallpaper"
+    (config / "nvim/init.lua").write_text("user nvim edit\n")
+    result = run("reset", "nvim")
+    assert result.returncode == 0, result.stderr
+    assert (config / "nvim/init.lua").read_text() == "default nvim\n"
+    assert any(path.read_text() == "user nvim edit\n" for path in
+               (state / "icewine").glob("defaults-reset-*/config/nvim/init.lua"))
     assert (root / "data/wallpapers/default.jpg").read_bytes() == b"user wallpaper"
 
     fastfetch_path = config / "fastfetch/config.jsonc"
@@ -212,6 +221,11 @@ with tempfile.TemporaryDirectory() as temporary:
     unknown_adapters.mkdir()
     adapters_link = legacy_config / "quickshell/adapters"
     adapters_link.symlink_to(unknown_adapters)
+    old_init = root / "store" / ("f" * 32 + "-init.lua")
+    old_init.write_text("old generated nvim\n")
+    init_link = legacy_config / "nvim/init.lua"
+    init_link.parent.mkdir(parents=True)
+    init_link.symlink_to(old_init)
     old_home = os.environ.get("HOME")
     try:
         os.environ["HOME"] = str(legacy_home)
@@ -234,6 +248,10 @@ with tempfile.TemporaryDirectory() as temporary:
     saved_modules = list((legacy_home / ".local/state/icewine").glob(
         "defaults-migration-*/config/quickshell/modules/Thing.qml"))
     assert len(saved_modules) == 1 and saved_modules[0].read_text() == "old managed module\n"
+    assert init_link.read_text() == "default nvim\n" and not init_link.is_symlink()
+    saved_init = list((legacy_home / ".local/state/icewine").glob(
+        "defaults-migration-*/config/nvim/init.lua"))
+    assert len(saved_init) == 1 and saved_init[0].read_text() == "old generated nvim\n"
 
     # Every shipped palette renders app-native files, including light mode.
     for theme_id, background, appearance in [
