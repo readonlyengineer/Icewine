@@ -214,8 +214,12 @@ The defaults come from Icewine, except for host-selected files supplied by
 NixOS; later activations and theme changes preserve local edits. Run
 `icewine reset APP` to adopt updated shipped defaults for `hypr`, `quickshell`,
 `uwsm`, `btop`, `user-dirs`, or `wallpapers`, or use `icewine reset` for all
-defaults. Reset saves replaced content first. The generated Quickshell palette
-and Hyprland `Theme.lua` remain Icewine-managed links so theme selection works.
+defaults. Reset saves replaced content first. Quickshell's writable
+`theme/Palette.qml` reads generated palette data; Hyprland `Theme.lua` remains
+an Icewine-managed link. An existing user-edited palette is preserved by `init`
+and may not support live updates. `icewine reset quickshell` backs it up and
+installs the live palette, but also replaces other edited Quickshell defaults;
+review the saved `defaults-reset-*` files before restoring local changes.
 `icewine init APP` installs missing files for one of `quickshell`, `gtk`,
 `yazi`, `fastfetch`, `starship`, `hypr`, `uwsm`, `btop`, `user-dirs`,
 `wallpapers`, or `nvim`. `icewine reset APP` backs up and refreshes
@@ -232,6 +236,11 @@ Catppuccin palettes use the [official colours](https://github.com/catppuccin/pal
 (MIT; licence in `theme/assets/themes/CATPPUCCIN-LICENSE`). Latte is light;
 Frappé, Macchiato and Mocha are dark. Neovim requires `catppuccin-nvim`,
 provided by the NixOS editor configuration.
+`icewine theme status` reports shell application or pending consumers while
+Quickshell is running; without the shell it reports the saved selection and
+unknown live status. Set `ICEWINE_THEME_TRANSITION=off` in the `icewine.service`
+environment and restart that service once to disable subsequent colour
+transitions.
 
 `icewine transparency off|low|med|high` saves an independent transparency
 preference. With no argument it reports the saved level. Kitty background /
@@ -251,12 +260,22 @@ launch handoff are preserved. Full reset restores `off`; targeted resets keep it
 `icewine reset` backs up the Icewine-owned config paths under
 `$XDG_STATE_HOME/icewine/reset-*`, restores their shipped defaults and clears
 the CLI choice. It leaves the separately selected wallpaper alone. Theme
-changes update the generated palette and report live reload failures and
-which applications need a restart. GTK applications, browsers, Kitty, Yazi,
-Fastfetch, Neovim and new shells use the new theme when restarted; an active Hyprland
-and Quickshell session is refreshed where available. Browser chrome uses
-shared GTK and portal appearance; no browser profile is changed. Select
-"System theme — auto" in Firefox/LibreWolf and restart after changing palettes.
+changes update the running Quickshell palette without restarting the shell.
+Scoped same-user Kitty and Neovim instances receive native `SIGUSR1` reload
+requests; signal delivery cannot confirm that colours were applied. Kitty
+rereads its full configuration, including `host.conf` and command-line
+overrides, and may reset a temporary font-size change or preserve colours set
+by an application. Neovim instances with an older or edited `init.lua` may not
+have the Signal hook and remain pending. Yazi receives a reload broadcast for
+all current user clients, including other sessions; it is not acknowledged per
+instance. GTK's theme and light/dark preference are published through
+GSettings; custom CSS in already open GTK or Flatpak apps may require reopening
+those apps. Starship uses the new theme at the next prompt and Fastfetch at its
+next run. The CLI reports failed or pending consumers separately from the saved
+selection. Browser chrome uses shared GTK and portal appearance where supported;
+browser-specific reload behaviour remains outside this command. No browser
+profile is changed. Select "System theme — auto" in Firefox/LibreWolf for
+system appearance.
 Icewine publishes a named GTK3 theme under `$XDG_DATA_HOME/themes` and updates
 `org.gnome.desktop.interface` GTK theme and light/dark settings using `gsettings`.
 The Settings portal must use a backend that exposes these settings (the NixOS

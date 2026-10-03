@@ -78,6 +78,7 @@ in {
   } ''
     python3 ${./controls.py} ${self}
     python3 ${./render-ready.py} ${self}
+    python3 ${./theme-live.py} ${self}
     touch "$out"
   '';
   terminal = import ./terminal.nix { inherit self nixpkgs; };

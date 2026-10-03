@@ -7,6 +7,7 @@ import json
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -21,7 +22,6 @@ TRANSPARENCY = {
     "high": ("0.76", "0.75"),
 }
 OWNED = {
-    "quickshell/theme/Palette.qml": "Palette.qml",
     "gtk-3.0/settings.ini": "gtk-settings.ini",
     "gtk-3.0/gtk.css": "gtk.css",
     "gtk-4.0/settings.ini": "gtk4-settings.ini",
@@ -32,7 +32,7 @@ OWNED = {
     "starship.toml": "starship.toml",
 }
 APPS = {
-    "quickshell": ("quickshell/theme/Palette.qml",),
+    "quickshell": (),
     "gtk": tuple(relative for relative in OWNED if relative.startswith("gtk-")),
     "yazi": ("yazi/theme.toml", "yazi/keymap.toml"),
     "fastfetch": ("fastfetch/config.jsonc",),
@@ -59,7 +59,7 @@ TEMPLATES = {
     "starship.toml": "starship.toml.in",
     "ls-colors.sh": "ls-colors.sh.in",
 }
-LEGACY_MANAGED = set(OWNED) - {"gtk-4.0/gtk.css"}
+LEGACY_MANAGED = (set(OWNED) - {"gtk-4.0/gtk.css"}) | {"quickshell/theme/Palette.qml"}
 STORE_DIR = Path("/nix/store")
 
 
@@ -144,6 +144,19 @@ def render_theme(assets, palette_file, level="med"):
         values["nixpkgsRow"] = render((templates / "fastfetch-nixpkgs-row.json.in").read_text(encoding="utf-8"), values)
     files = {name: render((templates / template).read_text(encoding="utf-8"), values)
              for name, template in TEMPLATES.items()}
+    files["palette.json"] = json.dumps({
+        "themeId": palette_file.stem,
+        "dark": values["appearance"] != "light",
+        **{name: values[source] for name, source in {
+            "background": "background", "backgroundDark": "backgroundDark",
+            "surface": "surface", "selection": "selection", "border": "border",
+            "foreground": "foreground", "foregroundDark": "foregroundDark",
+            "muted": "muted", "primary": "highlight", "primaryDark": "highlightDark",
+            "secondary": "secondaryHighlight", "tertiary": "tertiaryHighlight",
+            "success": "success", "warning": "warning", "caution": "caution",
+            "error": "error", "info": "info",
+        }.items()},
+    }, sort_keys=True) + "\n"
     files["gtk4-settings.ini"] = files["gtk-settings.ini"]
     files["gtk-settings.ini"] = files["gtk-settings.ini"].replace(
         "gtk-theme-name=" + values["gtkThemeName"], "gtk-theme-name=Icewine-" + palette_file.stem
@@ -285,6 +298,9 @@ def static_app(root_name, relative):
 def managed_static_link(path, root, root_name):
     if not path.is_symlink():
         return False
+    if (root_name == "config" and path == root / "quickshell/theme/Palette.qml"
+            and os.readlink(path) == str(root / "icewine/current/Palette.qml")):
+        return True
     try:
         target = Path(os.readlink(path)).relative_to(STORE_DIR)
     except ValueError:
@@ -303,6 +319,7 @@ def managed_static_link(path, root, root_name):
     names = {
         "config": {"uwsm/env": "env", "quickshell/shell.qml": "shell.qml",
                    "quickshell/adapters": "adapters", "quickshell/modules": "modules",
+                   "quickshell/theme/Palette.qml": "Palette.qml",
                    "quickshell/DeckOverlay.qml": "DeckOverlay.qml",
                    "quickshell/DeckMenu.js": "DeckMenu.js",
                    "quickshell/config/qmldir": "qmldir",
@@ -466,42 +483,141 @@ def install_flatpak_theme(state, theme_id, files):
 def sync_gtk_settings(theme_id, appearance):
     if not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
         print("Pending: GTK settings will be published at next session login.", file=sys.stderr)
-        return
+        return True
+    complete = True
     for key, value in (("gtk-theme", "Icewine-" + theme_id),
                        ("color-scheme", "prefer-" + appearance)):
         try:
             subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", key, value],
                            check=True, timeout=10)
         except (OSError, subprocess.SubprocessError) as error:
-            raise ValueError(f"theme files saved, but GTK setting {key} was not published: {error}") from error
+            complete = False
+            print(f"Failed: GTK setting {key} was not published: {error}", file=sys.stderr)
+    if complete:
+        print("Applied: GTK theme and light/dark preference were published through GSettings.")
+    return complete
 
 
-def reload_session():
+PROC = Path("/proc")
+
+
+def signal_reload(name, config, runtime):
+    """Request native reload only for this user's default-config processes."""
+    if not runtime or not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        print(f"Pending: {name} native reload is unavailable on this session.", file=sys.stderr)
+        return False
+    sent = skipped = exited = 0
+    failed = False
+    try:
+        processes = list(PROC.iterdir())
+    except OSError as error:
+        print(f"Failed: {name} process discovery: {error}", file=sys.stderr)
+        return True
+    for process in processes:
+        if not process.name.isdecimal():
+            continue
+        try:
+            if ((process / "comm").read_bytes().strip() != name.encode() or
+                    process.stat().st_uid != os.getuid()):
+                continue
+        except (OSError, ValueError):
+            continue
+        try:
+            fd = os.pidfd_open(int(process.name))
+        except ProcessLookupError:
+            exited += 1
+            continue
+        except OSError as error:
+            failed = True
+            print(f"Failed: {name} process access for PID {process.name}: {error}", file=sys.stderr)
+            continue
+        try:
+            try:
+                if process.stat().st_uid != os.getuid():
+                    continue
+                args = (process / "cmdline").read_bytes().split(b"\0")
+                if not args or Path(os.fsdecode(args[0])).name != name:
+                    skipped += 1
+                    continue
+                options = [os.fsdecode(arg) for arg in args[1:] if arg]
+                blocked = ("--config", "--override", "-c", "-o") if name == "kitty" else ("-u", "--clean", "--headless", "--cmd", "--noplugin")
+                if any(option == flag or option.startswith(flag + "=") or
+                       (flag in ("-c", "-o", "-u") and option.startswith(flag) and option != flag)
+                       for option in options for flag in blocked):
+                    skipped += 1
+                    continue
+                env = dict(item.split(b"=", 1) for item in (process / "environ").read_bytes().split(b"\0")
+                           if b"=" in item and item.split(b"=", 1)[0] in
+                           (b"HOME", b"XDG_CONFIG_HOME", b"XDG_RUNTIME_DIR", b"NVIM_APPNAME"))
+                home = os.fsdecode(env.get(b"HOME", b""))
+                target_config = os.fsdecode(env.get(b"XDG_CONFIG_HOME", b"")) or (home + "/.config" if home else "")
+                if (os.fsdecode(env.get(b"XDG_RUNTIME_DIR", b"")) != runtime or
+                        not target_config or Path(target_config).resolve() != config.resolve() or
+                        (name == "nvim" and env.get(b"NVIM_APPNAME", b"nvim") != b"nvim")):
+                    skipped += 1
+                    continue
+                signal.pidfd_send_signal(fd, signal.SIGUSR1)
+                sent += 1
+            except ProcessLookupError:
+                exited += 1
+            except OSError as error:
+                failed = True
+                print(f"Failed: {name} reload request for PID {process.name}: {error}", file=sys.stderr)
+        finally:
+            os.close(fd)
+    if sent:
+        print(f"Pending: {name} native reload requested for {sent} instance(s); application is unconfirmed.")
+    if skipped or exited:
+        print(f"Pending: {name} skipped {skipped} unscoped and {exited} exited instance(s).", file=sys.stderr)
+    if not sent and not skipped and not exited and not failed:
+        print(f"Pending: no scoped running {name} instance found; new instances use the saved theme.")
+    return failed
+
+
+def reload_session(config):
     def succeeded(command):
         try:
             return subprocess.run(command, check=False, stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.DEVNULL).returncode == 0
-        except FileNotFoundError:
+                                  stderr=subprocess.DEVNULL, timeout=5).returncode == 0
+        except (OSError, subprocess.SubprocessError):
             return False
 
     pending = []
+    failed = False
     if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
         if not succeeded(["hyprctl", "reload"]):
-            pending.append("Hyprland reload")
+            print("Failed: Hyprland reload request was not delivered.", file=sys.stderr)
+            failed = True
     else:
         pending.append("Hyprland at login")
-    if os.environ.get("WAYLAND_DISPLAY"):
-        if not succeeded(["systemctl", "--user", "is-active", "--quiet", "icewine.service"]):
-            pending.append("Icewine shell at login")
-        elif not succeeded(["systemctl", "--user", "try-restart", "icewine.service"]):
-            pending.append("Icewine shell restart")
-    else:
-        pending.append("Icewine shell at login")
-    print("Applied: persisted selection and linked theme files.")
-    print("Restart needed: GTK and Flatpak apps, browsers, Kitty, Neovim, Yazi, Fastfetch, and new shells.")
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    failed = signal_reload("kitty", config, runtime) or failed
+    failed = signal_reload("nvim", config, runtime) or failed
+    if shutil.which("ya"):
+        try:
+            subprocess.run(["ya", "emit-to", "0", "app:theme"], check=True,
+                           capture_output=True, timeout=5)
+            print("Pending: Yazi theme reload broadcast requested for all current user clients; application is unconfirmed.")
+        except (OSError, subprocess.SubprocessError) as error:
+            failed = True
+            print(f"Failed: Yazi theme reload was not delivered: {error}", file=sys.stderr)
+    if os.environ.get("WAYLAND_DISPLAY") and os.environ.get("ICEWINE_THEME_FROM_SHELL") != "1":
+        try:
+            shell = subprocess.run(["qs", "ipc", "call", "theme", "refresh"],
+                                   capture_output=True, text=True, timeout=10)
+            if shell.returncode != 0 or not shell.stdout.strip().startswith("applied:"):
+                print("Failed: Quickshell palette refresh request was not confirmed.", file=sys.stderr)
+                failed = True
+        except (OSError, subprocess.SubprocessError):
+            print("Failed: Quickshell palette refresh request was not delivered.", file=sys.stderr)
+            failed = True
+    elif not os.environ.get("WAYLAND_DISPLAY"):
+        pending.append("Quickshell palette at login")
+    print("Applied: persisted selection and linked theme files; Starship on next prompt, Fastfetch on next run.")
+    print("Pending: GTK/Flatpak custom CSS in already open apps; browsers follow their own theme integration.")
     if pending:
         print("Pending: " + ", ".join(pending), file=sys.stderr)
-    return bool(pending) and bool(os.environ.get("WAYLAND_DISPLAY"))
+    return failed
 
 
 def main(argv):
@@ -515,6 +631,8 @@ def main(argv):
         raise ValueError(f"unsupported app: {app}; choose {', '.join(APPS)}")
     config = xdg("XDG_CONFIG_HOME", ".config")
     state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    if command == "init":
+        state.mkdir(parents=True, exist_ok=True)
     if command == "autofullscreen":
         path = state / "autofullscreen"
         value = args[0] if args else (path.read_text(encoding="utf-8").strip() if path.exists() else "off")
@@ -538,6 +656,19 @@ def main(argv):
     if command == "transparency" and not args:
         print(f"Transparency: {transparency_level(state)} (off, low, med, high)")
         return 0
+    if command == "theme" and args == ["status"]:
+        if os.environ.get("WAYLAND_DISPLAY"):
+            try:
+                result = subprocess.run(["qs", "ipc", "call", "theme", "status"],
+                                        check=True, capture_output=True, text=True, timeout=10)
+                print(result.stdout.strip())
+                return 0
+            except (OSError, subprocess.SubprocessError):
+                pass
+        theme_id, policy = effective(state, themes)
+        print(f"Saved: {theme_id}" + (" (Nix policy)" if policy else ""))
+        print("Pending: Quickshell is unavailable; live application status is unknown.")
+        return 0
     if command == "theme" and not args:
         theme_id, policy = effective(state, themes)
         print("Installed: " + ", ".join(sorted(themes)))
@@ -548,6 +679,20 @@ def main(argv):
         requested = args[0]
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", requested) or requested not in themes:
             raise ValueError(f"theme is not installed: {requested}")
+        if os.environ.get("WAYLAND_DISPLAY"):
+            try:
+                result = subprocess.run(["qs", "ipc", "call", "theme", "select", requested],
+                                        capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    answer = result.stdout.strip()
+                    if answer.startswith(("pending:", "saved:")):
+                        print(answer)
+                        return 0
+                    if answer.startswith("failed:"):
+                        raise ValueError(answer)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            print("Pending: Quickshell is unavailable; saving selection for next login.", file=sys.stderr)
         atomic_text(state / "theme", requested + "\n")
     elif command == "transparency":
         if args[0] not in TRANSPARENCY:
@@ -566,21 +711,25 @@ def main(argv):
     files = render_theme(assets, themes[theme_id], level)
     gtk_enabled = os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false"
     if gtk_enabled:
-        install_gtk_theme(config, theme_id)
+        try:
+            install_gtk_theme(config, theme_id)
+        except (OSError, ValueError) as error:
+            print(f"Pending: GTK custom CSS theme could not be installed: {error}", file=sys.stderr)
     publish(config, files)
     if command in {"init", "reset"}:
         install_defaults(os.environ.get("ICEWINE_DEFAULT_FILES"), config,
                          xdg("XDG_DATA_HOME", ".local/share"), state, command == "reset", app)
     if command in {"init", "reset", "theme", "transparency"}:
         install_links(config, state, command == "reset", app)
+    gtk_complete = True
     if gtk_enabled and app in (None, "gtk"):
         install_flatpak_theme(state, theme_id, files)
         appearance = json.loads(themes[theme_id].read_text(encoding="utf-8"))["appearance"]
-        sync_gtk_settings(theme_id, appearance)
+        gtk_complete = sync_gtk_settings(theme_id, appearance)
     print(f"Effective theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else ""))
     print(f"Transparency: {level}")
     if command in {"theme", "reset", "transparency", "apply"}:
-        return int(reload_session())
+        return int(reload_session(config) or not gtk_complete)
     return 0
 
 

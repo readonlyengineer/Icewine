@@ -4,12 +4,14 @@
 import os
 import importlib.machinery
 import json
+import signal
 import subprocess
 import sys
 import tempfile
 import tomllib
 import types
 from pathlib import Path
+from unittest import mock
 
 
 script = Path(sys.argv[1]).resolve()
@@ -29,6 +31,8 @@ with tempfile.TemporaryDirectory() as temporary:
         "config/hypr/modules/Baseline.lua": b"default baseline\n",
         "config/uwsm/env": b"default env\n",
         "config/quickshell/shell.qml": b"default shell\n",
+        "config/quickshell/theme/Palette.qml": (script.parent.parent / "quickshell/theme/Palette.qml").read_bytes(),
+        "config/quickshell/theme/qmldir": (script.parent.parent / "quickshell/theme/qmldir").read_bytes(),
         "config/quickshell/modules/Thing.qml": b"default module\n",
         "config/quickshell/adapters/Adapter.qml": b"default adapter\n",
         "config/btop/btop.conf": b"default btop\n",
@@ -54,6 +58,11 @@ with tempfile.TemporaryDirectory() as temporary:
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     env.pop("WAYLAND_DISPLAY", None)
     env.pop("HYPRLAND_INSTANCE_SIGNATURE", None)
+    fake_bin = root / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "ya").write_text("#!/bin/sh\nexit 0\n")
+    (fake_bin / "ya").chmod(0o755)
+    env["PATH"] = f"{fake_bin}:{os.environ['PATH']}"
 
     def run(*arguments, policy="", skip="", nix_epoch=None, git_enabled="true"):
         command_env = dict(env, ICEWINE_THEME_POLICY=policy,
@@ -88,11 +97,11 @@ with tempfile.TemporaryDirectory() as temporary:
     assert result.returncode == 0, result.stderr
     assert "Effective theme: tokyo-night" in result.stdout
     assert edited.read_text() == "user edit\n"
-    assert 'primary: "#7aa2f7"' in legacy.read_text()
+    assert not legacy.is_symlink() and "property color primary" in legacy.read_text()
     assert unrelated.is_symlink() and os.readlink(unrelated) == "/nix/store/" + "b" * 32 + "-user-css"
     assert unknown_path.is_symlink() and os.readlink(unknown_path) == unknown_target
     assert "conflict: preserved unrecognized symlink" in result.stderr
-    migration = list((state / "icewine").glob("migration-*/quickshell/theme/Palette.qml"))
+    migration = list((state / "icewine").glob("defaults-migration-*/config/quickshell/theme/Palette.qml"))
     assert len(migration) == 1 and os.readlink(migration[0]) == legacy_target
     assert (config / "icewine/current").is_symlink()
     nvim_theme = config / "icewine/current/nvim-theme.lua"
@@ -156,13 +165,13 @@ with tempfile.TemporaryDirectory() as temporary:
     result = run("theme", "missing")
     assert result.returncode != 0
     assert not (state / "icewine/theme").exists()
-    assert 'primary: "#7aa2f7"' in legacy.read_text()
+    assert json.loads((config / "icewine/current/palette.json").read_text())["primary"] == "7aa2f7"
 
     result = run("theme", "dracula")
     assert result.returncode == 0, result.stderr
     assert (state / "icewine/theme").read_text() == "dracula\n"
     assert 'local theme = "dracula"' in nvim_theme.read_text()
-    assert 'primary: "#bd93f9"' in legacy.read_text()
+    assert json.loads((config / "icewine/current/palette.json").read_text())["primary"] == "bd93f9"
     assert unrelated.is_symlink() and os.readlink(unrelated) == "/nix/store/" + "b" * 32 + "-user-css"
     assert edited.read_text() == "user edit\n"
     assert "Effective: dracula" in run("theme").stdout
@@ -183,12 +192,12 @@ with tempfile.TemporaryDirectory() as temporary:
     assert "Nix policy overrides CLI selection" in result.stdout
     assert 'local theme = "dracula"' in nvim_theme.read_text()
     assert (state / "icewine/theme").read_text() == "tokyo-night\n"
-    assert 'primary: "#bd93f9"' in legacy.read_text()
+    assert json.loads((config / "icewine/current/palette.json").read_text())["primary"] == "bd93f9"
 
     (state / "icewine/theme").write_text("broken ID\n")
     result = run("init", policy="dracula")
     assert result.returncode == 0, result.stderr
-    assert 'primary: "#bd93f9"' in legacy.read_text()
+    assert json.loads((config / "icewine/current/palette.json").read_text())["primary"] == "bd93f9"
     (state / "icewine/theme").write_text("tokyo-night\n")
 
     result = run("reset")
@@ -217,8 +226,6 @@ with tempfile.TemporaryDirectory() as temporary:
         for relative in host_paths:
             assert (config / relative).read_text() == f"host override: {relative}\n"
 
-    fake_bin = root / "bin"
-    fake_bin.mkdir()
     command = fake_bin / "icewine-theme"
     command.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
     command.chmod(0o755)
@@ -265,8 +272,8 @@ with tempfile.TemporaryDirectory() as temporary:
             os.environ.pop("HOME", None)
         else:
             os.environ["HOME"] = old_home
-    assert 'primary: "#7aa2f7"' in old_link.read_text()
-    saved = list((legacy_home / ".local/state/icewine").glob("migration-*/quickshell/theme/Palette.qml"))
+    assert "property color primary" in old_link.read_text()
+    saved = list((legacy_home / ".local/state/icewine").glob("defaults-migration-*/config/quickshell/theme/Palette.qml"))
     assert len(saved) == 1 and saved[0].read_text() == "old managed palette\n"
     assert module_link.is_dir() and not module_link.is_symlink()
     assert (module_link / "Thing.qml").read_text() == "default module\n"
@@ -336,3 +343,84 @@ with tempfile.TemporaryDirectory() as temporary:
                             env=dict(env, PATH=f"{fake_bin}:{os.environ['PATH']}"),
                             text=True, capture_output=True)
     assert routed.returncode == 0 and routed.stdout == "transparency\nlow\n", routed.stderr
+
+    # Dispatch to reachable consumers; no real application receives a signal.
+    runtime = root / "runtime"
+    runtime.mkdir()
+    command_log = root / "consumer-commands"
+    for name in ("hyprctl", "qs", "ya"):
+        command = fake_bin / name
+        command.write_text("#!/bin/sh\n"
+                           'printf "%s %s\\n" "$(basename "$0")" "$*" >> "$ICEWINE_TEST_COMMANDS"\n'
+                           'if [ "$(basename "$0")" = qs ]; then echo "applied: tokyo-night"; fi\n')
+        command.chmod(0o755)
+    env.update(PATH=f"{fake_bin}:{os.environ['PATH']}",
+               WAYLAND_DISPLAY="wayland-test", HYPRLAND_INSTANCE_SIGNATURE="test",
+               XDG_RUNTIME_DIR=str(runtime), ICEWINE_TEST_COMMANDS=str(command_log))
+    result = run("apply")
+    assert result.returncode == 0, result.stderr
+    commands = command_log.read_text()
+    for expected in ("hyprctl reload", "ya emit-to 0 app:theme",
+                     "qs ipc call theme refresh"):
+        assert expected in commands, commands
+    assert "kitten @" not in commands and "nvim --server" not in commands
+    yazi_command = (fake_bin / "ya").read_text()
+    (fake_bin / "ya").write_text(yazi_command + "exit 2\n")
+    command_log.write_text("")
+    result = run("apply")
+    assert result.returncode == 1 and "Failed: Yazi theme reload" in result.stderr
+    assert "qs ipc call theme refresh" in command_log.read_text()
+    (fake_bin / "ya").write_text(yazi_command)
+    command_log.write_text("")
+    qs_command = (fake_bin / "qs").read_text()
+    (fake_bin / "qs").write_text(qs_command + "exit 2\n")
+    result = run("apply")
+    assert result.returncode == 1 and "Failed: Quickshell palette refresh" in result.stderr
+    assert "ya emit-to 0 app:theme" in command_log.read_text()
+    (fake_bin / "qs").write_text(qs_command)
+    command_log.write_text("")
+    (fake_bin / "hyprctl").write_text("#!/missing-interpreter\n")
+    result = run("apply")
+    assert result.returncode == 1 and "Failed: Hyprland reload" in result.stderr
+    commands = command_log.read_text()
+    assert "ya emit-to 0 app:theme" in commands and "qs ipc call theme refresh" in commands
+    command_log.write_text("")
+    (fake_bin / "hyprctl").write_text("#!/bin/sh\nexec sleep 20\n")
+    (fake_bin / "hyprctl").chmod(0o755)
+    result = run("apply")
+    assert result.returncode == 1 and "Failed: Hyprland reload" in result.stderr
+    commands = command_log.read_text()
+    assert "ya emit-to 0 app:theme" in commands and "qs ipc call theme refresh" in commands
+
+    # Synthetic proc entries exercise scoped pidfd dispatch and exit handling.
+    proc = root / "proc"
+    proc.mkdir()
+    def process(pid, name, arguments, *, config_home=str(config), runtime_dir=str(runtime)):
+        entry = proc / str(pid)
+        entry.mkdir()
+        (entry / "comm").write_text(name + "\n")
+        (entry / "cmdline").write_bytes(b"\0".join(arg.encode() for arg in arguments) + b"\0")
+        (entry / "environ").write_bytes(
+            f"HOME={root}\0XDG_CONFIG_HOME={config_home}\0XDG_RUNTIME_DIR={runtime_dir}\0".encode())
+    process(123, "kitty", ["kitty"])
+    process(124, "kitty", ["kitty"], runtime_dir="/other-session")
+    process(125, "kitty", ["kitty", "--config", "/other/kitty.conf"])
+    process(126, "nvim", ["nvim", "notes.md"])
+    process(127, "nvim", ["nvim", "-uNONE"])
+    delivered = []
+    def send(fd, number):
+        delivered.append(number)
+    with mock.patch.object(module, "PROC", proc), \
+         mock.patch.object(module.os, "pidfd_open", lambda pid: os.open(os.devnull, os.O_RDONLY), create=True), \
+         mock.patch.object(module.signal, "pidfd_send_signal", send, create=True):
+        assert module.signal_reload("kitty", config, str(runtime)) is False
+        assert module.signal_reload("nvim", config, str(runtime)) is False
+        assert delivered == [signal.SIGUSR1, signal.SIGUSR1]
+        with mock.patch.object(module.signal, "pidfd_send_signal", mock.Mock(side_effect=ProcessLookupError)):
+            assert module.signal_reload("kitty", config, str(runtime)) is False
+        with mock.patch.object(module.signal, "pidfd_send_signal", mock.Mock(side_effect=PermissionError)):
+            assert module.signal_reload("kitty", config, str(runtime)) is True
+    with mock.patch.object(module, "PROC", proc), \
+         mock.patch.object(module.os, "getuid", return_value=os.getuid() + 1), \
+         mock.patch.object(module.os, "pidfd_open", side_effect=AssertionError("other user"), create=True):
+        assert module.signal_reload("kitty", config, str(runtime)) is False

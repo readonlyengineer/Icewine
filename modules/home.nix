@@ -2,6 +2,9 @@
 let
   cfg = osConfig.services.icewine;
   themeAssets = import ../theme/bundle.nix { inherit pkgs; };
+  themeIds = map (name: lib.removeSuffix ".json" name)
+    (builtins.filter (name: lib.hasSuffix ".json" name)
+      (builtins.attrNames (builtins.readDir ../theme/assets/themes)));
   defaults = pkgs.runCommand "icewine-default-files" { } ''
     mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/config/nvim $out/data
     cp -r ${../hyprland}/modules/. $out/config/hypr/modules/
@@ -14,6 +17,7 @@ let
     ''}
     cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
     cp -r ${../quickshell/adapters} ${../quickshell/modules} $out/config/quickshell/
+    cp -r ${../quickshell/theme} $out/config/quickshell/
     cp ${../quickshell/config/qmldir} ${../quickshell/config/Settings.qml} $out/config/quickshell/config/
     ${lib.optionalString cfg.handheld.enable ''
       cp ${../hyprland/deck/Deck.lua} $out/config/hypr/modules/Deck.lua
@@ -50,7 +54,9 @@ let
   };
   themeCli = pkgs.writeShellApplication {
     name = "icewine-theme";
-    runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd pkgs.glib ]
+    runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd pkgs.glib quickshell pkgs.neovim ]
+      ++ lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty
+      ++ lib.optional (cfg.fileManager.preset == "yazi") pkgs.yazi
       ++ lib.optional osConfig.services.flatpak.enable pkgs.flatpak;
     text = ''
       export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
@@ -103,7 +109,7 @@ in {
   '';
   home.activation.icewineThemeApply = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
     if ! ${themeCli}/bin/icewine-theme apply; then
-      echo "Icewine: theme selection is saved; a running consumer needs a restart." >&2
+      echo "Icewine: theme selection is saved; check reported live-application failures." >&2
     fi
   '';
 
@@ -127,8 +133,12 @@ in {
       ExecStart = "${quickshell}/bin/qs";
       Environment = [
         "XDG_DATA_HOME=${config.xdg.dataHome}"
+        "XDG_CONFIG_HOME=${config.xdg.configHome}"
+        "XDG_STATE_HOME=${config.xdg.stateHome}"
+        "ICEWINE_THEME_IDS=${lib.concatStringsSep ":" themeIds}"
+        "ICEWINE_THEME_POLICY=${if cfg.theme == null then "" else cfg.theme}"
         "ICEWINE_AUTHENTICATION_REQUIRED=${if cfg.authenticationRequired then "true" else "false"}"
-        "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness ]}"
+        "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness ]}"
         "QT_IM_MODULE=qtvirtualkeyboard"
       ];
       Restart = "on-failure";

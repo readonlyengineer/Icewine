@@ -17,9 +17,14 @@ vim.diagnostic.config({
 })
 
 local theme = vim.fn.stdpath("config"):gsub("/nvim$", "") .. "/icewine/current/nvim-theme.lua"
-if vim.fn.filereadable(theme) == 1 then
-  dofile(theme)
+local function reload_theme()
+  if vim.fn.filereadable(theme) == 1 then
+    dofile(theme)
+  end
 end
+reload_theme()
+vim.api.nvim_create_user_command("IcewineReloadTheme", reload_theme, {})
+vim.api.nvim_create_autocmd("Signal", { pattern = "SIGUSR1", callback = reload_theme })
 
 vim.api.nvim_create_autocmd("FileType", {
   pattern = { "bash", "c", "cpp", "help", "lua", "markdown", "nix", "python", "qml", "sh", "vim" },
