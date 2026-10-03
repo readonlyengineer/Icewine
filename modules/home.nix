@@ -2,6 +2,30 @@
 let
   cfg = osConfig.services.icewine;
   themeAssets = import ../theme/bundle.nix { inherit pkgs; };
+  defaults = pkgs.runCommand "icewine-default-files" { } ''
+    mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/data
+    cp -r ${../hyprland}/modules/. $out/config/hypr/modules/
+    cp ${../hyprland}/hyprland.lua $out/config/hypr/hyprland.lua
+    cp ${../session/env} $out/config/uwsm/env
+    cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
+    cp -r ${../quickshell/adapters} ${../quickshell/modules} $out/config/quickshell/
+    cp ${../quickshell/config/qmldir} ${../quickshell/config/Settings.qml} $out/config/quickshell/config/
+    ${lib.optionalString cfg.handheld.enable ''
+      cp ${../hyprland/deck/Deck.lua} $out/config/hypr/modules/Deck.lua
+      cp ${../quickshell/deck/DeckOverlay.qml} ${../quickshell/deck/DeckMenu.js} $out/config/quickshell/
+    ''}
+    chmod -R u+w $out
+    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
+      "cp ${lib.escapeShellArg "${source}"} $out/config/hypr/modules/${lib.escapeShellArg name}"
+    ) cfg.hyprland.extraModules)}
+    chmod -R u+w $out
+    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
+      "mkdir -p $out/config/${lib.escapeShellArg (builtins.dirOf name)}; cp ${lib.escapeShellArg "${source}"} $out/config/${lib.escapeShellArg name}"
+    ) cfg.defaultFiles.config)}
+    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
+      "mkdir -p $out/data/${lib.escapeShellArg (builtins.dirOf name)}; cp ${lib.escapeShellArg "${source}"} $out/data/${lib.escapeShellArg name}"
+    ) cfg.defaultFiles.data)}
+  '';
   hostThemeFiles =
     lib.optional (config.programs.fastfetch.settings != { }) "fastfetch/config.jsonc"
     ++ lib.optional (config.programs.starship.settings != { }) "starship.toml"
@@ -27,11 +51,13 @@ let
       export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_ASSETS=${themeAssets}/share/icewine
+      export ICEWINE_DEFAULT_FILES=${defaults}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" hostThemeFiles)}
       export ICEWINE_THEME_GIT_ENABLE=${if cfg.shell.starship.git.enable then "true" else "false"}
       export ICEWINE_NIXPKGS_LAST_MODIFIED=${toString nixpkgsLastModified}
       export XDG_CONFIG_HOME=''${XDG_CONFIG_HOME:-${config.xdg.configHome}}
+      export XDG_DATA_HOME=''${XDG_DATA_HOME:-${config.xdg.dataHome}}
       export XDG_STATE_HOME=''${XDG_STATE_HOME:-${config.xdg.stateHome}}
       exec python3 ${../scripts/theme} "$@"
     '';
@@ -51,18 +77,6 @@ let
     runtimeInputs = [ pkgs.coreutils pkgs.brightnessctl pkgs.ddcutil ];
     text = builtins.readFile ../quickshell/tools/monitor-brightness;
   };
-  hyprTree = pkgs.runCommand "icewine-hyprland" { } ''
-    mkdir -p $out
-    cp -r ${../hyprland}/hyprland.lua ${../hyprland}/modules $out/
-    chmod -R u+w $out
-    ln -s ${config.xdg.configHome}/icewine/current/Theme.lua $out/modules/Theme.lua
-    ${lib.optionalString cfg.handheld.enable ''
-      cp ${../hyprland/deck/Deck.lua} $out/modules/Deck.lua
-    ''}
-    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
-      "cp ${lib.escapeShellArg "${source}"} \"$out/modules/\"${lib.escapeShellArg name}"
-    ) cfg.hyprland.extraModules)}
-  '';
 in {
   imports = [ ./terminal.nix ./shell.nix ./gtk.nix ./desktop.nix ];
 
@@ -95,19 +109,6 @@ in {
       echo "Icewine: legacy wallpaper could not be migrated; it was left unchanged." >&2
     fi
   '';
-
-  xdg.configFile = {
-    "hypr" = { source = hyprTree; recursive = true; };
-    "uwsm/env".source = ../session/env;
-    "quickshell/shell.qml".source = if cfg.handheld.enable
-      then ../quickshell/deck/shell.qml else ../quickshell/shell.qml;
-    "quickshell/adapters".source = ../quickshell/adapters;
-    "quickshell/modules".source = ../quickshell/modules;
-    "quickshell/DeckOverlay.qml" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckOverlay.qml; };
-    "quickshell/DeckMenu.js" = lib.mkIf cfg.handheld.enable { source = ../quickshell/deck/DeckMenu.js; };
-    "quickshell/config/qmldir".source = ../quickshell/config/qmldir;
-    "quickshell/config/Settings.qml".source = ../quickshell/config/Settings.qml;
-  };
 
   systemd.user.services.icewine = {
     Unit = {

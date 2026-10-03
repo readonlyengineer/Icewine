@@ -83,6 +83,18 @@ in {
       default = { };
       description = "Host Lua files overlaid into Hyprland's modules directory, keyed by filename.";
     };
+    defaultFiles = {
+      config = lib.mkOption {
+        type = lib.types.attrsOf lib.types.path;
+        default = { };
+        description = "Host-owned editable defaults under XDG_CONFIG_HOME.";
+      };
+      data = lib.mkOption {
+        type = lib.types.attrsOf lib.types.path;
+        default = { };
+        description = "Host-owned editable defaults under XDG_DATA_HOME.";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -93,6 +105,9 @@ in {
         message = "Icewine application commands must be nonempty; set the corresponding applications command when disabling its managed preset."; }
       { assertion = lib.all (name: builtins.match "[A-Za-z0-9_-]+\\.lua" name != null) (builtins.attrNames cfg.hyprland.extraModules);
         message = "Icewine extraModules keys must be Lua filenames without directory components."; }
+      { assertion = lib.all (name: name != "" && lib.all (part: part != "" && part != "." && part != "..") (lib.splitString "/" name))
+          (builtins.attrNames cfg.defaultFiles.config ++ builtins.attrNames cfg.defaultFiles.data);
+        message = "Icewine defaultFiles keys must be relative paths without . or .. components."; }
     ];
 
     programs.hyprland = { enable = true; withUWSM = true; };

@@ -23,8 +23,25 @@ with tempfile.TemporaryDirectory() as temporary:
     wallpaper = root / "data/icewine/wallpapers/selection.img"
     wallpaper.parent.mkdir(parents=True)
     wallpaper.write_bytes(b"wallpaper is independent")
+    defaults = root / "defaults"
+    for relative, contents in {
+        "config/hypr/hyprland.lua": b"default hypr\n",
+        "config/hypr/modules/Baseline.lua": b"default baseline\n",
+        "config/uwsm/env": b"default env\n",
+        "config/quickshell/shell.qml": b"default shell\n",
+        "config/quickshell/modules/Thing.qml": b"default module\n",
+        "config/quickshell/adapters/Adapter.qml": b"default adapter\n",
+        "config/btop/btop.conf": b"default btop\n",
+        "config/user-dirs.locale": b"default locale\n",
+        "data/wallpapers/default.jpg": b"default wallpaper",
+        "data/wallpapers/current_blurr.jpg": b"default blur",
+    }.items():
+        path = defaults / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
     env = dict(os.environ, XDG_CONFIG_HOME=str(config), XDG_STATE_HOME=str(state),
                ICEWINE_THEME_ASSETS=str(assets), ICEWINE_THEME_POLICY="",
+               ICEWINE_DEFAULT_FILES=str(defaults),
                HOME=str(root))
     env["XDG_DATA_HOME"] = str(root / "data")
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)
@@ -73,12 +90,25 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not any(item.get("key", "").endswith("Nixpkgs") for item in fastfetch["modules"] if isinstance(item, dict))
     assert tomllib.loads((config / "icewine/current/starship.toml").read_text())["git_branch"]["disabled"] is False
     assert (config / "yazi/keymap.toml").is_symlink()
+    assert (config / "hypr/hyprland.lua").read_text() == "default hypr\n"
+    assert (config / "hypr/modules/Theme.lua").is_symlink()
+    assert os.readlink(config / "hypr/modules/Theme.lua") == str(config / "icewine/current/Theme.lua")
+    assert (config / "quickshell/modules/Thing.qml").read_text() == "default module\n"
+    assert (root / "data/wallpapers/default.jpg").read_bytes() == b"default wallpaper"
+    assert not (config / "quickshell/modules/Thing.qml").is_symlink()
+
+    (config / "quickshell/modules/Thing.qml").write_text("user module edit\n")
+    (root / "data/wallpapers/default.jpg").write_bytes(b"user wallpaper")
+    assert run("init").returncode == 0
+    assert (config / "quickshell/modules/Thing.qml").read_text() == "user module edit\n"
+    assert (root / "data/wallpapers/default.jpg").read_bytes() == b"user wallpaper"
 
     fastfetch_path = config / "fastfetch/config.jsonc"
     fastfetch_path.unlink()
     result = run("init", "fastfetch")
     assert result.returncode == 0 and fastfetch_path.is_symlink(), result.stderr
     assert edited.read_text() == "user edit\n"
+    assert (config / "quickshell/modules/Thing.qml").read_text() == "user module edit\n"
     assert run("init", "unknown").returncode != 0
 
     result = run("apply", nix_epoch="1790821943", git_enabled="false")
@@ -131,6 +161,12 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not (state / "icewine/theme").exists()
     assert "gtk-theme-name=Icewine-tokyo-night" in edited.read_text()
     assert wallpaper.read_bytes() == b"wallpaper is independent"
+    assert (config / "quickshell/modules/Thing.qml").read_text() == "default module\n"
+    assert (root / "data/wallpapers/default.jpg").read_bytes() == b"default wallpaper"
+    assert any(path.read_text() == "user module edit\n" for path in
+               (state / "icewine").glob("defaults-reset-*/config/quickshell/modules/Thing.qml"))
+    assert any(path.read_bytes() == b"user wallpaper" for path in
+               (state / "icewine").glob("defaults-reset-*/data/wallpapers/default.jpg"))
     backups = list((state / "icewine").glob("reset-*/gtk-3.0/settings.ini"))
     assert len(backups) == 1 and backups[0].read_text() == "user edit\n"
 
@@ -167,11 +203,22 @@ with tempfile.TemporaryDirectory() as temporary:
     old_link = legacy_config / "quickshell/theme/Palette.qml"
     old_link.parent.mkdir(parents=True)
     old_link.symlink_to(old_file)
+    old_modules = root / "store" / ("e" * 32 + "-modules")
+    old_modules.mkdir()
+    (old_modules / "Thing.qml").write_text("old managed module\n")
+    module_link = legacy_config / "quickshell/modules"
+    module_link.symlink_to(old_modules)
+    unknown_adapters = root / "outside-adapters"
+    unknown_adapters.mkdir()
+    adapters_link = legacy_config / "quickshell/adapters"
+    adapters_link.symlink_to(unknown_adapters)
     old_home = os.environ.get("HOME")
     try:
         os.environ["HOME"] = str(legacy_home)
         module.STORE_DIR = root / "store"
         module.publish(legacy_config, module.render_theme(assets, assets / "themes/tokyo-night.json"))
+        module.install_defaults(str(defaults), legacy_config, legacy_home / "data",
+                                legacy_home / ".local/state/icewine", False, None)
         module.install_links(legacy_config, legacy_home / ".local/state/icewine", False)
     finally:
         if old_home is None:
@@ -181,6 +228,12 @@ with tempfile.TemporaryDirectory() as temporary:
     assert 'primary: "#7aa2f7"' in old_link.read_text()
     saved = list((legacy_home / ".local/state/icewine").glob("migration-*/quickshell/theme/Palette.qml"))
     assert len(saved) == 1 and saved[0].read_text() == "old managed palette\n"
+    assert module_link.is_dir() and not module_link.is_symlink()
+    assert (module_link / "Thing.qml").read_text() == "default module\n"
+    assert adapters_link.is_symlink() and not (adapters_link / "Adapter.qml").exists()
+    saved_modules = list((legacy_home / ".local/state/icewine").glob(
+        "defaults-migration-*/config/quickshell/modules/Thing.qml"))
+    assert len(saved_modules) == 1 and saved_modules[0].read_text() == "old managed module\n"
 
     # Every shipped palette renders app-native files, including light mode.
     for theme_id, background, appearance in [

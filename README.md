@@ -86,8 +86,8 @@ command validates and copies PNG, JPEG, GIF, or BMP images into
 `$XDG_DATA_HOME/icewine/wallpapers/selection.img`, then refreshes the running
 desktop and handheld shell. The original file can be moved or deleted. With no
 selection, Icewine uses the shipped
-`$XDG_DATA_HOME/wallpapers/default.jpg`. The selected copy follows Home Manager's
-`xdg.dataHome` and the NixOS persist allowlist. Legacy user-owned
+`$XDG_DATA_HOME/wallpapers/default.jpg`. The selected copy follows the NixOS
+persist allowlist. Legacy user-owned
 `wallpapers/current.jpg` images are copied during Home Manager activation when
 there is no saved selection; the old Nix-store-backed default is not migrated.
 
@@ -97,8 +97,18 @@ there is no saved selection; the old Nix-store-backed default is not migrated.
 replaces recognized old Home Manager links. It preserves user-edited files.
 Recognized links are backed up under `$XDG_STATE_HOME/icewine/migration-*`;
 unrecognized symlinks remain untouched and are reported as conflicts.
+Static Hyprland, Quickshell, UWSM, btop, locale and wallpaper defaults are
+installed as writable files. Their migrated links and replaced files are saved
+under `defaults-migration-*` and `defaults-reset-*` in the same state directory.
+The defaults come from Icewine, except for host-selected files supplied by
+NixOS; later activations and theme changes preserve local edits. Run
+`icewine reset APP` to adopt updated shipped defaults for `hypr`, `quickshell`,
+`uwsm`, `btop`, `user-dirs`, or `wallpapers`, or use `icewine reset` for all
+defaults. Reset saves replaced content first. The generated Quickshell palette
+and Hyprland `Theme.lua` remain Icewine-managed links so theme selection works.
 `icewine init APP` installs missing files for one of `quickshell`, `gtk`,
-`yazi`, `fastfetch`, or `starship`. `icewine reset APP` backs up and refreshes
+`yazi`, `fastfetch`, `starship`, `hypr`, `uwsm`, `btop`, `user-dirs`, or
+`wallpapers`. `icewine reset APP` backs up and refreshes
 only that app's files without clearing the selected theme; plain `reset`
 restores every Icewine-owned file and clears the CLI selection.
 `icewine theme` lists the installed themes and effective selection;

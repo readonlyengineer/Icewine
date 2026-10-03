@@ -12,6 +12,7 @@ let
         user = "demo";
         handheld.enable = handheld;
         hyprland.extraModules."host.lua" = ../hyprland/modules/Autostart.lua;
+        hyprland.extraModules."Autostart.lua" = ../hyprland/modules/Baseline.lua;
       };
       system.stateVersion = "26.05";
     } ];
@@ -55,6 +56,9 @@ let
   icewineCli = builtins.head (nixpkgs.lib.filter
     (package: nixpkgs.lib.getName package == "icewine")
     (home desktop).home.packages);
+  handheldCli = builtins.head (nixpkgs.lib.filter
+    (package: nixpkgs.lib.getName package == "icewine")
+    (home handheld).home.packages);
 in {
   screenshot = pkgs.runCommand "icewine-screenshot-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
@@ -137,12 +141,14 @@ in {
     assert nixpkgs.lib.elem desktopSystem.pkgs.gamescope desktop.environment.systemPackages;
     assert desktop.home-manager.users.demo.home.stateVersion == "26.05";
     assert nixpkgs.lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
-    assert (home desktop).xdg.configFile."hypr".recursive;
+    assert !((home desktop).xdg.configFile ? "hypr");
+    assert !((home desktop).xdg.configFile ? "quickshell/modules");
+    assert !((home desktop).xdg.configFile ? "uwsm/env");
     assert !((home desktop).xdg.configFile ? "quickshell/theme/Palette.qml");
     assert !((home desktop).xdg.configFile ? "gtk-3.0/settings.ini");
     assert !((home desktop).xdg.configFile ? "fastfetch/config.jsonc");
     assert !((home desktop).xdg.configFile ? "starship.toml");
-    assert (home handheld).xdg.configFile."hypr".recursive;
+    assert !((home handheld).xdg.configFile ? "hypr");
     assert (home desktop).systemd.user.services ? icewine;
     assert nixpkgs.lib.elem "QT_IM_MODULE=qtvirtualkeyboard"
       (home desktop).systemd.user.services.icewine.Service.Environment;
@@ -162,12 +168,21 @@ in {
     assert !handheld.services.openssh.enable;
     assert !desktop.networking.networkmanager.enable;
     pkgs.runCommand "icewine-module-checks" { } ''
-      test ! -e ${((home desktop).xdg.configFile."hypr").source}/tests
-      test ! -e ${((home handheld).xdg.configFile."hypr").source}/tests
-      test -L ${((home desktop).xdg.configFile."hypr").source}/modules/Theme.lua
-      cmp ${../hyprland/modules/Autostart.lua} ${((home desktop).xdg.configFile."hypr").source}/modules/host.lua
-      test ! -e ${((home desktop).xdg.configFile."hypr").source}/modules/Deck.lua
-      test -f ${((home handheld).xdg.configFile."hypr").source}/modules/Deck.lua
+      export HOME=$TMPDIR/home XDG_CONFIG_HOME=$TMPDIR/home/.config XDG_DATA_HOME=$TMPDIR/home/.local/share XDG_STATE_HOME=$TMPDIR/home/.local/state
+      mkdir -p "$HOME"
+      ${icewineCli}/bin/icewine init
+      cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
+      cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"
+      test ! -e "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"
+      test -L "$XDG_CONFIG_HOME/hypr/modules/Theme.lua"
+      test ! -e "$XDG_CONFIG_HOME/hypr/tests"
+      export HOME=$TMPDIR/handheld XDG_CONFIG_HOME=$TMPDIR/handheld/.config XDG_DATA_HOME=$TMPDIR/handheld/.local/share XDG_STATE_HOME=$TMPDIR/handheld/.local/state
+      mkdir -p "$HOME"
+      ${handheldCli}/bin/icewine init
+      test -f "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"
+      cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
+      cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"
+      cmp ${../quickshell/deck/shell.qml} "$XDG_CONFIG_HOME/quickshell/shell.qml"
       touch "$out"
     '';
 }

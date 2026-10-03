@@ -37,6 +37,11 @@ APPS = {
     "yazi": ("yazi/theme.toml", "yazi/keymap.toml"),
     "fastfetch": ("fastfetch/config.jsonc",),
     "starship": ("starship.toml",),
+    "hypr": (),
+    "uwsm": (),
+    "btop": (),
+    "wallpapers": (),
+    "user-dirs": (),
 }
 TEMPLATES = {
     "Palette.qml": "Palette.qml.in",
@@ -232,6 +237,9 @@ def install_links(config, state, replace, app=None):
         backup_owned(config, state, migration, "migration-")
     for relative, name in owned(app).items():
         path = config / relative
+        if any(parent.is_symlink() for parent in path.parents if parent != config and config in parent.parents):
+            print(f"conflict: preserved symlinked parent: {path}", file=sys.stderr)
+            continue
         target = config / "icewine/current" / name
         if path.is_symlink() and os.readlink(path) == str(target):
             continue
@@ -262,6 +270,147 @@ def backup_owned(config, state, paths=None, prefix="reset-"):
         else:
             shutil.copy2(path, destination)
         print(f"saved: {path} -> {destination}")
+
+
+def static_app(root_name, relative):
+    if root_name == "data":
+        return relative.parts[0]
+    return {"hypr": "hypr", "uwsm": "uwsm", "quickshell": "quickshell",
+            "btop": "btop", "user-dirs.locale": "user-dirs"}.get(relative.parts[0], relative.parts[0])
+
+
+def managed_static_link(path, root, root_name):
+    if not path.is_symlink():
+        return False
+    try:
+        target = Path(os.readlink(path)).relative_to(STORE_DIR)
+    except ValueError:
+        return False
+    if not target.parts or not re.fullmatch(r"[a-z0-9]{32}-.+", target.parts[0]):
+        return False
+    store_name = target.parts[0][33:]
+    relative = path.relative_to(root)
+    if store_name == "home-manager-files":
+        try:
+            return target.parts[1:] == path.relative_to(Path.home()).parts
+        except ValueError:
+            return False
+    if store_name == "icewine-hyprland":
+        return root_name == "config" and relative.parts[0] == "hypr"
+    names = {
+        "config": {"uwsm/env": "env", "quickshell/shell.qml": "shell.qml",
+                   "quickshell/adapters": "adapters", "quickshell/modules": "modules",
+                   "quickshell/DeckOverlay.qml": "DeckOverlay.qml",
+                   "quickshell/DeckMenu.js": "DeckMenu.js",
+                   "quickshell/config/qmldir": "qmldir",
+                   "quickshell/config/Settings.qml": "Settings.qml",
+                   "btop/btop.conf": "btop.conf.in", "user-dirs.locale": "user-dirs.locale"},
+        "data": {"wallpapers/default.jpg": "tokyo-night-wallpaper.jpg",
+                 "wallpapers/current_blurr.jpg": "tokyo-night-lockscreen.jpg"},
+    }
+    return len(target.parts) == 1 and store_name == names[root_name].get(relative.as_posix())
+
+
+def install_defaults(defaults, config, data, state, replace, app):
+    if not defaults:
+        return
+    source_root = Path(defaults)
+    backup = None
+    backed_up = set()
+
+    def save(path, root, root_name):
+        nonlocal backup
+        if path in backed_up:
+            return
+        if backup is None:
+            state.mkdir(parents=True, exist_ok=True)
+            backup = Path(tempfile.mkdtemp(prefix="defaults-reset-" if replace else "defaults-migration-", dir=state))
+        destination = backup / root_name / path.relative_to(root)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_dir():
+            shutil.copytree(path, destination)
+        elif path.exists():
+            shutil.copy2(path, destination)
+        else:
+            destination.symlink_to(os.readlink(path))
+        backed_up.add(path)
+        print(f"saved: {path} -> {destination}")
+
+    for root_name, root in (("config", config), ("data", data)):
+        source = source_root / root_name
+        if not source.is_dir():
+            raise ValueError(f"default files are unavailable: {source}")
+        for shipped in sorted(item for item in source.rglob("*") if item.is_file()):
+            relative = shipped.relative_to(source)
+            if app and static_app(root_name, relative) != app:
+                continue
+            path = root / relative
+            blocked = False
+            for parent in reversed(path.parents):
+                if parent == root:
+                    continue
+                if root not in parent.parents:
+                    continue
+                if parent.exists() and not parent.is_dir():
+                    print(f"conflict: preserved non-directory: {parent}", file=sys.stderr)
+                    blocked = True
+                    break
+                if not parent.is_symlink():
+                    continue
+                if not managed_static_link(parent, root, root_name):
+                    print(f"conflict: preserved unrecognized symlink: {parent}", file=sys.stderr)
+                    blocked = True
+                    break
+                save(parent, root, root_name)
+                parent.unlink()
+            if blocked:
+                continue
+            if path.is_symlink():
+                if not managed_static_link(path, root, root_name):
+                    print(f"conflict: preserved unrecognized symlink: {path}", file=sys.stderr)
+                    continue
+                save(path, root, root_name)
+                path.unlink()
+            elif path.exists():
+                if not path.is_file():
+                    print(f"conflict: preserved non-file: {path}", file=sys.stderr)
+                    continue
+                if not replace:
+                    continue
+                save(path, root, root_name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix=".icewine-", dir=path.parent)
+            try:
+                with os.fdopen(fd, "wb") as stream, shipped.open("rb") as source_file:
+                    shutil.copyfileobj(source_file, stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.chmod(temporary, 0o644)
+                os.replace(temporary, path)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+            print(f"installed: {path}")
+
+    if app in (None, "hypr"):
+        path = config / "hypr/modules/Theme.lua"
+        target = config / "icewine/current/Theme.lua"
+        if path.is_symlink() and os.readlink(path) == str(target):
+            return
+        if any(parent.is_symlink() for parent in (path.parent, path.parent.parent)):
+            print(f"conflict: preserved symlinked parent: {path}", file=sys.stderr)
+            return
+        if path.exists() or path.is_symlink():
+            if path.is_symlink() and not managed_static_link(path, config, "config"):
+                print(f"conflict: preserved unrecognized symlink: {path}", file=sys.stderr)
+                return
+            if not replace and not managed_static_link(path, config, "config"):
+                print(f"preserved edited file: {path}")
+                return
+            save(path, config, "config")
+            path.unlink()
+        atomic_link(path, target)
+        print(f"installed: {path}")
 
 
 def install_gtk_theme(config, theme_id):
@@ -415,6 +564,9 @@ def main(argv):
     if gtk_enabled:
         install_gtk_theme(config, theme_id)
     publish(config, files)
+    if command in {"init", "reset"}:
+        install_defaults(os.environ.get("ICEWINE_DEFAULT_FILES"), config,
+                         xdg("XDG_DATA_HOME", ".local/share"), state, command == "reset", app)
     if command in {"init", "reset", "theme", "transparency"}:
         install_links(config, state, command == "reset", app)
     if gtk_enabled and app in (None, "gtk"):
