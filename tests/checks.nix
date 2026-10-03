@@ -175,12 +175,15 @@ in {
       cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
       cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"
       test ! -e "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"
+      cmp ${../hyprland/hyprland.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua"
       test -L "$XDG_CONFIG_HOME/hypr/modules/Theme.lua"
       test ! -e "$XDG_CONFIG_HOME/hypr/tests"
       export HOME=$TMPDIR/handheld XDG_CONFIG_HOME=$TMPDIR/handheld/.config XDG_DATA_HOME=$TMPDIR/handheld/.local/share XDG_STATE_HOME=$TMPDIR/handheld/.local/state
       mkdir -p "$HOME"
       ${handheldCli}/bin/icewine init
       test -f "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"
+      { cat ${../hyprland/hyprland.lua}; printf '\nrequire("modules.Deck")\n'; } > "$TMPDIR/handheld-hyprland.lua"
+      cmp "$TMPDIR/handheld-hyprland.lua" "$XDG_CONFIG_HOME/hypr/hyprland.lua"
       cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
       cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"
       cmp ${../quickshell/deck/shell.qml} "$XDG_CONFIG_HOME/quickshell/shell.qml"

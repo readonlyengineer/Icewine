@@ -1,5 +1,5 @@
 -- ~/.config/hypr/modules/Baseline.lua
--- Hardware-agnostic baseline: defaults, catchall monitor, env vars,
+-- Hardware-agnostic baseline: defaults, env vars,
 -- global behaviour fixes, and the (commented) permissions reference.
 -- Hardware-specific overrides are supplied by the host configuration.
 
@@ -55,14 +55,6 @@ hl.config({
 		cm_auto_hdr = 1,
 		direct_scanout = 2,
 	},
-})
-
--- Catchall monitor: any output not handled by a hardware module gets preferred mode at auto position.
-hl.monitor({
-	output   = "",
-	mode     = "preferred",
-	position = "auto",
-	scale    = "auto",
 })
 
 -- Per-device example (kept commented in case the epic-mouse comes back)

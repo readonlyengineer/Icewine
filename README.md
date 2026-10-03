@@ -155,15 +155,11 @@ networking.networkmanager.enable = true;
 hardware.bluetooth.enable = true;
 ```
 
-Monitor layout and hardware-specific settings belong on the host too. Extra
-Hyprland Lua modules can be supplied through `services.icewine.hyprland.extraModules`.
-
-For example:
-```nix
-services.icewine.hyprland.extraModules."host.lua" = ./hypr/host.lua;
-```
-
-Refer to Hyprland wiki for options and syntax. 
+Customise monitors, bindings and other Hyprland settings in
+`~/.config/hypr/hyprland.lua`. The default uses each display's preferred mode,
+automatic placement and scale 1. Add settings directly or load your own Lua
+modules with `require()`. Rebuilds preserve edits; `icewine reset hypr` backs
+up the current files and restores shipped defaults.
 
 ### Handheld
 

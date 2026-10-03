@@ -13,16 +13,4 @@ require("modules.Binds")
 --- DefaultApps piggy backs in on Binds
 require("modules.Autostart")
 
--- Load handheld behaviour before optional host overrides.
-if package.searchpath("modules.Deck", package.path) then
-  require("modules.Deck")
-end
-
--- import host personalisation if it exists
-if package.searchpath("modules.host", package.path) then
-  require("modules.host")
-end
-
-if package.searchpath("modules.Personal", package.path) then
-  require("modules.Personal")
-end
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })

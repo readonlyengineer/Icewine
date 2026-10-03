@@ -23,6 +23,8 @@ let
     cp ${../quickshell/config/Settings.qml} $out/config/quickshell/config/Settings.qml
     ${lib.optionalString cfg.handheld.enable ''
       cp ${../hyprland/deck/Deck.lua} $out/config/hypr/modules/Deck.lua
+      chmod u+w $out/config/hypr/hyprland.lua
+      printf '\nrequire("modules.Deck")\n' >> $out/config/hypr/hyprland.lua
       cp ${../quickshell/deck/DeckOverlay.qml} $out/config/quickshell/DeckOverlay.qml
       cp ${../quickshell/deck/DeckMenu.js} $out/config/quickshell/DeckMenu.js
     ''}
