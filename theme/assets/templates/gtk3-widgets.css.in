@@ -5,7 +5,10 @@
 }
 headerbar, .titlebar, menubar, toolbar {
   background-image: none;
-  background-color: shade(mix(@palette_bg_dark, @palette_highlight, 0.2), 0.8);
+  background-color: @palette_bg_dark;
+  color: @palette_highlight;
+}
+menubar > menuitem {
   color: @palette_fg;
 }
 headerbar:backdrop, .titlebar:backdrop, menubar:backdrop, toolbar:backdrop {
@@ -21,6 +24,9 @@ entry, textview, textview text {
   background-color: @palette_bg_dark;
   color: @palette_fg;
 }
+entry:focus {
+  border-color: @palette_highlight;
+}
 button {
   background-image: none;
   background-color: @palette_bg_highlight;
@@ -28,6 +34,14 @@ button {
   border-color: @borders;
 }
 button:hover { background-color: @palette_fg_gutter; }
+headerbar button, .titlebar button, toolbar button {
+  background-color: @palette_bg_dark;
+  color: @palette_highlight;
+}
+headerbar button:hover, .titlebar button:hover, toolbar button:hover {
+  background-color: @palette_bg_highlight;
+}
+menubar > menuitem:backdrop { color: @palette_fg_dark; }
 selection, *:selected, menuitem:hover {
   background-color: @palette_highlight;
   color: @palette_bg_dark;
