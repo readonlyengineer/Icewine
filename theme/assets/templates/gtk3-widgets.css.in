@@ -16,8 +16,19 @@ headerbar:backdrop, .titlebar:backdrop, menubar:backdrop, toolbar:backdrop {
   color: @palette_fg_dark;
 }
 menu, menuitem, popover, .sidebar {
+  background-image: none;
   background-color: @palette_bg;
   color: @palette_fg;
+}
+menu, popover {
+  border-color: @borders;
+}
+.sidebar, treeview.view, list {
+  background-color: @palette_bg_dark;
+  color: @palette_fg;
+}
+row:hover:not(:selected) {
+  background-color: @palette_bg_highlight;
 }
 entry, textview, textview text {
   background-image: none;
@@ -41,9 +52,36 @@ headerbar button, .titlebar button, toolbar button {
 headerbar button:hover, .titlebar button:hover, toolbar button:hover {
   background-color: @palette_bg_highlight;
 }
+button:active, button:checked,
+headerbar button:active, headerbar button:checked,
+.titlebar button:active, .titlebar button:checked,
+toolbar button:active, toolbar button:checked {
+  background-color: @palette_highlight;
+  color: @palette_bg_dark;
+  border-color: @palette_highlight;
+}
+button:focus, entry:focus, row:focus {
+  outline-color: @palette_highlight;
+}
+scrollbar trough {
+  background-color: @palette_bg_dark;
+}
+scrollbar slider {
+  background-image: none;
+  background-color: @palette_comment;
+  border-color: transparent;
+}
+scrollbar slider:hover { background-color: @palette_fg_dark; }
+scrollbar slider:active { background-color: @palette_highlight; }
 menubar > menuitem:backdrop { color: @palette_fg_dark; }
 selection, *:selected, menuitem:hover {
   background-color: @palette_highlight;
   color: @palette_bg_dark;
 }
 *:disabled { color: @palette_comment; }
+button:disabled, headerbar button:disabled,
+.titlebar button:disabled, toolbar button:disabled {
+  background-color: @palette_bg_highlight;
+  color: @palette_comment;
+  border-color: @borders;
+}
