@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 
-DEFAULT = "tokyo-night"
+DEFAULT = "catppuccin-mocha"
 TRANSPARENCY = {
     "off": ("1.00", "1.00"),
     "low": ("0.92", "0.95"),
@@ -117,7 +117,7 @@ def render(source, values):
     return re.sub(r"@([A-Za-z][A-Za-z0-9]*)@", replace, source)
 
 
-def render_theme(assets, palette_file, level="med"):
+def render_theme(assets, palette_file, level="high"):
     palette = json.loads(palette_file.read_text(encoding="utf-8"))
     if not isinstance(palette, dict) or not all(isinstance(value, str) for value in palette.values()):
         raise ValueError(f"invalid theme data: {palette_file}")
@@ -183,7 +183,7 @@ def selection(state):
 
 def transparency_level(state):
     path = state / "transparency"
-    level = path.read_text(encoding="utf-8").strip() if path.exists() else "med"
+    level = path.read_text(encoding="utf-8").strip() if path.exists() else "high"
     if level not in TRANSPARENCY:
         raise ValueError(f"invalid saved transparency in {path}; choose off, low, med or high")
     return level

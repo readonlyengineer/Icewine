@@ -231,7 +231,7 @@ restores every Icewine-owned file and clears the CLI selection.
 `null` (the default), `"tokyo-night"`, `"dracula"`, `"nord"`, `"gruvbox-light"`,
 `"gruvbox-dark"`, `"catppuccin-latte"`, `"catppuccin-frappe"`,
 `"catppuccin-macchiato"`, or `"catppuccin-mocha"`. An explicit Nix value
-overrides the CLI choice; otherwise the CLI choice wins, then Tokyo Night.
+overrides the CLI choice; otherwise the CLI choice wins, then Catppuccin Mocha.
 Catppuccin palettes use the [official colours](https://github.com/catppuccin/palette)
 (MIT; licence in `theme/assets/themes/CATPPUCCIN-LICENSE`). Latte is light;
 Frappé, Macchiato and Mocha are dark. Neovim requires `catppuccin-nvim`,
@@ -245,9 +245,9 @@ transitions.
 `icewine transparency off|low|med|high` saves an independent transparency
 preference. With no argument it reports the saved level. Kitty background /
 inactive-window opacity is 1.00/1.00, 0.92/0.95, 0.84/0.85 or 0.76/0.75;
-`med` is the default. Theme changes and login retain this choice. Hyprland
+`high` is the default. Theme changes and login retain this choice. Hyprland
 reloads where available; reopen Kitty to use its new background opacity.
-Blur remains unchanged. A full `icewine reset` restores `med`; targeted resets
+Blur remains unchanged. A full `icewine reset` restores `high`; targeted resets
 keep the preference.
 
 `icewine autofullscreen on|off` controls automatic fullscreen on ordinary

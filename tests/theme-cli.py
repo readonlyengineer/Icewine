@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory() as temporary:
 
     result = run("init")
     assert result.returncode == 0, result.stderr
-    assert "Effective theme: tokyo-night" in result.stdout
+    assert "Effective theme: catppuccin-mocha" in result.stdout
     assert edited.read_text() == "user edit\n"
     assert not legacy.is_symlink() and "property color primary" in legacy.read_text()
     assert unrelated.is_symlink() and os.readlink(unrelated) == "/nix/store/" + "b" * 32 + "-user-css"
@@ -105,7 +105,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert len(migration) == 1 and os.readlink(migration[0]) == legacy_target
     assert (config / "icewine/current").is_symlink()
     nvim_theme = config / "icewine/current/nvim-theme.lua"
-    assert 'local theme = "tokyo-night"' in nvim_theme.read_text()
+    assert 'local theme = "catppuccin-mocha"' in nvim_theme.read_text()
     fastfetch = json.loads((config / "icewine/current/fastfetch.jsonc").read_text())
     assert not any(item.get("key", "").endswith("Nixpkgs") for item in fastfetch["modules"] if isinstance(item, dict))
     assert tomllib.loads((config / "icewine/current/starship.toml").read_text())["git_branch"]["disabled"] is False
@@ -165,7 +165,7 @@ with tempfile.TemporaryDirectory() as temporary:
     result = run("theme", "missing")
     assert result.returncode != 0
     assert not (state / "icewine/theme").exists()
-    assert json.loads((config / "icewine/current/palette.json").read_text())["primary"] == "7aa2f7"
+    assert json.loads((config / "icewine/current/palette.json").read_text())["primary"] == "89b4fa"
 
     result = run("theme", "dracula")
     assert result.returncode == 0, result.stderr
@@ -203,7 +203,7 @@ with tempfile.TemporaryDirectory() as temporary:
     result = run("reset")
     assert result.returncode == 0, result.stderr
     assert not (state / "icewine/theme").exists()
-    assert "gtk-theme-name=Icewine-tokyo-night" in edited.read_text()
+    assert "gtk-theme-name=Icewine-catppuccin-mocha" in edited.read_text()
     assert wallpaper.read_bytes() == b"wallpaper is independent"
     assert (config / "quickshell/modules/Thing.qml").read_text() == "default module\n"
     assert (root / "data/wallpapers/default.jpg").read_bytes() == b"default wallpaper"
@@ -337,8 +337,8 @@ with tempfile.TemporaryDirectory() as temporary:
     assert run("transparency", "off").returncode == 0
     assert run("reset").returncode == 0
     assert not (state / "icewine/transparency").exists()
-    assert "background_opacity 0.84\n" in (current / "kitty.conf").read_text()
-    assert "inactive_opacity = 0.85" in (current / "Theme.lua").read_text()
+    assert "background_opacity 0.76\n" in (current / "kitty.conf").read_text()
+    assert "inactive_opacity = 0.75" in (current / "Theme.lua").read_text()
     routed = subprocess.run(["bash", str(dispatcher), "transparency", "low"],
                             env=dict(env, PATH=f"{fake_bin}:{os.environ['PATH']}"),
                             text=True, capture_output=True)
