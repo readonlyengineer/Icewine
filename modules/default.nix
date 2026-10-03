@@ -46,7 +46,8 @@ in {
     };
     gtk.enable = lib.mkEnableOption "Icewine GTK styling" // { default = true; };
     theme = lib.mkOption {
-      type = lib.types.nullOr (lib.types.enum [ "tokyo-night" "dracula" "nord" "gruvbox-light" "gruvbox-dark" ]);
+      type = lib.types.nullOr (lib.types.enum [ "tokyo-night" "dracula" "nord" "gruvbox-light" "gruvbox-dark"
+        "catppuccin-latte" "catppuccin-frappe" "catppuccin-macchiato" "catppuccin-mocha" ]);
       default = null;
       description = "Optional Icewine theme policy. Null lets the user's CLI selection win; Tokyo Night is the fallback.";
     };

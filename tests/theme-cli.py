@@ -187,6 +187,10 @@ with tempfile.TemporaryDirectory() as temporary:
         ("tokyo-night", "1a1b26", "dark"), ("dracula", "282a36", "dark"),
         ("nord", "2e3440", "dark"), ("gruvbox-light", "fbf1c7", "light"),
         ("gruvbox-dark", "282828", "dark"),
+        ("catppuccin-latte", "eff1f5", "light"),
+        ("catppuccin-frappe", "303446", "dark"),
+        ("catppuccin-macchiato", "24273a", "dark"),
+        ("catppuccin-mocha", "1e1e2e", "dark"),
     ]:
         result = run("theme", theme_id)
         assert result.returncode == 0, result.stderr

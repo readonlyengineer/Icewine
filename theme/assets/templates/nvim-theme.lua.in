@@ -9,6 +9,9 @@ elseif theme == "nord" then
 elseif theme == "gruvbox-light" or theme == "gruvbox-dark" then
   require("gruvbox").setup({ transparent_mode = true })
   vim.cmd.colorscheme("gruvbox")
+elseif theme:match("^catppuccin%-") then
+  require("catppuccin").setup({ transparent_background = true })
+  vim.cmd.colorscheme(theme)
 else
   require("tokyonight").setup({
     style = "night",

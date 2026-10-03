@@ -105,8 +105,13 @@ restores every Icewine-owned file and clears the CLI selection.
 `icewine theme tokyo-night` and `icewine theme dracula` save a choice under
 `$XDG_STATE_HOME/icewine/theme`. On NixOS, `services.icewine.theme` accepts
 `null` (the default), `"tokyo-night"`, `"dracula"`, `"nord"`, `"gruvbox-light"`,
-or `"gruvbox-dark"`. An explicit Nix value
+`"gruvbox-dark"`, `"catppuccin-latte"`, `"catppuccin-frappe"`,
+`"catppuccin-macchiato"`, or `"catppuccin-mocha"`. An explicit Nix value
 overrides the CLI choice; otherwise the CLI choice wins, then Tokyo Night.
+Catppuccin palettes use the [official colours](https://github.com/catppuccin/palette)
+(MIT; licence in `theme/assets/themes/CATPPUCCIN-LICENSE`). Latte is light;
+Frappé, Macchiato and Mocha are dark. Neovim requires `catppuccin-nvim`,
+provided by the NixOS editor configuration.
 
 `icewine transparency off|low|med|high` saves an independent transparency
 preference. With no argument it reports the saved level. Kitty background /
