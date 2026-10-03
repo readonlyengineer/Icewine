@@ -30,10 +30,6 @@ let
     ''}
     chmod -R u+w $out
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
-      "cp ${lib.escapeShellArg "${source}"} $out/config/hypr/modules/${lib.escapeShellArg name}"
-    ) cfg.hyprland.extraModules)}
-    chmod -R u+w $out
-    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
       "mkdir -p $out/config/${lib.escapeShellArg (builtins.dirOf name)}; cp ${lib.escapeShellArg "${source}"} $out/config/${lib.escapeShellArg name}"
     ) cfg.defaultFiles.config)}
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:

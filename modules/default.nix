@@ -49,7 +49,7 @@ in {
       type = lib.types.nullOr (lib.types.enum [ "tokyo-night" "dracula" "nord" "gruvbox-light" "gruvbox-dark"
         "catppuccin-latte" "catppuccin-frappe" "catppuccin-macchiato" "catppuccin-mocha" ]);
       default = null;
-      description = "Optional Icewine theme policy. Null lets the user's CLI selection win; Tokyo Night is the fallback.";
+      description = "Optional Icewine theme policy. Null lets the user's CLI selection win; Catppuccin Mocha is the fallback.";
     };
     idle.enable = lib.mkEnableOption "Icewine idle locking and suspend" // { default = true; };
     battery.enable = lib.mkEnableOption "Icewine Quickshell battery warnings and sleep" // { default = true; };
@@ -78,11 +78,6 @@ in {
       fileManager = command "File manager command." (if cfg.fileManager.preset == "yazi" then [ "icewine-terminal-exec" "yazi" ] else [ "xdg-open" "." ]);
       steam = command "Steam command used inside Gamescope; installed by handheld mode or the host." ([ "steam" ] ++ lib.optional cfg.handheld.enable "-gamepadui");
     };
-    hyprland.extraModules = lib.mkOption {
-      type = lib.types.attrsOf lib.types.path;
-      default = { };
-      description = "Host Lua files overlaid into Hyprland's modules directory, keyed by filename.";
-    };
     defaultFiles = {
       config = lib.mkOption {
         type = lib.types.attrsOf lib.types.path;
@@ -103,8 +98,6 @@ in {
         message = "Icewine requires services.icewine.user to name an existing user."; }
       { assertion = lib.all (argv: argv != [ ] && builtins.head argv != "") (builtins.attrValues commands);
         message = "Icewine application commands must be nonempty; set the corresponding applications command when disabling its managed preset."; }
-      { assertion = lib.all (name: builtins.match "[A-Za-z0-9_-]+\\.lua" name != null) (builtins.attrNames cfg.hyprland.extraModules);
-        message = "Icewine extraModules keys must be Lua filenames without directory components."; }
       { assertion = lib.all (name: name != "" && lib.all (part: part != "" && part != "." && part != "..") (lib.splitString "/" name))
           (builtins.attrNames cfg.defaultFiles.config ++ builtins.attrNames cfg.defaultFiles.data);
         message = "Icewine defaultFiles keys must be relative paths without . or .. components."; }

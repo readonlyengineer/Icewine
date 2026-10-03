@@ -11,8 +11,8 @@ let
         enable = true;
         user = "demo";
         handheld.enable = handheld;
-        hyprland.extraModules."host.lua" = ../hyprland/modules/Autostart.lua;
-        hyprland.extraModules."Autostart.lua" = ../hyprland/modules/Baseline.lua;
+        defaultFiles.config."hypr/modules/host.lua" = ../hyprland/modules/Autostart.lua;
+        defaultFiles.config."hypr/modules/Autostart.lua" = ../hyprland/modules/Baseline.lua;
       };
       system.stateVersion = "26.05";
     } ];
