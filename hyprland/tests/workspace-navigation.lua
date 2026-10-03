@@ -26,11 +26,15 @@ hl = {
 }
 local module = dofile(assert(arg[1], "Pass the Binds.lua path"))
 for key, command in pairs({
-	XF86MonBrightnessUp = "brightnessctl -e4 -n2 set 5%+",
-	XF86MonBrightnessDown = "brightnessctl -e4 -n2 set 5%-",
+	XF86AudioRaiseVolume = "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+ && wpctl set-mute @DEFAULT_AUDIO_SINK@ 0",
+	XF86AudioLowerVolume = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- && wpctl set-mute @DEFAULT_AUDIO_SINK@ 0",
+	XF86MonBrightnessUp = "icewine-monitor-brightness focused +5",
+	XF86MonBrightnessDown = "icewine-monitor-brightness focused -5",
 }) do
 	assert(binds[key] == command and options[key].locked and options[key].repeating)
 end
+assert(binds.XF86AudioMute == "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+	and options.XF86AudioMute.locked and not options.XF86AudioMute.repeating)
 for direction, command in pairs({ left = "focus r", right = "focus l" }) do
 	gestures[direction]()
 	assert(lastDispatch == command)

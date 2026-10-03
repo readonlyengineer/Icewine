@@ -67,7 +67,7 @@ in {
     touch "$out"
   '';
   brightness = pkgs.runCommand "icewine-brightness-checks" {
-    nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.python3 pkgs.shellcheck ];
+    nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.python3 pkgs.shellcheck pkgs.jq pkgs.util-linux ];
   } ''
     shellcheck ${../quickshell/tools/monitor-brightness}
     python3 ${./brightness.py} ${../quickshell/tools/monitor-brightness}

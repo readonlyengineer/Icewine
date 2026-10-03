@@ -85,7 +85,7 @@ let
   };
   monitorBrightness = pkgs.writeShellApplication {
     name = "icewine-monitor-brightness";
-    runtimeInputs = [ pkgs.coreutils pkgs.brightnessctl pkgs.ddcutil ];
+    runtimeInputs = [ pkgs.coreutils pkgs.brightnessctl pkgs.ddcutil pkgs.hyprland pkgs.jq pkgs.util-linux ];
     text = builtins.readFile ../quickshell/tools/monitor-brightness;
   };
 in {
