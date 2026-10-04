@@ -19,9 +19,9 @@ from pathlib import Path
 DEFAULT = "catppuccin-mocha"
 TRANSPARENCY = {
     "off": ("1.00", "1.00"),
-    "low": ("0.70", "0.75"),
-    "med": ("0.50", "0.55"),
-    "high": ("0.35", "0.40"),
+    "low": ("0.90", "0.75"),
+    "med": ("0.80", "0.55"),
+    "high": ("0.70", "0.40"),
 }
 OWNED = {
     "gtk-3.0/settings.ini": "gtk-settings.ini",
@@ -150,8 +150,9 @@ def render_theme(assets, palette_file, level="high"):
         raise ValueError(f"invalid theme data: {palette_file}")
     values = dict(palette)
     values["themeId"] = palette_file.stem
+    # Smoky glass: 80% dark base, 8% accent and 12% black.
     values["terminalBackground"] = "".join(
-        f"{round(int(values['background'][i:i + 2], 16) * 0.9 + int(values['highlight'][i:i + 2], 16) * 0.1):02x}"
+        f"{round(int(values['backgroundDark'][i:i + 2], 16) * 0.8 + int(values['highlight'][i:i + 2], 16) * 0.08):02x}"
         for i in (0, 2, 4)
     )
     values["kittyOpacity"], values["inactiveOpacity"] = TRANSPARENCY[level]

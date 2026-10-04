@@ -241,9 +241,11 @@ transitions.
 
 `icewine transparency off|low|med|high` saves an independent transparency
 preference. With no argument it reports the saved level. Kitty background /
-inactive-window opacity is 1.00/1.00, 0.70/0.75, 0.50/0.55 or 0.35/0.40;
+inactive-window opacity is 1.00/1.00, 0.90/0.75, 0.80/0.55 or 0.70/0.40;
 `high` is the default. Theme changes and login retain this choice. Hyprland
 reloads where available; reopen Kitty to use its new background opacity.
+Kitty backgrounds mix 80% of the darker palette base, 8% accent and 12% black
+for a smoky tint. Only background opacity changes; terminal text stays opaque.
 Blur remains unchanged. A full `icewine reset` restores `high`; targeted resets
 keep the preference.
 

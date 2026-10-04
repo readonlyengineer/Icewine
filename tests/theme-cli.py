@@ -447,13 +447,13 @@ x-scheme-handler/https=firefox.desktop
     # Every shipped palette renders app-native files, including light mode.
     kitty_entry.write_text("user Kitty theme edit\n")
     for theme_id, background, appearance in [
-        ("tokyo-night", "24283b", "dark"), ("dracula", "37354a", "dark"),
-        ("nord", "37424e", "dark"), ("gruvbox-light", "ebd4aa", "light"),
-        ("gruvbox-dark", "46382d", "dark"),
-        ("catppuccin-latte", "dae3f5", "light"),
-        ("catppuccin-frappe", "394057", "dark"),
-        ("catppuccin-macchiato", "2e344d", "dark"),
-        ("catppuccin-mocha", "292d42", "dark"),
+        ("tokyo-night", "1b1f2c", "dark"), ("dracula", "2a2737", "dark"),
+        ("nord", "303944", "dark"), ("gruvbox-light", "cab48f", "light"),
+        ("gruvbox-dark", "342a22", "dark"),
+        ("catppuccin-latte", "bac3d3", "light"),
+        ("catppuccin-frappe", "2c3143", "dark"),
+        ("catppuccin-macchiato", "23273a", "dark"),
+        ("catppuccin-mocha", "1e2232", "dark"),
     ]:
         result = run("theme", theme_id)
         assert result.returncode == 0, result.stderr
@@ -506,8 +506,8 @@ x-scheme-handler/https=firefox.desktop
     # Opacity is independent of theme selection and survives reapplication.
     saved_theme = (state / "icewine/theme").read_text()
     for level, kitty_opacity, inactive_opacity in [
-        ("off", "1.00", "1.00"), ("low", "0.70", "0.75"),
-        ("med", "0.50", "0.55"), ("high", "0.35", "0.40"),
+        ("off", "1.00", "1.00"), ("low", "0.90", "0.75"),
+        ("med", "0.80", "0.55"), ("high", "0.70", "0.40"),
     ]:
         result = run("transparency", level)
         assert result.returncode == 0, result.stderr
@@ -530,7 +530,7 @@ x-scheme-handler/https=firefox.desktop
     assert run("transparency", "off").returncode == 0
     assert run("reset").returncode == 0
     assert not (state / "icewine/transparency").exists()
-    assert "background_opacity 0.35\n" in (current / "kitty.conf").read_text()
+    assert "background_opacity 0.70\n" in (current / "kitty.conf").read_text()
     assert "inactive_opacity = 0.40" in (current / "Theme.lua").read_text()
     routed = subprocess.run(["bash", str(dispatcher), "transparency", "low"],
                             env=dict(env, PATH=f"{fake_bin}:{os.environ['PATH']}"),
