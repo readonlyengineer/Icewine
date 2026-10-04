@@ -2,6 +2,7 @@
 """Focused regression checks for the shipped theme command."""
 
 import os
+import errno
 import importlib.machinery
 import json
 import signal
@@ -44,12 +45,19 @@ with tempfile.TemporaryDirectory() as temporary:
             b"include ../icewine/current/kitty.conf\n"
             b"include host.conf\n"
         ),
+        "config/kitty/host.conf": b"",
+        "config/icewine/shell/bashrc": b"# default bash\n",
+        "config/icewine/shell/profile": b"# default profile\n",
+        "config/icewine/shell/bash_profile": b"# default bash profile\n",
         "data/wallpapers/default.jpg": b"default wallpaper",
         "data/wallpapers/current_blurr.jpg": b"default blur",
     }.items():
         path = defaults / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(contents)
+    (defaults / "home").mkdir()
+    for name in ("bashrc", "profile", "bash_profile"):
+        (defaults / "home" / f".{name}").symlink_to(f"icewine/shell/{name}")
     env = dict(os.environ, XDG_CONFIG_HOME=str(config), XDG_STATE_HOME=str(state),
                ICEWINE_THEME_ASSETS=str(assets), ICEWINE_THEME_POLICY="",
                ICEWINE_DEFAULT_FILES=str(defaults),
@@ -62,7 +70,13 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_bin.mkdir()
     (fake_bin / "ya").write_text("#!/bin/sh\nexit 0\n")
     (fake_bin / "ya").chmod(0o755)
+    (fake_bin / "systemctl").write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$ICEWINE_TEST_SYSTEMCTL_LOG"\n')
+    (fake_bin / "systemctl").chmod(0o755)
     env["PATH"] = f"{fake_bin}:{os.environ['PATH']}"
+    env["ICEWINE_TEST_SYSTEMCTL_LOG"] = str(root / "systemctl.log")
+    env["XDG_RUNTIME_DIR"] = str(root / "runtime")
+    (root / "runtime/systemd").mkdir(parents=True)
+    (root / "runtime/systemd/private").touch()
 
     def run(*arguments, policy="", skip="", nix_epoch=None, git_enabled="true"):
         command_env = dict(env, ICEWINE_THEME_POLICY=policy,
@@ -92,6 +106,37 @@ with tempfile.TemporaryDirectory() as temporary:
     kitty_entry.parent.mkdir(parents=True, exist_ok=True)
     kitty_legacy_target = "/nix/store/" + "c" * 32 + "-home-manager-files/.config/kitty/kitty.conf"
     kitty_entry.symlink_to(kitty_legacy_target)
+    legacy_bash = root / ".bashrc"
+    legacy_bash_target = "/nix/store/" + "e" * 32 + "-home-manager-files/.bashrc"
+    legacy_bash.symlink_to(legacy_bash_target)
+    (root / ".profile").write_text("custom login profile\n")
+    launchers = root / "data/applications"
+    launchers.mkdir(parents=True)
+    old_steam = launchers / "steam.desktop"
+    old_steam_target = "/nix/store/" + "f" * 32 + "-home-manager-files/data/applications/steam.desktop"
+    old_steam.symlink_to(old_steam_target)
+    custom_launcher = launchers / "steam-gamescope.desktop"
+    custom_launcher.write_text("user Steam launcher\n")
+    unknown_steam = launchers / "com.valvesoftware.Steam.desktop"
+    unknown_steam.symlink_to("/nix/store/" + "a" * 32 + "-host-launcher")
+    units = config / "systemd/user"
+    wants = units / "graphical-session.target.wants"
+    requires = units / "other.target.requires"
+    wants.mkdir(parents=True)
+    requires.mkdir()
+    unit_links = [units / "icewine.service", wants / "hypridle.service",
+                  requires / "icewine-inputplumber-hyprland.service",
+                  units / "icewine-refresh-flatpak-icons.path"]
+    for path in unit_links:
+        path.symlink_to("/nix/store/" + "1" * 32 + "-home-manager-files/"
+                        + path.relative_to(root).as_posix())
+    edited_unit = units / "hyprpolkitagent.service"
+    edited_unit.write_text("user Polkit unit\n")
+    unknown_unit = units / "icewine-keyboard.service"
+    unknown_unit.symlink_to("/nix/store/" + "2" * 32 + "-custom-unit")
+    unrelated_unit = units / "other.service"
+    unrelated_unit.symlink_to("/nix/store/" + "3" * 32
+                             + "-home-manager-files/.config/systemd/user/other.service")
 
     result = run("init")
     assert result.returncode == 0, result.stderr
@@ -125,12 +170,32 @@ with tempfile.TemporaryDirectory() as temporary:
     ]
     kitty_migration = list((state / "icewine").glob("defaults-migration-*/config/kitty/kitty.conf"))
     assert len(kitty_migration) == 1 and os.readlink(kitty_migration[0]) == kitty_legacy_target
+    assert os.readlink(legacy_bash) == str(config / "icewine/shell/bashrc")
+    assert (root / ".profile").read_text() == "custom login profile\n"
+    bash_migration = list((state / "icewine").glob("defaults-migration-*/home/.bashrc"))
+    assert len(bash_migration) == 1 and os.readlink(bash_migration[0]) == legacy_bash_target
+    assert not old_steam.exists() and not old_steam.is_symlink()
+    assert custom_launcher.read_text() == "user Steam launcher\n"
+    assert unknown_steam.is_symlink()
+    steam_migration = list((state / "icewine").glob("defaults-migration-*/data/applications/steam.desktop"))
+    assert len(steam_migration) == 1 and os.readlink(steam_migration[0]) == old_steam_target
+    for path in unit_links:
+        assert not path.exists() and not path.is_symlink()
+        backups = list((state / "icewine").glob("defaults-migration-*/config/"
+                                               + path.relative_to(config).as_posix()))
+        assert len(backups) == 1 and backups[0].is_symlink()
+    assert edited_unit.read_text() == "user Polkit unit\n"
+    assert unknown_unit.is_symlink() and unrelated_unit.is_symlink()
+    assert (root / "systemctl.log").read_text() == "--user daemon-reload\n"
 
     (config / "quickshell/modules/Thing.qml").write_text("user module edit\n")
     (root / "data/wallpapers/default.jpg").write_bytes(b"user wallpaper")
     assert run("init").returncode == 0
     assert (config / "quickshell/modules/Thing.qml").read_text() == "user module edit\n"
     assert (root / "data/wallpapers/default.jpg").read_bytes() == b"user wallpaper"
+    assert custom_launcher.read_text() == "user Steam launcher\n"
+    assert unknown_steam.is_symlink()
+    assert (root / "systemctl.log").read_text() == "--user daemon-reload\n"
     (config / "nvim/init.lua").write_text("user nvim edit\n")
     result = run("reset", "nvim")
     assert result.returncode == 0, result.stderr
@@ -146,6 +211,17 @@ with tempfile.TemporaryDirectory() as temporary:
     assert "include host.conf\n" in kitty_entry.read_text()
     assert any(path.read_text() == "user Kitty entry edit\n" for path in
                (state / "icewine").glob("defaults-reset-*/config/kitty/kitty.conf"))
+    (config / "icewine/shell/bashrc").write_text("user Bash edit\n")
+    assert run("init", "bash").returncode == 0
+    assert (config / "icewine/shell/bashrc").read_text() == "user Bash edit\n"
+    result = run("reset", "bash")
+    assert result.returncode == 0, result.stderr
+    assert (config / "icewine/shell/bashrc").read_text() == "# default bash\n"
+    assert (root / ".profile").read_text() == "# default profile\n"
+    assert any(path.read_text() == "user Bash edit\n" for path in
+               (state / "icewine").glob("defaults-reset-*/config/icewine/shell/bashrc"))
+    assert any(path.read_text() == "custom login profile\n" for path in
+               (state / "icewine").glob("defaults-reset-*/home/.profile"))
 
     fastfetch_path = config / "fastfetch/config.jsonc"
     fastfetch_path.unlink()
@@ -237,6 +313,18 @@ with tempfile.TemporaryDirectory() as temporary:
     # Exercise migration of a live Home Manager target and its content backup.
     module = types.ModuleType("icewine_theme")
     importlib.machinery.SourceFileLoader(module.__name__, str(script)).exec_module(module)
+    mounted = config / "user-dirs.locale"
+    mounted.write_text("user locale edit\n")
+    replace = os.replace
+    def busy_for_file(source, destination):
+        if destination == mounted:
+            raise OSError(errno.EBUSY, "simulated persisted file mount")
+        return replace(source, destination)
+    with mock.patch.object(module.os, "replace", side_effect=busy_for_file):
+        module.install_defaults(str(defaults), config, root / "data", state / "icewine", True, "user-dirs")
+    assert mounted.read_text() == "default locale\n"
+    assert any(path.read_text() == "user locale edit\n" for path in
+               (state / "icewine").glob("defaults-reset-*/config/user-dirs.locale"))
     legacy_home = root / "migration-home"
     old_file = root / "store" / ("c" * 32 + "-home-manager-files") / ".config/quickshell/theme/Palette.qml"
     old_file.parent.mkdir(parents=True)
@@ -259,6 +347,24 @@ with tempfile.TemporaryDirectory() as temporary:
     init_link = legacy_config / "nvim/init.lua"
     init_link.parent.mkdir(parents=True)
     init_link.symlink_to(old_init)
+    pure_mime = """[Default Applications]
+application/pdf=firefox.desktop
+application/xhtml+xml=firefox.desktop
+text/html=firefox.desktop
+x-scheme-handler/http=firefox.desktop
+x-scheme-handler/https=firefox.desktop
+"""
+    mime_config = legacy_config / "mimeapps.list"
+    old_mime_config = root / "store" / ("1" * 32 + "-home-manager-files") / ".config/mimeapps.list"
+    old_mime_config.parent.mkdir(parents=True)
+    old_mime_config.write_text(pure_mime)
+    mime_config.symlink_to(old_mime_config)
+    mime_data = legacy_home / "data/applications/mimeapps.list"
+    old_mime_data = root / "store" / ("2" * 32 + "-home-manager-files") / "data/applications/mimeapps.list"
+    old_mime_data.parent.mkdir(parents=True)
+    old_mime_data.write_text(pure_mime + "image/png=imv.desktop\n")
+    mime_data.parent.mkdir(parents=True)
+    mime_data.symlink_to(old_mime_data)
     old_home = os.environ.get("HOME")
     try:
         os.environ["HOME"] = str(legacy_home)
@@ -266,6 +372,24 @@ with tempfile.TemporaryDirectory() as temporary:
         module.publish(legacy_config, module.render_theme(assets, assets / "themes/tokyo-night.json"))
         module.install_defaults(str(defaults), legacy_config, legacy_home / "data",
                                 legacy_home / ".local/state/icewine", False, None)
+        assert not mime_config.exists() and not mime_config.is_symlink()
+        assert mime_data.is_symlink() and mime_data.read_text().endswith("image/png=imv.desktop\n")
+        backups = list((legacy_home / ".local/state/icewine").glob(
+            "defaults-migration-*/config/mimeapps.list"))
+        assert len(backups) == 1 and backups[0].read_text() == pure_mime
+        mime_config.write_text("[Default Applications]\napplication/pdf=org.gnome.Evince.desktop\n")
+        old_mime_data_pure = root / "store" / ("3" * 32 + "-home-manager-files") / "data/applications/mimeapps.list"
+        old_mime_data_pure.parent.mkdir(parents=True)
+        old_mime_data_pure.write_text(pure_mime)
+        mime_data.unlink()
+        mime_data.symlink_to(old_mime_data_pure)
+        module.install_defaults(str(defaults), legacy_config, legacy_home / "data",
+                                legacy_home / ".local/state/icewine", False, None)
+        assert mime_config.read_text().endswith("org.gnome.Evince.desktop\n")
+        assert not mime_data.exists() and not mime_data.is_symlink()
+        backups = list((legacy_home / ".local/state/icewine").glob(
+            "defaults-migration-*/data/applications/mimeapps.list"))
+        assert len(backups) == 1 and backups[0].read_text() == pure_mime
         module.install_links(legacy_config, legacy_home / ".local/state/icewine", False)
     finally:
         if old_home is None:
@@ -346,7 +470,6 @@ with tempfile.TemporaryDirectory() as temporary:
 
     # Dispatch to reachable consumers; no real application receives a signal.
     runtime = root / "runtime"
-    runtime.mkdir()
     command_log = root / "consumer-commands"
     for name in ("hyprctl", "qs", "ya"):
         command = fake_bin / name

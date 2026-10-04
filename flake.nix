@@ -2,13 +2,11 @@
   description = "Unified Hyprland desktop for Desktop/Laptop/Handheld/HTPC; developed NixOS-first";
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    home-manager.url = "github:nix-community/home-manager";
-    home-manager.inputs.nixpkgs.follows = "nixpkgs";
   };
-  outputs = { self, nixpkgs, home-manager }: {
+  outputs = { self, nixpkgs }: {
     nixosModules.default = {
-      imports = [ home-manager.nixosModules.home-manager ./modules/default.nix ];
-      home-manager.extraSpecialArgs.nixpkgsLastModified = nixpkgs.lastModified or 0;
+      imports = [ ./modules/default.nix ];
+      _module.args.icewineNixpkgsLastModified = nixpkgs.lastModified or 0;
     };
     lib.palette = builtins.fromJSON (builtins.readFile ./theme/assets/themes/tokyo-night.json);
     checks.x86_64-linux = import ./tests/checks.nix { inherit self nixpkgs; };

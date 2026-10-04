@@ -1,69 +1,77 @@
-{ lib, pkgs, osConfig, ... }:
+{ config, lib, pkgs, ... }:
 let
-  cfg = osConfig.services.icewine;
+  cfg = config.services.icewine;
+  launcher = pkgs.writeText "steam-gamescope.desktop" ''
+    [Desktop Entry]
+    Type=Application
+    Name=Steam (Gamescope)
+    Comment=Launch Steam inside monitor-aware Gamescope
+    Exec=${pkgs.quickshell}/bin/qs ipc call gameLauncher launchSteamGamescope
+    Icon=${if builtins.elem "com.valvesoftware.Steam" cfg.applications.steam then "com.valvesoftware.Steam" else "steam"}
+    Categories=Game;
+    Terminal=false
+  '';
+  hidden = pkgs.writeText "icewine-hidden.desktop" ''
+    [Desktop Entry]
+    Type=Application
+    Name=Steam
+    NoDisplay=true
+    Hidden=true
+  '';
+  steamEntries = pkgs.runCommand "icewine-steam-desktop-entries" { } ''
+    mkdir -p $out/share/applications
+    cp ${launcher} $out/share/applications/steam-gamescope.desktop
+    cp ${hidden} $out/share/applications/steam.desktop
+    cp ${hidden} $out/share/applications/com.valvesoftware.Steam.desktop
+  '';
 in {
-  xdg.desktopEntries.steam-gamescope = lib.mkIf cfg.steam.enable {
-    name = "Steam (Gamescope)";
-    comment = "Launch Steam inside monitor-aware Gamescope";
-    exec = "${pkgs.quickshell}/bin/qs ipc call gameLauncher launchSteamGamescope";
-    icon = if builtins.elem "com.valvesoftware.Steam" cfg.applications.steam
-      then "com.valvesoftware.Steam" else "steam";
-    categories = [ "Game" ];
-    terminal = false;
-  };
-  xdg.dataFile = {
-    # uuctl is bundled with UWSM, so mask only its unwanted launcher entry.
-    "applications/uuctl.desktop".text = ''
-      [Desktop Entry]
-      Type=Application
-      Name=uuctl
-      NoDisplay=true
-      Hidden=true
-    '';
-  } // lib.genAttrs [
-    "applications/steam.desktop"
-    "applications/com.valvesoftware.Steam.desktop"
-  ] (_: lib.mkIf cfg.steam.enable {
-    text = ''
-      [Desktop Entry]
-      Type=Application
-      Name=Steam
-      NoDisplay=true
-      Hidden=true
-    '';
-  });
-  programs.yazi = lib.mkIf (cfg.fileManager.preset == "yazi") {
-    enable = true;
-    enableBashIntegration = lib.mkDefault false;
-    extraPackages = with pkgs; [
-      ffmpegthumbnailer
-      _7zz
-    ];
-    plugins.mount = pkgs.yaziPlugins.mount;
-  };
-  services.hypridle = lib.mkIf cfg.idle.enable {
-    enable = true;
-    settings = {
-      general = lib.mapAttrs (_: lib.mkDefault) {
-        before_sleep_cmd = "qs ipc call session lock";
-        inhibit_sleep = 3;
-        ignore_dbus_inhibit = false;
-        ignore_systemd_inhibit = false;
-        ignore_wayland_inhibit = false;
-      };
-      listener = lib.mkDefault [
-        { timeout = 600; on-timeout = "loginctl lock-session"; }
-        { timeout = 1200;
-          on-timeout = "hyprctl dispatch 'hl.dsp.dpms({ action = \"disable\" })'";
-          on-resume = "hyprctl dispatch 'hl.dsp.dpms({ action = \"enable\" })'"; }
-        { timeout = 1800; on-timeout = "systemctl suspend"; }
-      ];
+  config = lib.mkIf cfg.enable {
+    services.icewine.defaultFiles.data = {
+      "applications/uuctl.desktop" = pkgs.writeText "uuctl-hidden.desktop" ''
+        [Desktop Entry]
+        Type=Application
+        Name=uuctl
+        NoDisplay=true
+        Hidden=true
+      '';
     };
-  };
-  systemd.user.services.hypridle = lib.mkIf cfg.idle.enable {
-    Service = {
-      Restart = lib.mkForce "on-failure";
-      RestartSec = lib.mkForce "100ms";
+    users.users.${cfg.user}.packages = lib.optionals (cfg.fileManager.preset == "yazi")
+      [ pkgs.yazi pkgs.ffmpegthumbnailer pkgs._7zz ] ++ lib.optional cfg.steam.enable steamEntries;
+    services.icewine.defaultFiles.config = lib.mkIf cfg.idle.enable {
+      "hypr/hypridle.conf" = pkgs.writeText "icewine-hypridle.conf" ''
+        general {
+          before_sleep_cmd = qs ipc call session lock
+          inhibit_sleep = 3
+          ignore_dbus_inhibit = false
+          ignore_systemd_inhibit = false
+          ignore_wayland_inhibit = false
+        }
+        listener {
+          timeout = 600
+          on-timeout = loginctl lock-session
+        }
+        listener {
+          timeout = 1200
+          on-timeout = hyprctl dispatch 'hl.dsp.dpms({ action = "disable" })'
+          on-resume = hyprctl dispatch 'hl.dsp.dpms({ action = "enable" })'
+        }
+        listener {
+          timeout = 1800
+          on-timeout = systemctl suspend
+        }
+      '';
+    };
+    systemd.user.services.hypridle = lib.mkIf cfg.idle.enable {
+      description = "Icewine idle locking and suspend";
+      partOf = [ "graphical-session.target" ];
+      after = [ "graphical-session.target" ];
+      wantedBy = [ "graphical-session.target" ];
+      unitConfig.ConditionUser = cfg.user;
+      serviceConfig = {
+        ExecStart = "${pkgs.hypridle}/bin/hypridle -c %h/.config/hypr/hypridle.conf";
+        Restart = "on-failure";
+        RestartSec = "100ms";
+      };
     };
   };
 }

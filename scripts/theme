@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Manage only Icewine's user-owned theme files and selection."""
 
+import configparser
 import os
+import errno
 import hashlib
 import json
 import re
@@ -44,6 +46,7 @@ APPS = {
     "user-dirs": (),
     "nvim": (),
     "kitty": (),
+    "bash": (),
 }
 TEMPLATES = {
     "Palette.qml": "Palette.qml.in",
@@ -60,6 +63,12 @@ TEMPLATES = {
     "ls-colors.sh": "ls-colors.sh.in",
 }
 LEGACY_MANAGED = (set(OWNED) - {"gtk-4.0/gtk.css"}) | {"quickshell/theme/Palette.qml"}
+LEGACY_UNITS = (
+    "icewine.service", "icewine-refresh-flatpak-icons.service",
+    "icewine-refresh-flatpak-icons.path", "hyprpolkitagent.service",
+    "hypridle.service", "icewine-controller-idle.service",
+    "icewine-inputplumber-hyprland.service", "icewine-keyboard.service",
+)
 STORE_DIR = Path("/nix/store")
 
 
@@ -292,8 +301,12 @@ def backup_owned(config, state, paths=None, prefix="reset-"):
 
 
 def static_app(root_name, relative):
+    if root_name == "home":
+        return "bash"
     if root_name == "data":
         return relative.parts[0]
+    if relative.parts[:2] == ("icewine", "shell"):
+        return "bash"
     return {"hypr": "hypr", "uwsm": "uwsm", "quickshell": "quickshell",
             "kitty": "kitty",
             "btop": "btop", "user-dirs.locale": "user-dirs"}.get(relative.parts[0], relative.parts[0])
@@ -302,6 +315,9 @@ def static_app(root_name, relative):
 def managed_static_link(path, root, root_name):
     if not path.is_symlink():
         return False
+    if root_name == "home" and path.name in {".bashrc", ".profile", ".bash_profile"}:
+        if os.readlink(path) == str(xdg("XDG_CONFIG_HOME", ".config") / "icewine/shell" / path.name.lstrip(".")):
+            return True
     if (root_name == "config" and path == root / "quickshell/theme/Palette.qml"
             and os.readlink(path) == str(root / "icewine/current/Palette.qml")):
         return True
@@ -330,10 +346,31 @@ def managed_static_link(path, root, root_name):
                    "quickshell/config/Settings.qml": "Settings.qml",
                    "btop/btop.conf": "btop.conf.in", "user-dirs.locale": "user-dirs.locale",
                    "nvim/init.lua": "init.lua"},
+        "home": {},
         "data": {"wallpapers/default.jpg": "tokyo-night-wallpaper.jpg",
                  "wallpapers/current_blurr.jpg": "tokyo-night-lockscreen.jpg"},
     }
     return len(target.parts) == 1 and store_name == names[root_name].get(relative.as_posix())
+
+
+def pure_legacy_browser_mime(path):
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    try:
+        with path.open(encoding="utf-8") as stream:
+            parser.read_file(stream)
+    except (OSError, UnicodeError, configparser.Error):
+        return False
+    browser_types = {"x-scheme-handler/http", "x-scheme-handler/https", "text/html",
+                     "application/xhtml+xml", "application/pdf"}
+    return (not parser.defaults()
+            and set(parser.sections()) <= {"Default Applications", "Added Associations", "Removed Associations"}
+            and parser.has_section("Default Applications")
+            and set(parser["Default Applications"]) == browser_types
+            and all(value in {"firefox.desktop", "firefox.desktop;"}
+                    for value in parser["Default Applications"].values())
+            and all(not parser[section] for section in ("Added Associations", "Removed Associations")
+                    if parser.has_section(section)))
 
 
 def install_defaults(defaults, config, data, state, replace, app):
@@ -361,11 +398,13 @@ def install_defaults(defaults, config, data, state, replace, app):
         backed_up.add(path)
         print(f"saved: {path} -> {destination}")
 
-    for root_name, root in (("config", config), ("data", data)):
+    for root_name, root in (("config", config), ("data", data), ("home", Path.home())):
         source = source_root / root_name
         if not source.is_dir():
+            if root_name == "home":
+                continue
             raise ValueError(f"default files are unavailable: {source}")
-        for shipped in sorted(item for item in source.rglob("*") if item.is_file()):
+        for shipped in sorted(item for item in source.rglob("*") if item.is_file() or item.is_symlink()):
             relative = shipped.relative_to(source)
             if app and static_app(root_name, relative) != app:
                 continue
@@ -404,18 +443,84 @@ def install_defaults(defaults, config, data, state, replace, app):
                     continue
                 save(path, root, root_name)
             path.parent.mkdir(parents=True, exist_ok=True)
-            fd, temporary = tempfile.mkstemp(prefix=".icewine-", dir=path.parent)
-            try:
-                with os.fdopen(fd, "wb") as stream, shipped.open("rb") as source_file:
-                    shutil.copyfileobj(source_file, stream)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.chmod(temporary, 0o644)
-                os.replace(temporary, path)
-            finally:
-                if os.path.exists(temporary):
-                    os.unlink(temporary)
+            if shipped.is_symlink():
+                atomic_link(path, config / os.readlink(shipped))
+            else:
+                fd, temporary = tempfile.mkstemp(prefix=".icewine-", dir=path.parent)
+                try:
+                    with os.fdopen(fd, "wb") as stream, shipped.open("rb") as source_file:
+                        shutil.copyfileobj(source_file, stream)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.chmod(temporary, 0o644)
+                    try:
+                        os.replace(temporary, path)
+                    except OSError as error:
+                        if error.errno != errno.EBUSY or path not in backed_up:
+                            raise
+                        # A persisted file bind mount cannot be renamed; its scoped backup is the recovery path.
+                        with open(temporary, "rb") as source_file, path.open("wb") as destination:
+                            shutil.copyfileobj(source_file, destination)
+                            destination.flush()
+                            os.fsync(destination.fileno())
+                finally:
+                    if os.path.exists(temporary):
+                        os.unlink(temporary)
             print(f"installed: {path}")
+
+    # Steam launchers now come from the selected user's package profile. Retire
+    # only recognized Home Manager links; local overrides remain user-owned.
+    if app is None:
+        for root_name, root, relative in (("config", config, "mimeapps.list"),
+                                          ("data", data, "applications/mimeapps.list")):
+            path = root / relative
+            if managed_static_link(path, root, root_name):
+                if pure_legacy_browser_mime(path):
+                    save(path, root, root_name)
+                    path.unlink()
+                    print(f"retired: {path}")
+                else:
+                    print(f"conflict: preserved combined or unreadable Home Manager MIME defaults: {path}",
+                          file=sys.stderr)
+
+        for relative in ("applications/steam-gamescope.desktop", "applications/steam.desktop",
+                         "applications/com.valvesoftware.Steam.desktop"):
+            path = data / relative
+            if managed_static_link(path, data, "data"):
+                save(path, data, "data")
+                path.unlink()
+                print(f"retired: {path}")
+
+        # Home Manager's old unit links override the native NixOS user units.
+        # Retire only Icewine's known links, including its generated target links.
+        unit_root = config / "systemd/user"
+        if not (config / "systemd").is_symlink() and not unit_root.is_symlink() and unit_root.is_dir():
+            candidates = [unit_root / name for name in LEGACY_UNITS]
+            candidates += [directory / name for directory in unit_root.iterdir()
+                           if directory.is_dir() and not directory.is_symlink()
+                           and directory.name.endswith((".wants", ".requires"))
+                           for name in LEGACY_UNITS]
+            retired = False
+            for path in candidates:
+                if managed_static_link(path, config, "config"):
+                    save(path, config, "config")
+                    path.unlink()
+                    retired = True
+                    print(f"retired: {path}")
+                elif path.exists() or path.is_symlink():
+                    print(f"conflict: preserved user unit link or file: {path}", file=sys.stderr)
+            if retired:
+                runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
+                if (runtime / "systemd/private").exists():
+                    env = dict(os.environ, XDG_RUNTIME_DIR=str(runtime))
+                    try:
+                        result = subprocess.run(["systemctl", "--user", "daemon-reload"],
+                                                env=env, capture_output=True, text=True)
+                        if result.returncode:
+                            print(f"Pending: user systemd daemon-reload failed: {result.stderr.strip()}",
+                                  file=sys.stderr)
+                    except OSError as error:
+                        print(f"Pending: user systemd daemon-reload failed: {error}", file=sys.stderr)
 
     if app in (None, "hypr"):
         path = config / "hypr/modules/Theme.lua"

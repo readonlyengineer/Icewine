@@ -1,10 +1,12 @@
 { self, nixpkgs }:
 let
   pkgs = nixpkgs.legacyPackages.x86_64-linux;
+  lib = nixpkgs.lib;
   example = handheld: nixpkgs.lib.nixosSystem {
     system = "x86_64-linux";
     modules = [ self.nixosModules.default {
       users.users.demo.isNormalUser = true;
+      users.users.other.isNormalUser = true;
       nixpkgs.config.allowUnfreePredicate = pkg:
         builtins.elem (nixpkgs.lib.getName pkg) [ "steam" "steam-unwrapped" "steam-run" ];
       services.icewine = {
@@ -18,7 +20,9 @@ let
     } ];
   };
   desktopSystem = example false;
+  handheldSystem = example true;
   desktop = desktopSystem.config;
+  handheld = handheldSystem.config;
   noLogin = (desktopSystem.extendModules {
     modules = [ { services.icewine.login.enable = false; } ];
   }).config;
@@ -40,25 +44,18 @@ let
   steamOptOut = (handheldSystem.extendModules {
     modules = [ { services.icewine.steam.enable = false; } ];
   }).config;
-  nativeBrowserMatches = c:
-    c.programs.firefox.enable
-    && c.services.icewine.applications.browser == [ "firefox" ]
-    && (home c).xdg.mimeApps.enable
-    && nixpkgs.lib.all (mime:
-      (home c).xdg.mimeApps.defaultApplications.${mime} == [ "firefox.desktop" ]
-    ) [ "x-scheme-handler/http" "x-scheme-handler/https" "text/html" "application/xhtml+xml" "application/pdf" ];
-  handheldSystem = example true;
-  handheld = handheldSystem.config;
-  home = c: c.home-manager.users.demo;
   quickshell = pkgs.quickshell.overrideAttrs (old: {
     buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
-  icewineCli = builtins.head (nixpkgs.lib.filter
-    (package: nixpkgs.lib.getName package == "icewine")
-    (home desktop).home.packages);
-  handheldCli = builtins.head (nixpkgs.lib.filter
-    (package: nixpkgs.lib.getName package == "icewine")
-    (home handheld).home.packages);
+  icewineCli = builtins.head (lib.filter
+    (package: lib.getName package == "icewine") desktop.users.users.demo.packages);
+  handheldCli = builtins.head (lib.filter
+    (package: lib.getName package == "icewine") handheld.users.users.demo.packages);
+  steamEntryPackage = builtins.head (lib.filter
+    (package: lib.getName package == "icewine-steam-desktop-entries") handheld.users.users.demo.packages);
+  mimePackage = builtins.head (lib.filter
+    (package: lib.getName package == "mimeapps.list") desktop.users.users.demo.packages);
+  hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
 in {
   screenshot = pkgs.runCommand "icewine-screenshot-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
@@ -106,57 +103,42 @@ in {
     assert desktop.services.icewine.applications.steam == [ "steam" ];
     assert handheld.services.icewine.applications.steam == [ "steam" "-gamepadui" ];
     assert steamDesktop.services.icewine.applications.steam == [ "flatpak" "run" "com.valvesoftware.Steam" ];
-    assert !((home desktop).xdg.desktopEntries ? steam-gamescope);
-    assert !((home steamOptOut).xdg.desktopEntries ? steam-gamescope);
-    assert !((home steamOptOut).xdg.dataFile ? "applications/steam.desktop");
+    assert !(hasPackage "icewine-steam-desktop-entries" desktop.users.users.demo.packages);
+    assert !(hasPackage "icewine-steam-desktop-entries" steamOptOut.users.users.demo.packages);
+    assert hasPackage "icewine-steam-desktop-entries" steamDesktop.users.users.demo.packages;
+    assert hasPackage "icewine-steam-desktop-entries" handheld.users.users.demo.packages;
     assert !steamDesktop.programs.steam.enable;
-    assert (home steamDesktop).xdg.desktopEntries.steam-gamescope.icon == "com.valvesoftware.Steam";
-    assert (home handheld).xdg.desktopEntries.steam-gamescope.icon == "steam";
-    assert nixpkgs.lib.all (c:
-      (home c).xdg.desktopEntries.steam-gamescope.exec
-        == "${pkgs.quickshell}/bin/qs ipc call gameLauncher launchSteamGamescope"
-      && (home c).xdg.dataFile."applications/steam.desktop".text
-        == (home c).xdg.dataFile."applications/com.valvesoftware.Steam.desktop".text
-      && nixpkgs.lib.hasInfix "Hidden=true" (home c).xdg.dataFile."applications/steam.desktop".text
-    ) [ steamDesktop handheld ];
-    assert nativeBrowserMatches desktop;
+    assert desktop.programs.firefox.enable;
+    assert desktop.xdg.mime.defaultApplications == { };
+    assert hasPackage "mimeapps.list" desktop.users.users.demo.packages;
+    assert !(hasPackage "mimeapps.list" desktop.users.users.other.packages);
     assert !desktop.services.flatpak.enable;
     assert !unmanaged.programs.firefox.enable;
     assert !unmanaged.services.flatpak.enable;
-    assert !(home unmanaged).xdg.mimeApps.enable;
+    assert !(hasPackage "mimeapps.list" unmanaged.users.users.demo.packages);
     assert unmanaged.services.icewine.applications.browser == [ "custom-browser" ];
     assert !disabled.services.flatpak.enable;
-    assert nixpkgs.lib.all (config:
-      config.services.displayManager.sddm.enable
-      && config.services.xserver.enable
-      && !config.services.displayManager.sddm.wayland.enable
-      && config.services.displayManager.sddm.theme == "icewine"
-      && config.services.displayManager.defaultSession == "hyprland-uwsm"
-      && !config.services.displayManager.autoLogin.enable
+    assert lib.all (c:
+      c.services.displayManager.sddm.enable
+      && c.services.xserver.enable
+      && !c.services.displayManager.sddm.wayland.enable
+      && c.services.displayManager.sddm.theme == "icewine"
+      && c.services.displayManager.defaultSession == "hyprland-uwsm"
+      && !c.services.displayManager.autoLogin.enable
     ) [ desktop handheld ];
     assert !noLogin.services.displayManager.sddm.enable;
     assert !noLogin.services.xserver.enable;
     assert !disabled.services.displayManager.sddm.enable;
     assert !disabled.services.xserver.enable;
-    assert nixpkgs.lib.elem pkgs.btop desktop.environment.systemPackages;
-    assert nixpkgs.lib.elem desktopSystem.pkgs.gamescope desktop.environment.systemPackages;
-    assert desktop.home-manager.users.demo.home.stateVersion == "26.05";
-    assert nixpkgs.lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
-    assert !((home desktop).xdg.configFile ? "hypr");
-    assert !((home desktop).xdg.configFile ? "quickshell/modules");
-    assert !((home desktop).xdg.configFile ? "uwsm/env");
-    assert !((home desktop).xdg.configFile ? "quickshell/theme/Palette.qml");
-    assert !((home desktop).xdg.configFile ? "gtk-3.0/settings.ini");
-    assert !((home desktop).xdg.configFile ? "fastfetch/config.jsonc");
-    assert !((home desktop).xdg.configFile ? "starship.toml");
-    assert !((home handheld).xdg.configFile ? "hypr");
-    assert (home desktop).systemd.user.services ? icewine;
-    assert nixpkgs.lib.elem "QT_IM_MODULE=qtvirtualkeyboard"
-      (home desktop).systemd.user.services.icewine.Service.Environment;
-    assert !((home desktop).systemd.user.services ? quickshell);
-    assert !((home desktop).systemd.user.services ? icewine-inputplumber-hyprland);
-    assert (home handheld).systemd.user.services ? icewine-inputplumber-hyprland;
-    assert (home handheld).systemd.user.services ? icewine-keyboard;
+    assert lib.elem pkgs.btop desktop.environment.systemPackages;
+    assert lib.elem desktopSystem.pkgs.gamescope desktop.environment.systemPackages;
+    assert lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
+    assert desktop.systemd.user.services ? icewine;
+    assert desktop.systemd.user.services.icewine.unitConfig.ConditionUser == "demo";
+    assert lib.elem "QT_IM_MODULE=qtvirtualkeyboard" desktop.systemd.user.services.icewine.serviceConfig.Environment;
+    assert !(desktop.systemd.user.services ? icewine-inputplumber-hyprland);
+    assert handheld.systemd.user.services ? icewine-inputplumber-hyprland;
+    assert handheld.systemd.user.services ? icewine-keyboard;
     assert desktop.hardware.i2c.enable;
     assert desktop.security.pam.services ? icewine;
     assert handheld.services.icewine.authenticationRequired;
@@ -181,6 +163,10 @@ in {
       export HOME=$TMPDIR/handheld XDG_CONFIG_HOME=$TMPDIR/handheld/.config XDG_DATA_HOME=$TMPDIR/handheld/.local/share XDG_STATE_HOME=$TMPDIR/handheld/.local/state
       mkdir -p "$HOME"
       ${handheldCli}/bin/icewine init
+      grep -Fx 'Icon=steam' ${steamEntryPackage}/share/applications/steam-gamescope.desktop
+      grep -Fx 'Hidden=true' ${steamEntryPackage}/share/applications/steam.desktop
+      grep -Fx 'application/pdf=firefox.desktop;' ${mimePackage}/share/applications/mimeapps.list
+      test ! -e "$XDG_DATA_HOME/applications/steam-gamescope.desktop"
       test -f "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"
       { cat ${../hyprland/hyprland.lua}; printf '\nrequire("modules.Deck")\n'; } > "$TMPDIR/handheld-hyprland.lua"
       cmp "$TMPDIR/handheld-hyprland.lua" "$XDG_CONFIG_HOME/hypr/hyprland.lua"

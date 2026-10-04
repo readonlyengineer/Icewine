@@ -24,15 +24,23 @@ let
   quickshell = pkgs.quickshell.overrideAttrs (old: {
     buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
+  browserDefaults = pkgs.writeTextDir "share/applications/mimeapps.list" ''
+    [Default Applications]
+    x-scheme-handler/http=firefox.desktop;
+    x-scheme-handler/https=firefox.desktop;
+    text/html=firefox.desktop;
+    application/xhtml+xml=firefox.desktop;
+    application/pdf=firefox.desktop;
+  '';
 in {
-  imports = [ ./handheld.nix ./login.nix ];
+  imports = [ ./home.nix ./desktop.nix ./shell.nix ./gtk.nix ./handheld.nix ./login.nix ];
 
   options.services.icewine = {
     enable = lib.mkEnableOption "Icewine desktop environment";
     user = lib.mkOption {
       type = lib.types.str;
       default = "";
-      description = "Existing user whose Home Manager configuration receives Icewine.";
+      description = "Existing user who receives Icewine configuration and services.";
     };
     handheld.enable = lib.mkEnableOption "handheld shell, controller routing and on-screen keyboard";
     browser.enable = lib.mkEnableOption "Icewine's native Firefox browser" // { default = true; };
@@ -129,22 +137,8 @@ in {
       grim slurp wl-clipboard libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl
       bluetui impala wiremix btop xdg-utils gamescope
-    ]) ++ launchers ++ [ screenshot ] ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas
-      ++ lib.optionals cfg.gtk.enable (lib.optional (config.home-manager.users.${cfg.user}.gtk.theme.package != null) config.home-manager.users.${cfg.user}.gtk.theme.package);
-
-    home-manager.users.${cfg.user} = {
-      home.stateVersion = lib.mkDefault config.system.stateVersion;
-      imports = [ ./home.nix ];
-      xdg.mimeApps = lib.mkIf cfg.browser.enable {
-        enable = true;
-        defaultApplications = lib.genAttrs [
-          "x-scheme-handler/http"
-          "x-scheme-handler/https"
-          "text/html"
-          "application/xhtml+xml"
-          "application/pdf"
-        ] (_: lib.mkDefault [ "firefox.desktop" ]);
-      };
-    };
+    ]) ++ launchers ++ [ screenshot ] ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
+    users.users.${cfg.user}.packages = lib.optional cfg.browser.enable browserDefaults
+      ++ lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty;
   };
 }

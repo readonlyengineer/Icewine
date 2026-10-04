@@ -44,8 +44,8 @@ Icewine runs on any of them.
 ## Why copying the configuration is insufficient
 
 Icewine's source is ordinary QML, JavaScript, Lua and shell, but its installation
-is a NixOS module plus Home Manager module (`flake.nix`, `modules/default.nix`,
-`modules/home.nix`). Nix currently generates or wires all of the following:
+is a NixOS module with native user services (`flake.nix`,
+`modules/default.nix`, `modules/home.nix`). Nix currently generates or wires all of the following:
 
 - a Hyprland Lua tree with a generated `Theme.lua`, optional Deck modules and
   host overlays (`modules/home.nix:15-38`);
@@ -60,13 +60,13 @@ is a NixOS module plus Home Manager module (`flake.nix`, `modules/default.nix`,
   UPower, power profiles, GVfs, fonts and packages
   (`modules/default.nix:102-125`);
 - optional idle, battery, Yazi and shell presets (`modules/desktop.nix`,
-  `modules/{gtk,terminal,shell}.nix`), including palette-expanded GTK/Kitty
-  files and generated Fastfetch/Starship/Bash settings; and
+  `modules/{gtk,shell}.nix`), including editable GTK/Kitty/Bash defaults and
+  generated Fastfetch/Starship theme files; and
 - handheld InputPlumber profiles, policy, user services, patched Squeekboard and
   patched Gamescope (`modules/handheld.nix`).
 
-Home Manager cannot simply be run on Fedora: `home.nix` reads NixOS `osConfig`,
-and generated services embed store/profile paths. Concrete FHS leaks include
+Icewine's NixOS adapter cannot simply be run on Fedora: generated services
+embed store/profile paths. Concrete FHS leaks include
 `/run/current-system/sw/bin` in Icewine's service PATH and
 `/run/current-system/sw/share/inputplumber/profiles/default.yaml` in controller
 restore. The shell prompt also compares NixOS generation kernels. Installing Nix

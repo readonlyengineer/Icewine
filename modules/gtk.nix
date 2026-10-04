@@ -1,4 +1,4 @@
-{ lib, pkgs, osConfig, ... }:
+{ config, lib, pkgs, ... }:
 let
   theme = pkgs.stdenvNoCC.mkDerivation {
     pname = "tokyonight-gtk-theme";
@@ -27,9 +27,8 @@ let
     '';
   };
 in {
-  config = lib.mkIf osConfig.services.icewine.gtk.enable {
+  config = lib.mkIf (config.services.icewine.enable && config.services.icewine.gtk.enable) {
     # The CLI owns settings.ini and gtk.css; GTK theme assets remain installed.
-    gtk.theme.package = lib.mkDefault theme;
-    home.packages = [ theme ];
+    environment.systemPackages = [ theme ];
   };
 }

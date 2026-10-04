@@ -80,7 +80,8 @@ Create `/etc/nixos/flake.nix` with `sudo nano /etc/nixos/flake.nix` and paste:
 
 Replace `YOUR_USERNAME` with the result of `id -un`. The `icewine` name is the
 configuration selected by the commands below; it does not rename your computer.
-Icewine includes Home Manager integration, so no separate installation is needed.
+Icewine uses NixOS user packages and services; Home Manager is optional for
+unrelated host configuration.
 
 ### 3. Build, reboot and log in
 
@@ -137,12 +138,6 @@ inputs.icewine.inputs.nixpkgs.follows = "nixpkgs";
 ```
 
 Use a current `nixos-unstable` Nixpkgs input for Icewine's desktop dependencies.
-If your flake already imports Home Manager, share its input too:
-
-```nix
-inputs.icewine.inputs.home-manager.follows = "home-manager";
-```
-
 ### Host responsibilities
 
 Users, passwords, autologin, networking, Bluetooth, hardware drivers, storage and
@@ -194,7 +189,7 @@ desktop and handheld shell. The original file can be moved or deleted. With no
 selection, Icewine uses the shipped
 `$XDG_DATA_HOME/wallpapers/default.jpg`. The selected copy follows the NixOS
 persist allowlist. Legacy user-owned
-`wallpapers/current.jpg` images are copied during Home Manager activation when
+`wallpapers/current.jpg` images are copied during NixOS activation when
 there is no saved selection; the old Nix-store-backed default is not migrated.
 
 ### Theme and user configuration
@@ -206,8 +201,14 @@ unrecognized symlinks remain untouched and are reported as conflicts.
 Static Hyprland, Quickshell, UWSM, btop, locale and wallpaper defaults are
 installed as writable files. Their migrated links and replaced files are saved
 under `defaults-migration-*` and `defaults-reset-*` in the same state directory.
+The full init also retires recognized Icewine Home Manager user-unit and target
+links so native NixOS units load on the next login; an active user manager is
+reloaded. If reload reports `Pending`, run `systemctl --user daemon-reload` in
+the user session. Edited or unknown units are preserved and reported as conflicts.
 The defaults come from Icewine, except for host-selected files supplied by
-NixOS; later activations and theme changes preserve local edits. Run
+NixOS; later activations and theme changes preserve local edits. NixOS prepares
+the files before the display manager starts and refreshes them on user activation.
+Run
 `icewine reset APP` to adopt updated shipped defaults for `hypr`, `quickshell`,
 `uwsm`, `btop`, `user-dirs`, or `wallpapers`, or use `icewine reset` for all
 defaults. Reset saves replaced content first. Quickshell's writable
@@ -218,7 +219,7 @@ installs the live palette, but also replaces other edited Quickshell defaults;
 review the saved `defaults-reset-*` files before restoring local changes.
 `icewine init APP` installs missing files for one of `quickshell`, `gtk`,
 `yazi`, `fastfetch`, `starship`, `hypr`, `uwsm`, `btop`, `user-dirs`,
-`wallpapers`, or `nvim`. `icewine reset APP` backs up and refreshes
+`wallpapers`, `nvim`, or `bash`. `icewine reset APP` backs up and refreshes
 only that app's files without clearing the selected theme; plain `reset`
 restores every Icewine-owned file and clears the CLI selection.
 `icewine theme` lists the installed themes and effective selection;
@@ -289,8 +290,17 @@ and reported, including on reset; ownership hashes are saved under
 blocking desktop startup. If Flatpak is installed later, run `icewine init gtk`.
 Browser colour mapping remains browser-controlled; web content and privacy
 preferences are unchanged.
-Explicit Home Manager Fastfetch, Starship and Yazi settings retain their own
-config files; Icewine skips those paths when applying or resetting a theme.
+The Bash starter files live under `$XDG_CONFIG_HOME/icewine/shell/`; `.bashrc`,
+`.profile` and `.bash_profile` link to them. NixOS supplies current package paths,
+feature flags and session variables, so disabling Fastfetch, ble.sh or Starship
+on rebuild takes effect without replacing an edited Bash starter. Existing home
+dotfiles and recognized Home Manager links are backed up on migration or reset;
+unknown symlinks remain untouched. If you previously set Home Manager Kitty,
+Fastfetch, Starship, Yazi or Hypridle options, move those custom settings into
+the corresponding editable files. Icewine no longer reads those options. Review
+the saved `defaults-migration-*` files before removing the old Home Manager
+configuration. A regular file edited by the user is preserved by `init`; a
+scoped `reset` backs it up before restoring the default.
 Icewine ships JSON palette data and app-native templates in `theme/assets`.
 The CLI renders them into `$XDG_CONFIG_HOME/icewine/rendered/`; Nix packages
 those source files and supplies optional policy/host metadata. On non-Nix
@@ -304,6 +314,18 @@ packages inside `/etc/nixos/configuration.nix`, then rebuild:
 ```nix
 environment.systemPackages = with pkgs; [ vlc ];
 ```
+
+Firefox's web/PDF defaults are in the selected user's package profile. Full
+`icewine init` backs up and retires old Home Manager `mimeapps.list` links only
+when they contain exactly Icewine's five Firefox defaults, at either the XDG
+config or data location. Combined host MIME files and edited files remain in
+place and take priority. If you disable Firefox or change the browser and a
+combined file still names `firefox.desktop`, remove those five web/PDF defaults
+from the host's `xdg.mimeApps.defaultApplications` and activate Home Manager.
+If Home Manager no longer owns that file, copy its contents to a writable
+temporary file, replace the old symlink with that file at
+`$XDG_CONFIG_HOME/mimeapps.list` or `$XDG_DATA_HOME/applications/mimeapps.list`,
+and remove only those entries, preserving the other associations.
 
 For a graphical app store, enable Flatpak in that same configuration:
 
@@ -336,6 +358,12 @@ services.icewine.applications.steam = [
 ];
 ```
 
+The Gamescope launcher and Steam hiding entries are installed in the selected
+user's NixOS package profile while `steam.enable` is true. Disabling it removes
+those profile entries on the next generation. `icewine init` backs up and
+retires recognized old Home Manager links; local launcher edits and unknown
+symlinks remain untouched and may override the profile entries.
+
 Handheld mode installs native Steam for its Gamescope/controller integration.
 Steam is proprietary, so allow unfree packages on the host:
 
@@ -365,8 +393,9 @@ services.icewine.handheld.enable = true;
 
 ### Browser
 
-Icewine installs native Firefox and uses it for the browser launcher, web links,
-HTML and PDFs.
+Icewine installs native Firefox and gives the selected user defaults for web
+links, HTML and PDFs through that user's package profile. User and host MIME
+settings remain higher priority, including Nixos's independent media defaults.
 
 ### Supported alternative software
 
@@ -416,17 +445,12 @@ require Quickshell to be running. Suspend uses the same session action as the
 Sleep button and reports a failed request; check notifications and sleep on
 real hardware without deliberately draining a battery.
 
-With the Kitty preset active, Icewine installs an editable
-`$XDG_CONFIG_HOME/kitty/kitty.conf` entry. Home Manager redirects its generated
-Kitty config, including host settings, fonts, bindings and extra config, to
-`kitty/host.conf`; the entry includes it after Icewine's base and theme files so
-host settings retain precedence without sharing the editable entry path. Shell
-integration remains managed through Home Manager's separate shell hooks.
-Setting `terminal.preset = null` leaves Home Manager's normal Kitty
-configuration path to the host. On the Nixos desktop, Home Manager's `hm-bak`
-policy backs up the editable entry when handing that path back to host settings;
-activation stops safely if that backup already exists. Other Home Manager
-consumers need a backup extension configured or must move the entry first.
+With the Kitty preset active, Icewine installs editable
+`$XDG_CONFIG_HOME/kitty/kitty.conf` and `host.conf` entries. The first includes
+Icewine's base, theme and optional host settings in that order. Move former Home
+Manager Kitty settings from the migration backup into `host.conf` if needed.
+Setting `terminal.preset = null` leaves Kitty installation and configuration to
+the host.
 
 The handheld interface is opt-in (`handheld.enable = true;`), not enabled by
 default. There is no blanket exclusion list for core desktop dependencies.

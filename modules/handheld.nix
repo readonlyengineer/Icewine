@@ -99,28 +99,25 @@ in {
   '';
 
 
-    home-manager.users.${cfg.user} = {
       systemd.user.services.icewine-controller-idle = lib.mkIf cfg.idle.enable {
-        Unit = {
-          Description = "Keep Icewine awake during controller activity";
-          PartOf = [ "graphical-session.target" ];
-          After = [ "graphical-session.target" ];
-        };
-        Service = {
+        description = "Keep Icewine awake during controller activity";
+        partOf = [ "graphical-session.target" ];
+        after = [ "graphical-session.target" ];
+        unitConfig.ConditionUser = cfg.user;
+        serviceConfig = {
           ExecStart = "${pkgs.wljoywake}/bin/wljoywake -t 5";
           Restart = "on-failure";
           RestartSec = "2s";
         };
-        Install.WantedBy = [ "graphical-session.target" ];
+        wantedBy = [ "graphical-session.target" ];
       };
 
       systemd.user.services.icewine-inputplumber-hyprland = {
-        Unit = {
-          Description = "Steam Deck InputPlumber profile for Hyprland";
-          PartOf = [ "graphical-session.target" ];
-          After = [ "graphical-session.target" ];
-        };
-        Service = {
+        description = "Steam Deck InputPlumber profile for Hyprland";
+        partOf = [ "graphical-session.target" ];
+        after = [ "graphical-session.target" ];
+        unitConfig.ConditionUser = cfg.user;
+        serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
           Restart = "on-failure";
@@ -128,28 +125,26 @@ in {
           ExecStart = "${icewineInputplumberHyprland}";
           ExecStop = "${icewineInputplumberRestore}";
         };
-        Install.WantedBy = [ "graphical-session.target" ];
+        wantedBy = [ "graphical-session.target" ];
       };
 
       systemd.user.services.icewine-keyboard = {
-        Unit = {
-          Description = "Icewine on-screen keyboard";
-          PartOf = [ "graphical-session.target" ];
-          After = [ "graphical-session.target" ];
-        };
-        Service = {
+        description = "Icewine on-screen keyboard";
+        partOf = [ "graphical-session.target" ];
+        after = [ "graphical-session.target" ];
+        unitConfig.ConditionUser = cfg.user;
+        serviceConfig = {
           Type = "dbus";
           BusName = "sm.puri.OSK0";
           ExecStart = "${pkgs.squeekboard}/bin/squeekboard";
           Restart = "on-failure";
         };
-        Install.WantedBy = [ "graphical-session.target" ];
+        wantedBy = [ "graphical-session.target" ];
       };
 
       # Normal exits and crashes both leave the gamepad muted, while native
       # trackpads and the keyboard-mapped R5 remain usable for recovery.
-      systemd.user.services.icewine.Service.ExecStopPost =
+      systemd.user.services.icewine.serviceConfig.ExecStopPost =
         "-${icewineInputplumberIntercept}/bin/icewine-inputplumber-intercept overlay";
-    };
   };
 }
