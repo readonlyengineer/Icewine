@@ -27,7 +27,7 @@ OWNED = {
     "gtk-3.0/settings.ini": "gtk-settings.ini",
     "gtk-3.0/gtk.css": "gtk.css",
     "gtk-4.0/settings.ini": "gtk4-settings.ini",
-    "gtk-4.0/gtk.css": "gtk.css",
+    "gtk-4.0/gtk.css": "gtk4.css",
     "yazi/theme.toml": "yazi-theme.toml",
     "yazi/keymap.toml": "yazi-keymap.toml",
     "fastfetch/config.jsonc": "fastfetch.jsonc",
@@ -55,6 +55,7 @@ TEMPLATES = {
     "nvim-theme.lua": "nvim-theme.lua.in",
     "kitty-base.conf": "kitty-base.conf",
     "gtk.css": "gtk.css.in",
+    "gtk4.css": "gtk4.css.in",
     "gtk-settings.ini": "gtk-settings.ini.in",
     "yazi-theme.toml": "yazi-theme.toml.in",
     "yazi-keymap.toml": "yazi-keymap.toml",
@@ -126,6 +127,23 @@ def render(source, values):
     return re.sub(r"@([A-Za-z][A-Za-z0-9]*)@", replace, source)
 
 
+def gtk_foreground(background, preferred, alternate=None):
+    def luminance(color):
+        channels = (int(color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        linear = (v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+                  for v in channels)
+        return sum(v * weight for v, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+    bg, fg = luminance(background), luminance(preferred)
+    if (max(bg, fg) + 0.05) / (min(bg, fg) + 0.05) >= 4.5:
+        return preferred
+    if alternate is not None:
+        other = luminance(alternate)
+        if (max(bg, other) + 0.05) / (min(bg, other) + 0.05) >= 4.5:
+            return alternate
+    return "000000" if bg >= 0.175 else "ffffff"
+
+
 def render_theme(assets, palette_file, level="high"):
     palette = json.loads(palette_file.read_text(encoding="utf-8"))
     if not isinstance(palette, dict) or not all(isinstance(value, str) for value in palette.values()):
@@ -138,6 +156,14 @@ def render_theme(assets, palette_file, level="high"):
     )
     values["kittyOpacity"], values["inactiveOpacity"] = TRANSPARENCY[level]
     values["gtkPreferDark"] = "0" if values["appearance"] == "light" else "1"
+    for role, source in (("gtkAccentFg", "highlight"), ("gtkSuccessFg", "success"),
+                         ("gtkWarningFg", "caution"), ("gtkErrorFg", "error")):
+        values[role] = gtk_foreground(values[source], values["backgroundDark"])
+    values["gtkButtonHoverFg"] = gtk_foreground(values["border"], values["foreground"])
+    values["gtkHeaderbarFg"] = gtk_foreground(
+        values["backgroundDark"], values["highlight"], values["foreground"])
+    values["gtkHeaderbarHoverFg"] = gtk_foreground(
+        values["surface"], values["highlight"], values["foreground"])
     for key in ("highlightRgb", "mutedRgb"):
         values[key.removesuffix("Rgb") + "Sgr"] = values[key].replace(", ", ";")
     git_enabled = os.environ.get("ICEWINE_THEME_GIT_ENABLE", "true") == "true"
@@ -171,8 +197,9 @@ def render_theme(assets, palette_file, level="high"):
         }.items()},
     }, sort_keys=True) + "\n"
     files["gtk4-settings.ini"] = files["gtk-settings.ini"]
+    files["gtk4.css"] = files["gtk.css"] + files["gtk4.css"]
     files["gtk-settings.ini"] = files["gtk-settings.ini"].replace(
-        "gtk-theme-name=" + values["gtkThemeName"], "gtk-theme-name=Icewine-" + palette_file.stem
+        "gtk-theme-name=Adwaita", "gtk-theme-name=Icewine-" + palette_file.stem
     )
     variant = "-dark" if values["appearance"] == "dark" else ""
     files["gtk3-theme.css"] = (
@@ -245,6 +272,9 @@ def managed_link(path, config):
         return False
     if (path == config / "gtk-4.0/settings.ini"
             and os.readlink(path) == str(config / "icewine/current/gtk-settings.ini")):
+        return True
+    if (path == config / "gtk-4.0/gtk.css"
+            and os.readlink(path) == str(config / "icewine/current/gtk.css")):
         return True
     try:
         if path.relative_to(config).as_posix() not in LEGACY_MANAGED:

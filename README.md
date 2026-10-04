@@ -288,6 +288,10 @@ refresh the extension. Edited extension files and symlinked paths are preserved
 and reported, including on reset; ownership hashes are saved under
 `$XDG_STATE_HOME/icewine/flatpak-themes/`. Extension failures are reported without
 blocking desktop startup. If Flatpak is installed later, run `icewine init gtk`.
+Native GTK4 uses Adwaita with Icewine's user CSS. GTK 4.16 and newer can use
+the palette's window, view, headerbar, sidebar, card, accent and status CSS
+variables in libadwaita; older GTK4 releases retain the named colour mapping.
+Flatpak GTK4 apps do not receive this host CSS through the GTK3 extension.
 Browser colour mapping remains browser-controlled; web content and privacy
 preferences are unchanged.
 The Bash starter files live under `$XDG_CONFIG_HOME/icewine/shell/`; `.bashrc`,

@@ -33,7 +33,7 @@ let
     application/pdf=firefox.desktop;
   '';
 in {
-  imports = [ ./home.nix ./desktop.nix ./shell.nix ./gtk.nix ./handheld.nix ./login.nix ];
+  imports = [ ./home.nix ./desktop.nix ./shell.nix ./handheld.nix ./login.nix ];
 
   options.services.icewine = {
     enable = lib.mkEnableOption "Icewine desktop environment";

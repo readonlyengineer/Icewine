@@ -1,0 +1,26 @@
+/* GTK 4.16+ and libadwaita 1.6+ use these CSS variables. Older versions
+   retain the shared named colours above. */
+:root {
+  --window-bg-color: #@background@;
+  --window-fg-color: #@foreground@;
+  --view-bg-color: #@backgroundDark@;
+  --view-fg-color: #@foreground@;
+  --headerbar-bg-color: #@backgroundDark@;
+  --headerbar-fg-color: #@foreground@;
+  --headerbar-backdrop-color: #@backgroundDark@;
+  --sidebar-bg-color: #@surface@;
+  --sidebar-fg-color: #@foreground@;
+  --sidebar-backdrop-color: #@surface@;
+  --card-bg-color: #@surface@;
+  --card-fg-color: #@foreground@;
+  --accent-bg-color: #@highlight@;
+  --accent-fg-color: #@gtkAccentFg@;
+  --success-bg-color: #@success@;
+  --success-fg-color: #@gtkSuccessFg@;
+  --warning-bg-color: #@caution@;
+  --warning-fg-color: #@gtkWarningFg@;
+  --error-bg-color: #@error@;
+  --error-fg-color: #@gtkErrorFg@;
+  --destructive-bg-color: #@error@;
+  --destructive-fg-color: #@gtkErrorFg@;
+}

@@ -8,6 +8,10 @@
 @define-color palette_fg_gutter       #@border@;
 @define-color palette_comment         #@muted@;
 @define-color palette_highlight       #@highlight@;
+@define-color palette_accent_fg       #@gtkAccentFg@;
+@define-color palette_button_hover_fg #@gtkButtonHoverFg@;
+@define-color palette_headerbar_fg     #@gtkHeaderbarFg@;
+@define-color palette_headerbar_hover_fg #@gtkHeaderbarHoverFg@;
 @define-color palette_secondary       #@secondaryHighlight@;
 @define-color palette_success         #@success@;
 @define-color palette_warning         #@caution@;
@@ -20,7 +24,7 @@
 @define-color theme_base_color          @palette_bg_dark;
 @define-color theme_text_color          @palette_fg;
 @define-color theme_selected_bg_color   @palette_highlight;
-@define-color theme_selected_fg_color   @palette_bg_dark;
+@define-color theme_selected_fg_color   @palette_accent_fg;
 @define-color theme_tooltip_bg_color    @palette_bg_highlight;
 @define-color theme_tooltip_fg_color    @palette_fg;
 @define-color theme_unfocused_bg_color  @palette_bg_dark;
@@ -36,13 +40,21 @@
 /* --- Accent (used by newer GTK3 apps + libadwaita-style widgets) --- */
 @define-color accent_color              @palette_highlight;
 @define-color accent_bg_color           @palette_highlight;
-@define-color accent_fg_color           @palette_bg_dark;
+@define-color accent_fg_color           @palette_accent_fg;
 
 /* --- Status --- */
 @define-color success_color             @palette_success;
+@define-color success_bg_color          @palette_success;
+@define-color success_fg_color          #@gtkSuccessFg@;
 @define-color warning_color             @palette_warning;
+@define-color warning_bg_color          @palette_warning;
+@define-color warning_fg_color          #@gtkWarningFg@;
 @define-color error_color               @palette_error;
+@define-color error_bg_color            @palette_error;
+@define-color error_fg_color            #@gtkErrorFg@;
 @define-color destructive_color         @palette_error;
+@define-color destructive_bg_color      @palette_error;
+@define-color destructive_fg_color      #@gtkErrorFg@;
 
 /* --- Links --- */
 @define-color link_color                @palette_info;

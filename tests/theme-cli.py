@@ -5,6 +5,7 @@ import os
 import errno
 import importlib.machinery
 import json
+import re
 import signal
 import subprocess
 import sys
@@ -18,6 +19,30 @@ from unittest import mock
 script = Path(sys.argv[1]).resolve()
 dispatcher = Path(sys.argv[2]).resolve()
 assets = Path(sys.argv[3]).resolve()
+
+
+def contrast(first, second):
+    def luminance(color):
+        channels = (int(color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        linear = (v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+                  for v in channels)
+        return sum(v * weight for v, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+    lighter, darker = sorted((luminance(first), luminance(second)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def css_hex(css, name):
+    match = re.search(rf"(?m)^  {re.escape(name)}: #([0-9a-f]{{6}});$", css)
+    assert match, name
+    return match.group(1)
+
+
+def named_color(css, name):
+    match = re.search(rf"(?m)^@define-color {re.escape(name)}\s+#([0-9a-f]{{6}});$", css)
+    assert match, name
+    return match.group(1)
+
 
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
@@ -146,6 +171,15 @@ with tempfile.TemporaryDirectory() as temporary:
     assert unrelated.is_symlink() and os.readlink(unrelated) == "/nix/store/" + "b" * 32 + "-user-css"
     assert unknown_path.is_symlink() and os.readlink(unknown_path) == unknown_target
     assert "conflict: preserved unrecognized symlink" in result.stderr
+    # Existing Icewine GTK4 links must migrate from the shared CSS to GTK4 CSS.
+    old_gtk4_css = (config / "icewine/current/gtk.css").read_text()
+    unknown_path.unlink()
+    unknown_path.symlink_to(config / "icewine/current/gtk.css")
+    result = run("init", "gtk")
+    assert result.returncode == 0, result.stderr
+    assert os.readlink(unknown_path) == str(config / "icewine/current/gtk4.css")
+    migrated_gtk4 = list((state / "icewine").glob("migration-*/gtk-4.0/gtk.css"))
+    assert len(migrated_gtk4) == 1 and migrated_gtk4[0].read_text() == old_gtk4_css
     migration = list((state / "icewine").glob("defaults-migration-*/config/quickshell/theme/Palette.qml"))
     assert len(migration) == 1 and os.readlink(migration[0]) == legacy_target
     assert (config / "icewine/current").is_symlink()
@@ -429,6 +463,41 @@ x-scheme-handler/https=firefox.desktop
         assert f'vim.opt.background = "{appearance}"' in nvim_theme.read_text()
         assert f'dark: "{appearance}"' in (current / "Palette.qml").read_text()
         assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}" in (current / "gtk-settings.ini").read_text()
+        assert "gtk-theme-name=Adwaita\n" in (current / "gtk4-settings.ini").read_text()
+        palette = json.loads((assets / "themes" / f"{theme_id}.json").read_text())
+        gtk4 = (current / "gtk4.css").read_text()
+        for role, color in (("window-bg", "background"), ("view-bg", "backgroundDark"),
+                            ("headerbar-bg", "backgroundDark"), ("sidebar-bg", "surface"),
+                            ("card-bg", "surface"), ("accent-bg", "highlight")):
+            assert f"--{role}-color: #{palette[color]};" in gtk4
+        for role in ("accent", "success", "warning", "error", "destructive"):
+            bg = css_hex(gtk4, f"--{role}-bg-color")
+            fg = css_hex(gtk4, f"--{role}-fg-color")
+            assert contrast(bg, fg) >= 4.5, (theme_id, role, bg, fg)
+        gtk3 = (current / "gtk3-theme.css").read_text()
+        accent_fg = css_hex(gtk4, "--accent-fg-color")
+        assert f"@define-color palette_accent_fg       #{accent_fg};" in gtk3
+        assert "@define-color theme_selected_fg_color   @palette_accent_fg;" in gtk3
+        assert "@define-color accent_fg_color           @palette_accent_fg;" in gtk3
+        assert not re.search(r"(?m)^  color: @palette_bg_dark;$", gtk3)
+        for background_role, foreground_role in (
+            ("palette_bg_highlight", "palette_fg"),
+            ("palette_fg_gutter", "palette_button_hover_fg"),
+            ("palette_bg_dark", "palette_headerbar_fg"),
+            ("palette_bg_highlight", "palette_headerbar_hover_fg"),
+        ):
+            bg = named_color(gtk3, background_role)
+            fg = named_color(gtk3, foreground_role)
+            assert contrast(bg, fg) >= 4.5, (theme_id, background_role, foreground_role, bg, fg)
+        assert "button:hover {\n  background-color: @palette_fg_gutter;\n  color: @palette_button_hover_fg;" in gtk3
+        for selector, foreground in (
+            ("headerbar, .titlebar, menubar, toolbar", "palette_headerbar_fg"),
+            ("headerbar button, .titlebar button, toolbar button", "palette_headerbar_fg"),
+            ("headerbar button:hover, .titlebar button:hover, toolbar button:hover",
+             "palette_headerbar_hover_fg"),
+        ):
+            assert re.search(re.escape(selector) + r" \{[^}]*color: @" + foreground + ";", gtk3)
+        assert "Tokyonight-Dark" not in (current / "gtk4-settings.ini").read_text()
         for filename in ("starship.toml", "yazi-theme.toml", "yazi-keymap.toml"):
             tomllib.loads((current / filename).read_text())
     assert run("theme", "nord", policy="gruvbox-light").returncode == 0

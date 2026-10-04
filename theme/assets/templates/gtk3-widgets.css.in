@@ -6,7 +6,7 @@
 headerbar, .titlebar, menubar, toolbar {
   background-image: none;
   background-color: @palette_bg_dark;
-  color: @palette_highlight;
+  color: @palette_headerbar_fg;
 }
 menubar > menuitem {
   color: @palette_fg;
@@ -44,20 +44,24 @@ button {
   color: @palette_fg;
   border-color: @borders;
 }
-button:hover { background-color: @palette_fg_gutter; }
+button:hover {
+  background-color: @palette_fg_gutter;
+  color: @palette_button_hover_fg;
+}
 headerbar button, .titlebar button, toolbar button {
   background-color: @palette_bg_dark;
-  color: @palette_highlight;
+  color: @palette_headerbar_fg;
 }
 headerbar button:hover, .titlebar button:hover, toolbar button:hover {
   background-color: @palette_bg_highlight;
+  color: @palette_headerbar_hover_fg;
 }
 button:active, button:checked,
 headerbar button:active, headerbar button:checked,
 .titlebar button:active, .titlebar button:checked,
 toolbar button:active, toolbar button:checked {
   background-color: @palette_highlight;
-  color: @palette_bg_dark;
+  color: @palette_accent_fg;
   border-color: @palette_highlight;
 }
 button:focus, entry:focus, row:focus {
@@ -76,7 +80,7 @@ scrollbar slider:active { background-color: @palette_highlight; }
 menubar > menuitem:backdrop { color: @palette_fg_dark; }
 selection, *:selected, menuitem:hover {
   background-color: @palette_highlight;
-  color: @palette_bg_dark;
+  color: @palette_accent_fg;
 }
 *:disabled { color: @palette_comment; }
 button:disabled, headerbar button:disabled,
