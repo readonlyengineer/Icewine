@@ -613,7 +613,6 @@ def install_flatpak_theme(state, theme_id, files):
                 return
         atomic_text(path, contents)
         atomic_text(record, digest + "\n")
-        print(f"installed Flatpak GTK theme: {path}")
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         # Optional Flatpak integration must not prevent the desktop shell starting.
         print(f"pending Flatpak GTK theme: {error}", file=sys.stderr)
@@ -621,7 +620,6 @@ def install_flatpak_theme(state, theme_id, files):
 
 def sync_gtk_settings(theme_id, appearance):
     if not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
-        print("Pending: GTK settings will be published at next session login.", file=sys.stderr)
         return True
     complete = True
     for key, value in (("gtk-theme", "Icewine-" + theme_id),
@@ -632,8 +630,6 @@ def sync_gtk_settings(theme_id, appearance):
         except (OSError, subprocess.SubprocessError) as error:
             complete = False
             print(f"Failed: GTK setting {key} was not published: {error}", file=sys.stderr)
-    if complete:
-        print("Applied: GTK theme and light/dark preference were published through GSettings.")
     return complete
 
 
@@ -645,7 +641,7 @@ def signal_reload(name, config, runtime):
     if not runtime or not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
         print(f"Pending: {name} native reload is unavailable on this session.", file=sys.stderr)
         return False
-    sent = skipped = exited = 0
+    skipped = exited = 0
     failed = False
     try:
         processes = list(PROC.iterdir())
@@ -696,7 +692,6 @@ def signal_reload(name, config, runtime):
                     skipped += 1
                     continue
                 signal.pidfd_send_signal(fd, signal.SIGUSR1)
-                sent += 1
             except ProcessLookupError:
                 exited += 1
             except OSError as error:
@@ -704,12 +699,8 @@ def signal_reload(name, config, runtime):
                 print(f"Failed: {name} reload request for PID {process.name}: {error}", file=sys.stderr)
         finally:
             os.close(fd)
-    if sent:
-        print(f"Pending: {name} native reload requested for {sent} instance(s); application is unconfirmed.")
     if skipped or exited:
         print(f"Pending: {name} skipped {skipped} unscoped and {exited} exited instance(s).", file=sys.stderr)
-    if not sent and not skipped and not exited and not failed:
-        print(f"Pending: no scoped running {name} instance found; new instances use the saved theme.")
     return failed
 
 
@@ -721,15 +712,12 @@ def reload_session(config, app=None):
         except (OSError, subprocess.SubprocessError):
             return False
 
-    pending = []
     failed = False
     if app in (None, "hypr"):
         if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
             if not succeeded(["hyprctl", "reload"]):
                 print("Failed: Hyprland reload request was not delivered.", file=sys.stderr)
                 failed = True
-        else:
-            pending.append("Hyprland at login")
     runtime = os.environ.get("XDG_RUNTIME_DIR")
     if app in (None, "kitty"):
         failed = signal_reload("kitty", config, runtime) or failed
@@ -738,8 +726,14 @@ def reload_session(config, app=None):
     if app in (None, "yazi") and shutil.which("ya"):
         try:
             subprocess.run(["ya", "emit-to", "0", "app:theme"], check=True,
-                           capture_output=True, timeout=5)
-            print("Pending: Yazi theme reload broadcast requested for all current user clients; application is unconfirmed.")
+                           capture_output=True, text=True, timeout=5)
+        except subprocess.CalledProcessError as error:
+            detail = error.stderr.strip()
+            # Yazi exposes errno only in its error text; use structured errors if added.
+            if detail != "Cannot emit command: Connection refused (os error 111)":
+                failed = True
+                print(f"Failed: Yazi theme reload was not delivered: {detail or error}",
+                      file=sys.stderr)
         except (OSError, subprocess.SubprocessError) as error:
             failed = True
             print(f"Failed: Yazi theme reload was not delivered: {error}", file=sys.stderr)
@@ -754,13 +748,6 @@ def reload_session(config, app=None):
             except (OSError, subprocess.SubprocessError):
                 print("Failed: Quickshell palette refresh request was not delivered.", file=sys.stderr)
                 failed = True
-        elif not os.environ.get("WAYLAND_DISPLAY"):
-            pending.append("Quickshell palette at login")
-    if app is None:
-        print("Applied: persisted selection and linked theme files; Starship on next prompt, Fastfetch on next run.")
-        print("Pending: GTK/Flatpak custom CSS in already open apps; browsers follow their own theme integration.")
-    if pending:
-        print("Pending: " + ", ".join(pending), file=sys.stderr)
     return failed
 
 
@@ -870,8 +857,7 @@ def main(argv):
         install_flatpak_theme(state, theme_id, files)
         appearance = json.loads(themes[theme_id].read_text(encoding="utf-8"))["appearance"]
         gtk_complete = sync_gtk_settings(theme_id, appearance)
-    print(f"Effective theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else ""))
-    print(f"Transparency: {level}")
+    print(f"Theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else "") + f" · Transparency: {level}")
     if command in {"theme", "reset", "transparency", "apply"}:
         return int(reload_session(config, app if command == "reset" else None) or not gtk_complete)
     return 0

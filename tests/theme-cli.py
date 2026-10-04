@@ -165,7 +165,7 @@ with tempfile.TemporaryDirectory() as temporary:
 
     result = run("init")
     assert result.returncode == 0, result.stderr
-    assert "Effective theme: catppuccin-mocha" in result.stdout
+    assert "Theme: catppuccin-mocha · Transparency: high" in result.stdout
     assert edited.read_text() == "user edit\n"
     assert not legacy.is_symlink() and "property color primary" in legacy.read_text()
     assert unrelated.is_symlink() and os.readlink(unrelated) == "/nix/store/" + "b" * 32 + "-user-css"
@@ -573,11 +573,24 @@ x-scheme-handler/https=firefox.desktop
                      "qs ipc call theme refresh"):
         assert expected in commands, commands
     assert "kitten @" not in commands and "nvim --server" not in commands
-    (fake_bin / "ya").write_text(yazi_command + "exit 2\n")
+    assert result.stdout == "Theme: catppuccin-mocha · Transparency: high\n"
+    (fake_bin / "ya").write_text(
+        yazi_command + "echo 'Cannot emit command: Permission denied (os error 13)' >&2\nexit 2\n")
     command_log.write_text("")
     result = run("apply")
     assert result.returncode == 1 and "Failed: Yazi theme reload" in result.stderr
+    assert "Permission denied (os error 13)" in result.stderr
     assert "qs ipc call theme refresh" in command_log.read_text()
+    (fake_bin / "ya").write_text(
+        yazi_command + "echo 'Cannot emit command: Connection refused (os error 111)' >&2\nexit 1\n")
+    for args in (("transparency", "high"), ("reset", "yazi")):
+        command_log.write_text("")
+        result = run(*args)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines()[-1] == "Theme: catppuccin-mocha · Transparency: high"
+        if args[0] == "transparency":
+            assert len(result.stdout.splitlines()) == 1
+        assert "ya emit-to 0 app:theme" in command_log.read_text()
     (fake_bin / "ya").write_text(yazi_command)
     command_log.write_text("")
     qs_command = (fake_bin / "qs").read_text()
