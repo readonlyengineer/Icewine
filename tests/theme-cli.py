@@ -506,8 +506,8 @@ x-scheme-handler/https=firefox.desktop
     # Opacity is independent of theme selection and survives reapplication.
     saved_theme = (state / "icewine/theme").read_text()
     for level, kitty_opacity, inactive_opacity in [
-        ("off", "1.00", "1.00"), ("low", "0.88", "0.91"),
-        ("med", "0.80", "0.81"), ("high", "0.72", "0.71"),
+        ("off", "1.00", "1.00"), ("low", "0.80", "0.85"),
+        ("med", "0.68", "0.72"), ("high", "0.55", "0.60"),
     ]:
         result = run("transparency", level)
         assert result.returncode == 0, result.stderr
@@ -530,8 +530,8 @@ x-scheme-handler/https=firefox.desktop
     assert run("transparency", "off").returncode == 0
     assert run("reset").returncode == 0
     assert not (state / "icewine/transparency").exists()
-    assert "background_opacity 0.72\n" in (current / "kitty.conf").read_text()
-    assert "inactive_opacity = 0.71" in (current / "Theme.lua").read_text()
+    assert "background_opacity 0.55\n" in (current / "kitty.conf").read_text()
+    assert "inactive_opacity = 0.60" in (current / "Theme.lua").read_text()
     routed = subprocess.run(["bash", str(dispatcher), "transparency", "low"],
                             env=dict(env, PATH=f"{fake_bin}:{os.environ['PATH']}"),
                             text=True, capture_output=True)
