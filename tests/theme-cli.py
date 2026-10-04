@@ -448,8 +448,8 @@ x-scheme-handler/https=firefox.desktop
     kitty_entry.write_text("user Kitty theme edit\n")
     for theme_id, background, appearance in [
         ("tokyo-night", "24283b", "dark"), ("dracula", "37354a", "dark"),
-        ("nord", "37424e", "dark"), ("gruvbox-light", "e3e3bf", "light"),
-        ("gruvbox-dark", "313433", "dark"),
+        ("nord", "37424e", "dark"), ("gruvbox-light", "ebd4aa", "light"),
+        ("gruvbox-dark", "46382d", "dark"),
         ("catppuccin-latte", "dae3f5", "light"),
         ("catppuccin-frappe", "394057", "dark"),
         ("catppuccin-macchiato", "2e344d", "dark"),
