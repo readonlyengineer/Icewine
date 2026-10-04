@@ -549,6 +549,23 @@ x-scheme-handler/https=firefox.desktop
     env.update(PATH=f"{fake_bin}:{os.environ['PATH']}",
                WAYLAND_DISPLAY="wayland-test", HYPRLAND_INSTANCE_SIGNATURE="test",
                XDG_RUNTIME_DIR=str(runtime), ICEWINE_TEST_COMMANDS=str(command_log))
+    yazi_command = (fake_bin / "ya").read_text()
+    (fake_bin / "ya").write_text(yazi_command + "exit 2\n")
+    for app, expected in (("bash", ""), ("hypr", "hyprctl reload\n"),
+                          ("quickshell", "qs ipc call theme refresh\n"),
+                          ("kitty", ""), ("nvim", ""),
+                          ("yazi", "ya emit-to 0 app:theme\n")):
+        command_log.write_text("")
+        result = run("reset", app)
+        assert result.returncode == (1 if app == "yazi" else 0), (app, result.stderr)
+        assert command_log.read_text() == expected, app
+    (fake_bin / "ya").write_text(yazi_command)
+    command_log.write_text("")
+    result = run("reset")
+    assert result.returncode == 0, result.stderr
+    assert all(command in command_log.read_text() for command in
+               ("hyprctl reload", "ya emit-to 0 app:theme", "qs ipc call theme refresh"))
+    command_log.write_text("")
     result = run("apply")
     assert result.returncode == 0, result.stderr
     commands = command_log.read_text()
@@ -556,7 +573,6 @@ x-scheme-handler/https=firefox.desktop
                      "qs ipc call theme refresh"):
         assert expected in commands, commands
     assert "kitten @" not in commands and "nvim --server" not in commands
-    yazi_command = (fake_bin / "ya").read_text()
     (fake_bin / "ya").write_text(yazi_command + "exit 2\n")
     command_log.write_text("")
     result = run("apply")

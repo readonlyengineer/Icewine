@@ -713,7 +713,7 @@ def signal_reload(name, config, runtime):
     return failed
 
 
-def reload_session(config):
+def reload_session(config, app=None):
     def succeeded(command):
         try:
             return subprocess.run(command, check=False, stdout=subprocess.DEVNULL,
@@ -723,16 +723,19 @@ def reload_session(config):
 
     pending = []
     failed = False
-    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
-        if not succeeded(["hyprctl", "reload"]):
-            print("Failed: Hyprland reload request was not delivered.", file=sys.stderr)
-            failed = True
-    else:
-        pending.append("Hyprland at login")
+    if app in (None, "hypr"):
+        if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+            if not succeeded(["hyprctl", "reload"]):
+                print("Failed: Hyprland reload request was not delivered.", file=sys.stderr)
+                failed = True
+        else:
+            pending.append("Hyprland at login")
     runtime = os.environ.get("XDG_RUNTIME_DIR")
-    failed = signal_reload("kitty", config, runtime) or failed
-    failed = signal_reload("nvim", config, runtime) or failed
-    if shutil.which("ya"):
+    if app in (None, "kitty"):
+        failed = signal_reload("kitty", config, runtime) or failed
+    if app in (None, "nvim"):
+        failed = signal_reload("nvim", config, runtime) or failed
+    if app in (None, "yazi") and shutil.which("ya"):
         try:
             subprocess.run(["ya", "emit-to", "0", "app:theme"], check=True,
                            capture_output=True, timeout=5)
@@ -740,20 +743,22 @@ def reload_session(config):
         except (OSError, subprocess.SubprocessError) as error:
             failed = True
             print(f"Failed: Yazi theme reload was not delivered: {error}", file=sys.stderr)
-    if os.environ.get("WAYLAND_DISPLAY") and os.environ.get("ICEWINE_THEME_FROM_SHELL") != "1":
-        try:
-            shell = subprocess.run(["qs", "ipc", "call", "theme", "refresh"],
-                                   capture_output=True, text=True, timeout=10)
-            if shell.returncode != 0 or not shell.stdout.strip().startswith("applied:"):
-                print("Failed: Quickshell palette refresh request was not confirmed.", file=sys.stderr)
+    if app in (None, "quickshell"):
+        if os.environ.get("WAYLAND_DISPLAY") and os.environ.get("ICEWINE_THEME_FROM_SHELL") != "1":
+            try:
+                shell = subprocess.run(["qs", "ipc", "call", "theme", "refresh"],
+                                       capture_output=True, text=True, timeout=10)
+                if shell.returncode != 0 or not shell.stdout.strip().startswith("applied:"):
+                    print("Failed: Quickshell palette refresh request was not confirmed.", file=sys.stderr)
+                    failed = True
+            except (OSError, subprocess.SubprocessError):
+                print("Failed: Quickshell palette refresh request was not delivered.", file=sys.stderr)
                 failed = True
-        except (OSError, subprocess.SubprocessError):
-            print("Failed: Quickshell palette refresh request was not delivered.", file=sys.stderr)
-            failed = True
-    elif not os.environ.get("WAYLAND_DISPLAY"):
-        pending.append("Quickshell palette at login")
-    print("Applied: persisted selection and linked theme files; Starship on next prompt, Fastfetch on next run.")
-    print("Pending: GTK/Flatpak custom CSS in already open apps; browsers follow their own theme integration.")
+        elif not os.environ.get("WAYLAND_DISPLAY"):
+            pending.append("Quickshell palette at login")
+    if app is None:
+        print("Applied: persisted selection and linked theme files; Starship on next prompt, Fastfetch on next run.")
+        print("Pending: GTK/Flatpak custom CSS in already open apps; browsers follow their own theme integration.")
     if pending:
         print("Pending: " + ", ".join(pending), file=sys.stderr)
     return failed
@@ -868,7 +873,7 @@ def main(argv):
     print(f"Effective theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else ""))
     print(f"Transparency: {level}")
     if command in {"theme", "reset", "transparency", "apply"}:
-        return int(reload_session(config) or not gtk_complete)
+        return int(reload_session(config, app if command == "reset" else None) or not gtk_complete)
     return 0
 
 

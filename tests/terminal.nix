@@ -60,7 +60,7 @@ pkgs.runCommand "icewine-terminal-checks" {
 } ''
   export HOME="$TMPDIR/home" XDG_CONFIG_HOME="$TMPDIR/home/.config" XDG_DATA_HOME="$TMPDIR/home/.local/share" XDG_STATE_HOME="$TMPDIR/home/.local/state"
   mkdir -p "$HOME" "$TMPDIR/fake-bin"
-  printf '#!/bin/sh\necho ICEWINE_FASTFETCH\n' > "$TMPDIR/fake-bin/fastfetch"
+  printf '#!/bin/sh\ntest "$#" -eq 0 && echo ICEWINE_FASTFETCH\n' > "$TMPDIR/fake-bin/fastfetch"
   chmod +x "$TMPDIR/fake-bin/fastfetch"
   export PATH="$TMPDIR/fake-bin:$PATH"
   ${cli}/bin/icewine init
@@ -92,7 +92,7 @@ pkgs.runCommand "icewine-terminal-checks" {
   prompt=$(STARSHIP_CONFIG="$XDG_CONFIG_HOME/icewine/current/starship.toml" starship prompt)
   case "$prompt" in *icewine-check*) ;; *) exit 1 ;; esac
   export ICEWINE_THEME_GIT_ENABLE=false
-  python3 ${../scripts/theme} apply
+  python3 ${../scripts/theme} init
   prompt=$(STARSHIP_CONFIG="$XDG_CONFIG_HOME/icewine/current/starship.toml" starship prompt)
   case "$prompt" in *icewine-check*|*'?'*) exit 1 ;; esac
   touch "$out"

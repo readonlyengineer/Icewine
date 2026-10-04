@@ -14,7 +14,7 @@ let
       . "${current}/ls-colors.sh"
     fi
     if [[ ''${ICEWINE_FASTFETCH_ENABLED:-false} == true ]] && command -v fastfetch >/dev/null; then
-      fastfetch --config "${current}/fastfetch.jsonc"
+      fastfetch
     fi
     if [[ ''${ICEWINE_BLESH_ENABLED:-false} == true && -r /etc/profiles/per-user/$USER/share/blesh/ble.sh ]]; then
       source -- /etc/profiles/per-user/$USER/share/blesh/ble.sh 2>/dev/null
