@@ -19,9 +19,9 @@ from pathlib import Path
 DEFAULT = "catppuccin-mocha"
 TRANSPARENCY = {
     "off": ("1.00", "1.00"),
-    "low": ("0.90", "0.75"),
-    "med": ("0.80", "0.55"),
-    "high": ("0.70", "0.40"),
+    "low": ("0.80", "0.75"),
+    "med": ("0.60", "0.55"),
+    "high": ("0.40", "0.40"),
 }
 OWNED = {
     "gtk-3.0/settings.ini": "gtk-settings.ini",
