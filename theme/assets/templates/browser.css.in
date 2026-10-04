@@ -1,0 +1,53 @@
+/* Icewine Firefox/LibreWolf chrome colours; no layout or web content changes. */
+/* Preserve browser high-contrast mode and installed themes. */
+@media not (forced-colors) {
+  :root:not([lwtheme]) {
+    --toolbox-background-color: #@backgroundDark@ !important;
+    --toolbox-background-color-inactive: #@backgroundDark@ !important;
+    --toolbox-text-color: #@gtkHeaderbarFg@ !important;
+    --toolbox-text-color-inactive: #@foregroundDark@ !important;
+    --toolbar-background-color: #@background@ !important;
+    --toolbar-text-color: #@foreground@ !important;
+    --toolbar-bgcolor: #@background@ !important;
+    --toolbar-color: #@foreground@ !important;
+    --toolbar-field-background-color: #@backgroundDark@ !important;
+    --toolbar-field-background-color-focus: #@surface@ !important;
+    --toolbar-field-color: #@foreground@ !important;
+    --toolbar-field-color-focus: #@foreground@ !important;
+    --toolbar-field-text-color: #@foreground@ !important;
+    --toolbar-field-text-color-focus: #@foreground@ !important;
+    --toolbar-field-border-color: #@border@ !important;
+    --toolbar-field-border-color-focus: #@highlight@ !important;
+    --toolbarbutton-hover-background: #@surface@ !important;
+    --toolbarbutton-active-background: #@selection@ !important;
+    --toolbarbutton-background-color-hover: #@surface@ !important;
+    --toolbarbutton-background-color-active: #@selection@ !important;
+    --tab-selected-bgcolor: #@surface@ !important;
+    --tab-selected-textcolor: #@gtkHeaderbarHoverFg@ !important;
+    --panel-background: #@background@ !important;
+    --panel-background-color: #@background@ !important;
+    --panel-color: #@foreground@ !important;
+    --panel-text-color: #@foreground@ !important;
+    --panel-border-color: #@border@ !important;
+    --sidebar-background-color: #@backgroundDark@ !important;
+    --sidebar-text-color: #@foreground@ !important;
+    --sidebar-border-color: #@border@ !important;
+    --lwt-sidebar-background-color: #@backgroundDark@ !important;
+    --lwt-sidebar-text-color: #@foreground@ !important;
+    --chrome-content-separator-color: #@border@ !important;
+    --tabs-navbar-separator-color: #@border@ !important;
+    --focus-outline-color: #@highlight@ !important;
+    --color-accent-primary: #@highlight@ !important;
+    --color-accent-primary-selected: #@highlight@ !important;
+    --text-color-accent-primary-selected: #@gtkAccentFg@ !important;
+  }
+
+  :root:not([lwtheme]) :is(#nav-bar, #PersonalToolbar) {
+    background-color: #@background@ !important;
+    color: #@foreground@ !important;
+  }
+
+  :root:not([lwtheme]) .tab-background[selected] {
+    background-color: #@surface@ !important;
+  }
+}

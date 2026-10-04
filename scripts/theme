@@ -56,6 +56,7 @@ TEMPLATES = {
     "kitty-base.conf": "kitty-base.conf",
     "gtk.css": "gtk.css.in",
     "gtk4.css": "gtk4.css.in",
+    "browser.css": "browser.css.in",
     "gtk-settings.ini": "gtk-settings.ini.in",
     "yazi-theme.toml": "yazi-theme.toml.in",
     "yazi-keymap.toml": "yazi-keymap.toml",

@@ -296,6 +296,21 @@ variables in libadwaita; older GTK4 releases retain the named colour mapping.
 Flatpak GTK4 apps do not receive this host CSS through the GTK3 extension.
 Browser colour mapping remains browser-controlled; web content and privacy
 preferences are unchanged.
+
+For full Firefox/LibreWolf chrome colours, Icewine generates
+`$XDG_CONFIG_HOME/icewine/current/browser.css`. Select **System theme — auto**.
+Open `about:support` and find your Profile Directory, then create
+`chrome/userChrome.css` there (or add this import at the beginning of an existing
+file), using your actual absolute config path:
+
+```css
+@import url("file:///home/YOUR_USER/.config/icewine/current/browser.css");
+```
+
+Set `toolkit.legacyUserProfileCustomizations.stylesheets` to `true` in
+`about:config` and restart the browser. Restart after changing Icewine themes.
+Flatpak browsers also need read access to the imported file. Installed browser
+themes take precedence; browser updates may require CSS selector adjustments.
 The Bash starter files live under `$XDG_CONFIG_HOME/icewine/shell/`; `.bashrc`,
 `.profile` and `.bash_profile` link to them. NixOS supplies current package paths,
 feature flags and session variables, so disabling Fastfetch, ble.sh or Starship

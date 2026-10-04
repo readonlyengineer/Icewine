@@ -8,13 +8,6 @@ headerbar, .titlebar, menubar, toolbar {
   background-color: @palette_bg_dark;
   color: @palette_headerbar_fg;
 }
-/* Firefox samples menubar colours for its toolbar outside GNOME/KDE. */
-menubar {
-  background-color: @palette_bg_highlight;
-}
-menubar > menuitem {
-  color: @palette_headerbar_hover_fg;
-}
 headerbar:backdrop, .titlebar:backdrop, menubar:backdrop, toolbar:backdrop {
   background-color: @palette_bg_dark;
   color: @palette_fg_dark;
