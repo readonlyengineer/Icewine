@@ -102,6 +102,7 @@ let
     runtimeInputs = [ pkgs.edid-decode ];
     text = builtins.readFile ../quickshell/tools/probe-monitor-capabilities;
   };
+  steamShortcuts = import ../quickshell/tools/steam-shortcuts.nix { inherit pkgs; };
   monitorBrightness = pkgs.writeShellApplication {
     name = "icewine-monitor-brightness";
     runtimeInputs = [ pkgs.coreutils pkgs.brightnessctl pkgs.ddcutil pkgs.hyprland pkgs.jq pkgs.util-linux ];
@@ -169,7 +170,7 @@ in {
         "ICEWINE_THEME_POLICY=${if cfg.theme == null then "" else cfg.theme}"
         "ICEWINE_AUTHENTICATION_REQUIRED=${if cfg.authenticationRequired then "true" else "false"}"
         "ICEWINE_BATTERY_ENABLED=${if cfg.battery.enable then "true" else "false"}"
-        "PATH=/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness ]}"
+        "PATH=/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness steamShortcuts ]}"
         "QT_IM_MODULE=qtvirtualkeyboard"
       ];
       Restart = "on-failure";

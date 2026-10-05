@@ -70,6 +70,7 @@ let
     (package: lib.getName package == "mimeapps.list") desktop.users.users.demo.packages);
   hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
   browserHost = import ../theme/browser.nix { inherit pkgs; };
+  steamShortcuts = import ../quickshell/tools/steam-shortcuts.nix { inherit pkgs; };
 in {
   screenshot = pkgs.runCommand "icewine-screenshot-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
@@ -96,7 +97,7 @@ in {
   '';
   terminal = import ./terminal.nix { inherit self nixpkgs; };
   logic = pkgs.runCommand "icewine-logic-checks" {
-    nativeBuildInputs = [ pkgs.nodejs pkgs.lua pkgs.python3 ];
+    nativeBuildInputs = [ pkgs.nodejs pkgs.lua (pkgs.python3.withPackages (python: [ python.vdf ])) ];
   } ''
     cd ${self}
     for test in quickshell/tests/*.js quickshell/deck/test-demo.js; do node "$test"; done
@@ -180,6 +181,7 @@ in {
       export HOME=$TMPDIR/home XDG_CONFIG_HOME=$TMPDIR/home/.config XDG_DATA_HOME=$TMPDIR/home/.local/share XDG_STATE_HOME=$TMPDIR/home/.local/state
       mkdir -p "$HOME"
       ${icewineCli}/bin/icewine init
+      test "$(${steamShortcuts}/bin/icewine-steam-shortcuts)" = '[]'
       PYTHONPATH=${pkgs.pywalfox-native}/${pkgs.python3.sitePackages} ${pkgs.python3}/bin/python3 ${./browser-upstream.py} ${browserHost}/lib/mozilla/native-messaging-hosts/pywalfox.json
       cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
       cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"

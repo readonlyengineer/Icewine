@@ -43,7 +43,29 @@ assert.deepEqual(search.launchOptions({command: ["demo"]}, "/home/demo"), {
     workingDirectory: "/home/demo"
 })
 
-const steamReader = require("../modules/topbar/SteamShortcuts.js")
+const fs = require("node:fs")
+const os = require("node:os")
+const path = require("node:path")
+const { spawnSync } = require("node:child_process")
+const home = fs.mkdtempSync(path.join(os.tmpdir(), "icewine-steam-test-"))
+const dataHome = path.join(home, "data")
+const shortcutFile = path.join(dataHome, "Steam/userdata/123/config/shortcuts.vdf")
+const script = path.resolve(__dirname, "../tools/steam-shortcuts")
+function readShortcuts(buffer) {
+    if (buffer !== undefined) {
+        fs.mkdirSync(path.dirname(shortcutFile), { recursive: true })
+        fs.writeFileSync(shortcutFile, buffer)
+    }
+    return spawnSync(process.env.ICEWINE_TEST_PYTHON || "python3", [script], {
+        encoding: "utf8", env: { ...process.env, HOME: home, XDG_DATA_HOME: dataHome }
+    })
+}
+function parse(buffer) {
+    const result = readShortcuts(buffer)
+    assert.equal(result.status, 0, result.stderr)
+    return JSON.parse(result.stdout)
+}
+assert.deepEqual(JSON.parse(readShortcuts().stdout), [])
 const z = text => Buffer.from(text + "\0")
 const stringField = (key, value) => Buffer.concat([Buffer.from([1]), z(key), z(value)])
 const objectField = (key, ...fields) => Buffer.concat([
@@ -63,20 +85,39 @@ const shortcutData = Buffer.concat([
             stringField("LaunchOptions", '-c "echo $HOME"'))),
     Buffer.from([8])
 ])
-const parse = buffer => steamReader.commands(Uint8Array.from(buffer).buffer)
 const shortcuts = parse(shortcutData)
 assert.deepEqual(shortcuts, [
     ["/usr/bin/flatpak", "run", "--branch=stable", "com.nvidia.geforcenow"],
     ["prismlauncher"], ["librewolf", "https://example.com"]
 ])
-for (let length = 0; length < shortcutData.length; length++)
-    assert.throws(() => parse(shortcutData.subarray(0, length)))
-assert.throws(() => parse(Buffer.concat([shortcutData, Buffer.from([0])])))
-assert.throws(() => parse(Buffer.from([99, 0, 8])))
-assert.throws(() => parse(Buffer.alloc(4 * 1024 * 1024 + 1)))
-assert.throws(() => parse(Buffer.concat([
-    objectField("shortcuts", stringField("0", "bad record")), Buffer.from([8])
-])))
+// The library accepts an omitted final outer terminator; records remain complete.
+assert.deepEqual(parse(shortcutData.subarray(0, shortcutData.length - 1)), shortcuts)
+for (const length of [0, 1, 8, Math.floor(shortcutData.length / 2), shortcutData.length - 2])
+    assert.notEqual(readShortcuts(shortcutData.subarray(0, length)).status, 0)
+for (const data of [
+    Buffer.concat([shortcutData, Buffer.from([0])]),
+    Buffer.from([99, 0, 8]), Buffer.alloc(4 * 1024 * 1024 + 1),
+    Buffer.concat([objectField("shortcuts", stringField("0", "bad record")), Buffer.from([8])]),
+    Buffer.concat([objectField("shortcuts", objectField("0", stringField("exe", "one"),
+        stringField("Exe", "two"))), Buffer.from([8])]),
+    Buffer.concat([objectField("shortcuts", objectField("0", stringField("exe", "x".repeat(65537)))), Buffer.from([8])])
+]) assert.notEqual(readShortcuts(data).status, 0)
+let nested = stringField("exe", "irrelevant")
+for (let depth = 0; depth < 9; depth++) nested = objectField("nested", nested)
+assert.notEqual(readShortcuts(Buffer.concat([objectField("shortcuts", nested), Buffer.from([8])])).status, 0)
+// Standard quoting is parsed as argv, never passed to a shell. Unsafe forms stay unmatched.
+assert.deepEqual(parse(Buffer.concat([objectField("shortcuts",
+    objectField("0", stringField("exe", '"/a path/café app"'), stringField("LaunchOptions", "--name 'two words'")),
+    objectField("1", stringField("exe", "touch"), stringField("LaunchOptions", "$HOME/never-created")),
+    objectField("2", stringField("exe", 'bad"quote')),
+    objectField("3", stringField("exe", "sh"), stringField("LaunchOptions", "-c 'echo unsafe; false'"))
+), Buffer.from([8])])), [["/a path/café app", "--name", "two words"]])
+// Both native roots are collected; Steam aliases may provide duplicates harmlessly.
+const otherFile = path.join(home, ".steam/steam/userdata/456/config/shortcuts.vdf")
+fs.mkdirSync(path.dirname(otherFile), { recursive: true })
+fs.writeFileSync(otherFile, shortcutData)
+assert.deepEqual(parse(shortcutData), shortcuts.concat(shortcuts))
+fs.rmSync(home, { recursive: true })
 
 const entries = [
     { name: "Game", command: ["steam", "steam://rungameid/123"] },

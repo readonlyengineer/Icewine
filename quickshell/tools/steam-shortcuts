@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Read native Steam shortcuts for launcher matching; never execute their text."""
+import json
+import os
+import re
+import shlex
+import struct
+import sys
+from pathlib import Path
+
+import vdf
+
+
+def normalize(value, depth=0):
+    if depth > 8 or isinstance(value, str) and len(value) > 65536:
+        raise ValueError("Steam shortcut nesting/string exceeds limit")
+    if not isinstance(value, vdf.VDFDict):
+        return value
+    result = {}
+    for key, item in value.items():
+        key = key.lower()
+        if len(key) > 65536 or key in result:
+            raise ValueError("Oversized or duplicate Steam shortcut field")
+        result[key] = normalize(item, depth + 1)
+    return result
+
+
+def words(text):
+    # Match literal argv only; expansions and compound shell commands stay visible.
+    if re.search(r'[\\$`;&|<>*?()\[\]{}~#\r\n\ufffd]', text):
+        return None
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return None
+
+
+def commands(path):
+    with path.open("rb") as stream:
+        data = stream.read(4 * 1024 * 1024 + 1)
+    if len(data) > 4 * 1024 * 1024:
+        raise ValueError("Steam shortcut file exceeds 4 MiB")
+    root = normalize(vdf.binary_loads(data, mapper=vdf.VDFDict, merge_duplicate_keys=False))
+    if not isinstance(root.get("shortcuts"), dict):
+        raise ValueError("Invalid Steam shortcut structure")
+    result = []
+    for shortcut in root["shortcuts"].values():
+        if not isinstance(shortcut, dict):
+            raise ValueError("Invalid Steam shortcut record")
+        executable, options = shortcut.get("exe"), shortcut.get("launchoptions", "")
+        if not isinstance(executable, str) or not isinstance(options, str):
+            continue
+        executable, options = words(executable), words(options)
+        if executable and options is not None:
+            result.append(executable + options)
+    return result
+
+
+if __name__ == "__main__":
+    try:
+        home = Path.home()
+        data_home = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
+        result = []
+        for root in (data_home / "Steam", home / ".steam/steam"):
+            for path in root.glob("userdata/*/config/shortcuts.vdf"):
+                if path.is_file():
+                    result.extend(commands(path))
+        print(json.dumps(result))
+    except (OSError, ValueError, SyntaxError, TypeError, struct.error) as error:
+        print(f"Steam shortcut discovery: {error}", file=sys.stderr)
+        sys.exit(1)

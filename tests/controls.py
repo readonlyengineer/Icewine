@@ -64,6 +64,8 @@ ShellRoot {
     Modules.BatteryAlert { session: session; batteryDevice: measuredBattery }
     Modules.BatteryAlert { session: session; batteryDevice: chargingBattery }
     Bar.SystemMetrics { id: systemMetrics }
+    Bar.SteamShortcuts { id: steamShortcuts }
+    Component.onCompleted: steamShortcuts.refresh()
     Bar.HistoryGraph {
         id: coldGraph
         width: 380
@@ -156,6 +158,9 @@ ShellRoot {
         interval: 400
         running: true
         onTriggered: {
+            if (JSON.stringify(steamShortcuts.commands) !== '[["demo"]]')
+                throw new Error("Steam shortcut process result was not published")
+            steamShortcuts.refresh()
             const actionNames = ["Lock", "Sleep", "Reboot", "Shutdown"]
             for (const name of actionNames) {
                 const button = root.findAccessible(battery, name)
@@ -231,6 +236,8 @@ ShellRoot {
         id: finish
         interval: 1200
         onTriggered: {
+            if (steamShortcuts.commands.length !== 0)
+                throw new Error("Failed Steam shortcut refresh left stale filtering")
             if (!brightness.available || brightness.value !== 76)
                 throw new Error("Pending brightness did not survive popup closure")
             if (root.sleepCalls !== 2)
@@ -284,6 +291,11 @@ with tempfile.TemporaryDirectory() as directory:
     notify = root / "bin/notify-send"
     notify.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$*" >> "' + str(root / "notifications") + '"\n')
     notify.chmod(0o755)
+    shortcuts = root / "bin/icewine-steam-shortcuts"
+    shortcuts.write_text("#!" + shutil.which("bash") + '\nif [ -e "' + str(root / "shortcuts-read")
+                         + '" ]; then exit 1; fi\ntouch "' + str(root / "shortcuts-read")
+                         + '"\necho \'[["demo"]]\'\n')
+    shortcuts.chmod(0o755)
     (root / "shell.qml").write_text(QML)
     (root / "network.txt").write_text("eth0: 100 0 0 0 0 0 0 0 50 0 0 0 0 0 0 0\n")
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen",
