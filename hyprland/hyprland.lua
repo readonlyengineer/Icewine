@@ -1,16 +1,4 @@
-----------------
----- MODULES ----
------------------
---- This is the root of the Hyprland lua tree,
---- Modules are sorted roughly by context upon which
---- they might be invoked in the future
-----------------
-require("modules.Baseline")
-require("modules.LookAndFeel")
-require("modules.Theme")
-require("modules.WindowPolicy")
-require("modules.Binds")
---- DefaultApps piggy backs in on Binds
-require("modules.Autostart")
-
-hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
+-- User entry point: Icewine owns implementation; add local overrides below.
+local implementation = assert(os.getenv("ICEWINE_IMPLEMENTATION"), "ICEWINE_IMPLEMENTATION is required; use the Icewine session environment")
+package.path = implementation .. "/hyprland/?.lua;" .. package.path
+require("icewine")

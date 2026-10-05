@@ -21,9 +21,7 @@ let
     runtimeInputs = with pkgs; [ coreutils grim grimblast wl-clipboard libnotify xdg-user-dirs ];
     text = builtins.readFile ../scripts/screenshot;
   };
-  quickshell = pkgs.quickshell.overrideAttrs (old: {
-    buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
-  });
+  quickshell = pkgs.callPackage ../quickshell/package.nix { };
   browserDefaults = pkgs.writeTextDir "share/applications/mimeapps.list" ''
     [Default Applications]
     x-scheme-handler/http=firefox.desktop;
@@ -112,6 +110,13 @@ in {
       { assertion = lib.all (name: name != "" && lib.all (part: part != "" && part != "." && part != "..") (lib.splitString "/" name))
           (builtins.attrNames cfg.defaultFiles.config ++ builtins.attrNames cfg.defaultFiles.data);
         message = "Icewine defaultFiles keys must be relative paths without . or .. components."; }
+      { assertion = lib.all (name: !(builtins.elem name [ "quickshell/icewine" "quickshell/modules" "quickshell/adapters" "quickshell/theme" "quickshell/DeckOverlay.qml" "quickshell/DeckMenu.js" ] || lib.hasPrefix "quickshell/icewine/" name
+          || lib.hasPrefix "quickshell/modules/" name || lib.hasPrefix "quickshell/adapters/" name
+          || lib.hasPrefix "quickshell/theme/" name
+          || builtins.elem name (map (module: "hypr/modules/${module}.lua")
+            [ "Baseline" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" "Deck" ])))
+          (builtins.attrNames cfg.defaultFiles.config);
+        message = "Icewine implementation is packaged; use Settings.qml, Binds.lua, Autostart.lua or entry-point/host hooks for customization."; }
     ];
 
     programs.hyprland = { enable = true; withUWSM = true; };

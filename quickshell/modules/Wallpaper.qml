@@ -4,7 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 import "Wallpaper.js" as Wallpaper
 

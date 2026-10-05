@@ -14,6 +14,10 @@ hl = {
 	get_active_window = function() return active end,
 	get_active_monitor = function() return active.monitor end,
 	get_windows = function() return windows end,
+	get_window = function(selector)
+		local pid = assert(tonumber(selector:match("^pid:(%d+)$")))
+		for _, win in ipairs(windows) do if win.pid == pid then return win end end
+	end,
 	get_workspaces = function() return workspaces end,
 	get_workspace_windows = function(ws) return ws.windows or {} end,
 	config = function(config) configured = config.scrolling.column_width end,
@@ -23,6 +27,7 @@ hl = {
 		window = {
 			fullscreen = function(request) return request end,
 			close = function(request) return { close = request.window } end,
+			move = function(request) return { move = request } end,
 		},
 	},
 	dispatch = function(request)
@@ -34,6 +39,9 @@ hl = {
 			active.size = { w = width * active.monitor.width }
 		elseif request.focus then
 			active, focuses = request.focus, focuses + 1
+		elseif request.move then
+			assert(request.move.follow == false)
+			request.move.window.workspace = request.move.workspace
 		elseif request.close then
 			closed = request.close
 			closed.mapped = false
@@ -151,55 +159,47 @@ events["window.move_to_workspace"](active)
 check(0.5, false)
 print("window policy: defaults, user overrides, toggles, adjustments and invalid-monitor fallback pass")
 
-local placement = rules["icewine-steam-placement"]
-assert(not placement.enabled and placement.no_initial_focus)
-assert(not placement.no_anim and not rules["icewine-steam-placeholder"].no_anim,
-	"Steam and its placeholder must retain normal navigation animations")
-assert(placement.suppress_event:find("fullscreenoutput", 1, true))
+assert(not rules["icewine-steam-placement"], "Catch-all Gamescope placement remains")
 local function placeholder(id)
-	local win = window(normal, 1, true)
-	win.initial_title = "Icewine Steam launch"
-	win.workspace.id, win.workspace.name = id, tostring(id)
-	events["window.open"](win)
-	return win
+    local win = window(normal, 1, true)
+    win.initial_title = "Icewine Steam launch"
+    win.workspace.id, win.workspace.name = id, tostring(id)
+    events["window.open"](win)
+    return win
 end
 
--- Keep the reserved workspace, but follow Steam when startup completes.
 local splash = placeholder(2)
-assert(placement.enabled and placement.workspace == "2 silent")
-local elsewhere = window(normal, 1, true)
-elsewhere.workspace.id = 1
+local unrelated = window(normal, 1, false)
+unrelated.class, unrelated.pid = "gamescope", 111
+local previous_workspace = unrelated.workspace
+closed = nil
+events["window.open"](unrelated)
+policy.handoff_steam(222)
+assert(closed == nil and unrelated.workspace == previous_workspace,
+    "Unrelated Gamescope consumed Steam's reservation")
+for _, pid in ipairs({0, -1, 1.5, "111"}) do policy.handoff_steam(pid) end
+assert(closed == nil, "Invalid PID reached handoff")
 local game = window(normal, 1, false)
-game.class, game.workspace = "gamescope", splash.workspace
-active = elsewhere -- the no-initial-focus rule keeps this window active at map.
-local before = focuses
+game.class, game.pid = "gamescope", 222
 events["window.open"](game)
-assert(active == game and focuses == before + 1, "Startup did not focus Steam")
+policy.handoff_steam(222)
+assert(active == game and game.fullscreen and closed == splash,
+    "Matching Steam session did not receive fullscreen/focus")
 assert(game.workspace.id == 2, "Steam lost its reserved workspace")
-assert(game.fullscreen and closed == splash and not placement.enabled)
 
--- Moving the placeholder updates placement; reloading preserves the reservation.
+-- Moving/reloading the placeholder preserves the target for explicit handoff.
 splash = placeholder(2)
 splash.workspace.id = 3
 events["window.move_to_workspace"](splash)
-assert(placement.workspace == "3 silent")
 events["config.reloaded"]()
-assert(placement.enabled and placement.workspace == "3 silent")
-game = window(normal, 1, false)
-game.class, game.workspace = "gamescope", splash.workspace
-active = splash
-events["window.open"](game)
-assert(active == game and game.fullscreen and closed == splash,
-	"Foreground startup did not transfer focus")
+policy.handoff_steam(222)
+assert(game.workspace.id == 3 and closed == splash, "Reload lost the reservation")
 
--- Closing the placeholder releases placement rather than affecting later launches.
-splash = placeholder(2)
+splash = placeholder(4)
 splash.mapped = false
 events["window.close"](splash)
-assert(not placement.enabled)
-game = window(normal, 1, false)
-game.class = "gamescope"
 closed = nil
-events["window.open"](game)
-assert(closed == nil and active == game)
-print("Steam placeholder: workspace reservation, background/foreground handoff, move, reload and close pass")
+policy.handoff_steam(222)
+assert(closed == nil and game.workspace.id == 3,
+    "Closed placeholder still moved the Steam session")
+print("Steam placeholder: PID identity, reserved workspace, fullscreen/focus, reload and close pass")

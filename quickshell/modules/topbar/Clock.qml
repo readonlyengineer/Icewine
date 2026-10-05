@@ -1,5 +1,5 @@
 import QtQuick
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Item {
     id: root

@@ -5,10 +5,10 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Widgets
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 import "DeckMenu.js" as Menu
-import "modules/topbar" as Bar
-import "modules/topbar/LauncherSearch.js" as LauncherSearch
+import "../modules/topbar" as Bar
+import "../modules/topbar/LauncherSearch.js" as LauncherSearch
 
 Scope {
     id: root

@@ -15,14 +15,30 @@ let
   themeIds = map (name: lib.removeSuffix ".json" name)
     (builtins.filter (name: lib.hasSuffix ".json" name)
       (builtins.attrNames (builtins.readDir ../theme/assets/themes)));
-  skippedThemeFiles =
-    lib.optionals (!cfg.gtk.enable) [ "gtk-3.0/settings.ini" "gtk-3.0/gtk.css" "gtk-4.0/settings.ini" "gtk-4.0/gtk.css" ]
-    ++ lib.optionals (cfg.fileManager.preset == null) [ "yazi/theme.toml" "yazi/keymap.toml" ]
-    ++ lib.optionals (!cfg.shell.enable || !cfg.shell.fastfetch.enable) [ "fastfetch/config.jsonc" ]
-    ++ lib.optionals (!cfg.shell.enable || !cfg.shell.starship.enable) [ "starship.toml" ];
+  themeConsumers = builtins.fromJSON (builtins.readFile ../theme/assets/consumers.json);
+  enabledConsumers = {
+    gtk = cfg.gtk.enable;
+    yazi = cfg.fileManager.preset == "yazi";
+    fastfetch = cfg.shell.enable && cfg.shell.fastfetch.enable;
+    starship = cfg.shell.enable && cfg.shell.starship.enable;
+  };
+  skippedThemeFiles = lib.concatLists (lib.mapAttrsToList (name: files:
+    lib.optionals (!enabledConsumers.${name}) (builtins.attrNames files)
+  ) themeConsumers);
+  implementation = pkgs.runCommand "icewine-implementation" { } ''
+    mkdir -p $out/quickshell/deck $out/hyprland/modules
+    cp -r ${../quickshell}/adapters ${../quickshell}/modules ${../quickshell}/theme $out/quickshell/
+    cp ${../quickshell}/deck/DeckOverlay.qml ${../quickshell}/deck/DeckMenu.js $out/quickshell/deck/
+    cp ${../quickshell}/Desktop.qml ${../quickshell}/Handheld.qml $out/quickshell/
+    cp ${../hyprland}/icewine.lua $out/hyprland/
+    ${lib.concatMapStringsSep "\n" (name:
+      "cp ${../hyprland}/modules/${name}.lua $out/hyprland/modules/"
+    ) [ "Baseline" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" ]}
+    cp ${../hyprland}/deck/Deck.lua $out/hyprland/modules/
+  '';
   defaults = pkgs.runCommand "icewine-default-files" { } ''
     mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/config/nvim $out/data
-    cp -r ${../hyprland}/modules/. $out/config/hypr/modules/
+    cp ${../hyprland}/modules/Binds.lua ${../hyprland}/modules/Autostart.lua $out/config/hypr/modules/
     cp ${../hyprland}/hyprland.lua $out/config/hypr/hyprland.lua
     cp ${../session/env} $out/config/uwsm/env
     cp ${../nvim/init.lua} $out/config/nvim/init.lua
@@ -42,17 +58,11 @@ let
       ln -s icewine/shell/bash_profile $out/home/.bash_profile
     ''}
     cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
-    cp -r ${../quickshell/adapters} $out/config/quickshell/adapters
-    cp -r ${../quickshell/modules} $out/config/quickshell/modules
-    cp -r ${../quickshell/theme} $out/config/quickshell/theme
     cp ${../quickshell/config/qmldir} $out/config/quickshell/config/qmldir
     cp ${../quickshell/config/Settings.qml} $out/config/quickshell/config/Settings.qml
     ${lib.optionalString cfg.handheld.enable ''
-      cp ${../hyprland/deck/Deck.lua} $out/config/hypr/modules/Deck.lua
       chmod u+w $out/config/hypr/hyprland.lua
       printf '\nrequire("modules.Deck")\n' >> $out/config/hypr/hyprland.lua
-      cp ${../quickshell/deck/DeckOverlay.qml} $out/config/quickshell/DeckOverlay.qml
-      cp ${../quickshell/deck/DeckMenu.js} $out/config/quickshell/DeckMenu.js
     ''}
     chmod -R u+w $out
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
@@ -61,10 +71,9 @@ let
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
       "mkdir -p $out/data/${lib.escapeShellArg (builtins.dirOf name)}; cp ${lib.escapeShellArg "${source}"} $out/data/${lib.escapeShellArg name}"
     ) cfg.defaultFiles.data)}
+    ln -s ${implementation}/quickshell $out/config/quickshell/icewine
   '';
-  quickshell = pkgs.quickshell.overrideAttrs (old: {
-    buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
-  });
+  quickshell = pkgs.callPackage ../quickshell/package.nix { };
   wallpaperSelector = pkgs.writeShellApplication {
     name = "icewine-wallpaper";
     runtimeInputs = [ pkgs.coreutils quickshell ];
@@ -88,6 +97,7 @@ let
       export ICEWINE_THEME_ASSETS=${../theme/assets}
       ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_THEME_FILE=/var/lib/icewine/sddm/theme.ini"}
       export ICEWINE_DEFAULT_FILES=${defaults}
+      export ICEWINE_IMPLEMENTATION=${implementation}
       export ICEWINE_STEAM_MASK_FILE=${if cfg.steam.enable then steamMask else ""}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
@@ -142,6 +152,7 @@ in {
       after = [ "icewine-init.service" ];
     };
     environment.sessionVariables = {
+      ICEWINE_IMPLEMENTATION = "${implementation}";
       EDITOR = lib.mkDefault (lib.escapeShellArgs cfg.applications.editor);
       ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";
       ICEWINE_KITTY_PRESET = if cfg.terminal.preset == "kitty" then "true" else "false";
@@ -174,6 +185,7 @@ in {
         "XDG_DATA_HOME=${dataHome}"
         "XDG_CONFIG_HOME=${configHome}"
         "XDG_STATE_HOME=${stateHome}"
+        "ICEWINE_IMPLEMENTATION=${implementation}"
         "ICEWINE_THEME_IDS=${lib.concatStringsSep ":" themeIds}"
         "ICEWINE_THEME_POLICY=${if cfg.theme == null then "" else cfg.theme}"
         "ICEWINE_AUTHENTICATION_REQUIRED=${if cfg.authenticationRequired then "true" else "false"}"

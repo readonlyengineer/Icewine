@@ -31,26 +31,6 @@ hl.window_rule({
 	match = { initial_title = "^Icewine Steam launch$" },
 	fullscreen = true,
 })
-local steam_placement = hl.window_rule({
-	name = "icewine-steam-placement",
-	match = { class = "^gamescope$" },
-	enabled = false,
-	no_initial_focus = true,
-	suppress_event = "activate activatefocus fullscreenoutput",
-})
-
-local function update_steam_placement()
-	if not steam_placeholder or not steam_placeholder.mapped then
-		steam_placement:set_enabled(false)
-		return
-	end
-	local ws = steam_placeholder.workspace
-	hl.window_rule({
-		name = "icewine-steam-placement",
-		enabled = true,
-		workspace = (ws.special and ws.name or tostring(ws.id)) .. " silent",
-	})
-end
 
 local function same_number(a, b)
 	return math.abs((a or 0) - (b or 0)) < epsilon
@@ -281,7 +261,6 @@ local function adopt_existing_windows()
 			state.fullscreen = fullscreen_of(win)
 		end
 	end
-	update_steam_placement()
 end
 
 function M.adjust_width(delta)
@@ -336,6 +315,20 @@ function M.toggle_floating()
 	apply_window(win)
 end
 
+function M.handoff_steam(pid)
+	if type(pid) ~= "number" or pid <= 0 or pid % 1 ~= 0
+		or not steam_placeholder or not steam_placeholder.mapped then return end
+	local win = hl.get_window("pid:" .. pid)
+	if not win or not win.mapped or win.class ~= "gamescope" then return end
+	local placeholder = steam_placeholder
+	hl.dispatch(hl.dsp.window.move({ workspace = placeholder.workspace, window = win, follow = false }))
+	state_for(win).fullscreen = true
+	set_fullscreen(win, true)
+	if not fullscreen_of(win) then return end
+	focus_window(win)
+	hl.dispatch(hl.dsp.window.close({ window = placeholder }))
+end
+
 hl.on("hyprland.start", function()
 	sync_default_width(hl.get_active_monitor())
 end)
@@ -361,21 +354,10 @@ hl.on("workspace.active", function(ws)
 end)
 
 hl.on("window.open", function(win)
-	if win.initial_title == steam_placeholder_title then
-		steam_placeholder = win
-		update_steam_placement()
-		return
-	end
-	if win.class == "gamescope" and steam_placeholder and steam_placeholder.mapped then
-		local placeholder = steam_placeholder
-		state_for(win).fullscreen = true
-		-- Keep Gamescope in the scrolling layout's fullscreen handling.
-		set_fullscreen(win, true)
-		if not fullscreen_of(win) then return end
-		focus_window(win)
-		hl.dispatch(hl.dsp.window.close({ window = placeholder }))
-		return
-	end
+    if win.initial_title == steam_placeholder_title then
+        steam_placeholder = win
+        return
+    end
 	local state = state_for(win)
 	if win.floating then
 		state.fullscreen = false
@@ -386,9 +368,8 @@ hl.on("window.open", function(win)
 end)
 
 hl.on("window.close", function(win)
-	if win == steam_placeholder then
-		steam_placeholder = nil
-		update_steam_placement()
+    if win == steam_placeholder then
+        steam_placeholder = nil
 	end
 	local key = key_for(win)
 	if not key then return end
@@ -397,7 +378,6 @@ hl.on("window.close", function(win)
 end)
 
 hl.on("window.move_to_workspace", function(win)
-	if win == steam_placeholder then update_steam_placement() end
 	apply_window(win)
 end)
 

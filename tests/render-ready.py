@@ -11,7 +11,7 @@ import tempfile
 source = Path(sys.argv[1]).resolve()
 qml = """import QtQuick
 import Quickshell
-import "modules" as Modules
+import "icewine/modules" as Modules
 import "sddm" as Sddm
 ShellRoot {
     id: root
@@ -154,7 +154,9 @@ ShellRoot {
 
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
-    (root / "modules").symlink_to(source / "quickshell/modules")
+    (root / "icewine").mkdir()
+    (root / "icewine/modules").symlink_to(source / "quickshell/modules")
+    (root / "icewine/theme").symlink_to(root / "theme")
     (root / "theme").mkdir()
     palette = (source / "theme/assets/templates/Palette.qml.in").read_text()
     (root / "theme/Palette.qml").write_text(re.sub(r"@\w+@", "7aa2f7", palette))
@@ -175,6 +177,7 @@ QtObject {
     for name, body in {
         "uwsm": 'printf "%s\\n" "$*" >> "$TEST_LAUNCHES"\n',
         "icewine-monitor-capabilities": "exit 0\n",
+        "systemctl": 'printf "LoadState=not-found\\nMainPID=0\\n"\n',
         "gdbus": '''if [[ "$1" == "call" ]]; then
     printf "(objectpath '/org/freedesktop/login1/session/_test',)\\n"
 else

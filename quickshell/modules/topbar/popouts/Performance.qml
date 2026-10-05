@@ -3,7 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import ".." as Bar
 import "../Metrics.js" as Metrics
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Flickable {
     id: root

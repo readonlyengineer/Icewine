@@ -5,7 +5,7 @@ import Quickshell
 import Quickshell.Services.SystemTray
 import Quickshell.Widgets
 import "LauncherSearch.js" as LauncherSearch
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Widget {
     id: root

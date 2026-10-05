@@ -2,7 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import "Metrics.js" as Metrics
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Rectangle {
     id: root

@@ -198,8 +198,10 @@ there is no saved selection; the old Nix-store-backed default is not migrated.
 replaces recognized old Home Manager links. It preserves user-edited files.
 Recognized links are backed up under `$XDG_STATE_HOME/icewine/migration-*`;
 unrecognized symlinks remain untouched and are reported as conflicts.
-Static Hyprland, Quickshell, UWSM, btop, locale and wallpaper defaults are
-installed as writable files. Icewine records the bytes or symlink it installed
+Quickshell QML/JS and Hyprland behaviour run from a read-only implementation
+package (the Nix store on NixOS).
+Writable defaults contain the small entry points, settings, bindings and hooks,
+plus UWSM, btop, locale and wallpaper configuration. Icewine records the bytes or symlink it installed
 in `$XDG_STATE_HOME/icewine/default-files.json`. Init refreshes a changed shipped
 default only while the current file still matches that record; your edits,
 untracked files, unknown symlinks and conflicting directories remain intact
@@ -219,34 +221,95 @@ starting; the desktop shell still requires successful initialization.
 Run
 `icewine reset APP` to adopt updated shipped defaults for `hypr`, `quickshell`,
 `uwsm`, `btop`, `user-dirs`, or `wallpapers`, or use `icewine reset` for all
-defaults. Reset saves replaced content first. Quickshell's writable
-`theme/Palette.qml` reads generated palette data; Hyprland `Theme.lua` remains
-an Icewine-managed link. An existing user-edited palette is preserved by `init`
-and may not support live updates. `icewine reset quickshell` backs it up and
-installs the live palette, but also replaces other edited Quickshell defaults;
-review the saved `defaults-reset-*` files before restoring local changes.
-New installations receive updated default implementation files automatically.
-A rollback to a generation containing this ownership-aware installer restores
-that generation's defaults wherever the current files remain unchanged. Older
-generations containing the previous installer preserve those files instead;
-they cannot use the ownership record to restore earlier defaults.
+defaults. Reset saves replaced content first. Generated appearance stays under
+`icewine/current`; Hyprland `modules/Theme.lua` is a managed link and the packaged
+Quickshell palette reads `palette.json` from that generated directory.
 
-Existing regular files installed before ownership records are untracked, even
-when they equal today's defaults: Icewine cannot establish whether they are
-user-owned. Init preserves them and reports the new shipped file to compare.
-Review those files and use a scoped `icewine reset APP` to back them up and adopt
-the current defaults, then merge your edits from the backup. Edited formerly
-managed files also remain yours; updated sibling implementation files may need
-corresponding manual adjustments to your overrides. In particular, preserve
-Kitty overrides in `host.conf` and review Quickshell settings after an update.
+Supported writable entry points are:
+
+- `quickshell/config/Settings.qml` for shell settings; keep its `qmldir` alongside it.
+- `quickshell/shell.qml` imports `"icewine" as Icewine` and runs `Icewine.Desktop {}`
+  or `Icewine.Handheld {}`. Additional user components may live in separate local
+  directories and be instantiated from this entry point.
+- `hypr/hyprland.lua` loads the packaged Icewine entry, then your host/Personal
+  modules or local overrides. Keep the packaged loader before those hooks.
+- `hypr/modules/Binds.lua` and `Autostart.lua` remain active writable hooks.
+  Load order is Baseline, LookAndFeel, generated Theme, WindowPolicy, Binds,
+  Autostart, fallback monitor, then appended handheld and host overrides.
+
+The runtime layout is independent of Nix store paths. `ICEWINE_IMPLEMENTATION`
+is a nonempty absolute implementation root containing `quickshell/` and
+`hyprland/`: Quickshell provides `Desktop.qml`, `Handheld.qml`, `adapters/`,
+`modules/`, `theme/` and `deck/`; Hyprland provides `icewine.lua` and its shared
+`modules/`. The managed `$XDG_CONFIG_HOME/quickshell/icewine` link targets that
+root's `quickshell/` directory. The writable Hyprland entry prepends
+`$ICEWINE_IMPLEMENTATION/hyprland/?.lua` to Lua's module search path. Neither
+runtime loader requires `/nix/store`; recognition of old Nix/Home Manager links
+intentionally still checks Nix provenance.
+
+For example, another packager could use `/usr/share/icewine` as that root.
+This describes a packaging contract, not a supported distribution or installer:
+
+- Supply compatible Hyprland Lua, Quickshell/Qt (including virtual keyboard),
+  systemd/UWSM session wiring, Icewine's command wrappers/tools, and the selected
+  applications/services. NixOS currently supplies and validates those dependencies.
+- Set `ICEWINE_IMPLEMENTATION` in the compositor/session environment. Launch
+  Quickshell using the user's writable configuration root and initialize it before
+  startup; a failed migration must prevent the new shell from starting.
+- Run the Python theme CLI through `icewine-theme` on PATH, supplying
+  `ICEWINE_THEME_ASSETS` (themes, templates and consumers.json), consistent
+  HOME/XDG config/data/state roots, and `ICEWINE_DEFAULT_FILES`. That defaults tree
+  contains `config/`, `data/` and optional `home/`; include the small entry points,
+  settings/hooks and the absolute `config/quickshell/icewine` link above. Keep
+  `default-files.json` with user state across upgrades. Match consumer flags/skip
+  settings to the installed applications; browser/GTK integration has its own
+  tools and session dependencies.
+
+Nix-specific package construction, dependency selection and session environment
+wiring stay in the NixOS module. Ordinary-directory loader checks establish this
+path contract; they do not validate another distribution's session integration.
+
+The `quickshell/icewine` link is managed package identity. `defaultFiles.config`
+may supply these settings and hooks; it cannot supply packaged implementation
+paths. Changes to internal QML/JS or Lua modules belong in an Icewine source fork.
+Updates refresh the implementation package without copying it into writable home
+files, while preserving edited settings and entry points. Existing edits to an
+entry point remain your compatibility responsibility when the packaged API changes.
+
+The first migration requires full `icewine init`. Unchanged recorded legacy
+implementation is backed up and retired automatically. Edited or untracked
+legacy modules, old entry points, and unknown package/container links block
+migration before files or generated appearance are changed; the old entry points
+and code remain in place. Retirements and both entry points are backed up as one
+migration batch. The complete layout is rechecked after backups/removals, during
+loader installation and before ownership is committed. A detected late edit,
+new legacy component or mounted-file failure aborts migration. Already switched
+loaders roll back only if still unchanged; removed files restore only to absent
+paths behind unchanged parents. New user content remains preserved, with recovery
+backups reported if a path cannot be restored. The individual loader writes are
+not atomic across a running session; finish editing before init.
+Back up the listed conflicts, move settings/bindings
+into the supported hooks or custom components into a separate local directory,
+then move the conflicting legacy paths aside and rerun `icewine init`. Internal
+behaviour edits require porting to a source fork. Untracked files are not adopted
+based on matching today's bytes. Do not use reset as a migration shortcut: it
+also restores settings and bindings within its explicit scope, and it cannot
+bypass implementation conflicts. Untouched Settings, Binds, Autostart and host
+hooks retain their existing paths; local edits to them survive ordinary init.
+
+Rollbacks within the packaged layout restore the implementation link and
+unchanged writable defaults. A rollback to the previous writable implementation
+layout can restore its unchanged recorded files, but cannot reconstruct user
+edits moved elsewhere; keep the migration backups and any manually moved code.
+Init preserves edited removed defaults and unrelated files. Keep Kitty overrides
+in `host.conf` and review Quickshell settings after an update.
 Init retires removed or disabled shipped defaults only if they still match the
 record, saving a backup first; edited remnants and other user files remain.
 A mounted file that cannot be removed remains with a diagnostic. Disabling
 Icewine entirely runs no initializer and leaves configuration, state and user
 data intact. Changing an XDG root also leaves the previous location intact.
 
-The recent theme-selection and Steam-shortcut changes require current Quickshell
-defaults. Init does not restart the running shell; restart `icewine.service`
+The packaged layout requires successful implementation migration. Init does not restart the running shell; restart `icewine.service`
 after adopting Quickshell changes. Updates preserve the selected theme,
 transparency, fullscreen preference and independently selected wallpaper.
 Init/reset serialize with each other and recheck live files after backup and
@@ -548,6 +611,19 @@ feature; they do not disable another module's configuration or delete user data.
 | `shell.blesh.enable = false;` | ble.sh installation and integration. |
 | `shell.starship.enable = false;` | Starship installation and prompt. |
 | `shell.starship.git.enable = false;` | Git information in the Starship prompt. |
+
+Opt-outs retire recognised Icewine-generated theme links and preserve user
+files and unknown links. GTK opt-out also retires unchanged recorded Flatpak
+CSS and Icewine's named-theme links. In a live session, it resets `gtk-theme`
+only when the value still matches Icewine's ownership record; older unrecorded
+selections need a manual change through your GTK settings. The existing colour
+scheme preference remains yours, and running applications may need restarting.
+
+Default-file updates retire untouched removed files before installing their
+replacements, so files can become directories in one `icewine init`. Directory
+ownership is not recorded: replacing a directory with a file requires you to
+back up and move that directory first, even when it is empty. Icewine reports
+the conflict and preserves its contents.
 
 Battery thresholds are editable in `quickshell/config/Settings.qml`: 20% low,
 10% critical and 5% danger warnings, then a 3% Suspend request by default.

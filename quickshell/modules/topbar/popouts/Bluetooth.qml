@@ -4,7 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Bluetooth
 import "StatusModel.js" as StatusModel
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Flickable {
     id: root
@@ -19,7 +19,14 @@ Flickable {
 
     signal advancedRequested(string tool)
 
+    function busy(device) {
+        return device.pairing || device.state === BluetoothDeviceState.Connecting
+            || device.state === BluetoothDeviceState.Disconnecting
+    }
+
     function activate(device) {
+        if (busy(device))
+            return
         if (device.connected) {
             device.disconnect()
         } else if (device.paired || device.bonded) {
@@ -28,6 +35,11 @@ Flickable {
             pairingDevice = device
             device.pair()
         }
+    }
+
+    function forget(device) {
+        if (!busy(device))
+            device.forget()
     }
 
     implicitHeight: contentHeight
@@ -103,7 +115,7 @@ Flickable {
                 width: content.width
                 device: modelData
                 onActivated: root.activate(modelData)
-                onForgotten: modelData.forget()
+                onForgotten: root.forget(modelData)
             }
         }
 
@@ -118,9 +130,7 @@ Flickable {
         id: deviceRow
 
         required property var device
-        readonly property bool loading: device.pairing
-            || device.state === BluetoothDeviceState.Connecting
-            || device.state === BluetoothDeviceState.Disconnecting
+        readonly property bool loading: root.busy(device)
         signal activated()
         signal forgotten()
 
@@ -191,20 +201,19 @@ Flickable {
             font.pixelSize: 9
         }
 
-        Text {
+        ActionButton {
             id: forget
 
             anchors.right: parent.right
             anchors.rightMargin: 9
             anchors.verticalCenter: parent.verticalCenter
             visible: deviceRow.device.bonded
+            enabled: !deviceRow.loading
+            width: 28
+            implicitHeight: 28
             text: "󰆴"
-            color: forgetHover.hovered ? Theme.Palette.error : Theme.Palette.muted
-            font.family: "JetBrainsMono Nerd Font"
-            font.pixelSize: 11
-
-            HoverHandler { id: forgetHover; cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: deviceRow.forgotten() }
+            Accessible.name: "Forget " + (deviceRow.device.name || deviceRow.device.deviceName || "device")
+            onClicked: deviceRow.forgotten()
         }
 
         HoverHandler { id: deviceHover; cursorShape: Qt.PointingHandCursor }

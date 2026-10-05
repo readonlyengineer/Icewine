@@ -2,7 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls as Controls
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Controls.Switch {
     id: root

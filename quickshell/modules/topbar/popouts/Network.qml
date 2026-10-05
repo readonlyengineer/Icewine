@@ -5,7 +5,7 @@ import Quickshell
 import Quickshell.Networking
 import "StatusModel.js" as StatusModel
 import ".." as Bar
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Item {
     id: root

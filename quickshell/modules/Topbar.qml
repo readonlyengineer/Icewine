@@ -9,7 +9,7 @@ import Quickshell.Services.Mpris
 import Quickshell.Wayland
 import "topbar" as Bar
 import "ShellState.js" as State
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Scope {
     id: root

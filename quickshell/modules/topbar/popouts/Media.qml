@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Flickable {
     id: root
@@ -129,6 +129,7 @@ Flickable {
             ActionButton {
                 width: 72
                 text: ""
+                Accessible.name: "Previous track"
                 enabled: root.player?.canGoPrevious ?? false
                 onClicked: root.player.previous()
             }
@@ -138,6 +139,7 @@ Flickable {
 
                 width: 86
                 text: root.player?.isPlaying ? "" : ""
+                Accessible.name: root.player?.isPlaying ? "Pause" : "Play"
                 enabled: root.player?.canTogglePlaying ?? false
                 onClicked: root.player.togglePlaying()
             }
@@ -145,6 +147,7 @@ Flickable {
             ActionButton {
                 width: 72
                 text: ""
+                Accessible.name: "Next track"
                 enabled: root.player?.canGoNext ?? false
                 onClicked: root.player.next()
             }

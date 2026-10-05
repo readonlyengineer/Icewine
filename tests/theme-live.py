@@ -33,11 +33,14 @@ def palette(theme):
 
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
-    (root / "modules").symlink_to(source / "quickshell/modules")
-    (root / "theme").symlink_to(source / "quickshell/theme")
+    implementation = root / "implementation"
+    # Exercise the real palette/service imports from ordinary installed files.
+    shutil.copytree(source / "quickshell/modules", implementation / "quickshell/modules")
+    shutil.copytree(source / "quickshell/theme", implementation / "quickshell/theme")
+    (root / "icewine").symlink_to(implementation / "quickshell")
     (root / "shell.qml").write_text('''import QtQuick
 import Quickshell
-import "modules" as Modules
+import "icewine/modules" as Modules
 ShellRoot {
     Modules.ThemeService {}
     Timer { interval: 1000; running: true; repeat: true }
@@ -68,7 +71,8 @@ ShellRoot {
                XDG_STATE_HOME=str(root / "state"), XDG_RUNTIME_DIR=str(root / "runtime"),
                XDG_CACHE_HOME=str(root / "cache"), TEST_ROOT=str(root),
                ICEWINE_THEME_IDS="tokyo-night:dracula:nord:catppuccin-mocha", ICEWINE_THEME_POLICY="",
-               ICEWINE_THEME_TRANSITION="off",
+               ICEWINE_IMPLEMENTATION=str(implementation), ICEWINE_THEME_TRANSITION="off", ICEWINE_BROWSER_THEME_ENABLE="false",
+               DBUS_SESSION_BUS_ADDRESS="", DBUS_SYSTEM_BUS_ADDRESS="",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
 
     def call(function, *args):

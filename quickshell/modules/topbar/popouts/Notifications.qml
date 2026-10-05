@@ -3,7 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import "../../notifications" as NotificationParts
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Item {
     id: root

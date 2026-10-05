@@ -15,11 +15,13 @@ import QtQuick.Window
 import QtTest
 import Quickshell
 import Quickshell.Services.UPower
-import "modules" as Modules
-import "modules/topbar" as Bar
-import "modules/topbar/popouts" as Popouts
+import "icewine/deck" as Deck
+import "icewine/modules" as Modules
+import "icewine/modules/topbar" as Bar
+import "icewine/modules/topbar/popouts" as Popouts
 ShellRoot {
     id: root
+    Component { id: handheldOverlay; Deck.DeckOverlay { compositor: compositor; sessionLocked: false; shell: root } }
     property bool keepAwake: false
     property bool doNotDisturb: false
     property int count: 0
@@ -30,11 +32,14 @@ ShellRoot {
     property string sessionAction: ""
     property int sleepCalls: 0
     property int toggles: 0
+    property int buttonCalls: 0
     signal tick()
     QtObject {
         id: compositor
         readonly property var toplevels: []
+        signal monitorsChanged()
         function activateWindow(address) {}
+        function getMonitors() { return [{name: "fixture-no-screen", width: 1280, height: 800}] }
     }
     QtObject {
         id: session
@@ -67,6 +72,7 @@ ShellRoot {
     Modules.BatteryAlert { session: session; batteryDevice: chargingBattery }
     Bar.SystemMetrics { id: systemMetrics }
     Bar.SteamShortcuts { id: steamShortcuts }
+    Modules.GameLauncher { id: gameLauncher; compositor: compositor }
     Component.onCompleted: steamShortcuts.refresh()
     Bar.HistoryGraph {
         id: coldGraph
@@ -119,7 +125,18 @@ ShellRoot {
             text: "Keyboard action"
             onToggled: ++root.toggles
         }
+        Popouts.ActionButton {
+            id: keyboardButton
+            y: 40
+            text: "Keyboard button"
+            onClicked: ++root.buttonCalls
+        }
         TestCase { id: toggleKeys; when: false }
+    }
+    Popouts.Media {
+        id: media
+        width: 380; height: 420
+        player: null
     }
     Popouts.Battery {
         id: battery
@@ -171,6 +188,12 @@ ShellRoot {
         interval: 400
         running: true
         onTriggered: {
+            if (handheldOverlay.status !== Component.Ready)
+                throw new Error("Packaged handheld overlay did not compile")
+            gameLauncher.launchSteamGamescope()
+            for (const name of ["Previous track", "Play", "Next track"])
+                if (!root.findAccessible(media, name))
+                    throw new Error("Missing named media action: " + name)
             toggleWindow.requestActivate()
             toggleKeys.tryCompare(toggleWindow, "active", true)
             keyboardToggle.forceActiveFocus()
@@ -180,6 +203,13 @@ ShellRoot {
                 toggleKeys.keyClick(key)
                 if (keyboardToggle.checked === previous || root.toggles !== actions + 1)
                     throw new Error(`Keyboard switch key ${key}: checked=${keyboardToggle.checked}, actions=${root.toggles - actions}, focused=${keyboardToggle.activeFocus}`)
+            }
+            keyboardButton.forceActiveFocus()
+            for (const key of [Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space]) {
+                const before = root.buttonCalls
+                toggleKeys.keyClick(key)
+                if (root.buttonCalls !== before + 1)
+                    throw new Error("Shared action button keyboard activation failed")
             }
             if (JSON.stringify(steamShortcuts.commands) !== '[["demo"]]')
                 throw new Error("Steam shortcut process result was not published")
@@ -259,6 +289,9 @@ ShellRoot {
         id: finish
         interval: 1200
         onTriggered: {
+            if (!gameLauncher.steamLaunching || !gameLauncher.pendingSteamCommand)
+                throw new Error("Native Steam service query did not resolve a launch")
+            gameLauncher.finishSteamLaunch()
             if (steamShortcuts.commands.length !== 0)
                 throw new Error("Failed Steam shortcut refresh left stale filtering")
             if (!brightness.available || brightness.value !== 76)
@@ -296,9 +329,16 @@ assert battery.index('id: keepAwake') < battery.index('text: "Battery condition"
 for action in ["Lock", "Sleep", "Reboot", "Shutdown"]:
     assert f'Accessible.name: "{action}"' in battery
     assert f'Controls.ToolTip.text: "{action}"' in battery
+bluetooth = (source / "quickshell/modules/topbar/popouts/Bluetooth.qml").read_text()
+assert re.search(r'ActionButton\s*\{\s*id: forget', bluetooth)
+assert 'Accessible.name: "Forget "' in bluetooth and 'onClicked: deviceRow.forgotten()' in bluetooth
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
-    (root / "modules").symlink_to(source / "quickshell/modules")
+    (root / "icewine").mkdir()
+    (root / "icewine/modules").symlink_to(source / "quickshell/modules")
+    (root / "icewine/theme").symlink_to(root / "theme")
+    for name in ("Desktop.qml", "Handheld.qml", "adapters", "deck"):
+        (root / "icewine" / name).symlink_to(source / "quickshell" / name)
     (root / "theme").mkdir()
     palette = (source / "theme/assets/templates/Palette.qml.in").read_text()
     (root / "theme/Palette.qml").write_text(re.sub(r"@\w+@", "7aa2f7", palette))
@@ -319,6 +359,12 @@ with tempfile.TemporaryDirectory() as directory:
                          + '" ]; then exit 1; fi\ntouch "' + str(root / "shortcuts-read")
                          + '"\necho \'[["demo"]]\'\n')
     shortcuts.chmod(0o755)
+    service = root / "bin/systemctl"
+    service.write_text("#!" + shutil.which("bash") + '\nprintf "LoadState=not-found\\nMainPID=0\\n"\n')
+    service.chmod(0o755)
+    capabilities = root / "bin/icewine-monitor-capabilities"
+    capabilities.write_text("#!" + shutil.which("bash") + '\nexit 0\n')
+    capabilities.chmod(0o755)
     (root / "shell.qml").write_text(QML)
     (root / "network.txt").write_text("eth0: 100 0 0 0 0 0 0 0 50 0 0 0 0 0 0 0\n")
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen",
@@ -327,8 +373,11 @@ with tempfile.TemporaryDirectory() as directory:
                DBUS_SYSTEM_BUS_ADDRESS="unix:path=" + str(root / "no-system-bus"),
                XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(root / "runtime"),
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
-    result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
-                            capture_output=True, text=True, timeout=10)
+    try:
+        result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                                capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError((error.stdout or b"").decode() + (error.stderr or b"").decode()) from error
     output = result.stdout + result.stderr
     assert result.returncode == 0 and "CONTROL_CHECK_PASSED" in output, output
     assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
@@ -338,4 +387,13 @@ with tempfile.TemporaryDirectory() as directory:
     assert any("-u normal Battery Low 20%" in call for call in notifications), notifications
     assert any("-u critical Battery Critical 10%" in call for call in notifications), notifications
     assert any("-u critical Battery Danger 5%" in call for call in notifications), notifications
-    print("control lifecycle checks passed")
+    # Native panels require a Wayland backend. Resolve the actual writable entry
+    # imports as far as that boundary without starting a compositor/session.
+    for entry in (source / "quickshell/shell.qml", source / "quickshell/deck/shell.qml"):
+        (root / "shell.qml").write_bytes(entry.read_bytes())
+        result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                                capture_output=True, text=True, timeout=10)
+        output = result.stdout + result.stderr
+        assert result.returncode != 0 and "No PanelWindow backend loaded." in output, output
+        assert not re.search(r"unresolvable import|not a type|No such file", output), output
+    print("control lifecycle and packaged entry imports pass; native panels require session validation")

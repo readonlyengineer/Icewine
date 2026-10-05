@@ -56,9 +56,7 @@ let
   steamOptOut = (handheldSystem.extendModules {
     modules = [ { services.icewine.steam.enable = false; } ];
   }).config;
-  quickshell = pkgs.quickshell.overrideAttrs (old: {
-    buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
-  });
+  quickshell = pkgs.callPackage ../quickshell/package.nix { };
   sddmTheme = pkgs.callPackage ../sddm { };
   icewineCli = builtins.head (lib.filter
     (package: lib.getName package == "icewine") desktop.users.users.demo.packages);
@@ -83,6 +81,7 @@ in {
   } ''
     shellcheck ${../quickshell/tools/monitor-brightness}
     python3 ${./brightness.py} ${../quickshell/tools/monitor-brightness}
+    bash ${./monitor-capabilities.sh} ${../quickshell/tools/probe-monitor-capabilities}
     touch "$out"
   '';
   controls = pkgs.runCommand "icewine-control-checks" {
@@ -177,7 +176,7 @@ in {
     assert !disabled.services.inputplumber.enable;
     assert !handheld.services.openssh.enable;
     assert !desktop.networking.networkmanager.enable;
-    pkgs.runCommand "icewine-module-checks" { } ''
+    pkgs.runCommand "icewine-module-checks" { nativeBuildInputs = [ pkgs.lua ]; } ''
       export HOME=$TMPDIR/home XDG_CONFIG_HOME=$TMPDIR/home/.config XDG_DATA_HOME=$TMPDIR/home/.local/share XDG_STATE_HOME=$TMPDIR/home/.local/state
       mkdir -p "$HOME"
       ${icewineCli}/bin/icewine init
@@ -186,9 +185,28 @@ in {
       cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
       cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"
       test ! -e "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"
+      test -L "$XDG_CONFIG_HOME/quickshell/icewine"
+      test -f "$XDG_CONFIG_HOME/quickshell/icewine/Desktop.qml"
+      test ! -e "$XDG_CONFIG_HOME/quickshell/modules"
       cmp ${../hyprland/hyprland.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua"
       test -L "$XDG_CONFIG_HOME/hypr/modules/Theme.lua"
       test ! -e "$XDG_CONFIG_HOME/hypr/tests"
+      export ICEWINE_IMPLEMENTATION=${desktop.environment.sessionVariables.ICEWINE_IMPLEMENTATION}
+      # Compare actual installed paths: individually interpolated Nix files or
+      # directories copied into a directory retain their store-prefixed basename.
+      for name in adapters/Hyprland.qml modules/Topbar.qml theme/qmldir theme/Palette.qml Desktop.qml Handheld.qml deck/DeckOverlay.qml deck/DeckMenu.js; do
+        cmp ${../quickshell}/"$name" "$ICEWINE_IMPLEMENTATION/quickshell/$name"
+      done
+      cmp ${../hyprland}/icewine.lua "$ICEWINE_IMPLEMENTATION/hyprland/icewine.lua"
+      for name in Baseline LookAndFeel WindowPolicy DefaultApps Docking; do
+        cmp ${../hyprland}/modules/"$name.lua" "$ICEWINE_IMPLEMENTATION/hyprland/modules/$name.lua"
+      done
+      cmp ${../hyprland}/deck/Deck.lua "$ICEWINE_IMPLEMENTATION/hyprland/modules/Deck.lua"
+      cmp ${../hyprland}/modules/Binds.lua "$XDG_CONFIG_HOME/hypr/modules/Binds.lua"
+      # Runtime loaders accept an ordinary implementation root as well as Nix store paths.
+      cp -r "$ICEWINE_IMPLEMENTATION" "$TMPDIR/portable-implementation"
+      export ICEWINE_IMPLEMENTATION=$TMPDIR/portable-implementation
+      lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" desktop
       export HOME=$TMPDIR/handheld XDG_CONFIG_HOME=$TMPDIR/handheld/.config XDG_DATA_HOME=$TMPDIR/handheld/.local/share XDG_STATE_HOME=$TMPDIR/handheld/.local/state
       mkdir -p "$HOME"
       ${handheldCli}/bin/icewine init
@@ -198,12 +216,17 @@ in {
       test ! -e ${steamEntryPackage}/share/applications/steam.desktop
       grep -Fx 'application/pdf=firefox.desktop;' ${mimePackage}/share/applications/mimeapps.list
       test ! -e "$XDG_DATA_HOME/applications/steam-gamescope.desktop"
-      test -f "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"
+      test ! -e "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"
+      test -L "$XDG_CONFIG_HOME/quickshell/icewine"
+      test -f "$XDG_CONFIG_HOME/quickshell/icewine/Handheld.qml"
+      test ! -e "$XDG_CONFIG_HOME/quickshell/modules"
       { cat ${../hyprland/hyprland.lua}; printf '\nrequire("modules.Deck")\n'; } > "$TMPDIR/handheld-hyprland.lua"
       cmp "$TMPDIR/handheld-hyprland.lua" "$XDG_CONFIG_HOME/hypr/hyprland.lua"
       cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
       cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"
       cmp ${../quickshell/deck/shell.qml} "$XDG_CONFIG_HOME/quickshell/shell.qml"
+      export ICEWINE_IMPLEMENTATION=$TMPDIR/portable-implementation
+      lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" handheld
       touch "$out"
     '';
 }

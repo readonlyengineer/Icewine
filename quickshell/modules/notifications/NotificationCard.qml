@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Services.Notifications
 import "Model.js" as NotificationModel
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Rectangle {
     id: root

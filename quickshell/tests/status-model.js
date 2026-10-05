@@ -38,3 +38,31 @@ assert.deepEqual(status.bluetoothDevices(devices).map(device => device.name),
     ["Mouse", "Alpha", "Zulu"])
 
 console.log("status model checks passed")
+
+// Exercise the shared Bluetooth handlers used by pointer and keyboard callers.
+const fs = require("node:fs")
+const path = require("node:path")
+const vm = require("node:vm")
+const bluetooth = fs.readFileSync(path.join(__dirname, "../modules/topbar/popouts/Bluetooth.qml"), "utf8")
+const bluetoothState = {Connecting: 1, Disconnecting: 2}
+const bluetoothContext = vm.createContext({BluetoothDeviceState: bluetoothState, pairingDevice: null})
+for (const name of ["busy", "activate", "forget"])
+    vm.runInContext(bluetooth.match(new RegExp(`    function ${name}\\(device\\) \\{[\\s\\S]*?^    \\}`, "m"))[0], bluetoothContext)
+for (const busy of [{pairing: true}, {state: 1}, {state: 2}]) {
+    const device = {...busy, paired: true,
+        connect() { throw new Error("Busy device connected") },
+        disconnect() { throw new Error("Busy device disconnected") },
+        pair() { throw new Error("Busy device paired") },
+        forget() { throw new Error("Busy device forgotten") }}
+    bluetoothContext.activate(device)
+    bluetoothContext.forget(device)
+}
+const actions = []
+const idleDevice = {paired: true,
+    connect() { actions.push("connect") }, disconnect() { actions.push("disconnect") },
+    pair() { actions.push("pair") }, forget() { actions.push("forget") }}
+bluetoothContext.activate(idleDevice)
+bluetoothContext.activate({...idleDevice, connected: true})
+bluetoothContext.activate({...idleDevice, paired: false})
+bluetoothContext.forget(idleDevice)
+assert.deepEqual(actions, ["connect", "disconnect", "pair", "forget"])

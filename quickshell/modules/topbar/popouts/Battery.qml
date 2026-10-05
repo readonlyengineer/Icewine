@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import Quickshell.Services.UPower
 import "StatusModel.js" as StatusModel
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Flickable {
     id: root
@@ -206,9 +206,8 @@ Flickable {
 
         Text {
             visible: root.brightness.available
-            text: root.brightness.available ? `Brightness  ${root.brightness.value}%`
-                : root.brightness.error || "Reading brightness…"
-            color: root.brightness.available ? Theme.Palette.foreground : Theme.Palette.muted
+            text: `Brightness  ${root.brightness.value}%`
+            color: Theme.Palette.foreground
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 11
         }

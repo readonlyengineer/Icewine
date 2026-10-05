@@ -1,7 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 QtObject {
     id: root

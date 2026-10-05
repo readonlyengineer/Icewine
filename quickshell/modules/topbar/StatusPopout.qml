@@ -3,7 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import "popouts" as Popouts
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Widget {
     id: root

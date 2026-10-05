@@ -3,7 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Services.Pipewire
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Flickable {
     id: root

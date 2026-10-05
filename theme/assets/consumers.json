@@ -1,0 +1,14 @@
+{
+  "gtk": {
+    "gtk-3.0/settings.ini": "gtk-settings.ini",
+    "gtk-3.0/gtk.css": "gtk.css",
+    "gtk-4.0/settings.ini": "gtk4-settings.ini",
+    "gtk-4.0/gtk.css": "gtk4.css"
+  },
+  "yazi": {
+    "yazi/theme.toml": "yazi-theme.toml",
+    "yazi/keymap.toml": "yazi-keymap.toml"
+  },
+  "fastfetch": { "fastfetch/config.jsonc": "fastfetch.jsonc" },
+  "starship": { "starship.toml": "starship.toml" }
+}

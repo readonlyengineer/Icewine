@@ -3,7 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 import "GameLauncher.js" as Launcher
 
 Scope {
@@ -19,6 +19,8 @@ Scope {
     property string steamSplashScreen: ""
     property var pendingSteamCommand: null
     property int steamAutostartRetries: 0
+    property double steamGamescopePid: 0
+    property bool steamRequestPending: false
 
     function monitorRecord(m) {
         var capabilities = monitorCapabilities[String(m.name || "")] || {}
@@ -122,6 +124,8 @@ Scope {
         root.steamSplashVisible = false
         root.steamSplashScreen = ""
         root.pendingSteamCommand = null
+        root.steamRequestPending = false
+        steamSessionProbe.running = false
         steamLaunchTimeout.stop()
     }
 
@@ -145,12 +149,56 @@ Scope {
             compositor.activateWindow(decision.window.address)
             return JSON.stringify({ok: true, reused: true}, null, 2)
         }
-        if (decision.action === "wait")
+        if (decision.action === "wait" || root.steamRequestPending || steamSessionProbe.running)
             return JSON.stringify({ok: true, pending: true}, null, 2)
 
         var plan = root.gamescopePlan(["icewine-steam"], true)
         if (!plan.ok)
             return JSON.stringify(plan, null, 2)
+
+        root.steamRequestPending = true
+        root.steamGamescopePid = 0
+        steamLaunchTimeout.restart()
+        root.probeSteamSession()
+        return JSON.stringify({ok: true, pending: true}, null, 2)
+    }
+
+    function probeSteamSession() {
+        if (!steamSessionProbe.running) {
+            steamSessionProbe.output = ""
+            steamSessionProbe.exec(["systemctl", "--user", "show", "icewine-steam-gamescope.service",
+                                   "--property=MainPID", "--property=LoadState"])
+        }
+    }
+
+    function resolveSteamRequest(output) {
+        var pid = Launcher.steamServicePid(output)
+        if (pid === null) {
+            root.finishSteamLaunch()
+            console.warn("Could not identify the Steam Gamescope service")
+            return
+        }
+        if (root.steamRequestPending && root.steamGamescopePid > 0 && pid === 0) {
+            root.finishSteamLaunch()
+            return
+        }
+        root.steamGamescopePid = pid
+        if (!root.steamRequestPending) {
+            root.handoffSteam()
+            return
+        }
+        var decision = Launcher.steamLaunchAction(compositor.toplevels, root.steamLaunching, pid)
+        if (decision.action === "focus") {
+            root.finishSteamLaunch()
+            compositor.activateWindow(decision.window.address)
+            return
+        }
+        if (decision.action === "wait")
+            return
+        root.steamRequestPending = false
+        var plan = root.gamescopePlan(["icewine-steam"], true)
+        if (!plan.ok)
+            return
 
         root.steamSplashScreen = plan.monitor.name
         root.steamLaunching = true
@@ -164,7 +212,18 @@ Scope {
             "-p", "ExitType=main", "-p", "KillMode=control-group", "--"
         ].concat(plan.arguments)
         steamLaunchTimeout.restart()
-        return JSON.stringify(plan, null, 2)
+    }
+
+    function handoffSteam() {
+        var existing = Launcher.existingSteamWindow(compositor.toplevels, root.steamGamescopePid)
+        if (root.steamRequestPending && existing) {
+            root.finishSteamLaunch()
+            compositor.activateWindow(existing.address)
+            return
+        }
+        if (root.steamLaunching && Launcher.gamescopeWindow(compositor.toplevels, root.steamGamescopePid))
+            Quickshell.execDetached(["hyprctl", "eval",
+                'require("modules.WindowPolicy").handoff_steam(' + root.steamGamescopePid + ')'])
     }
 
     function autostartSteamGamescope() {
@@ -177,6 +236,23 @@ Scope {
         } else {
             root.steamAutostartRetries = 0
         }
+    }
+
+    Process {
+        id: steamSessionProbe
+        property string output: ""
+        stdout: StdioCollector { onStreamFinished: steamSessionProbe.output = this.text }
+        onExited: root.resolveSteamRequest(output)
+    }
+
+    Timer {
+        // Ponytail: bounded startup polling until MainPID appears; use service
+        // notifications if repeated systemctl calls become measurable.
+        interval: 250
+        repeat: true
+        running: root.steamRequestPending
+            || (root.steamLaunching && root.pendingSteamCommand === null && root.steamGamescopePid === 0)
+        onTriggered: root.probeSteamSession()
     }
 
     Process {
@@ -217,6 +293,7 @@ Scope {
         function onMonitorsChanged() {
             root.probeMonitorCapabilities()
         }
+        function onToplevelsChanged() { root.handoffSteam() }
     }
 
     Variants {

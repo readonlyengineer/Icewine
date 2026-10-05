@@ -5,7 +5,7 @@ import Quickshell
 import Quickshell.Services.SystemTray
 import Quickshell.Widgets
 import "BackgroundAppsModel.js" as BackgroundAppsModel
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 FocusScope {
     id: root

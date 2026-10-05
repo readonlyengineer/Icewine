@@ -8,7 +8,7 @@ import Quickshell.Services.Notifications
 import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 import "popouts/StatusModel.js" as StatusModel
-import qs.theme as Theme
+import qs.icewine.theme as Theme
 
 Rectangle {
     id: root
