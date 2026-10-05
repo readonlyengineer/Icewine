@@ -10,6 +10,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import tomllib
 import types
 from pathlib import Path
@@ -213,11 +215,11 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (root / ".profile").read_text() == "custom login profile\n"
     bash_migration = list((state / "icewine").glob("defaults-migration-*/home/.bashrc"))
     assert len(bash_migration) == 1 and os.readlink(bash_migration[0]) == legacy_bash_target
-    assert not old_steam.exists() and not old_steam.is_symlink()
+    assert old_steam.is_symlink() and os.readlink(old_steam) == old_steam_target
     assert custom_launcher.read_text() == "user Steam launcher\n"
     assert unknown_steam.is_symlink()
     steam_migration = list((state / "icewine").glob("defaults-migration-*/data/applications/steam.desktop"))
-    assert len(steam_migration) == 1 and os.readlink(steam_migration[0]) == old_steam_target
+    assert not steam_migration  # Unreadable legacy content cannot establish Icewine ownership.
     for path in unit_links:
         assert not path.exists() and not path.is_symlink()
         backups = list((state / "icewine").glob("defaults-migration-*/config/"
@@ -229,7 +231,9 @@ with tempfile.TemporaryDirectory() as temporary:
 
     (config / "quickshell/modules/Thing.qml").write_text("user module edit\n")
     (root / "data/wallpapers/default.jpg").write_bytes(b"user wallpaper")
+    backups_before = set((state / "icewine").glob("defaults-migration-*"))
     assert run("init").returncode == 0
+    assert set((state / "icewine").glob("defaults-migration-*")) == backups_before
     assert (config / "quickshell/modules/Thing.qml").read_text() == "user module edit\n"
     assert (root / "data/wallpapers/default.jpg").read_bytes() == b"user wallpaper"
     assert custom_launcher.read_text() == "user Steam launcher\n"
@@ -352,6 +356,88 @@ with tempfile.TemporaryDirectory() as temporary:
     # Exercise migration of a live Home Manager target and its content backup.
     module = types.ModuleType("icewine_theme")
     importlib.machinery.SourceFileLoader(module.__name__, str(script)).exec_module(module)
+    # Force both publishers past the existence check before the real rename.
+    concurrent_config = root / "concurrent-config"
+    barrier = threading.Barrier(2)
+    rename = Path.rename
+    def simultaneous_rename(path, destination):
+        if path.name.startswith(".render-"):
+            barrier.wait(timeout=5)
+        return rename(path, destination)
+    with mock.patch.object(Path, "rename", simultaneous_rename), ThreadPoolExecutor(max_workers=2) as publishers:
+        jobs = [publishers.submit(module.publish, concurrent_config, {"palette.json": "{}\n"}) for _ in range(2)]
+        for job in jobs:
+            job.result(timeout=10)
+    assert (concurrent_config / "icewine/current/palette.json").read_text() == "{}\n"
+    with mock.patch.object(Path, "rename", side_effect=PermissionError(errno.EACCES, "denied")):
+        try:
+            module.publish(concurrent_config, {"palette.json": "changed\n"})
+        except PermissionError:
+            pass
+        else:
+            raise AssertionError("publication must propagate non-collision errors")
+    # User-data masks override exported launchers, survive unchanged init, and
+    # retire on opt-out without removing edited files or unrelated symlinks.
+    mask_root = root / "mask-home"
+    mask_defaults = root / "mask-defaults"
+    for directory in (mask_root, mask_defaults / "config", mask_defaults / "data"):
+        directory.mkdir(parents=True)
+    mask_config, mask_data, mask_state = (mask_root / name for name in ("config", "data", "state"))
+    mask_store = root / "mask-store"
+    mask_store.mkdir()
+    first_mask = mask_store / ("a" * 32 + "-icewine-steam-mask.desktop")
+    first_mask.write_text("[Desktop Entry]\nHidden=true\n")
+    second_mask = mask_store / ("b" * 32 + "-icewine-steam-mask.desktop")
+    second_mask.write_text(first_mask.read_text())
+    with mock.patch.object(module, "STORE_DIR", mask_store), mock.patch.dict(os.environ, {
+        "HOME": str(mask_root), "XDG_CONFIG_HOME": str(mask_config),
+        "ICEWINE_STEAM_MASK_FILE": str(first_mask),
+    }):
+        def reconcile_masks():
+            module.install_defaults(str(mask_defaults), mask_config, mask_data, mask_state, False, None)
+        reconcile_masks()
+        mask_paths = [mask_data / "applications" / name for name in
+                      ("steam.desktop", "com.valvesoftware.Steam.desktop")]
+        assert all(path.is_symlink() and os.readlink(path) == str(first_mask) for path in mask_paths)
+        reconcile_masks()
+        assert not list(mask_state.glob("defaults-migration-*"))
+        os.environ["ICEWINE_STEAM_MASK_FILE"] = str(second_mask)
+        reconcile_masks()
+        assert all(os.readlink(path) == str(second_mask) for path in mask_paths)
+        os.environ["ICEWINE_STEAM_MASK_FILE"] = ""
+        reconcile_masks()
+        assert all(not path.exists() and not path.is_symlink() for path in mask_paths)
+        legacy_mask = mask_store / ("c" * 32 + "-home-manager-files") / "data/applications/steam.desktop"
+        legacy_mask.parent.mkdir(parents=True)
+        legacy_mask.write_text("[Desktop Entry]\nType=Application\nName=Steam\nNoDisplay=true\nHidden=true\n")
+        legacy_launcher = legacy_mask.with_name("steam-gamescope.desktop")
+        legacy_launcher.write_text(
+            "[Desktop Entry]\nVersion=1.0\nType=Application\nName=Steam (Gamescope)\n"
+            "Comment=Launch Steam inside monitor-aware Gamescope\nIcon=steam\n"
+            "Categories=Game;\nTerminal=false\nExec=/nix/store/" + "d" * 32
+            + "-quickshell-0.3.1/bin/qs ipc call gameLauncher launchSteamGamescope\n")
+        launcher_path = mask_data / "applications/steam-gamescope.desktop"
+        launcher_path.symlink_to(legacy_launcher)
+        mask_paths[0].symlink_to(legacy_mask)
+        os.environ["ICEWINE_STEAM_MASK_FILE"] = str(first_mask)
+        reconcile_masks()
+        assert os.readlink(mask_paths[0]) == str(first_mask)
+        assert not launcher_path.exists() and not launcher_path.is_symlink()
+        os.environ["ICEWINE_STEAM_MASK_FILE"] = ""
+        reconcile_masks()
+        legacy_mask.write_text("[Desktop Entry]\nName=Custom Steam\nExec=custom-launcher\n")
+        legacy_launcher.write_text(legacy_launcher.read_text() + "X-Custom=true\n")
+        launcher_path.symlink_to(legacy_launcher)
+        mask_paths[0].symlink_to(legacy_mask)
+        mask_paths[1].symlink_to(first_mask.parent / "custom-mask")
+        os.environ["ICEWINE_STEAM_MASK_FILE"] = str(first_mask)
+        reconcile_masks()
+        os.environ["ICEWINE_STEAM_MASK_FILE"] = ""
+        reconcile_masks()
+        assert os.readlink(mask_paths[0]) == str(legacy_mask)
+        assert mask_paths[0].read_text() == "[Desktop Entry]\nName=Custom Steam\nExec=custom-launcher\n"
+        assert os.readlink(mask_paths[1]) == str(first_mask.parent / "custom-mask")
+        assert launcher_path.is_symlink() and "X-Custom=true" in launcher_path.read_text()
     mounted = config / "user-dirs.locale"
     mounted.write_text("user locale edit\n")
     replace = os.replace

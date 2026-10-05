@@ -41,13 +41,6 @@ function cpuUsage(current, previous) {
     return total > 0 && idle >= 0 && idle <= total ? 100 * (total - idle) / total : null
 }
 
-function memoryUsage(text) {
-    const total = /^MemTotal:\s+(\d+)\s+kB$/m.exec(text)
-    const available = /^MemAvailable:\s+(\d+)\s+kB$/m.exec(text)
-    if (!total || !available || +total[1] <= 0 || +available[1] > +total[1]) return null
-    return 100 * (1 - Number(available[1]) / Number(total[1]))
-}
-
 function memory(text) {
     const total = /^MemTotal:\s+(\d+)\s+kB$/m.exec(text)
     const available = /^MemAvailable:\s+(\d+)\s+kB$/m.exec(text)
@@ -144,5 +137,5 @@ function format(value, unit) {
 }
 
 if (typeof module !== "undefined")
-    module.exports = { network, networkRate, cpu, cpuUsage, memoryUsage, memory,
+    module.exports = { network, networkRate, cpu, cpuUsage, memory,
         sensorDefinitions, gpuGroups, sensor, append, format }

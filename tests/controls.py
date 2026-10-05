@@ -12,6 +12,7 @@ import tempfile
 
 QML = """import QtQuick
 import QtQuick.Window
+import QtTest
 import Quickshell
 import Quickshell.Services.UPower
 import "modules" as Modules
@@ -28,6 +29,7 @@ ShellRoot {
     property real performanceHeightBefore: 0
     property string sessionAction: ""
     property int sleepCalls: 0
+    property int toggles: 0
     signal tick()
     QtObject {
         id: compositor
@@ -108,6 +110,17 @@ ShellRoot {
         monitorName: "DP-1"
         active: true
     }
+    Window {
+        id: toggleWindow
+        visible: true
+        width: 200; height: 80
+        Popouts.Toggle {
+            id: keyboardToggle
+            text: "Keyboard action"
+            onToggled: ++root.toggles
+        }
+        TestCase { id: toggleKeys; when: false }
+    }
     Popouts.Battery {
         id: battery
         width: 380; height: 420
@@ -158,6 +171,16 @@ ShellRoot {
         interval: 400
         running: true
         onTriggered: {
+            toggleWindow.requestActivate()
+            toggleKeys.tryCompare(toggleWindow, "active", true)
+            keyboardToggle.forceActiveFocus()
+            for (const key of [Qt.Key_Return, Qt.Key_Enter]) {
+                const previous = keyboardToggle.checked
+                const actions = root.toggles
+                toggleKeys.keyClick(key)
+                if (keyboardToggle.checked === previous || root.toggles !== actions + 1)
+                    throw new Error(`Keyboard switch key ${key}: checked=${keyboardToggle.checked}, actions=${root.toggles - actions}, focused=${keyboardToggle.activeFocus}`)
+            }
             if (JSON.stringify(steamShortcuts.commands) !== '[["demo"]]')
                 throw new Error("Steam shortcut process result was not published")
             steamShortcuts.refresh()

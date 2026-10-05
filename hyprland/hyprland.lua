@@ -13,4 +13,4 @@ require("modules.Binds")
 --- DefaultApps piggy backs in on Binds
 require("modules.Autostart")
 
-hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })

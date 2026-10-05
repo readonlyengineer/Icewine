@@ -193,7 +193,9 @@ in {
       mkdir -p "$HOME"
       ${handheldCli}/bin/icewine init
       grep -Fx 'Icon=steam' ${steamEntryPackage}/share/applications/steam-gamescope.desktop
-      grep -Fx 'Hidden=true' ${steamEntryPackage}/share/applications/steam.desktop
+      grep -Fx 'Hidden=true' "$XDG_DATA_HOME/applications/steam.desktop"
+      grep -Fx 'Hidden=true' "$XDG_DATA_HOME/applications/com.valvesoftware.Steam.desktop"
+      test ! -e ${steamEntryPackage}/share/applications/steam.desktop
       grep -Fx 'application/pdf=firefox.desktop;' ${mimePackage}/share/applications/mimeapps.list
       test ! -e "$XDG_DATA_HOME/applications/steam-gamescope.desktop"
       test -f "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"

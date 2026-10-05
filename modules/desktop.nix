@@ -1,7 +1,7 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.icewine;
-  launcher = pkgs.writeText "steam-gamescope.desktop" ''
+  steamEntries = (pkgs.writeTextDir "share/applications/steam-gamescope.desktop" ''
     [Desktop Entry]
     Type=Application
     Name=Steam (Gamescope)
@@ -10,20 +10,7 @@ let
     Icon=${if builtins.elem "com.valvesoftware.Steam" cfg.applications.steam then "com.valvesoftware.Steam" else "steam"}
     Categories=Game;
     Terminal=false
-  '';
-  hidden = pkgs.writeText "icewine-hidden.desktop" ''
-    [Desktop Entry]
-    Type=Application
-    Name=Steam
-    NoDisplay=true
-    Hidden=true
-  '';
-  steamEntries = pkgs.runCommand "icewine-steam-desktop-entries" { } ''
-    mkdir -p $out/share/applications
-    cp ${launcher} $out/share/applications/steam-gamescope.desktop
-    cp ${hidden} $out/share/applications/steam.desktop
-    cp ${hidden} $out/share/applications/com.valvesoftware.Steam.desktop
-  '';
+  '').overrideAttrs { name = "icewine-steam-desktop-entries"; };
 in {
   config = lib.mkIf cfg.enable {
     services.icewine.defaultFiles.data = {
@@ -48,7 +35,7 @@ in {
         }
         listener {
           timeout = 600
-          on-timeout = loginctl lock-session
+          on-timeout = qs ipc call session lock
         }
         listener {
           timeout = 1200

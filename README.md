@@ -152,7 +152,7 @@ hardware.bluetooth.enable = true;
 
 Customise monitors, bindings and other Hyprland settings in
 `~/.config/hypr/hyprland.lua`. The default uses each display's preferred mode,
-automatic placement and scale 1. Add settings directly or load your own Lua
+automatic placement and scaling. Add settings directly or load your own Lua
 modules with `require()`. Rebuilds preserve edits; `icewine reset hypr` backs
 up the current files and restores shipped defaults.
 
@@ -207,7 +207,9 @@ reloaded. If reload reports `Pending`, run `systemctl --user daemon-reload` in
 the user session. Edited or unknown units are preserved and reported as conflicts.
 The defaults come from Icewine, except for host-selected files supplied by
 NixOS; later activations and theme changes preserve local edits. NixOS prepares
-the files before the display manager starts and refreshes them on user activation.
+the files before the display manager starts and initializes missing files on
+user activation. Initialization errors are reported but do not prevent SDDM
+starting; the desktop shell still requires successful initialization.
 Run
 `icewine reset APP` to adopt updated shipped defaults for `hypr`, `quickshell`,
 `uwsm`, `btop`, `user-dirs`, or `wallpapers`, or use `icewine reset` for all
@@ -217,6 +219,14 @@ an Icewine-managed link. An existing user-edited palette is preserved by `init`
 and may not support live updates. `icewine reset quickshell` backs it up and
 installs the live palette, but also replaces other edited Quickshell defaults;
 review the saved `defaults-reset-*` files before restoring local changes.
+Updates do not refresh existing regular files, even if they have never been
+edited. After an update changes Quickshell or Hyprland defaults, compare your
+files with the new Icewine and host defaults before a scoped reset, then merge
+your edits from its backup. This update changes Hyprland's fallback monitor
+scale; existing installations need to adopt `scale = "auto"` in their editable
+`hyprland.lua`. The recent theme-selection and Steam-shortcut changes require
+the current Quickshell defaults. A reset does not restart the running shell;
+restart `icewine.service` after adopting Quickshell changes.
 `icewine init APP` installs missing files for one of `quickshell`, `gtk`,
 `yazi`, `fastfetch`, `starship`, `hypr`, `uwsm`, `btop`, `user-dirs`,
 `wallpapers`, `nvim`, or `bash`. `icewine reset APP` backs up and refreshes
@@ -431,11 +441,13 @@ services.icewine.applications.steam = [
 ];
 ```
 
-The Gamescope launcher and Steam hiding entries are installed in the selected
-user's NixOS package profile while `steam.enable` is true. Disabling it removes
-those profile entries on the next generation. `icewine init` backs up and
-retires recognized old Home Manager links; local launcher edits and unknown
-symlinks remain untouched and may override the profile entries.
+The Gamescope launcher is installed in the selected user's NixOS package
+profile while `steam.enable` is true. Steam hiding entries are owned symlinks
+under `$XDG_DATA_HOME/applications`, ahead of Flatpak exports. Disabling Steam
+integration removes those masks on the next full `icewine init`, run during
+boot and user activation, and removes the profile launcher on the next
+generation. Old Home Manager links are backed up during migration; local
+launcher edits and unknown symlinks remain untouched.
 
 Handheld mode installs native Steam for its Gamescope/controller integration.
 Steam is proprietary, so allow unfree packages on the host:

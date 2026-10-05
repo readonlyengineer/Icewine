@@ -29,12 +29,15 @@ let
       starship.enable = false;
     };
   };
-  themeAssets = import ../theme/bundle.nix { inherit pkgs; };
   cli = builtins.head (lib.filter (pkg: lib.getName pkg == "icewine") defaults.users.users.demo.packages);
 in
 assert defaults.systemd.user.services.hypridle.unitConfig.ConditionUser == "demo";
 assert defaults.systemd.user.services.hyprpolkitagent.unitConfig.ConditionUser == "demo";
-assert lib.elem "icewine-init.service" defaults.systemd.services.display-manager.requires;
+assert lib.elem "icewine-init.service" defaults.systemd.services.display-manager.wants;
+assert !(lib.elem "icewine-init.service" defaults.systemd.services.display-manager.requires);
+assert lib.elem "icewine-init.service" defaults.systemd.services.display-manager.after;
+assert defaults.environment.sessionVariables.ICEWINE_KITTY_PRESET == "true";
+assert unmanaged.environment.sessionVariables.ICEWINE_KITTY_PRESET == "false";
 assert defaults.systemd.services.icewine-init.serviceConfig.User == "demo";
 assert lib.elem pkgs.yazi defaults.users.users.demo.packages;
 assert lib.elem pkgs.kitty defaults.users.users.demo.packages;
@@ -80,7 +83,7 @@ pkgs.runCommand "icewine-terminal-checks" {
   tail -n 1 "$XDG_CONFIG_HOME/icewine/shell/bashrc" | grep -Fx '# user edit'
   ${cli}/bin/icewine reset bash
   test -f "$XDG_STATE_HOME/icewine/$(ls "$XDG_STATE_HOME/icewine" | grep '^defaults-reset-' | tail -n 1)/config/icewine/shell/bashrc"
-  export STARSHIP_CACHE="$TMPDIR/starship" ICEWINE_THEME_ASSETS=${themeAssets}/share/icewine
+  export STARSHIP_CACHE="$TMPDIR/starship" ICEWINE_THEME_ASSETS=${../theme/assets}
   mkdir -p "$STARSHIP_CACHE"
   git init -q --initial-branch=icewine-check repo
   cd repo

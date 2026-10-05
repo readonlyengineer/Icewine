@@ -12,8 +12,8 @@ Controls.Switch {
     font.family: "JetBrainsMono Nerd Font"
     font.pixelSize: 11
 
-    Keys.onReturnPressed: root.toggle()
-    Keys.onEnterPressed: root.toggle()
+    Keys.onReturnPressed: root.click()
+    Keys.onEnterPressed: root.click()
 
     indicator: Rectangle {
         x: root.width - width

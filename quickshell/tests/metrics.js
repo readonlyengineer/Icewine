@@ -26,9 +26,7 @@ assert.deepEqual(m.cpu("cpu  10 20 30 40 5 6 7 8 100 100\ncpu0 1 2 3 4"), { tota
 assert.equal(m.cpuUsage({ total: 200, idle: 120 }, { total: 100, idle: 40 }), 20)
 assert.equal(m.cpuUsage({ total: 100, idle: 50 }, { total: 200, idle: 80 }), null)
 assert.equal(m.cpu("broken"), null)
-assert.equal(m.memoryUsage("MemTotal: 1000 kB\nMemAvailable: 250 kB\n"), 75)
-assert.equal(m.memoryUsage("MemTotal: 0 kB\nMemAvailable: 0 kB"), null)
-assert.equal(m.memoryUsage("MemTotal: 100 kB"), null)
+assert.equal(m.memory("MemTotal: 0 kB\nMemAvailable: 0 kB"), null)
 assert.deepEqual(m.memory("MemTotal: 2097152 kB\nMemAvailable: 524288 kB\n"),
     { usage: 75, usedGiB: 1.5, totalGiB: 2 })
 assert.equal(m.memory("MemTotal: 100 kB"), null)

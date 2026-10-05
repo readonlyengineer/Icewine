@@ -5,7 +5,13 @@ let
   configHome = "${userHome}/.config";
   dataHome = "${userHome}/.local/share";
   stateHome = "${userHome}/.local/state";
-  themeAssets = import ../theme/bundle.nix { inherit pkgs; };
+  steamMask = pkgs.writeText "icewine-steam-mask.desktop" ''
+    [Desktop Entry]
+    Type=Application
+    Name=Steam
+    NoDisplay=true
+    Hidden=true
+  '';
   themeIds = map (name: lib.removeSuffix ".json" name)
     (builtins.filter (name: lib.hasSuffix ".json" name)
       (builtins.attrNames (builtins.readDir ../theme/assets/themes)));
@@ -79,9 +85,10 @@ let
       export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_BROWSER_THEME_ENABLE=${if cfg.browser.theme.enable then "true" else "false"}
-      export ICEWINE_THEME_ASSETS=${themeAssets}/share/icewine
+      export ICEWINE_THEME_ASSETS=${../theme/assets}
       ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_THEME_FILE=/var/lib/icewine/sddm/theme.ini"}
       export ICEWINE_DEFAULT_FILES=${defaults}
+      export ICEWINE_STEAM_MASK_FILE=${if cfg.steam.enable then steamMask else ""}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
       export ICEWINE_THEME_GIT_ENABLE=${if cfg.shell.starship.git.enable then "true" else "false"}
@@ -131,12 +138,13 @@ in {
       };
     };
     systemd.services.display-manager = lib.mkIf cfg.login.enable {
-      requires = [ "icewine-init.service" ];
+      wants = [ "icewine-init.service" ];
       after = [ "icewine-init.service" ];
     };
     environment.sessionVariables = {
       EDITOR = lib.mkDefault (lib.escapeShellArgs cfg.applications.editor);
       ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";
+      ICEWINE_KITTY_PRESET = if cfg.terminal.preset == "kitty" then "true" else "false";
     };
     system.userActivationScripts.icewine.text = ''
       if [ "$(${pkgs.coreutils}/bin/id -un)" = ${lib.escapeShellArg cfg.user} ]; then

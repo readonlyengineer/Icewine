@@ -3,7 +3,7 @@ local stub = setmetatable({}, {
 	__index = function(self) return self end,
 	__call = function(self, request) return request or self end,
 })
-package.loaded["modules.DefaultApps"] = {}
+package.loaded["modules.DefaultApps"] = dofile("hyprland/modules/DefaultApps.lua")
 package.loaded["modules.WindowPolicy"] = stub
 local binds, workspaces, active, target = {}, {}, nil, nil
 local options, gestures, lastDispatch = {}, {}, nil
@@ -25,6 +25,7 @@ hl = {
 	end,
 }
 local module = dofile(assert(arg[1], "Pass the Binds.lua path"))
+assert(binds["SUPER + L"] == "qs ipc call session lock")
 for key, command in pairs({
 	XF86AudioRaiseVolume = "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+ && wpctl set-mute @DEFAULT_AUDIO_SINK@ 0",
 	XF86AudioLowerVolume = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- && wpctl set-mute @DEFAULT_AUDIO_SINK@ 0",

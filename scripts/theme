@@ -265,8 +265,9 @@ def publish(config, files):
                 (temporary / name).chmod(0o444)
             try:
                 temporary.rename(destination)
-            except FileExistsError:
-                pass
+            except OSError as error:
+                if error.errno not in (errno.EEXIST, errno.ENOTEMPTY):
+                    raise
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
@@ -369,9 +370,20 @@ def managed_static_link(path, root, root_name):
         return False
     store_name = target.parts[0][33:]
     relative = path.relative_to(root)
+    if store_name == "icewine-steam-mask.desktop":
+        return (root_name == "data" and len(target.parts) == 1
+                and relative.as_posix() in {"applications/steam.desktop",
+                                           "applications/com.valvesoftware.Steam.desktop"})
     if store_name == "home-manager-files":
         try:
-            return target.parts[1:] == path.relative_to(Path.home()).parts
+            if target.parts[1:] != path.relative_to(Path.home()).parts:
+                return False
+            if root_name == "data" and relative.as_posix() in {
+                "applications/steam.desktop", "applications/com.valvesoftware.Steam.desktop",
+                "applications/steam-gamescope.desktop",
+            }:
+                return pure_legacy_steam_entry(path)
+            return True
         except ValueError:
             return False
     if store_name == "icewine-hyprland":
@@ -391,6 +403,30 @@ def managed_static_link(path, root, root_name):
                  "wallpapers/current_blurr.jpg": "tokyo-night-lockscreen.jpg"},
     }
     return len(target.parts) == 1 and store_name == names[root_name].get(relative.as_posix())
+
+
+def pure_legacy_steam_entry(path):
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    try:
+        with path.open(encoding="utf-8") as stream:
+            parser.read_file(stream)
+    except (OSError, UnicodeError, configparser.Error):
+        return False
+    if parser.defaults() or parser.sections() != ["Desktop Entry"]:
+        return False
+    entry = dict(parser["Desktop Entry"])
+    if path.name != "steam-gamescope.desktop":
+        return entry == {"Type": "Application", "Name": "Steam",
+                         "NoDisplay": "true", "Hidden": "true"}
+    executable = entry.pop("Exec", "")
+    icon = entry.pop("Icon", "")
+    version = entry.pop("Version", "1.0")
+    return (re.fullmatch(r"/nix/store/[a-z0-9]{32}-quickshell-[^/]+/bin/qs ipc call gameLauncher launchSteamGamescope", executable) is not None
+            and icon in {"steam", "com.valvesoftware.Steam"} and version == "1.0"
+            and entry == {"Type": "Application", "Name": "Steam (Gamescope)",
+                          "Comment": "Launch Steam inside monitor-aware Gamescope",
+                          "Categories": "Game;", "Terminal": "false"})
 
 
 def pure_legacy_browser_mime(path):
@@ -470,6 +506,8 @@ def install_defaults(defaults, config, data, state, replace, app):
             if blocked:
                 continue
             if path.is_symlink():
+                if shipped.is_symlink() and os.readlink(path) == str(config / os.readlink(shipped)):
+                    continue
                 if not managed_static_link(path, root, root_name):
                     print(f"conflict: preserved unrecognized symlink: {path}", file=sys.stderr)
                     continue
@@ -508,8 +546,8 @@ def install_defaults(defaults, config, data, state, replace, app):
                         os.unlink(temporary)
             print(f"installed: {path}")
 
-    # Steam launchers now come from the selected user's package profile. Retire
-    # only recognized Home Manager links; local overrides remain user-owned.
+    # The Gamescope launcher comes from the user profile; Steam masks must
+    # outrank Flatpak exports. Local overrides remain user-owned.
     if app is None:
         for root_name, root, relative in (("config", config, "mimeapps.list"),
                                           ("data", data, "applications/mimeapps.list")):
@@ -526,10 +564,23 @@ def install_defaults(defaults, config, data, state, replace, app):
         for relative in ("applications/steam-gamescope.desktop", "applications/steam.desktop",
                          "applications/com.valvesoftware.Steam.desktop"):
             path = data / relative
+            mask = os.environ.get("ICEWINE_STEAM_MASK_FILE") if relative != "applications/steam-gamescope.desktop" else None
+            if mask and path.is_symlink() and os.readlink(path) == mask:
+                continue
+            if any(parent.is_symlink() for parent in path.parents
+                   if parent != data and data in parent.parents):
+                print(f"conflict: preserved symlinked parent: {path}", file=sys.stderr)
+                continue
             if managed_static_link(path, data, "data"):
                 save(path, data, "data")
                 path.unlink()
                 print(f"retired: {path}")
+            if mask:
+                if path.exists() or path.is_symlink():
+                    print(f"conflict: preserved user Steam entry: {path}", file=sys.stderr)
+                else:
+                    atomic_link(path, Path(mask))
+                    print(f"installed: {path}")
 
         # Home Manager's old unit links override the native NixOS user units.
         # Retire only Icewine's known links, including its generated target links.
