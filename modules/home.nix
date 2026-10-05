@@ -80,6 +80,7 @@ let
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_BROWSER_THEME_ENABLE=${if cfg.browser.theme.enable then "true" else "false"}
       export ICEWINE_THEME_ASSETS=${themeAssets}/share/icewine
+      ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_THEME_FILE=/var/lib/icewine/sddm/theme.ini"}
       export ICEWINE_DEFAULT_FILES=${defaults}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}

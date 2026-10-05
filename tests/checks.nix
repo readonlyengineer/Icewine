@@ -59,6 +59,7 @@ let
   quickshell = pkgs.quickshell.overrideAttrs (old: {
     buildInputs = old.buildInputs ++ [ pkgs.qt6.qtvirtualkeyboard ];
   });
+  sddmTheme = pkgs.callPackage ../sddm { };
   icewineCli = builtins.head (lib.filter
     (package: lib.getName package == "icewine") desktop.users.users.demo.packages);
   handheldCli = builtins.head (lib.filter
@@ -84,11 +85,13 @@ in {
     touch "$out"
   '';
   controls = pkgs.runCommand "icewine-control-checks" {
-    nativeBuildInputs = [ pkgs.nodejs pkgs.python3 quickshell ];
+    nativeBuildInputs = [ pkgs.nodejs pkgs.python3 quickshell pkgs.qt6.qtdeclarative ];
   } ''
     python3 ${./controls.py} ${self}
     python3 ${./render-ready.py} ${self}
     python3 ${./theme-live.py} ${self}
+    python3 ${./sddm-palette.py} ${sddmTheme}/share/sddm/themes/icewine/theme/Palette.qml \
+      ${pkgs.qt6.qtdeclarative}/bin/qml ${pkgs.qt6.qtdeclarative}/lib/qt-6/qml
     touch "$out"
   '';
   terminal = import ./terminal.nix { inherit self nixpkgs; };

@@ -84,13 +84,15 @@ def xdg(name, fallback):
     return Path(value if value else Path.home() / fallback).expanduser()
 
 
-def atomic_text(path, contents):
+def atomic_text(path, contents, mode=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".icewine-", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(contents)
             stream.flush()
+            if mode is not None:
+                os.fchmod(stream.fileno(), mode)
             os.fsync(stream.fileno())
         os.replace(temporary, path)
     finally:
@@ -855,6 +857,12 @@ def main(argv):
         except (OSError, ValueError) as error:
             print(f"Pending: GTK custom CSS theme could not be installed: {error}", file=sys.stderr)
     publish(config, files)
+    sddm_file = os.environ.get("ICEWINE_SDDM_THEME_FILE")
+    if sddm_file:
+        try:
+            atomic_text(Path(sddm_file), f"[General]\ntheme={theme_id}\n", 0o644)
+        except OSError as error:
+            print(f"Pending: SDDM colours will not update: {error}", file=sys.stderr)
     if os.environ.get("ICEWINE_BROWSER_THEME_ENABLE") == "true":
         wal = config / "icewine/wal/colors.json"
         target = config / "icewine/current/pywalfox.json"

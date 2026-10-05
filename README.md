@@ -239,6 +239,16 @@ unknown live status. Set `ICEWINE_THEME_TRANSITION=off` in the `icewine.service`
 environment and restart that service once to disable subsequent colour
 transitions.
 
+When Icewine's SDDM login is enabled, only `services.icewine.user` publishes the
+greeter's theme ID to `/var/lib/icewine/sddm/theme.ini`. NixOS creates this
+selected-user-owned directory; the file is publicly readable but contains only
+the theme ID. SDDM uses the matching packaged palette at its next greeter start
+(normally after logout), not during an already-running greeter. Missing,
+unreadable or unrecognized IDs use the packaged Tokyo Night palette. No theme
+change needs sudo or a NixOS rebuild. On reboot, `icewine-init.service`
+republishes the saved selection before SDDM starts; disabling Icewine login
+stops publication.
+
 `icewine transparency off|low|med|high` saves an independent transparency
 preference. With no argument it reports the saved level. Kitty background /
 inactive-window opacity is 1.00/1.00, 0.80/0.75, 0.60/0.55 or 0.40/0.40;

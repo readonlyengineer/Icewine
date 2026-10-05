@@ -89,6 +89,8 @@ with tempfile.TemporaryDirectory() as temporary:
                HOME=str(root))
     env["XDG_DATA_HOME"] = str(root / "data")
     env["ICEWINE_BROWSER_THEME_ENABLE"] = "false"
+    sddm_file = root / "sddm/theme.ini"
+    env["ICEWINE_SDDM_THEME_FILE"] = str(sddm_file)
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     env.pop("WAYLAND_DISPLAY", None)
     env.pop("HYPRLAND_INSTANCE_SIGNATURE", None)
@@ -167,6 +169,8 @@ with tempfile.TemporaryDirectory() as temporary:
     result = run("init")
     assert result.returncode == 0, result.stderr
     assert "Theme: catppuccin-mocha · Transparency: high" in result.stdout
+    assert sddm_file.read_text() == "[General]\ntheme=catppuccin-mocha\n"
+    assert sddm_file.stat().st_mode & 0o777 == 0o644
     assert edited.read_text() == "user edit\n"
     assert not legacy.is_symlink() and "property color primary" in legacy.read_text()
     assert unrelated.is_symlink() and os.readlink(unrelated) == "/nix/store/" + "b" * 32 + "-user-css"
@@ -476,6 +480,7 @@ x-scheme-handler/https=firefox.desktop
     ]:
         result = run("theme", theme_id)
         assert result.returncode == 0, result.stderr
+        assert sddm_file.read_text() == f"[General]\ntheme={theme_id}\n"
         current = config / "icewine/current"
         assert f"background #{background}\n" in (current / "kitty.conf").read_text()
         assert kitty_entry.read_text() == "user Kitty theme edit\n"
@@ -535,7 +540,17 @@ x-scheme-handler/https=firefox.desktop
     assert browser_log.read_text() == saved_browser_log
     env["ICEWINE_BROWSER_THEME_ENABLE"] = "true"
     assert run("theme", "nord", policy="gruvbox-light").returncode == 0
+    assert sddm_file.read_text() == "[General]\ntheme=gruvbox-light\n"
     assert 'local theme = "gruvbox-light"' in nvim_theme.read_text()
+    assert run("theme", "not-installed").returncode != 0
+    assert sddm_file.read_text() == "[General]\ntheme=gruvbox-light\n"
+    blocked = root / "not-a-directory"
+    blocked.write_text("keep me\n")
+    env["ICEWINE_SDDM_THEME_FILE"] = str(blocked / "theme.ini")
+    result = run("apply")
+    assert result.returncode == 0 and "Pending: SDDM colours will not update" in result.stderr
+    assert blocked.read_text() == "keep me\n"
+    env["ICEWINE_SDDM_THEME_FILE"] = str(sddm_file)
 
     # Opacity is independent of theme selection and survives reapplication.
     saved_theme = (state / "icewine/theme").read_text()

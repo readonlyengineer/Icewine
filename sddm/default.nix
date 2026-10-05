@@ -1,10 +1,29 @@
-{ runCommand, writeText }:
+{ lib, runCommand, writeText }:
 let
-  palette = builtins.fromJSON (builtins.readFile ../theme/assets/themes/tokyo-night.json);
+  themeFiles = builtins.filter (name: lib.hasSuffix ".json" name)
+    (builtins.attrNames (builtins.readDir ../theme/assets/themes));
+  palettes = builtins.listToAttrs (map (file: {
+    name = lib.removeSuffix ".json" file;
+    value = builtins.fromJSON (builtins.readFile (../theme/assets/themes + "/${file}"));
+  }) themeFiles);
+  colors = [ "background" "backgroundDark" "surface" "selection" "border"
+    "foreground" "foregroundDark" "muted" "highlight" "highlightDark"
+    "secondaryHighlight" "tertiaryHighlight" "success" "warning" "caution"
+    "error" "info" ];
   paletteQml = writeText "icewine-palette.qml" (
     builtins.replaceStrings
-      (map (name: "@${name}@") (builtins.attrNames palette))
-      (builtins.attrValues palette)
+      ([ "import QtQuick\n" "QtObject {\n" "\"@appearance@\"" ]
+        ++ map (name: "\"#@${name}@\"") colors)
+      ([ "import QtQuick\nimport QtCore\n" ''
+QtObject {
+    property Settings themeSettings: Settings {
+        location: "file:///var/lib/icewine/sddm/theme.ini"
+    }
+    readonly property var palettes: (${builtins.toJSON palettes})
+    readonly property string themeId: themeSettings.value("theme", "")
+    readonly property var palette: Object.prototype.hasOwnProperty.call(palettes, themeId)
+        ? palettes[themeId] : palettes["tokyo-night"]
+'' "palette.appearance" ] ++ map (name: "\"#\" + palette.${name}") colors)
       (builtins.readFile ../theme/assets/templates/Palette.qml.in)
   );
 in
