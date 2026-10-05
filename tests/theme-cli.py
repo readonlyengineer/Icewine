@@ -1073,10 +1073,18 @@ with tempfile.TemporaryDirectory() as temporary:
             assert child.returncode == 0, stderr
 
 # Consumer opt-outs retire recognised resources, without widening scoped operations.
+# Supplying native CSS defaults must not hide a pre-migration generated link.
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
-    config, data, state = (root / name for name in ("config", "data", "state"))
+    config, data, state, defaults = (root / name for name in ("config", "data", "state/icewine", "defaults"))
+    css_source = defaults / "config/gtk-3.0/gtk.css"
+    css_source.parent.mkdir(parents=True)
+    css_source.write_text('@import url("icewine/defaults.css");\n'
+                          '@import url("../icewine/current/gtk.css");\n'
+                          '/* Add your overrides below. */\n')
     with mock.patch.dict(os.environ, {"HOME": str(root), "XDG_DATA_HOME": str(data),
+                                     "ICEWINE_DEFAULT_FILES": str(defaults), "ICEWINE_THEME_ASSETS": str(assets),
+                                     "DBUS_SESSION_BUS_ADDRESS": "",
                                      "ICEWINE_GTK_ENABLE": "false", "ICEWINE_THEME_SKIP": "yazi/theme.toml:yazi/keymap.toml"}):
         module.publish(config, module.render_theme(assets, assets / "themes/dracula.json"))
         for relative, output in module.OWNED.items():
@@ -1099,6 +1107,38 @@ with tempfile.TemporaryDirectory() as temporary:
         module.publish(config, module.render_theme(assets, assets / "themes/nord.json"))
         assert not (config / "gtk-3.0/gtk.css").exists(), "Disabled CSS followed the next theme"
         assert list(state.glob("opt-out-*/gtk-3.0/gtk.css")), "Retirement lost its recovery copy"
+
+        # Record real native writable entries while GTK is enabled, then opt out
+        # through each public theme-only command. Local edits retain ownership.
+        (defaults / "data").mkdir()
+        for action in (("theme", "nord"), ("transparency", "low"), ("apply",)):
+            with mock.patch.dict(os.environ, ICEWINE_GTK_ENABLE="true"):
+                module.install_defaults(defaults, config, data, state, False, "gtk")
+                module.install_links(config, state, False, "gtk")
+                assert (config / "gtk-3.0/gtk.css").read_bytes() == css_source.read_bytes()
+            with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config), "XDG_STATE_HOME": str(state.parent),
+                                             "ICEWINE_GTK_ENABLE": "false", "ICEWINE_BROWSER_THEME_ENABLE": "false"}), \
+                 mock.patch.object(module, "reload_session", return_value=False):
+                assert module.dispatch(list(action)) == 0
+            assert not (config / "gtk-3.0/gtk.css").exists(), action
+        with mock.patch.dict(os.environ, ICEWINE_GTK_ENABLE="true"):
+            module.install_defaults(defaults, config, data, state, False, "gtk")
+        css = config / "gtk-3.0/gtk.css"
+        css.write_text(css.read_text() + "/* my inline styles */\n")
+        module.install_links(config, state, False, "gtk", install=False)
+        assert css.read_text().endswith("/* my inline styles */\n")
+        module.install_defaults(defaults, config, data, state, True, "gtk")
+        module.install_links(config, state, True, "gtk")
+        assert not css.exists(), "Reset reactivated disabled native CSS"
+
+        # Host-selected standalone CSS remains active even when newly installed,
+        # untouched and tracked while Icewine GTK styling is disabled.
+        css_source.write_text("window { color: red; }\n")
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config), "XDG_STATE_HOME": str(state.parent)}):
+            assert module.dispatch(["init", "gtk"]) == 0
+            assert css.read_bytes() == css_source.read_bytes()
+            assert module.dispatch(["reset", "gtk"]) == 0
+            assert css.read_bytes() == css_source.read_bytes()
 
         named = data / "themes/Icewine-dracula/gtk-3.0/gtk.css"
         named.parent.mkdir(parents=True)
@@ -1294,7 +1334,7 @@ for conflict in (None, "module", "module-directory", "entry", "entry-directory",
             (config / "quickshell/icewine").symlink_to(root / "unknown-package")
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_DATA_HOME=str(data),
                    XDG_STATE_HOME=str(root / "state"), ICEWINE_THEME_ASSETS=str(assets),
-                   ICEWINE_IMPLEMENTATION=str(package.parent), ICEWINE_DEFAULT_FILES=str(new), ICEWINE_GTK_ENABLE="false",
+                   ICEWINE_DEFAULT_FILES=str(new), ICEWINE_GTK_ENABLE="false",
                    ICEWINE_BROWSER_THEME_ENABLE="false", DBUS_SESSION_BUS_ADDRESS="", WAYLAND_DISPLAY="")
         before_entry = module.default_signature(config / "hypr/hyprland.lua")
         before_module = module.default_signature(config / "quickshell/modules/Topbar.qml")
@@ -1326,7 +1366,6 @@ for conflict in (None, "module", "module-directory", "entry", "entry-directory",
         marker = new / "config/quickshell/icewine"
         marker.unlink()
         marker.symlink_to(next_package)
-        env["ICEWINE_IMPLEMENTATION"] = str(next_package.parent)
         result = subprocess.run([sys.executable, str(script), "init"], env=env, capture_output=True, text=True)
         assert result.returncode == 0, result.stdout + result.stderr
         assert (config / "quickshell/icewine").resolve() == next_package
@@ -1451,3 +1490,85 @@ for failure in ("after-backup", "late-edit", "mounted", "substituted-parent", "r
         if failure.startswith("custom") or failure == "after-loader-switch":
             assert custom.read_text() == "user custom component\n"
 print("implementation retirement/layout conflict recovery checks passed")
+
+# Native-entry migration uses the existing ownership record, never today's byte
+# equality. Verify package identity, active removed overrides and GTK CSS ownership.
+for conflict in (None, "hypr-entry", "kitty-host", "unknown-link", "link-parent"):
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        config, data, state, old, new, package = (root / name for name in
+            ("config", "data", "state", "old", "new", "package"))
+        for source in (old, new):
+            (source / "config").mkdir(parents=True)
+            (source / "data").mkdir()
+        legacy = {"hypr/hyprland.lua": "legacy loader\n", "kitty/kitty.conf": "include host.conf\n",
+                  "kitty/host.conf": "", "hypr/modules/Binds.lua": "legacy binds\n"}
+        for name, text in legacy.items():
+            path = old / "config" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        module.install_defaults(old, config, data, state, False, None)
+        for directory in ("hypr", "kitty", "gtk-3.0", "gtk-4.0"):
+            (package / directory).mkdir(parents=True)
+            path = new / "config" / directory
+            path.mkdir(parents=True)
+            (path / "icewine").symlink_to(package / directory)
+        (package / "hypr/modules").mkdir()
+        (package / "hypr/modules/Binds.lua").write_text("shared binds\n")
+        (new / "config/hypr/modules").mkdir()
+        (new / "config/hypr/modules/Binds.lua").symlink_to("hypr/icewine/modules/Binds.lua")
+        for name in ("hypr/hyprland.lua", "kitty/kitty.conf"):
+            source = script.parent.parent / name.replace("hypr/", "hyprland/")
+            (new / "config" / name).write_bytes(source.read_bytes())
+        for version, generated in ((3, "gtk.css"), (4, "gtk4.css")):
+            path = new / f"config/gtk-{version}.0/gtk.css"
+            path.write_text('@import url("icewine/defaults.css");\n'
+                            f'@import url("../icewine/current/{generated}");\n')
+            installed = config / f"gtk-{version}.0/gtk.css"
+            installed.parent.mkdir(parents=True)
+            installed.symlink_to(config / "icewine/current" / generated)
+        if conflict == "hypr-entry":
+            (config / "hypr/hyprland.lua").write_text("user loader\n")
+        elif conflict == "kitty-host":
+            (config / "kitty/host.conf").write_text("font_size 18\n")
+        elif conflict == "unknown-link":
+            (config / "kitty/icewine").symlink_to(root / "user-package")
+        elif conflict == "link-parent":
+            (config / "kitty").rename(root / "user-kitty")
+            (config / "kitty").symlink_to(root / "user-kitty")
+        before = (state / "default-files.json").read_bytes()
+        with mock.patch.dict(os.environ, ICEWINE_DEFAULT_FILES=str(new)):
+            if conflict:
+                for reset in (False, True):
+                    try:
+                        module.install_defaults(new, config, data, state, reset, None)
+                    except ValueError as error:
+                        assert "migration blocked" in str(error), error
+                    else:
+                        raise AssertionError(f"Native migration bypassed {conflict}")
+                    assert (state / "default-files.json").read_bytes() == before
+                continue
+            module.install_defaults(new, config, data, state, False, None)
+            assert not (config / "kitty/host.conf").exists()
+            binds = config / "hypr/modules/Binds.lua"
+            assert binds.is_symlink() and binds.read_text() == "shared binds\n"
+            binds.unlink()
+            binds.write_text("my active binds\n")
+            module.install_defaults(new, config, data, state, False, None)
+            assert binds.read_text() == "my active binds\n"
+            assert (config / "hypr/icewine").resolve() == package / "hypr"
+            assert any(path.is_symlink() for path in state.glob("defaults-update-*/config/gtk-3.0/gtk.css"))
+            css = config / "gtk-3.0/gtk.css"
+            css.write_text(css.read_text() + "/* my rules */\n")
+            module.install_links(config, state, True, "gtk")
+            assert css.read_text().endswith("/* my rules */\n"), "Theme reset bypassed native CSS tracking"
+            next_package = root / "next-kitty"
+            next_package.mkdir()
+            marker = new / "config/kitty/icewine"
+            marker.unlink()
+            marker.symlink_to(next_package)
+            module.install_defaults(new, config, data, state, False, "kitty")
+            assert (config / "kitty/icewine").resolve() == next_package
+            backups = list(state.glob("defaults-update-*/config/kitty/icewine"))
+            assert len(backups) == 1 and backups[0].is_symlink(), "Package update copied immutable files"
+print("native-entry migration and CSS ownership checks passed")

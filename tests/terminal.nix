@@ -78,6 +78,13 @@ pkgs.runCommand "icewine-terminal-checks" {
   test -z "$output"
   output=$(ICEWINE_SHELL_ENABLED=false ICEWINE_FASTFETCH_ENABLED=true bash --noprofile --rcfile "$HOME/.bashrc" -ic 'unset HISTFILE' 2>/dev/null)
   test -z "$output"
+  printf '\nHISTSIZE=123\n' >> "$XDG_CONFIG_HOME/icewine/shell/bashrc"
+  output=$(ICEWINE_SHELL_ENABLED=true ICEWINE_FASTFETCH_ENABLED=false ICEWINE_BLESH_ENABLED=false ICEWINE_STARSHIP_ENABLED=false bash --noprofile --rcfile "$HOME/.bashrc" -ic 'echo "$HISTSIZE"; unset HISTFILE' 2>/dev/null)
+  test "$output" = 123
+  output=$(ICEWINE_SHELL_ENABLED=true ICEWINE_FASTFETCH_ENABLED=false ICEWINE_BLESH_ENABLED=false ICEWINE_STARSHIP_ENABLED=true bash --noprofile --rcfile "$HOME/.bashrc" -ic 'echo "$STARSHIP_CONFIG"; unset HISTFILE' 2>/dev/null)
+  test "$output" = "$XDG_CONFIG_HOME/starship.toml"
+  output=$(STARSHIP_CONFIG="$TMPDIR/my-starship.toml" ICEWINE_SHELL_ENABLED=true ICEWINE_FASTFETCH_ENABLED=false ICEWINE_BLESH_ENABLED=false ICEWINE_STARSHIP_ENABLED=true bash --noprofile --rcfile "$HOME/.bashrc" -ic 'echo "$STARSHIP_CONFIG"; unset HISTFILE' 2>/dev/null)
+  test "$output" = "$TMPDIR/my-starship.toml"
   printf '# user edit\n' >> "$XDG_CONFIG_HOME/icewine/shell/bashrc"
   ${cli}/bin/icewine init bash
   tail -n 1 "$XDG_CONFIG_HOME/icewine/shell/bashrc" | grep -Fx '# user edit'

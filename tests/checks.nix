@@ -191,21 +191,34 @@ in {
       cmp ${../hyprland/hyprland.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua"
       test -L "$XDG_CONFIG_HOME/hypr/modules/Theme.lua"
       test ! -e "$XDG_CONFIG_HOME/hypr/tests"
-      export ICEWINE_IMPLEMENTATION=${desktop.environment.sessionVariables.ICEWINE_IMPLEMENTATION}
+      implementation=$(dirname "$(readlink "$XDG_CONFIG_HOME/quickshell/icewine")")
       # Compare actual installed paths: individually interpolated Nix files or
       # directories copied into a directory retain their store-prefixed basename.
       for name in adapters/Hyprland.qml modules/Topbar.qml theme/qmldir theme/Palette.qml Desktop.qml Handheld.qml deck/DeckOverlay.qml deck/DeckMenu.js; do
-        cmp ${../quickshell}/"$name" "$ICEWINE_IMPLEMENTATION/quickshell/$name"
+        cmp ${../quickshell}/"$name" "$implementation/quickshell/$name"
       done
-      cmp ${../hyprland}/icewine.lua "$ICEWINE_IMPLEMENTATION/hyprland/icewine.lua"
-      for name in Baseline LookAndFeel WindowPolicy DefaultApps Docking; do
-        cmp ${../hyprland}/modules/"$name.lua" "$ICEWINE_IMPLEMENTATION/hyprland/modules/$name.lua"
+      cmp ${../nvim}/defaults.lua "$XDG_CONFIG_HOME/nvim/icewine/defaults.lua"
+      cmp ${../bash}/bashrc "$XDG_CONFIG_HOME/icewine/shell/icewine/bashrc"
+      cmp ${../session}/env "$XDG_CONFIG_HOME/uwsm/icewine/env"
+      cmp ${../hypridle}/defaults.conf "$XDG_CONFIG_HOME/hypr/hypridle-icewine/defaults.conf"
+      cmp ${../gtk}/defaults.css "$XDG_CONFIG_HOME/gtk-3.0/icewine/defaults.css"
+      cmp ${../gtk}/defaults.css "$XDG_CONFIG_HOME/gtk-4.0/icewine/defaults.css"
+      cmp ${../theme/assets/templates}/kitty-base.conf "$XDG_CONFIG_HOME/kitty/icewine/defaults.conf"
+      grep -Fx 'include icewine/defaults.conf' "$XDG_CONFIG_HOME/kitty/kitty.conf"
+      test ! -e "$XDG_CONFIG_HOME/kitty/host.conf"
+      grep -Fx '@import url("../icewine/current/gtk.css");' "$XDG_CONFIG_HOME/gtk-3.0/gtk.css"
+      grep -Fx '@import url("../icewine/current/gtk4.css");' "$XDG_CONFIG_HOME/gtk-4.0/gtk.css"
+      cmp ${../hyprland}/icewine.lua "$implementation/hyprland/icewine.lua"
+      for name in Baseline LookAndFeel WindowPolicy DefaultApps Docking Binds Autostart; do
+        cmp ${../hyprland}/modules/"$name.lua" "$implementation/hyprland/modules/$name.lua"
       done
-      cmp ${../hyprland}/deck/Deck.lua "$ICEWINE_IMPLEMENTATION/hyprland/modules/Deck.lua"
+      cmp ${../hyprland}/deck/Deck.lua "$implementation/hyprland/modules/Deck.lua"
+      test -L "$XDG_CONFIG_HOME/hypr/modules/Binds.lua"
       cmp ${../hyprland}/modules/Binds.lua "$XDG_CONFIG_HOME/hypr/modules/Binds.lua"
       # Runtime loaders accept an ordinary implementation root as well as Nix store paths.
-      cp -r "$ICEWINE_IMPLEMENTATION" "$TMPDIR/portable-implementation"
-      export ICEWINE_IMPLEMENTATION=$TMPDIR/portable-implementation
+      cp -r "$implementation" "$TMPDIR/portable-implementation"
+      ln -sfn "$TMPDIR/portable-implementation/hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
+      unset ICEWINE_IMPLEMENTATION
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" desktop
       export HOME=$TMPDIR/handheld XDG_CONFIG_HOME=$TMPDIR/handheld/.config XDG_DATA_HOME=$TMPDIR/handheld/.local/share XDG_STATE_HOME=$TMPDIR/handheld/.local/state
       mkdir -p "$HOME"
@@ -225,7 +238,8 @@ in {
       cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
       cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"
       cmp ${../quickshell/deck/shell.qml} "$XDG_CONFIG_HOME/quickshell/shell.qml"
-      export ICEWINE_IMPLEMENTATION=$TMPDIR/portable-implementation
+      ln -sfn "$TMPDIR/portable-implementation/hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
+      unset ICEWINE_IMPLEMENTATION
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" handheld
       touch "$out"
     '';

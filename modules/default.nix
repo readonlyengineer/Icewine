@@ -110,7 +110,8 @@ in {
       { assertion = lib.all (name: name != "" && lib.all (part: part != "" && part != "." && part != "..") (lib.splitString "/" name))
           (builtins.attrNames cfg.defaultFiles.config ++ builtins.attrNames cfg.defaultFiles.data);
         message = "Icewine defaultFiles keys must be relative paths without . or .. components."; }
-      { assertion = lib.all (name: !(builtins.elem name [ "quickshell/icewine" "quickshell/modules" "quickshell/adapters" "quickshell/theme" "quickshell/DeckOverlay.qml" "quickshell/DeckMenu.js" ] || lib.hasPrefix "quickshell/icewine/" name
+      { assertion = lib.all (name: !(builtins.elem name [ "gtk-3.0/icewine" "gtk-4.0/icewine" "hypr/icewine" "hypr/hypridle-icewine" "nvim/icewine" "kitty/icewine" "uwsm/icewine" "icewine/shell/icewine" "quickshell/icewine" "quickshell/modules" "quickshell/adapters" "quickshell/theme" "quickshell/DeckOverlay.qml" "quickshell/DeckMenu.js" ] || lib.hasPrefix "quickshell/icewine/" name
+          || lib.any (link: lib.hasPrefix (link + "/") name) [ "gtk-3.0/icewine" "gtk-4.0/icewine" "hypr/icewine" "hypr/hypridle-icewine" "nvim/icewine" "kitty/icewine" "uwsm/icewine" "icewine/shell/icewine" ]
           || lib.hasPrefix "quickshell/modules/" name || lib.hasPrefix "quickshell/adapters/" name
           || lib.hasPrefix "quickshell/theme/" name
           || builtins.elem name (map (module: "hypr/modules/${module}.lua")

@@ -26,26 +26,9 @@ in {
       [ pkgs.yazi pkgs.ffmpegthumbnailer pkgs._7zz ] ++ lib.optional cfg.steam.enable steamEntries;
     services.icewine.defaultFiles.config = lib.mkIf cfg.idle.enable {
       "hypr/hypridle.conf" = pkgs.writeText "icewine-hypridle.conf" ''
-        general {
-          before_sleep_cmd = qs ipc call session lock
-          inhibit_sleep = 3
-          ignore_dbus_inhibit = false
-          ignore_systemd_inhibit = false
-          ignore_wayland_inhibit = false
-        }
-        listener {
-          timeout = 600
-          on-timeout = qs ipc call session lock
-        }
-        listener {
-          timeout = 1200
-          on-timeout = hyprctl dispatch 'hl.dsp.dpms({ action = "disable" })'
-          on-resume = hyprctl dispatch 'hl.dsp.dpms({ action = "enable" })'
-        }
-        listener {
-          timeout = 1800
-          on-timeout = systemctl suspend
-        }
+        # Shared idle defaults first; add your general settings below.
+        # Listener blocks append; edit a local full copy to replace shipped timers.
+        source = hypridle-icewine/defaults.conf
       '';
     };
     systemd.user.services.hypridle = lib.mkIf cfg.idle.enable {

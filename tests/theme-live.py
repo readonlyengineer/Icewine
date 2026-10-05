@@ -71,7 +71,7 @@ ShellRoot {
                XDG_STATE_HOME=str(root / "state"), XDG_RUNTIME_DIR=str(root / "runtime"),
                XDG_CACHE_HOME=str(root / "cache"), TEST_ROOT=str(root),
                ICEWINE_THEME_IDS="tokyo-night:dracula:nord:catppuccin-mocha", ICEWINE_THEME_POLICY="",
-               ICEWINE_IMPLEMENTATION=str(implementation), ICEWINE_THEME_TRANSITION="off", ICEWINE_BROWSER_THEME_ENABLE="false",
+               ICEWINE_THEME_TRANSITION="off", ICEWINE_BROWSER_THEME_ENABLE="false",
                DBUS_SESSION_BUS_ADDRESS="", DBUS_SYSTEM_BUS_ADDRESS="",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
 

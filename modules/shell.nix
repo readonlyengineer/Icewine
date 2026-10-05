@@ -2,30 +2,10 @@
 let
   cfg = config.services.icewine;
   shell = cfg.shell;
-  current = "\${XDG_CONFIG_HOME:-$HOME/.config}/icewine/current";
   bashrc = pkgs.writeText "icewine-bashrc" ''
-    # Icewine's editable interactive Bash defaults.
+    # Shared interactive defaults first; add your overrides below.
     [[ $- == *i* && ''${ICEWINE_SHELL_ENABLED:-false} == true ]] || return
-    export HISTSIZE=10000 HISTFILESIZE=10000 HISTCONTROL=ignoredups:ignorespace
-    shopt -s histappend
-    alias ls='ls --color=auto'
-    alias grep='grep --color=auto'
-    if [[ -r "${current}/ls-colors.sh" ]]; then
-      . "${current}/ls-colors.sh"
-    fi
-    if [[ ''${ICEWINE_FASTFETCH_ENABLED:-false} == true ]] && command -v fastfetch >/dev/null; then
-      fastfetch
-    fi
-    if [[ ''${ICEWINE_BLESH_ENABLED:-false} == true && -r /etc/profiles/per-user/$USER/share/blesh/ble.sh ]]; then
-      source -- /etc/profiles/per-user/$USER/share/blesh/ble.sh 2>/dev/null
-      bleopt exec_errexit_mark=
-      bleopt exec_elapsed_mark=
-      bleopt complete_menu_style=desc
-    fi
-    if [[ ''${ICEWINE_STARSHIP_ENABLED:-false} == true ]] && command -v starship >/dev/null; then
-      export STARSHIP_CONFIG="${current}/starship.toml"
-      eval "$(starship init bash)"
-    fi
+    . "''${XDG_CONFIG_HOME:-$HOME/.config}/icewine/shell/icewine/bashrc"
   '';
   profile = pkgs.writeText "icewine-profile" ''
     # Editable login-shell additions. /etc/profile supplies NixOS session policy.
@@ -33,6 +13,7 @@ let
   bashProfile = pkgs.writeText "icewine-bash-profile" ''
     if [[ -r "$HOME/.profile" ]]; then . "$HOME/.profile"; fi
     if [[ -r "$HOME/.bashrc" ]]; then . "$HOME/.bashrc"; fi
+    # Add login-only overrides below.
   '';
 in {
   config = lib.mkIf (cfg.enable && shell.enable) {

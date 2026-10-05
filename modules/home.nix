@@ -26,26 +26,38 @@ let
     lib.optionals (!enabledConsumers.${name}) (builtins.attrNames files)
   ) themeConsumers);
   implementation = pkgs.runCommand "icewine-implementation" { } ''
-    mkdir -p $out/quickshell/deck $out/hyprland/modules
+    mkdir -p $out/quickshell/deck $out/hyprland/modules $out/kitty $out/nvim $out/bash $out/uwsm $out/hypridle $out/gtk
     cp -r ${../quickshell}/adapters ${../quickshell}/modules ${../quickshell}/theme $out/quickshell/
     cp ${../quickshell}/deck/DeckOverlay.qml ${../quickshell}/deck/DeckMenu.js $out/quickshell/deck/
     cp ${../quickshell}/Desktop.qml ${../quickshell}/Handheld.qml $out/quickshell/
     cp ${../hyprland}/icewine.lua $out/hyprland/
+    cp ${../theme/assets/templates}/kitty-base.conf $out/kitty/defaults.conf
+    cp ${../nvim}/defaults.lua $out/nvim/defaults.lua
+    cp ${../bash}/bashrc $out/bash/bashrc
+    cp ${../session}/env $out/uwsm/env
+    cp ${../hypridle}/defaults.conf $out/hypridle/defaults.conf
+    cp ${../gtk}/defaults.css $out/gtk/defaults.css
     ${lib.concatMapStringsSep "\n" (name:
       "cp ${../hyprland}/modules/${name}.lua $out/hyprland/modules/"
-    ) [ "Baseline" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" ]}
+    ) [ "Baseline" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" "Binds" "Autostart" ]}
     cp ${../hyprland}/deck/Deck.lua $out/hyprland/modules/
   '';
   defaults = pkgs.runCommand "icewine-default-files" { } ''
     mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/config/nvim $out/data
-    cp ${../hyprland}/modules/Binds.lua ${../hyprland}/modules/Autostart.lua $out/config/hypr/modules/
     cp ${../hyprland}/hyprland.lua $out/config/hypr/hyprland.lua
-    cp ${../session/env} $out/config/uwsm/env
+    printf '%s\n' '# Shared session defaults first; add your overrides below.' '. "''${XDG_CONFIG_HOME:-$HOME/.config}/uwsm/icewine/env"' > $out/config/uwsm/env
     cp ${../nvim/init.lua} $out/config/nvim/init.lua
+    ${lib.optionalString cfg.gtk.enable ''
+      for version in 3 4; do
+        mkdir -p $out/config/gtk-$version.0
+        printf '%s\n' '@import url("icewine/defaults.css");' "@import url(\"../icewine/current/gtk$version.css\");" '/* Add your overrides below. */' > $out/config/gtk-$version.0/gtk.css
+      done
+      substituteInPlace $out/config/gtk-3.0/gtk.css --replace-fail gtk3.css gtk.css
+    ''}
     ${lib.optionalString (cfg.terminal.preset == "kitty") ''
       mkdir -p $out/config/kitty
       cp ${../kitty/kitty.conf} $out/config/kitty/kitty.conf
-      touch $out/config/kitty/host.conf
+      ${lib.optionalString (builtins.hasAttr "kitty/host.conf" cfg.defaultFiles.config) "printf '%s\\n' 'include host.conf' >> $out/config/kitty/kitty.conf"}
     ''}
     ${lib.optionalString (cfg.fileManager.preset == "yazi") ''
       mkdir -p $out/config/yazi/plugins/mount.yazi
@@ -72,6 +84,20 @@ let
       "mkdir -p $out/data/${lib.escapeShellArg (builtins.dirOf name)}; cp ${lib.escapeShellArg "${source}"} $out/data/${lib.escapeShellArg name}"
     ) cfg.defaultFiles.data)}
     ln -s ${implementation}/quickshell $out/config/quickshell/icewine
+    ln -s ${implementation}/hyprland $out/config/hypr/icewine
+    ${lib.concatMapStringsSep "\n" (name:
+      lib.optionalString (!(builtins.hasAttr "hypr/modules/${name}.lua" cfg.defaultFiles.config))
+        "ln -s hypr/icewine/modules/${name}.lua $out/config/hypr/modules/${name}.lua"
+    ) [ "Binds" "Autostart" ]}
+    ${lib.optionalString cfg.idle.enable "ln -s ${implementation}/hypridle $out/config/hypr/hypridle-icewine"}
+    ln -s ${implementation}/nvim $out/config/nvim/icewine
+    ln -s ${implementation}/uwsm $out/config/uwsm/icewine
+    ${lib.optionalString cfg.gtk.enable ''
+      ln -s ${implementation}/gtk $out/config/gtk-3.0/icewine
+      ln -s ${implementation}/gtk $out/config/gtk-4.0/icewine
+    ''}
+    ${lib.optionalString (cfg.terminal.preset == "kitty") "ln -s ${implementation}/kitty $out/config/kitty/icewine"}
+    ${lib.optionalString cfg.shell.enable "ln -s ${implementation}/bash $out/config/icewine/shell/icewine"}
   '';
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
   wallpaperSelector = pkgs.writeShellApplication {
@@ -97,7 +123,6 @@ let
       export ICEWINE_THEME_ASSETS=${../theme/assets}
       ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_THEME_FILE=/var/lib/icewine/sddm/theme.ini"}
       export ICEWINE_DEFAULT_FILES=${defaults}
-      export ICEWINE_IMPLEMENTATION=${implementation}
       export ICEWINE_STEAM_MASK_FILE=${if cfg.steam.enable then steamMask else ""}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
@@ -152,7 +177,6 @@ in {
       after = [ "icewine-init.service" ];
     };
     environment.sessionVariables = {
-      ICEWINE_IMPLEMENTATION = "${implementation}";
       EDITOR = lib.mkDefault (lib.escapeShellArgs cfg.applications.editor);
       ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";
       ICEWINE_KITTY_PRESET = if cfg.terminal.preset == "kitty" then "true" else "false";
@@ -185,7 +209,6 @@ in {
         "XDG_DATA_HOME=${dataHome}"
         "XDG_CONFIG_HOME=${configHome}"
         "XDG_STATE_HOME=${stateHome}"
-        "ICEWINE_IMPLEMENTATION=${implementation}"
         "ICEWINE_THEME_IDS=${lib.concatStringsSep ":" themeIds}"
         "ICEWINE_THEME_POLICY=${if cfg.theme == null then "" else cfg.theme}"
         "ICEWINE_AUTHENTICATION_REQUIRED=${if cfg.authenticationRequired then "true" else "false"}"

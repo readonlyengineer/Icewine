@@ -1,0 +1,23 @@
+/* --- Core GTK semantic tokens --- */
+@define-color theme_bg_color            @palette_bg;
+@define-color theme_fg_color            @palette_fg;
+@define-color theme_base_color          @palette_bg_dark;
+@define-color theme_text_color          @palette_fg;
+@define-color theme_selected_bg_color   @palette_highlight;
+@define-color theme_selected_fg_color   @palette_accent_fg;
+@define-color theme_tooltip_bg_color    @palette_bg_highlight;
+@define-color theme_tooltip_fg_color    @palette_fg;
+@define-color theme_unfocused_bg_color  @palette_bg_dark;
+@define-color theme_unfocused_fg_color  @palette_fg_dark;
+
+@define-color insensitive_bg_color      @palette_bg_dark;
+@define-color insensitive_fg_color      @palette_comment;
+@define-color insensitive_base_color    @palette_bg_dark;
+
+@define-color borders                   @palette_fg_gutter;
+@define-color unfocused_borders         @palette_fg_gutter;
+
+/* --- Accent (used by newer GTK3 apps + libadwaita-style widgets) --- */
+@define-color accent_color              @palette_highlight;
+@define-color accent_bg_color           @palette_highlight;
+@define-color accent_fg_color           @palette_accent_fg;

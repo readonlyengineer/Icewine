@@ -13,6 +13,9 @@ for _, name in ipairs({ "Binds", "Autostart" }) do
     local file = assert(io.open(path, "r"))
     local contents = file:read("*a")
     file:close()
+    -- Hooks normally alias immutable defaults. A local replacement remains an
+    -- active compatibility/host hook; do not write through a package symlink.
+    os.remove(path)
     file = assert(io.open(path, "w"))
     -- Prepend because Binds returns its exported functions as its final statement.
     file:write('_G.user_' .. name:lower() .. '_loaded = true\n' .. contents)

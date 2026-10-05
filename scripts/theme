@@ -308,20 +308,37 @@ def install_links(config, state, replace, app=None, install=True):
         backup_owned(config, state, migration, "migration-")
     enabled = owned(app)
     for relative, name in owned(app, include_disabled=True).items():
+        defaults = os.environ.get("ICEWINE_DEFAULT_FILES")
+        native_css = relative in {"gtk-3.0/gtk.css", "gtk-4.0/gtk.css"}
+        writable_css = native_css and defaults and (Path(defaults) / "config" / relative).is_file()
         path = config / relative
         if any(parent.is_symlink() for parent in path.parents if parent != config and config in parent.parents):
             print(f"conflict: preserved symlinked parent: {path}", file=sys.stderr)
             continue
         target = config / "icewine/current" / name
         if relative not in enabled:
-            if ((path.is_symlink() and os.readlink(path) == str(target))
+            signature = default_signature(path)
+            recorded_css = False
+            if native_css and path.is_file() and not path.is_symlink():
+                entry = default_records(state).get("config", {})
+                # Ownership records also track host CSS; only the shipped import
+                # stub is Icewine styling. Keep unrelated host rules active.
+                # Ponytail: extend recognised stub versions if this format changes.
+                stub = ('@import url("icewine/defaults.css");\n'
+                        f'@import url("../icewine/current/{name}");\n'
+                        '/* Add your overrides below. */\n').encode()
+                recorded_css = (entry.get("root") == str(config)
+                                and signature == entry.get("files", {}).get(relative)
+                                and path.read_bytes() == stub)
+            if (recorded_css or (path.is_symlink() and os.readlink(path) == str(target))
                     or managed_link(path, config)):
-                signature = default_signature(path)
                 backup_owned(config, state, [path], "opt-out-")
                 if still_current(path, config, signature):
                     path.unlink()
                     print(f"retired: {path}")
             continue
+        if writable_css:
+            continue  # Enabled writable CSS belongs to default-file tracking, including reset.
         if not install:
             continue
         if path.is_symlink() and os.readlink(path) == str(target):
@@ -364,12 +381,16 @@ def static_app(root_name, relative):
         return "bash"
     return {"hypr": "hypr", "uwsm": "uwsm", "quickshell": "quickshell",
             "kitty": "kitty",
+            "gtk-3.0": "gtk", "gtk-4.0": "gtk",
             "btop": "btop", "user-dirs.locale": "user-dirs"}.get(relative.parts[0], relative.parts[0])
 
 
 def managed_static_link(path, root, root_name):
     if not path.is_symlink():
         return False
+    if root_name == "config" and path.relative_to(root).as_posix() in {"gtk-3.0/gtk.css", "gtk-4.0/gtk.css"}:
+        names = ("gtk.css", "gtk4.css") if path.parent.name == "gtk-4.0" else ("gtk.css",)
+        return os.readlink(path) in {str(root / "icewine/current" / name) for name in names} or managed_link(path, root)
     if root_name == "home" and path.name in {".bashrc", ".profile", ".bash_profile"}:
         if os.readlink(path) == str(xdg("XDG_CONFIG_HOME", ".config") / "icewine/shell" / path.name.lstrip(".")):
             return True
@@ -512,6 +533,40 @@ def legacy_implementation(name):
 
 
 def implementation_preflight(defaults, config, state, app=None, *, records=None, migrating=False):
+    if defaults:
+        source = Path(defaults) / "config"
+        entry = (default_records(state) if records is None else records).get("config", {})
+        previous = entry.get("files", {}) if entry.get("root") == str(config) else {}
+        # Package links are identity, never writable override hooks. Check before
+        # switching any entry during init/reset. Theme-only commands do not switch package links.
+        for name in ("gtk-3.0/icewine", "gtk-4.0/icewine", "hypr/icewine", "hypr/hypridle-icewine", "nvim/icewine", "kitty/icewine",
+                     "uwsm/icewine", "icewine/shell/icewine"):
+            shipped, path = source / name, config / name
+            if not shipped.is_symlink() or (app and static_app("config", Path(name)) != app):
+                continue
+            current = default_signature(path)
+            if not still_current(path, config, current) or (current is not None
+                    and (current != previous.get(name) or not path.is_symlink())):
+                raise ValueError(f"implementation migration blocked: preserved unknown package link {path}; "
+                                 "back up and move the conflict before icewine init")
+        if (source / "hypr/icewine").is_symlink() and "hypr/icewine" not in previous and app in (None, "hypr"):
+            if app:
+                raise ValueError("implementation migration requires icewine init without APP; scoped init/reset cannot switch the Hyprland loader")
+            path = config / "hypr/hyprland.lua"
+            current = default_signature(path)
+            if current is not None and (current != previous.get("hypr/hyprland.lua")
+                    or not still_current(path, config, current)):
+                raise ValueError(f"implementation migration blocked: preserved edited/untracked {path}; "
+                                 "replace its ICEWINE_IMPLEMENTATION loader with the neighbouring icewine link, "
+                                 "back up and move the old entry, then icewine init")
+        if ((source / "kitty/icewine").is_symlink() and "kitty/icewine" not in previous
+                and not (source / "kitty/host.conf").is_file() and app in (None, "kitty")):
+            path = config / "kitty/host.conf"
+            if path.exists() or path.is_symlink():
+                if not still_current(path, config, default_signature(path)) or not path.is_file() or path.read_bytes():
+                    raise ValueError(f"configuration migration blocked: preserved {path}; move its overrides "
+                                     "after the includes in kitty.conf, back up and move host.conf, then icewine init; "
+                                     "reset cannot bypass active overrides")
     if app not in (None, "hypr", "quickshell") or not defaults or not (Path(defaults) / "config/quickshell/icewine").is_symlink():
         return
     entry = (default_records(state) if records is None else records).get("config", {})
@@ -574,7 +629,7 @@ def install_defaults(defaults, config, data, state, replace, app):
         destination = backup / root_name / path.relative_to(root)
         destination.parent.mkdir(parents=True, exist_ok=True)
         signature = default_signature(path)
-        if root_name == "config" and path == root / "quickshell/icewine" and path.is_symlink():
+        if root_name == "config" and (path.name == "icewine" or path.name == "hypridle-icewine") and path.is_symlink():
             destination.symlink_to(os.readlink(path))
         elif path.is_dir():
             shutil.copytree(path, destination)
@@ -598,13 +653,16 @@ def install_defaults(defaults, config, data, state, replace, app):
                                if (item.is_file() or item.is_symlink())
                                and (not app or static_app(root_name, item.relative_to(source)) == app))
         present = {item.relative_to(source).as_posix() for item in shipped_files}
-        if (root_name == "config" and not app and "quickshell/icewine" in present
-                and "quickshell/icewine" not in previous):
-            # Ponytail: these three loaders switch individually, not atomically
+        first_quickshell = "quickshell/icewine" in present and "quickshell/icewine" not in previous
+        first_hyprland = "hypr/icewine" in present and "hypr/icewine" not in previous
+        if root_name == "config" and not app and (first_quickshell or first_hyprland):
+            # Ponytail: these loaders switch individually, not atomically
             # across a running session. Finish editing before init; detected
             # conflicts retain backups and roll back unchanged paths only. Use an
             # offline migration if runtime observers must not see intermediate loaders.
-            loaders = ("hypr/hyprland.lua", "quickshell/shell.qml", "quickshell/icewine")
+            loaders = (("hypr/icewine",) if first_hyprland else ()) + ("hypr/hyprland.lua",)
+            if first_quickshell:
+                loaders += ("quickshell/shell.qml", "quickshell/icewine")
             retiring = sorted(name for name in set(previous) - present if legacy_implementation(name))
             original = previous.copy()
             removed, switched = [], {}

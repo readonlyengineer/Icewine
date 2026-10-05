@@ -201,7 +201,7 @@ unrecognized symlinks remain untouched and are reported as conflicts.
 Quickshell QML/JS and Hyprland behaviour run from a read-only implementation
 package (the Nix store on NixOS).
 Writable defaults contain the small entry points, settings, bindings and hooks,
-plus UWSM, btop, locale and wallpaper configuration. Icewine records the bytes or symlink it installed
+plus host-owned btop, locale and wallpaper configuration. Icewine records the bytes or symlink it installed
 in `$XDG_STATE_HOME/icewine/default-files.json`. Init refreshes a changed shipped
 default only while the current file still matches that record; your edits,
 untracked files, unknown symlinks and conflicting directories remain intact
@@ -233,43 +233,156 @@ Supported writable entry points are:
   directories and be instantiated from this entry point.
 - `hypr/hyprland.lua` loads the packaged Icewine entry, then your host/Personal
   modules or local overrides. Keep the packaged loader before those hooks.
-- `hypr/modules/Binds.lua` and `Autostart.lua` remain active writable hooks.
+- `hypr/modules/Binds.lua` and `Autostart.lua` are managed aliases to shared defaults; edited or host-selected hooks remain active compatibility overrides.
   Load order is Baseline, LookAndFeel, generated Theme, WindowPolicy, Binds,
   Autostart, fallback monitor, then appended handheld and host overrides.
 
-The runtime layout is independent of Nix store paths. `ICEWINE_IMPLEMENTATION`
-is a nonempty absolute implementation root containing `quickshell/` and
-`hyprland/`: Quickshell provides `Desktop.qml`, `Handheld.qml`, `adapters/`,
-`modules/`, `theme/` and `deck/`; Hyprland provides `icewine.lua` and its shared
-`modules/`. The managed `$XDG_CONFIG_HOME/quickshell/icewine` link targets that
-root's `quickshell/` directory. The writable Hyprland entry prepends
-`$ICEWINE_IMPLEMENTATION/hyprland/?.lua` to Lua's module search path. Neither
-runtime loader requires `/nix/store`; recognition of old Nix/Home Manager links
-intentionally still checks Nix provenance.
+Shared defaults live under one immutable `ROOT`, with application subtrees such
+as `ROOT/hyprland`, `ROOT/quickshell`, `ROOT/kitty`, `ROOT/nvim`, `ROOT/bash`,
+`ROOT/uwsm`, `ROOT/hypridle` and `ROOT/gtk`. Each application's writable native
+entry loads its neighbouring managed package link, then generated appearance,
+then your settings in that same entry. No runtime `ICEWINE_IMPLEMENTATION`
+environment variable is needed. On NixOS ROOT is a Nix store package; another
+packager could use `/usr/share/icewine`. This is a path contract, not another
+supported distribution or installer.
 
-For example, another packager could use `/usr/share/icewine` as that root.
-This describes a packaging contract, not a supported distribution or installer:
+For example:
+
+```text
+ROOT/kitty/defaults.conf
+~/.config/kitty/icewine -> ROOT/kitty
+~/.config/kitty/kitty.conf
+    include icewine/defaults.conf
+    include ../icewine/current/kitty.conf
+    font_size 16                       # my setting
+```
+
+The Hyprland entry prepends `hypr/icewine/?.lua` to Lua's search path; Neovim
+runs `nvim/icewine/defaults.lua`; UWSM sources `uwsm/icewine/env`. These loaders
+use HOME/XDG paths, with no hardcoded `/usr/share` or `/nix/store` dependency.
+Nix provenance checks remain intentional for recognizing old Home Manager links.
+Generated selections remain under `icewine/current`, separate from shared defaults.
+
+For another packaging environment:
 
 - Supply compatible Hyprland Lua, Quickshell/Qt (including virtual keyboard),
-  systemd/UWSM session wiring, Icewine's command wrappers/tools, and the selected
-  applications/services. NixOS currently supplies and validates those dependencies.
-- Set `ICEWINE_IMPLEMENTATION` in the compositor/session environment. Launch
-  Quickshell using the user's writable configuration root and initialize it before
-  startup; a failed migration must prevent the new shell from starting.
-- Run the Python theme CLI through `icewine-theme` on PATH, supplying
-  `ICEWINE_THEME_ASSETS` (themes, templates and consumers.json), consistent
-  HOME/XDG config/data/state roots, and `ICEWINE_DEFAULT_FILES`. That defaults tree
-  contains `config/`, `data/` and optional `home/`; include the small entry points,
-  settings/hooks and the absolute `config/quickshell/icewine` link above. Keep
-  `default-files.json` with user state across upgrades. Match consumer flags/skip
-  settings to the installed applications; browser/GTK integration has its own
-  tools and session dependencies.
+  systemd/UWSM session wiring, command wrappers/tools and selected applications.
+- Launch Quickshell from the user's writable configuration root and initialize it
+  before startup; a failed migration must prevent the new shell from starting.
+- Supply `ICEWINE_THEME_ASSETS`, consistent HOME/XDG config/data/state roots and
+  `ICEWINE_DEFAULT_FILES` to the Python theme CLI. The defaults tree contains
+  `config/`, `data/` and optional `home/`, native entries and absolute package
+  links. Retain `default-files.json` across updates and match feature flags/skip
+  settings to the installed consumers.
+
+#### Configuration inventory and native exceptions
+
+Paths below are relative to XDG_CONFIG_HOME unless a different root is named.
+“Current” means `icewine/current`; “none” means no generated appearance.
+
+| Set | Native entry and shared package link | Appearance and personal settings |
+| --- | --- | --- |
+| Hyprland / handheld | writable `hypr/hyprland.lua`; `hypr/icewine -> ROOT/hyprland` | shared behaviour loads `hypr/modules/Theme.lua -> Current/Theme.lua`; append overrides after desktop/Deck loading |
+| Quickshell / handheld | writable `quickshell/shell.qml`; `quickshell/icewine -> ROOT/quickshell` | packaged palette reads `Current/palette.json`; instantiate/customise components in the entry; singleton settings exception below |
+| Kitty | writable `kitty/kitty.conf`; `kitty/icewine -> ROOT/kitty` | include shared defaults, `Current/kitty.conf`, then inline overrides; no new `host.conf` |
+| Neovim | writable `nvim/init.lua`; `nvim/icewine -> ROOT/nvim` | shared defaults load/reload `Current/nvim-theme.lua`; append overrides in init.lua |
+| Bash / ble.sh | home startup links to writable `icewine/shell/{bashrc,profile,bash_profile}`; `icewine/shell/icewine -> ROOT/bash` | interactive shared defaults source `Current/ls-colors.sh`; put interactive overrides in bashrc; native startup/ble.sh exceptions below |
+| UWSM | writable `uwsm/env`; `uwsm/icewine -> ROOT/uwsm` | shared exports first, inline exports afterward; none |
+| Hypridle | writable `hypr/hypridle.conf`; `hypr/hypridle-icewine -> ROOT/hypridle` | native `source` first, inline general settings afterward; none; link-name/listener exception below |
+| GTK CSS 3 / 4 | writable `gtk-{3,4}.0/gtk.css`; neighbouring `icewine -> ROOT/gtk` | import shared semantic defaults, `Current/{gtk.css,gtk4.css}`, then inline CSS; generated complete CSS also serves legacy/named-theme consumers |
+| GTK settings / named themes / Flatpak | `gtk-{3,4}.0/settings.ini -> Current/{gtk-settings.ini,gtk4-settings.ini}`; generated named GTK3 themes in XDG_DATA_HOME/themes and Flatpak extensions | key-file / external-theme exception below; local settings.ini files stay active |
+| Fastfetch | normal `fastfetch/config.jsonc -> Current/fastfetch.jsonc` | whole-file JSONC exception; custom native files stay active; Bash invokes PATH-selected fastfetch without forced config flags |
+| Starship | normal `starship.toml -> Current/starship.toml` | whole-file TOML exception; shared Bash uses normal file or explicit existing STARSHIP_CONFIG, so custom files stay active |
+| Yazi | `yazi/{theme,keymap}.toml -> Current/yazi-{theme,keymap}.toml`; dependency plugin files under `yazi/plugins/mount.yazi` | TOML/flavour/plugin exception below; edited/native host files remain active |
+| btop / user-dirs | optional host defaults `btop/btop.conf`, `user-dirs.locale` through defaultFiles; no Icewine-owned source defaults | host ownership / native flat-file exception; no appearance generation |
+| Desktop entries / Steam masks / MIME defaults | package `share/applications` entries, XDG_DATA_HOME/applications masks and editable uuctl mask | desktop-file data exception; no appearance |
+| Wallpapers | XDG_DATA_HOME/wallpapers defaults supplied by host; selection in XDG_DATA_HOME/icewine/wallpapers | image-data exception; generated selected/blurred images are not app config |
+| SDDM | immutable theme package share/sddm/themes/icewine; mutable `/var/lib/icewine/sddm/theme.ini` | system/login ownership exception; generated palette is separate from user configuration |
+| Browser integration | packaged native messaging host and MIME defaults; `Current/pywalfox.json` feeds upstream integration | native-host/extension protocol exception; browser profiles remain browser/user-owned |
+| InputPlumber / services / launch tools | packaged YAML profiles, system/user units and executable scripts wired by NixOS | host/system/package ownership exception; none |
+
+The exceptions describe actual loader and ownership boundaries:
+
+- **Hyprland compatibility hooks:** shipped Binds and Autostart now live in
+  ROOT/hyprland/modules. Their old paths are managed aliases through `hypr/icewine`,
+  preserving the existing loader and Deck's Binds exports. New installs have one
+  writable Hyprland entry; add personal commands/bindings there. Edited hooks or
+  host-selected `defaultFiles` hooks remain separate and active, with ownership
+  diagnostics; they are compatibility/host overrides, not the default format.
+- **Quickshell Settings:** packaged components import the local QML singleton
+  `quickshell/config/Settings.qml` using its neighbouring qmldir. This native
+  singleton exposes readonly policy properties used by Desktop/Handheld SessionControl
+  and BatteryAlert; shell.qml instantiates their root. Putting settings only on
+  that root cannot replace singleton imports or assign its readonly values;
+  importing the application entry back into its own components creates a cyclic
+  component dependency. Retain this writable singleton/manifest for host and user
+  settings; extra user component directories are optional explicit imports.
+- **Bash:** Bash natively distinguishes login profile, interactive bashrc and
+  bash_profile; a single entry would change which shells execute login additions.
+  The existing home links and startup order remain. Only interactive enabled
+  Bash sources shared defaults; noninteractive startup returns before personal
+  interactive code. Profile has no shared behaviour to source; bash_profile sources
+  profile and bashrc before login-only overrides. ble.sh remains the dependency's
+  own startup script, selected from the user package profile. See the
+  [Bash startup rules](https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html).
+- **Hypridle:** both applications use the `hypr` config directory, so its package
+  link is named `hypridle-icewine` to avoid the Hyprland `icewine` link. Upstream
+  [source loading](https://github.com/hyprwm/hypridle/blob/main/src/config/ConfigManager.cpp)
+  resolves paths relative to the current config and appends anonymous listener
+  blocks. Later general values override; additional listeners append rather than
+  replacing timers. To replace/remove shipped listeners, remove the source line
+  and keep a local full config; future shared timer updates then do not apply.
+- **GTK settings:** GTK uses [GKeyFile settings.ini](https://docs.gtk.org/gtk4/class.Settings.html),
+  whose [format](https://docs.gtk.org/glib/struct.KeyFile.html) has no include directive.
+  Its native system/XDG layers do not provide a per-user generated layer followed
+  by an include in the same file. Keep the generated link or replace it with one
+  native writable file; the latter opts out of generated settings while CSS imports
+  still follow themes. Native [CSS loading](https://docs.gtk.org/gtk4/class.CssProvider.html)
+  permits imports/inline rules, hence CSS entries do adopt the format. Named GTK3
+  themes and Flatpak extensions need complete external theme directories, not a
+  user entry; their existing generated ownership and retirement remain.
+- **Fastfetch / Starship:** their native configuration selects one
+  [JSONC config](https://github.com/fastfetch-cli/fastfetch/wiki/Configuration) or
+  [TOML config](https://starship.rs/config/). Fastfetch's
+  [schema](https://github.com/fastfetch-cli/fastfetch/blob/dev/doc/json_schema.json)
+  has no configuration include; Lua preload runs helpers, not JSONC config layering.
+  Starship's [config loader](https://github.com/starship/starship/blob/master/src/config.rs)
+  parses the selected TOML, without an include layer. A package link cannot make
+  native parsers combine shared defaults, generated values and inline overrides.
+  Retain one generated normal-path link; copy it to a writable normal-path file
+  for personal settings. That whole file stays active but no longer follows themes.
+  There is no dead package link or custom merge engine. The legacy generated
+  `Current/kitty-base.conf` remains for already-edited old Kitty entries.
+- **Yazi:** [configuration mixing](https://yazi-rs.github.io/docs/configuration/overview/)
+  merges the program's built-in presets with one user TOML file; it does not include
+  a separate Icewine keymap. Native [flavours](https://yazi-rs.github.io/docs/flavors/overview/)
+  could layer theme settings but require a matching tmtheme.xml. The
+  [flavour loader](https://github.com/sxyazi/yazi/blob/main/yazi-config/src/theme/flavor.rs)
+  forces that flavour's preview-highlighting path, superseding user syntect_theme.
+  Icewine currently generates UI colours only, with no tmTheme asset; converting
+  this to a flavour would change previews or require a new highlighting artifact
+  and policy. Keep the generated complete theme/keymap links; writable replacements
+  stay active and opt out of generated updates. The mount plugin is dependency
+  executable code loaded by Yazi's native `plugin mount` resolver, not a user
+  settings entry. Existing tracked vendor files update only when unchanged; edited
+  plugins remain active. No fabricated TOML include or new flavour framework.
+- **Host/data/system sets:** btop and user-dirs defaults, wallpapers and additional
+  `defaultFiles` come from the host. Icewine cannot move host policy into its shared
+  package. [btop's loader](https://github.com/aristocratos/btop/blob/main/src/btop_config.cpp)
+  reads recognised assignments from one file, without include support; locale/image
+  and [desktop-entry data](https://specifications.freedesktop.org/desktop-entry-spec/latest/)
+  are native data formats rather than shared-code entry points. SDDM operates before
+  the user's session with system theme paths; browser native messaging/extension
+  and InputPlumber YAML are external protocols/service inputs. NixOS owns their
+  installation, dependencies and privilege boundary. Their immutable assets and
+  mutable palette/data paths remain separate; customisation uses the existing
+  host options or native user files, never a fake per-user include.
 
 Nix-specific package construction, dependency selection and session environment
 wiring stay in the NixOS module. Ordinary-directory loader checks establish this
 path contract; they do not validate another distribution's session integration.
 
-The `quickshell/icewine` link is managed package identity. `defaultFiles.config`
+The neighbouring `icewine` links are managed package identity. `defaultFiles.config`
 may supply these settings and hooks; it cannot supply packaged implementation
 paths. Changes to internal QML/JS or Lua modules belong in an Icewine source fork.
 Updates refresh the implementation package without copying it into writable home
@@ -301,8 +414,18 @@ Rollbacks within the packaged layout restore the implementation link and
 unchanged writable defaults. A rollback to the previous writable implementation
 layout can restore its unchanged recorded files, but cannot reconstruct user
 edits moved elsewhere; keep the migration backups and any manually moved code.
-Init preserves edited removed defaults and unrelated files. Keep Kitty overrides
-in `host.conf` and review Quickshell settings after an update.
+Init preserves edited removed defaults and unrelated files. The new Kitty entry
+has inline overrides. An explicitly host-selected defaultFiles `kitty/host.conf`
+retains its include as a host-ownership exception. Other nonempty/unknown legacy
+host.conf files block migration before
+any entry or theme changes; move its settings after the includes in kitty.conf,
+back up and move host.conf, then rerun full init. Reset cannot bypass this conflict.
+An edited/untracked old Hyprland loader likewise blocks the link migration; port
+its loader and move its overrides into the native entry before retrying. New
+package links use the same unknown-link/parent guards during init/reset, before
+migration changes generated output. Theme/transparency/apply commands update
+appearance without switching or validating package links. Review Quickshell
+settings after an update.
 Init retires removed or disabled shipped defaults only if they still match the
 record, saving a backup first; edited remnants and other user files remain.
 A mounted file that cannot be removed remains with a diagnostic. Disabling
@@ -373,8 +496,8 @@ the CLI choice. It leaves the separately selected wallpaper alone. Theme
 changes update the running Quickshell palette without restarting the shell.
 Scoped same-user Kitty and Neovim instances receive native `SIGUSR1` reload
 requests; signal delivery cannot confirm that colours were applied. Kitty
-rereads its full configuration, including `host.conf` and command-line
-overrides, and may reset a temporary font-size change or preserve colours set
+rereads its full configuration, including inline settings, any explicit local
+includes and command-line overrides, and may reset a temporary font-size change or preserve colours set
 by an application. Neovim instances with an older or edited `init.lua` may not
 have the Signal hook and remain pending. Yazi receives a reload broadcast for
 all current user clients, including other sessions; it is not acknowledged per
@@ -612,8 +735,11 @@ feature; they do not disable another module's configuration or delete user data.
 | `shell.starship.enable = false;` | Starship installation and prompt. |
 | `shell.starship.git.enable = false;` | Git information in the Starship prompt. |
 
-Opt-outs retire recognised Icewine-generated theme links and preserve user
-files and unknown links. GTK opt-out also retires unchanged recorded Flatpak
+Opt-outs retire recognised Icewine-generated theme links and unchanged recorded
+shipped GTK CSS import entries, preserving standalone host-selected CSS, edited
+files and unknown links. Edited CSS
+with an Icewine import remains your override; remove that import to stop following
+Icewine's generated colours. GTK opt-out also retires unchanged recorded Flatpak
 CSS and Icewine's named-theme links. In a live session, it resets `gtk-theme`
 only when the value still matches Icewine's ownership record; older unrecorded
 selections need a manual change through your GTK settings. The existing colour
@@ -635,9 +761,9 @@ Sleep button and reports a failed request; check notifications and sleep on
 real hardware without deliberately draining a battery.
 
 With the Kitty preset active, Icewine installs editable
-`$XDG_CONFIG_HOME/kitty/kitty.conf` and `host.conf` entries. The first includes
-Icewine's base, theme and optional host settings in that order. Move former Home
-Manager Kitty settings from the migration backup into `host.conf` if needed.
+`$XDG_CONFIG_HOME/kitty/kitty.conf` entry. It includes shared defaults and generated
+appearance before your inline settings. Move former Home
+Manager Kitty settings from the migration backup after its includes if needed.
 Setting `terminal.preset = null` leaves Kitty installation and configuration to
 the host.
 
