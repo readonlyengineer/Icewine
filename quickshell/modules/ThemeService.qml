@@ -63,6 +63,9 @@ QtObject {
         function select(theme: string): string {
             if (!/^[a-z0-9][a-z0-9-]*$/.test(theme) || root.installed.indexOf(theme) < 0)
                 return "failed: theme is not installed: " + theme
+            // CLI reset or another writer may have changed the saved selection.
+            root.selectionFile.reload()
+            root.selectionFile.waitForJob()
             root.requested = theme
             if (root.selectionFile.text().trim() === theme) {
                 if (root.policy)

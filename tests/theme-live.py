@@ -4,6 +4,8 @@
 import json
 import os
 from pathlib import Path
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -11,6 +13,7 @@ import time
 
 
 source = Path(sys.argv[1]).resolve()
+quickshell = shutil.which("qs")
 colors = {
     "background": "background", "backgroundDark": "backgroundDark",
     "surface": "surface", "selection": "selection", "border": "border",
@@ -41,7 +44,10 @@ ShellRoot {
 }
 ''')
     current = root / "config/icewine/current"
-    current.mkdir(parents=True)
+    current.parent.mkdir(parents=True)
+    initial = root / "initial"
+    initial.mkdir()
+    current.symlink_to(initial)
     (current / "palette.json").write_text(json.dumps(palette("tokyo-night")))
     (root / "state/icewine").mkdir(parents=True)
     (root / "runtime").mkdir()
@@ -55,15 +61,18 @@ ShellRoot {
                         'theme=$(cat "$XDG_STATE_HOME/icewine/theme")\n'
                         'cp "$TEST_ROOT/$theme.json" "$XDG_CONFIG_HOME/icewine/current/palette.json"\n')
     renderer.chmod(0o755)
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", XDG_CONFIG_HOME=str(root / "config"),
+    env = dict(os.environ, HOME=str(root), QT_QPA_PLATFORM="offscreen", WAYLAND_DISPLAY="icewine-test",
+               XDG_CONFIG_HOME=str(root / "config"),
+               XDG_DATA_HOME=str(root / "data"), ICEWINE_THEME_ASSETS=str(source / "theme/assets"),
+               ICEWINE_GTK_ENABLE="false", ICEWINE_DEFAULT_FILES="", HYPRLAND_INSTANCE_SIGNATURE="",
                XDG_STATE_HOME=str(root / "state"), XDG_RUNTIME_DIR=str(root / "runtime"),
                XDG_CACHE_HOME=str(root / "cache"), TEST_ROOT=str(root),
-               ICEWINE_THEME_IDS="tokyo-night:dracula:nord", ICEWINE_THEME_POLICY="",
+               ICEWINE_THEME_IDS="tokyo-night:dracula:nord:catppuccin-mocha", ICEWINE_THEME_POLICY="",
                ICEWINE_THEME_TRANSITION="off",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
 
     def call(function, *args):
-        return subprocess.run(["qs", "-p", str(root), "ipc", "call", "theme", function, *args],
+        return subprocess.run([quickshell, "-p", str(root), "ipc", "call", "theme", function, *args],
                               env=env, capture_output=True, text=True, timeout=5)
 
     def until(expected):
@@ -108,6 +117,36 @@ ShellRoot {
             assert (state_dir / "theme").read_text() == "dracula\n"
         finally:
             state_dir.chmod(0o700)
+
+        # Use the real CLI/renderer for reset and same-theme reselection. Route
+        # its IPC into this disposable offscreen shell, never the user's shell.
+        renderer.write_text("#!/bin/sh\nexec " + shlex.join([sys.executable, str(source / "scripts/theme")]) + ' "$@"\n')
+        ipc = root / "bin/qs"
+        ipc.write_text("#!/bin/sh\nexec " + shlex.join([quickshell, "-p", str(root)]) + ' "$@"\n')
+        ipc.chmod(0o755)
+        yazi = root / "bin/ya"
+        yazi.write_text("#!/bin/sh\nexit 0\n")
+        yazi.chmod(0o755)
+
+        def cli(*args):
+            result = subprocess.run([sys.executable, str(source / "scripts/theme"), *args],
+                                    env=env, capture_output=True, text=True, timeout=15)
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            return result
+
+        cli("theme", "nord")
+        until("applied: nord")
+        for _ in range(2):
+            cli("reset", "kitty")
+            assert (state_dir / "theme").read_text() == "nord\n"
+            assert json.loads((current / "palette.json").read_text())["themeId"] == "nord"
+            cli("reset")
+            until("applied: catppuccin-mocha")
+            assert not (state_dir / "theme").exists()
+            cli("theme", "nord")
+            until("applied: nord")
+            assert (state_dir / "theme").read_text() == "nord\n"
+            assert json.loads((current / "palette.json").read_text())["themeId"] == "nord"
     finally:
         shell.terminate()
         try:
