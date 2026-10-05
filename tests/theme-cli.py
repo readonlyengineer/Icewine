@@ -4,6 +4,7 @@
 import os
 import errno
 import importlib.machinery
+import io
 import json
 import re
 import signal
@@ -780,3 +781,291 @@ x-scheme-handler/https=firefox.desktop
          mock.patch.object(module.os, "getuid", return_value=os.getuid() + 1), \
          mock.patch.object(module.os, "pidfd_open", side_effect=AssertionError("other user"), create=True):
         assert module.signal_reload("kitty", config, str(runtime)) is False
+
+# Updates exercise the shared installer directly, without live applications.
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    config, data, state = (root / name for name in ("config", "data", "state"))
+    defaults = root / "defaults"
+    for name in ("config", "data", "home"):
+        (defaults / name).mkdir(parents=True)
+    state.mkdir()
+    initial = {
+        "config/hypr/hyprland.lua": b"hypr v1\n",
+        "config/quickshell/modules/Thing.qml": b"shell v1\n",
+        "config/quickshell/config/Settings.qml": b"settings v1\n",
+        "config/kitty/host.conf": b"",
+        "config/uwsm/env": b"env v1\n",
+        "config/btop/btop.conf": b"btop v1\n",
+        "config/icewine/shell/profile": b"profile v1\n",
+        "data/wallpapers/default.jpg": b"image v1",
+    }
+    for name, contents in initial.items():
+        source = defaults / name
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(contents)
+    (defaults / "home/.profile").symlink_to("icewine/shell/profile")
+    config.mkdir()
+    untracked = config / "uwsm/env"
+    untracked.parent.mkdir()
+    untracked.write_bytes(initial["config/uwsm/env"])  # Equality is not proof of ownership.
+    wallpaper = data / "icewine/wallpapers/selection.img"
+    wallpaper.parent.mkdir(parents=True)
+    wallpaper.write_bytes(b"user selection")
+    for name, value in {"theme": "dracula\n", "transparency": "low\n", "autofullscreen": "on\n"}.items():
+        (state / name).write_text(value)
+    update_env = dict(HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_DATA_HOME=str(data),
+                      XDG_STATE_HOME=str(root / "xdg-state"), ICEWINE_STEAM_MASK_FILE="")
+    with mock.patch.dict(os.environ, update_env):
+        def update(app=None, replace=False):
+            module.install_defaults(str(defaults), config, data, state, replace, app)
+
+        update()
+        record = state / "default-files.json"
+        assert "uwsm/env" not in json.loads(record.read_text())["config"]["files"]
+        before = record.read_bytes()
+        # A user-substituted known-looking legacy parent is not an untracked migration.
+        original_modules = config / "quickshell/modules"
+        user_modules = root / "store" / ("e" * 32 + "-modules")
+        user_modules.parent.mkdir()
+        original_modules.rename(user_modules)
+        original_modules.symlink_to(user_modules)
+        (defaults / "config/quickshell/modules/Thing.qml").write_text("shell v2\n")
+        with mock.patch.object(module, "STORE_DIR", root / "store"), \
+             mock.patch.object(module.sys, "stderr", new_callable=io.StringIO) as errors:
+            update("quickshell")
+        assert "preserved substituted parent" in errors.getvalue()
+        assert original_modules.is_symlink() and (user_modules / "Thing.qml").read_text() == "shell v1\n"
+        assert record.read_bytes() == before
+        original_modules.unlink()
+        user_modules.rename(original_modules)
+        (defaults / "config/quickshell/modules/Thing.qml").write_text("shell v1\n")
+        update()
+        assert record.read_bytes() == before
+        assert not list(state.glob("defaults-update-*"))
+        user_settings = config / "quickshell/config/Settings.qml"
+        user_settings.write_text("user settings\n")
+        host = config / "kitty/host.conf"
+        host.write_text("user Kitty overrides\n")
+        v2 = {name: contents.replace(b"v1", b"v2") for name, contents in initial.items()}
+        for name, contents in v2.items():
+            (defaults / name).write_bytes(contents)
+        (defaults / "home/.profile").unlink()
+        (defaults / "home/.profile").symlink_to("icewine/shell/profile-v2")
+        update("quickshell")
+        assert (config / "quickshell/modules/Thing.qml").read_bytes() == v2["config/quickshell/modules/Thing.qml"]
+        assert (config / "hypr/hyprland.lua").read_bytes() == initial["config/hypr/hyprland.lua"]
+        update()
+        assert (config / "hypr/hyprland.lua").read_bytes() == v2["config/hypr/hyprland.lua"]
+        assert (data / "wallpapers/default.jpg").read_bytes() == v2["data/wallpapers/default.jpg"]
+        assert os.readlink(root / ".profile") == str(config / "icewine/shell/profile-v2")
+        assert untracked.read_bytes() == initial["config/uwsm/env"]
+        assert user_settings.read_text() == "user settings\n" and host.read_text() == "user Kitty overrides\n"
+        assert any(path.read_bytes() == initial["config/hypr/hyprland.lua"]
+                   for path in state.glob("defaults-update-*/config/hypr/hyprland.lua"))
+        # Rolling back reinstalls prior bytes without resetting independent choices.
+        for name, contents in initial.items():
+            (defaults / name).write_bytes(contents)
+        update()
+        assert (config / "hypr/hyprland.lua").read_bytes() == initial["config/hypr/hyprland.lua"]
+        assert wallpaper.read_bytes() == b"user selection"
+        assert (state / "theme").read_text() == "dracula\n"
+        assert (state / "transparency").read_text() == "low\n"
+        assert (state / "autofullscreen").read_text() == "on\n"
+        # Recorded link edits are user-owned even if they resemble an old managed link.
+        profile = root / ".profile"
+        profile.unlink()
+        profile.symlink_to(config / "icewine/shell/profile")
+        update("bash")
+        assert os.readlink(profile) == str(config / "icewine/shell/profile")
+        profile.unlink()
+        profile.symlink_to(config / "icewine/shell/profile-v2")
+        # Removed/disabled unchanged files retire; edits and neighbouring user files stay.
+        extra = config / "quickshell/modules/User.qml"
+        extra.write_text("user extension\n")
+        for name in ("config/quickshell/modules/Thing.qml", "config/quickshell/config/Settings.qml",
+                     "config/btop/btop.conf", "data/wallpapers/default.jpg", "home/.profile"):
+            (defaults / name).unlink()
+        update("hypr")
+        assert (config / "quickshell/modules/Thing.qml").exists()
+        update()
+        assert not (config / "quickshell/modules/Thing.qml").exists()
+        assert not (data / "wallpapers/default.jpg").exists()
+        assert not (root / ".profile").is_symlink()
+        assert user_settings.read_text() == "user settings\n" and extra.read_text() == "user extension\n"
+        assert any(path.read_bytes() == initial["data/wallpapers/default.jpg"]
+                   for path in state.glob("defaults-update-*/data/wallpapers/default.jpg"))
+        # Conflicting replacements never acquire ownership, including dangling parents.
+        for name in ("directory", "unknown", "parent/entry"):
+            source = defaults / "config" / name
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("new shipped file\n")
+        (config / "directory").mkdir()
+        (config / "directory/user").write_text("keep directory contents\n")
+        (config / "unknown").symlink_to(root / "missing-user-target")
+        (config / "parent").symlink_to(root / "missing-parent")
+        update()
+        assert (config / "directory/user").read_text() == "keep directory contents\n"
+        assert (config / "unknown").is_symlink() and (config / "parent").is_symlink()
+        assert not (root / "missing-parent").exists()
+        # Explicit reset backs up an untracked regular file and establishes future ownership.
+        update("uwsm", replace=True)
+        assert any(path.read_bytes() == initial["config/uwsm/env"]
+                   for path in state.glob("defaults-reset-*/config/uwsm/env"))
+        (defaults / "config/uwsm/env").write_text("env v3\n")
+        update("uwsm")
+        assert untracked.read_text() == "env v3\n"
+        # Failures before replacement preserve both live bytes and the ownership record.
+        before = record.read_bytes()
+        (defaults / "config/uwsm/env").write_text("env v4\n")
+        with mock.patch.object(module.shutil, "copy2", side_effect=PermissionError("backup denied")):
+            try:
+                update("uwsm")
+                raise AssertionError("backup failure must stop replacement")
+            except PermissionError:
+                pass
+        assert untracked.read_text() == "env v3\n" and record.read_bytes() == before
+        with mock.patch.object(module.os, "replace", side_effect=PermissionError("replace denied")):
+            try:
+                update("uwsm")
+                raise AssertionError("replace failure must propagate")
+            except PermissionError:
+                pass
+        assert untracked.read_text() == "env v3\n" and record.read_bytes() == before
+        # A backup with different bytes must not authorize replacement.
+        def incomplete_backup(source, destination, *args, **kwargs):
+            Path(destination).write_bytes(b"incomplete backup")
+        with mock.patch.object(module.shutil, "copy2", side_effect=incomplete_backup):
+            try:
+                update("uwsm")
+                raise AssertionError("incomplete backup accepted")
+            except ValueError:
+                pass
+        assert untracked.read_text() == "env v3\n" and record.read_bytes() == before
+        # Edits made after backup or while preparing replacement survive refresh/retirement.
+        copy2 = module.shutil.copy2
+        def edit_after_backup(source, destination, *args, **kwargs):
+            result = copy2(source, destination, *args, **kwargs)
+            if source == untracked:
+                untracked.write_text("concurrent user edit\n")
+            return result
+        for retiring in (False, True):
+            if retiring:
+                (defaults / "config/uwsm/env").unlink()
+            with mock.patch.object(module.shutil, "copy2", side_effect=edit_after_backup), \
+                 mock.patch.object(module.sys, "stderr", new_callable=io.StringIO) as errors:
+                update("uwsm")
+            assert "changed during installation" in errors.getvalue()
+            assert untracked.read_text() == "concurrent user edit\n" and record.read_bytes() == before
+            untracked.write_text("env v3\n")
+            (defaults / "config/uwsm/env").write_text("env v4\n")
+        copyfileobj = module.shutil.copyfileobj
+        def edit_during_preparation(source, destination, *args, **kwargs):
+            result = copyfileobj(source, destination, *args, **kwargs)
+            if source.name == str(defaults / "config/uwsm/env"):
+                untracked.write_text("late user edit\n")
+            return result
+        with mock.patch.object(module.shutil, "copyfileobj", side_effect=edit_during_preparation):
+            update("uwsm")
+        assert untracked.read_text() == "late user edit\n" and record.read_bytes() == before
+        untracked.write_text("env v3\n")
+        # A parent switched during backup is preserved even when its file bytes match.
+        parent = config / "uwsm"
+        moved_parent = root / "late-user-parent"
+        def switch_parent_after_backup(source, destination, *args, **kwargs):
+            result = copy2(source, destination, *args, **kwargs)
+            if source == untracked:
+                parent.rename(moved_parent)
+                parent.symlink_to(moved_parent)
+            return result
+        with mock.patch.object(module.shutil, "copy2", side_effect=switch_parent_after_backup):
+            update("uwsm")
+        assert parent.is_symlink() and (moved_parent / "env").read_text() == "env v3\n"
+        assert record.read_bytes() == before
+        parent.unlink()
+        moved_parent.rename(parent)
+        # An interrupted manifest write leaves new bytes conservatively unowned.
+        atomic = module.atomic_text
+        def deny_record(path, *args, **kwargs):
+            if path == record:
+                raise PermissionError("ownership write denied")
+            return atomic(path, *args, **kwargs)
+        with mock.patch.object(module, "atomic_text", side_effect=deny_record):
+            try:
+                update("uwsm")
+                raise AssertionError("ownership write failure must propagate")
+            except PermissionError:
+                pass
+        assert untracked.read_text() == "env v4\n" and record.read_bytes() == before
+        (defaults / "config/uwsm/env").write_text("env v5\n")
+        update("uwsm")
+        assert untracked.read_text() == "env v4\n"  # No stale-hash takeover on retry.
+        untracked.write_text("env v3\n")
+        (defaults / "config/uwsm/env").write_text("env v4\n")
+        # Edited former managed paths may become dangling links or directories.
+        untracked.unlink()
+        untracked.symlink_to(root / "user-dangling")
+        update("uwsm")
+        assert os.readlink(untracked) == str(root / "user-dangling")
+        untracked.unlink()
+        untracked.mkdir()
+        (untracked / "user").write_text("keep\n")
+        update("uwsm")
+        assert (untracked / "user").read_text() == "keep\n"
+        (untracked / "user").unlink()
+        untracked.rmdir()
+        untracked.write_text("env v3\n")
+        # Removed children behind a substituted parent link are never followed.
+        original_uwsm = config / "uwsm"
+        moved_uwsm = root / "user-uwsm"
+        original_uwsm.rename(moved_uwsm)
+        original_uwsm.symlink_to(moved_uwsm)
+        (defaults / "config/uwsm/env").unlink()
+        update("uwsm")
+        assert (moved_uwsm / "env").read_text() == "env v3\n"
+        original_uwsm.unlink()
+        moved_uwsm.rename(original_uwsm)
+        (defaults / "config/uwsm/env").write_text("env v4\n")
+        # Corrupt/untrusted records cannot authorize deletion or replacement.
+        for contents in ('[]', '{"config":{"root":"x","files":{"../escape":"link:x"}}}'):
+            record.write_text(contents)
+            try:
+                update("uwsm")
+                raise AssertionError("invalid record accepted")
+            except ValueError:
+                pass
+            assert untracked.read_text() == "env v3\n"
+        record.unlink()
+        record.symlink_to(root / "missing-record")
+        try:
+            update("uwsm")
+            raise AssertionError("symlink record accepted")
+        except ValueError:
+            pass
+        record.unlink()
+        record.write_bytes(before)
+        # Changing XDG roots never cleans up the previous location.
+        old_config = config
+        config = root / "new-config"
+        update("uwsm")
+        assert (config / "uwsm/env").read_text() == "env v4\n"
+        assert (old_config / "uwsm/env").read_text() == "env v3\n"
+
+        # The public command waits for the defaults lock before modifying files.
+        cli_env = dict(os.environ, ICEWINE_THEME_ASSETS=str(assets), ICEWINE_DEFAULT_FILES=str(defaults),
+                       ICEWINE_GTK_ENABLE="false", ICEWINE_BROWSER_THEME_ENABLE="false", ICEWINE_SDDM_THEME_FILE="")
+        lock_root = Path(cli_env["XDG_STATE_HOME"]) / "icewine"
+        lock_root.mkdir(parents=True)
+        with (lock_root / "defaults.lock").open("w") as lock:
+            module.fcntl.flock(lock, module.fcntl.LOCK_EX)
+            child = subprocess.Popen([sys.executable, str(script), "init", "uwsm"], env=cli_env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                child.communicate(timeout=0.2)
+                raise AssertionError("init bypassed an existing defaults lock")
+            except subprocess.TimeoutExpired:
+                assert not (lock_root / "default-files.json").exists()
+            finally:
+                module.fcntl.flock(lock, module.fcntl.LOCK_UN)
+            stdout, stderr = child.communicate(timeout=15)
+            assert child.returncode == 0, stderr

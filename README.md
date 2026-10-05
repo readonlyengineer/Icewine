@@ -199,14 +199,20 @@ replaces recognized old Home Manager links. It preserves user-edited files.
 Recognized links are backed up under `$XDG_STATE_HOME/icewine/migration-*`;
 unrecognized symlinks remain untouched and are reported as conflicts.
 Static Hyprland, Quickshell, UWSM, btop, locale and wallpaper defaults are
-installed as writable files. Their migrated links and replaced files are saved
-under `defaults-migration-*` and `defaults-reset-*` in the same state directory.
+installed as writable files. Icewine records the bytes or symlink it installed
+in `$XDG_STATE_HOME/icewine/default-files.json`. Init refreshes a changed shipped
+default only while the current file still matches that record; your edits,
+untracked files, unknown symlinks and conflicting directories remain intact
+with conflict diagnostics. Keep this state directory with your configuration
+when using persistence. Migrated links, automatic updates/removals and explicit
+resets are backed up under `defaults-migration-*`, `defaults-update-*` and
+`defaults-reset-*` in the same state directory.
 The full init also retires recognized Icewine Home Manager user-unit and target
 links so native NixOS units load on the next login; an active user manager is
 reloaded. If reload reports `Pending`, run `systemctl --user daemon-reload` in
 the user session. Edited or unknown units are preserved and reported as conflicts.
 The defaults come from Icewine, except for host-selected files supplied by
-NixOS; later activations and theme changes preserve local edits. NixOS prepares
+NixOS; later activations update unchanged defaults and preserve local edits. NixOS prepares
 the files before the display manager starts and initializes missing files on
 user activation. Initialization errors are reported but do not prevent SDDM
 starting; the desktop shell still requires successful initialization.
@@ -219,14 +225,36 @@ an Icewine-managed link. An existing user-edited palette is preserved by `init`
 and may not support live updates. `icewine reset quickshell` backs it up and
 installs the live palette, but also replaces other edited Quickshell defaults;
 review the saved `defaults-reset-*` files before restoring local changes.
-Updates do not refresh existing regular files, even if they have never been
-edited. After an update changes Quickshell or Hyprland defaults, compare your
-files with the new Icewine and host defaults before a scoped reset, then merge
-your edits from its backup. This update changes Hyprland's fallback monitor
-scale; existing installations need to adopt `scale = "auto"` in their editable
-`hyprland.lua`. The recent theme-selection and Steam-shortcut changes require
-the current Quickshell defaults. A reset does not restart the running shell;
-restart `icewine.service` after adopting Quickshell changes.
+New installations receive updated default implementation files automatically.
+A rollback to a generation containing this ownership-aware installer restores
+that generation's defaults wherever the current files remain unchanged. Older
+generations containing the previous installer preserve those files instead;
+they cannot use the ownership record to restore earlier defaults.
+
+Existing regular files installed before ownership records are untracked, even
+when they equal today's defaults: Icewine cannot establish whether they are
+user-owned. Init preserves them and reports the new shipped file to compare.
+Review those files and use a scoped `icewine reset APP` to back them up and adopt
+the current defaults, then merge your edits from the backup. Edited formerly
+managed files also remain yours; updated sibling implementation files may need
+corresponding manual adjustments to your overrides. In particular, preserve
+Kitty overrides in `host.conf` and review Quickshell settings after an update.
+Init retires removed or disabled shipped defaults only if they still match the
+record, saving a backup first; edited remnants and other user files remain.
+A mounted file that cannot be removed remains with a diagnostic. Disabling
+Icewine entirely runs no initializer and leaves configuration, state and user
+data intact. Changing an XDG root also leaves the previous location intact.
+
+The recent theme-selection and Steam-shortcut changes require current Quickshell
+defaults. Init does not restart the running shell; restart `icewine.service`
+after adopting Quickshell changes. Updates preserve the selected theme,
+transparency, fullscreen preference and independently selected wallpaper.
+Init/reset serialize with each other and recheck live files after backup and
+preparation, preserving changes detected during installation. Ordinary editors
+do not take that lock: an edit in the narrow gap after the final check can still
+race replacement, and mounted files use a backed-up direct write. Finish editing
+Icewine defaults before a rebuild, init or reset; this is not a transaction with
+independent editors.
 `icewine init APP` installs missing files for one of `quickshell`, `gtk`,
 `yazi`, `fastfetch`, `starship`, `hypr`, `uwsm`, `btop`, `user-dirs`,
 `wallpapers`, `nvim`, or `bash`. `icewine reset APP` backs up and refreshes

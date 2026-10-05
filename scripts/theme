@@ -4,6 +4,7 @@
 import configparser
 import os
 import errno
+import fcntl
 import hashlib
 import json
 import re
@@ -449,41 +450,80 @@ def pure_legacy_browser_mime(path):
                     if parser.has_section(section)))
 
 
+def default_signature(path):
+    if path.is_symlink():
+        return "link:" + os.readlink(path)
+    if path.is_file():
+        return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    return None
+
+
 def install_defaults(defaults, config, data, state, replace, app):
     if not defaults:
         return
     source_root = Path(defaults)
+    manifest = state / "default-files.json"
+    if manifest.is_symlink():
+        raise ValueError(f"refusing symlinked defaults ownership record: {manifest}")
+    records = json.loads(manifest.read_text()) if manifest.exists() else {}
+    if not isinstance(records, dict) or set(records) - {"config", "data", "home"}:
+        raise ValueError(f"invalid defaults ownership record: {manifest}")
+    for entry in records.values():
+        if (not isinstance(entry, dict) or set(entry) != {"root", "files"}
+                or not isinstance(entry["root"], str) or not isinstance(entry["files"], dict)
+                or any(not isinstance(name, str) or not name or Path(name).is_absolute()
+                       or any(part in {"", ".", ".."} for part in name.split("/"))
+                       or not isinstance(value, str)
+                       or not (re.fullmatch(r"sha256:[0-9a-f]{64}", value) or value.startswith("link:"))
+                       for name, value in entry["files"].items())):
+            raise ValueError(f"invalid defaults ownership record: {manifest}")
     backup = None
     backed_up = set()
 
-    def save(path, root, root_name):
+    def still_current(path, root, signature):
+        if (any(parent.is_symlink() or (parent.exists() and not parent.is_dir())
+                for parent in path.parents if parent != root and root in parent.parents)
+                or default_signature(path) != signature
+                or (signature is None and path.exists())):
+            print(f"conflict: preserved default changed during installation: {path}", file=sys.stderr)
+            return False
+        return True
+
+    def save(path, root, root_name, automatic=False):
         nonlocal backup
         if path in backed_up:
             return
         if backup is None:
             state.mkdir(parents=True, exist_ok=True)
-            backup = Path(tempfile.mkdtemp(prefix="defaults-reset-" if replace else "defaults-migration-", dir=state))
+            backup = Path(tempfile.mkdtemp(prefix="defaults-update-" if automatic else ("defaults-reset-" if replace else "defaults-migration-"), dir=state))
         destination = backup / root_name / path.relative_to(root)
         destination.parent.mkdir(parents=True, exist_ok=True)
+        signature = default_signature(path)
         if path.is_dir():
             shutil.copytree(path, destination)
         elif path.exists():
             shutil.copy2(path, destination)
         else:
             destination.symlink_to(os.readlink(path))
+        if signature and signature.startswith("sha256:") and default_signature(destination) != signature:
+            raise ValueError(f"defaults backup changed during copying; preserved {path}: {destination}")
         backed_up.add(path)
         print(f"saved: {path} -> {destination}")
 
     for root_name, root in (("config", config), ("data", data), ("home", Path.home())):
         source = source_root / root_name
-        if not source.is_dir():
-            if root_name == "home":
-                continue
+        if not source.is_dir() and root_name != "home":
             raise ValueError(f"default files are unavailable: {source}")
+        if records.get(root_name, {}).get("root") != str(root):
+            records[root_name] = {"root": str(root), "files": {}}
+        previous = records[root_name]["files"]
+        present = set()
         for shipped in sorted(item for item in source.rglob("*") if item.is_file() or item.is_symlink()):
             relative = shipped.relative_to(source)
             if app and static_app(root_name, relative) != app:
                 continue
+            name = relative.as_posix()
+            present.add(name)
             path = root / relative
             blocked = False
             for parent in reversed(path.parents):
@@ -497,31 +537,55 @@ def install_defaults(defaults, config, data, state, replace, app):
                     break
                 if not parent.is_symlink():
                     continue
+                if any(Path(name).is_relative_to(parent.relative_to(root)) for name in previous):
+                    print(f"conflict: preserved substituted parent of recorded defaults: {parent}", file=sys.stderr)
+                    blocked = True
+                    break
                 if not managed_static_link(parent, root, root_name):
                     print(f"conflict: preserved unrecognized symlink: {parent}", file=sys.stderr)
                     blocked = True
                     break
+                parent_signature = default_signature(parent)
                 save(parent, root, root_name)
+                if not still_current(parent, root, parent_signature):
+                    blocked = True
+                    break
                 parent.unlink()
             if blocked:
                 continue
+            current = default_signature(path)
+            expected = ("link:" + str(config / os.readlink(shipped)) if shipped.is_symlink()
+                        else default_signature(shipped))
+            unchanged = current is not None and current == previous.get(name)
+            if unchanged and current == expected:
+                continue
             if path.is_symlink():
-                if shipped.is_symlink() and os.readlink(path) == str(config / os.readlink(shipped)):
+                if (current == expected and (unchanged or
+                        (name not in previous and managed_static_link(path, root, root_name)))):
+                    previous[name] = current
                     continue
-                if not managed_static_link(path, root, root_name):
+                if not unchanged and ((name in previous and not replace)
+                                      or not managed_static_link(path, root, root_name)):
                     print(f"conflict: preserved unrecognized symlink: {path}", file=sys.stderr)
                     continue
-                save(path, root, root_name)
-                path.unlink()
+                save(path, root, root_name, automatic=unchanged and not replace)
             elif path.exists():
                 if not path.is_file():
                     print(f"conflict: preserved non-file: {path}", file=sys.stderr)
                     continue
-                if not replace:
+                if not replace and not unchanged:
+                    reason = "edited" if name in previous else "untracked"
+                    target_app = static_app(root_name, relative)
+                    action = f"icewine reset {target_app}" if target_app in APPS else "icewine reset"
+                    print(f"conflict: preserved {reason} default: {path}; compare {shipped} or back up with {action}", file=sys.stderr)
                     continue
-                save(path, root, root_name)
+                save(path, root, root_name, automatic=unchanged and not replace)
+            if not still_current(path, root, current):
+                continue
             path.parent.mkdir(parents=True, exist_ok=True)
             if shipped.is_symlink():
+                if not still_current(path, root, current):
+                    continue
                 atomic_link(path, config / os.readlink(shipped))
             else:
                 fd, temporary = tempfile.mkstemp(prefix=".icewine-", dir=path.parent)
@@ -531,11 +595,15 @@ def install_defaults(defaults, config, data, state, replace, app):
                         stream.flush()
                         os.fsync(stream.fileno())
                     os.chmod(temporary, 0o644)
+                    if not still_current(path, root, current):
+                        continue
                     try:
                         os.replace(temporary, path)
                     except OSError as error:
                         if error.errno != errno.EBUSY or path not in backed_up:
                             raise
+                        if not still_current(path, root, current):
+                            continue
                         # A persisted file bind mount cannot be renamed; its scoped backup is the recovery path.
                         with open(temporary, "rb") as source_file, path.open("wb") as destination:
                             shutil.copyfileobj(source_file, destination)
@@ -544,7 +612,37 @@ def install_defaults(defaults, config, data, state, replace, app):
                 finally:
                     if os.path.exists(temporary):
                         os.unlink(temporary)
+            previous[name] = expected
+            atomic_text(manifest, json.dumps(records, sort_keys=True) + "\n")
             print(f"installed: {path}")
+
+        for name in sorted(set(previous) - present):
+            relative = Path(name)
+            if app and static_app(root_name, relative) != app:
+                continue
+            path = root / relative
+            if any(parent.is_symlink() or (parent.exists() and not parent.is_dir())
+                   for parent in path.parents if parent != root and root in parent.parents):
+                print(f"conflict: preserved removed default behind changed parent: {path}", file=sys.stderr)
+                continue
+            if path.exists() or path.is_symlink():
+                if default_signature(path) != previous[name]:
+                    print(f"conflict: preserved edited removed default: {path}", file=sys.stderr)
+                    continue
+                save(path, root, root_name, automatic=True)
+                if not still_current(path, root, previous[name]):
+                    continue
+                try:
+                    path.unlink()
+                except OSError as error:
+                    if error.errno != errno.EBUSY:
+                        raise
+                    print(f"conflict: preserved mounted removed default: {path}", file=sys.stderr)
+                    continue
+                print(f"retired: {path}")
+            del previous[name]
+            atomic_text(manifest, json.dumps(records, sort_keys=True) + "\n")
+        atomic_text(manifest, json.dumps(records, sort_keys=True) + "\n")
 
     # The Gamescope launcher comes from the user profile; Steam masks must
     # outrank Flatpak exports. Local overrides remain user-owned.
@@ -812,7 +910,7 @@ def reload_session(config, app=None):
     return failed
 
 
-def main(argv):
+def dispatch(argv):
     if not argv or argv[0] not in {"init", "reset", "theme", "transparency", "autofullscreen", "apply"}:
         raise ValueError("Usage: icewine {init [APP]|reset [APP]|theme [THEME_ID]|transparency [off|low|med|high]|autofullscreen [on|off]}")
     command, *args = argv
@@ -939,6 +1037,18 @@ def main(argv):
     if command in {"theme", "reset", "transparency", "apply"}:
         return int(reload_session(config, app if command == "reset" else None) or not gtk_complete)
     return 0
+
+
+def main(argv):
+    if argv and argv[0] in {"init", "reset"}:
+        state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+        state.mkdir(parents=True, exist_ok=True)
+        # Ponytail: one lock serialises init/reset, including backups; split by root if contention matters.
+        fd = os.open(state / "defaults.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "r+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return dispatch(argv)
+    return dispatch(argv)
 
 
 if __name__ == "__main__":
