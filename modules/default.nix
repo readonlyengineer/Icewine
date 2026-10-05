@@ -44,6 +44,9 @@ in {
     };
     handheld.enable = lib.mkEnableOption "handheld shell, controller routing and on-screen keyboard";
     browser.enable = lib.mkEnableOption "Icewine's native Firefox browser" // { default = true; };
+    browser.theme.enable = lib.mkEnableOption "upstream Pywalfox palette integration (extension installed manually)" // {
+      default = cfg.browser.enable;
+    };
     steam.enable = lib.mkEnableOption "Steam (Gamescope) launcher and ordinary Steam entry hiding" // {
       default = cfg.handheld.enable;
     };
@@ -118,6 +121,12 @@ in {
       config.hyprland."org.freedesktop.impl.portal.Settings" = [ "gtk" ];
     };
     programs.firefox.enable = lib.mkDefault cfg.browser.enable;
+    # Only the verified default wrapper discovers store manifests without force-linking user files.
+    programs.firefox.nativeMessagingHosts.packages = lib.mkIf
+      (cfg.browser.theme.enable && config.programs.firefox.package != null
+        && config.programs.firefox.package.outPath == pkgs.firefox.outPath) [
+      (import ../theme/browser.nix { inherit pkgs; })
+    ];
     security.pam.services.icewine = { };
     security.polkit.enable = true;
     services.pipewire = {
@@ -139,6 +148,7 @@ in {
       bluetui impala wiremix btop xdg-utils gamescope
     ]) ++ launchers ++ [ screenshot ] ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
     users.users.${cfg.user}.packages = lib.optional cfg.browser.enable browserDefaults
+      ++ lib.optional cfg.browser.theme.enable (import ../theme/browser.nix { inherit pkgs; })
       ++ lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty;
   };
 }

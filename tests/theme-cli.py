@@ -88,6 +88,7 @@ with tempfile.TemporaryDirectory() as temporary:
                ICEWINE_DEFAULT_FILES=str(defaults),
                HOME=str(root))
     env["XDG_DATA_HOME"] = str(root / "data")
+    env["ICEWINE_BROWSER_THEME_ENABLE"] = "false"
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     env.pop("WAYLAND_DISPLAY", None)
     env.pop("HYPRLAND_INSTANCE_SIGNATURE", None)
@@ -446,6 +447,24 @@ x-scheme-handler/https=firefox.desktop
 
     # Every shipped palette renders app-native files, including light mode.
     kitty_entry.write_text("user Kitty theme edit\n")
+    browser_log = root / "browser.log"
+    (fake_bin / "icewine-pywalfox").write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\nfrom pathlib import Path\n"
+        "current = Path(os.environ['XDG_CONFIG_HOME']) / 'icewine/current'\n"
+        "palette = json.loads((current / 'palette.json').read_text())\n"
+        "wal = json.loads((current.parent / 'wal/colors.json').read_text())\n"
+        f"with open({str(browser_log)!r}, 'a') as log:\n"
+        "    log.write(json.dumps([sys.argv[1], palette['themeId'], wal['colors']['color0']]) + '\\n')\n")
+    (fake_bin / "icewine-pywalfox").chmod(0o755)
+    env["ICEWINE_BROWSER_THEME_ENABLE"] = "true"
+    browser_input = config / "icewine/wal/colors.json"
+    browser_input.parent.mkdir(parents=True)
+    browser_input.write_text("custom input")
+    result = run("init")
+    assert "refusing to replace custom Pywalfox input" in result.stderr
+    assert browser_input.read_text() == "custom input" and not browser_log.exists()
+    browser_input.unlink()
     for theme_id, background, appearance in [
         ("tokyo-night", "13131a", "dark"), ("dracula", "1d1e27", "dark"),
         ("nord", "282e38", "dark"), ("gruvbox-light", "cfc19d", "light"),
@@ -465,6 +484,16 @@ x-scheme-handler/https=firefox.desktop
         assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}" in (current / "gtk-settings.ini").read_text()
         assert "gtk-theme-name=Adwaita\n" in (current / "gtk4-settings.ini").read_text()
         palette = json.loads((assets / "themes" / f"{theme_id}.json").read_text())
+        wal = json.loads((current / "pywalfox.json").read_text())
+        assert list(wal["colors"]) == [f"color{i}" for i in range(16)]
+        assert wal["wallpaper"] == ""
+        assert wal["colors"]["color0"] == "#" + palette["background"]
+        assert wal["colors"]["color8"] == "#" + palette["surface"]
+        assert wal["colors"]["color12"] == "#" + palette["highlight"]
+        assert wal["colors"]["color15"] == "#" + palette["foreground"]
+        assert not (current / "browser.css").exists()
+        calls = [json.loads(line) for line in browser_log.read_text().splitlines()]
+        assert calls[-2:] == [[appearance, theme_id, "#" + palette["background"]], ["update", theme_id, "#" + palette["background"]]], calls[-2:]
         gtk4 = (current / "gtk4.css").read_text()
         for role, color in (("window-bg", "background"), ("view-bg", "backgroundDark"),
                             ("headerbar-bg", "backgroundDark"), ("sidebar-bg", "surface"),
@@ -500,6 +529,11 @@ x-scheme-handler/https=firefox.desktop
         assert "Tokyonight-Dark" not in (current / "gtk4-settings.ini").read_text()
         for filename in ("starship.toml", "yazi-theme.toml", "yazi-keymap.toml"):
             tomllib.loads((current / filename).read_text())
+    env["ICEWINE_BROWSER_THEME_ENABLE"] = "false"
+    saved_browser_log = browser_log.read_text()
+    assert run("apply").returncode == 0
+    assert browser_log.read_text() == saved_browser_log
+    env["ICEWINE_BROWSER_THEME_ENABLE"] = "true"
     assert run("theme", "nord", policy="gruvbox-light").returncode == 0
     assert 'local theme = "gruvbox-light"' in nvim_theme.read_text()
 

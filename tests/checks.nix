@@ -41,6 +41,18 @@ let
       services.icewine.applications.steam = [ "flatpak" "run" "com.valvesoftware.Steam" ];
     } ];
   }).config;
+  binaryFirefox = (desktopSystem.extendModules {
+    modules = [ {
+      programs.firefox.package = (import nixpkgs {
+        system = "x86_64-linux";
+        config.allowUnfreePredicate = package:
+          lib.removeSuffix "-unwrapped" (lib.getName package) == "firefox-bin";
+      }).firefox-bin;
+    } ];
+  }).config;
+  unpatchedFirefox = (desktopSystem.extendModules {
+    modules = [ { programs.firefox.package = pkgs.firefox.override { hasMozSystemDirPatch = false; }; } ];
+  }).config;
   steamOptOut = (handheldSystem.extendModules {
     modules = [ { services.icewine.steam.enable = false; } ];
   }).config;
@@ -56,6 +68,7 @@ let
   mimePackage = builtins.head (lib.filter
     (package: lib.getName package == "mimeapps.list") desktop.users.users.demo.packages);
   hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
+  browserHost = import ../theme/browser.nix { inherit pkgs; };
 in {
   screenshot = pkgs.runCommand "icewine-screenshot-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
@@ -109,6 +122,16 @@ in {
     assert hasPackage "icewine-steam-desktop-entries" handheld.users.users.demo.packages;
     assert !steamDesktop.programs.steam.enable;
     assert desktop.programs.firefox.enable;
+    assert hasPackage "icewine-pywalfox" desktop.users.users.demo.packages;
+    assert hasPackage "icewine-pywalfox" desktop.programs.firefox.nativeMessagingHosts.packages;
+    assert !(hasPackage "icewine-pywalfox" desktop.users.users.other.packages);
+    assert !(hasPackage "icewine-pywalfox" unmanaged.users.users.demo.packages);
+    assert !(hasPackage "icewine-pywalfox" disabled.users.users.demo.packages);
+    assert unmanaged.programs.firefox.nativeMessagingHosts.packages == [ ];
+    assert binaryFirefox.programs.firefox.nativeMessagingHosts.packages == [ ];
+    assert unpatchedFirefox.programs.firefox.nativeMessagingHosts.packages == [ ];
+    assert hasPackage "icewine-pywalfox" binaryFirefox.users.users.demo.packages;
+    assert hasPackage "icewine-pywalfox" unpatchedFirefox.users.users.demo.packages;
     assert desktop.xdg.mime.defaultApplications == { };
     assert hasPackage "mimeapps.list" desktop.users.users.demo.packages;
     assert !(hasPackage "mimeapps.list" desktop.users.users.other.packages);
@@ -154,6 +177,7 @@ in {
       export HOME=$TMPDIR/home XDG_CONFIG_HOME=$TMPDIR/home/.config XDG_DATA_HOME=$TMPDIR/home/.local/share XDG_STATE_HOME=$TMPDIR/home/.local/state
       mkdir -p "$HOME"
       ${icewineCli}/bin/icewine init
+      PYTHONPATH=${pkgs.pywalfox-native}/${pkgs.python3.sitePackages} ${pkgs.python3}/bin/python3 ${./browser-upstream.py} ${browserHost}/lib/mozilla/native-messaging-hosts/pywalfox.json
       cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
       cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"
       test ! -e "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"

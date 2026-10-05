@@ -271,10 +271,9 @@ instance. GTK's theme and light/dark preference are published through
 GSettings; custom CSS in already open GTK or Flatpak apps may require reopening
 those apps. Starship uses the new theme at the next prompt and Fastfetch at its
 next run. The CLI reports failed or pending consumers separately from the saved
-selection. Browser chrome uses shared GTK and portal appearance where supported;
-browser-specific reload behaviour remains outside this command. No browser
-profile is changed. Select "System theme — auto" in Firefox/LibreWolf for
-system appearance.
+selection. With Pywalfox enabled, browser palette and mode updates use its upstream
+CLI after publication; the CLI does not acknowledge whether a browser received
+an update. Browser setup and limitations are described below.
 Icewine publishes a named GTK3 theme under `$XDG_DATA_HOME/themes` and updates
 `org.gnome.desktop.interface` GTK theme and light/dark settings using `gsettings`.
 The Settings portal must use a backend that exposes these settings (the NixOS
@@ -297,20 +296,63 @@ Flatpak GTK4 apps do not receive this host CSS through the GTK3 extension.
 Browser colour mapping remains browser-controlled; web content and privacy
 preferences are unchanged.
 
-For full Firefox/LibreWolf chrome colours, Icewine generates
-`$XDG_CONFIG_HOME/icewine/current/browser.css`. Select **System theme — auto**.
-Open `about:support` and find your Profile Directory, then create
-`chrome/userChrome.css` there (or add this import at the beginning of an existing
-file), using your actual absolute config path:
+Firefox/LibreWolf live chrome colours use the upstream [Pywalfox extension](https://addons.mozilla.org/firefox/addon/pywalfox/)
+and Nixpkgs `pywalfox-native`. Icewine exports its existing palette, without pywal
+or another colour generator. The unchanged Nixpkgs Firefox package registers the
+native host through NixOS; custom Firefox packages use manual registration below.
+Install the extension manually, open its settings, enable **Fetch on startup**
+and click **Fetch Pywal colors**.
+Enable neither optional CSS nor DuckDuckGo styling. The extension requests
+native messaging, theme, storage, tabs and alarms permissions and includes a
+DuckDuckGo content script. The upstream host can write profile CSS when those
+optional features are enabled; this integration does not enable them.
+On startup the upstream host may create an empty `chrome` directory in the
+discovered Profile0 even with CSS disabled; it does not overwrite CSS or
+preferences unless optional CSS actions are requested.
 
-```css
-@import url("file:///home/YOUR_USER/.config/icewine/current/browser.css");
+`browser.theme.enable` defaults to `browser.enable`. For a host-managed native
+LibreWolf, set `browser.enable = false`, your `applications.browser` command and
+`browser.theme.enable = true`. Native LibreWolf and custom Firefox packages must
+register the supplied manifest without overwriting an existing user manifest
+(inspect/back it up manually first):
+
+```sh
+mkdir -p "$HOME/.mozilla/native-messaging-hosts"
+ln -s /etc/profiles/per-user/YOUR_USER/lib/mozilla/native-messaging-hosts/pywalfox.json "$HOME/.mozilla/native-messaging-hosts/pywalfox.json"
 ```
 
-Set `toolkit.legacyUserProfileCustomizations.stylesheets` to `true` in
-`about:config` and restart the browser. Restart after changing Icewine themes.
-Flatpak browsers also need read access to the imported file. Installed browser
-themes take precedence; browser updates may require CSS selector adjustments.
+Restart once after native-host registration. Do not run `pywalfox install`: its
+installer replaces existing manifests without checking ownership. A pre-existing
+user manifest can also override Firefox's packaged host; inspect it if fetching
+fails. `icewine-pywalfox` runs the upstream CLI with Icewine's own cache directory
+under `$XDG_CONFIG_HOME/icewine`; the normal wal cache remains untouched. Logs are
+writable there, outside immutable rendered generations. `icewine-pywalfox log`
+provides upstream diagnostics. Theme changes publish input then call upstream
+`dark`/`light` and `update`. Browsers started later receive the saved mode and
+palette when **Fetch on startup** is enabled; otherwise fetch manually.
+Upstream supports one live native host per Unix user, so simultaneous profiles
+or Firefox and LibreWolf instances are not guaranteed to update together.
+
+Default Pywalfox templates give related derived chrome colours. For exact Icewine
+roles, optionally set both light and dark templates to Background=0,
+Background Light=8, Background Extra=8, Accent Primary=12, Accent Secondary=13,
+Text=15 and Text Focus=15 (14 choices per profile). Tabs, navigation/bookmarks,
+address/search fields, Theme API popups, sidebar and new tab follow the theme;
+arbitrary settings/about pages, native menus/dialogs, custom sidebars and website
+content have no arbitrary-palette guarantee. Upstream derives some default colours
+and does not expose every browser element.
+
+Icewine mode updates override the extension's manual/Auto selection; successful
+fetches reset temporary colour-wheel edits in both modes, while saved templates
+remain. To opt out, disable the extension and set `browser.theme.enable = false`;
+the extension's temporary Disable theme action is undone by the next fetch.
+No extension storage, profile preference or CSS is automatically migrated. Back
+up each selected profile's CSS, remove only the exact old Icewine `browser.css`
+import from `chrome/userChrome.css`, and restart once. Keep other CSS and leave
+legacy stylesheets enabled if it is still needed. Old rendered generations remain
+recoverable. Flatpak native messaging is deferred: upstream's recommended setup
+allows host-command execution; no such permission is granted here. Existing GTK
+Flatpak theming remains available.
 The Bash starter files live under `$XDG_CONFIG_HOME/icewine/shell/`; `.bashrc`,
 `.profile` and `.bash_profile` link to them. NixOS supplies current package paths,
 feature flags and session variables, so disabling Fastfetch, ble.sh or Starship
