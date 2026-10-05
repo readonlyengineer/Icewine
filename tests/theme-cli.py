@@ -447,13 +447,13 @@ x-scheme-handler/https=firefox.desktop
     # Every shipped palette renders app-native files, including light mode.
     kitty_entry.write_text("user Kitty theme edit\n")
     for theme_id, background, appearance in [
-        ("tokyo-night", "1b1f2c", "dark"), ("dracula", "2a2737", "dark"),
-        ("nord", "303944", "dark"), ("gruvbox-light", "cab48f", "light"),
-        ("gruvbox-dark", "342a22", "dark"),
-        ("catppuccin-latte", "bac3d3", "light"),
-        ("catppuccin-frappe", "2c3143", "dark"),
-        ("catppuccin-macchiato", "23273a", "dark"),
-        ("catppuccin-mocha", "1e2232", "dark"),
+        ("tokyo-night", "13131a", "dark"), ("dracula", "1d1e27", "dark"),
+        ("nord", "282e38", "dark"), ("gruvbox-light", "cfc19d", "light"),
+        ("gruvbox-dark", "232323", "dark"),
+        ("catppuccin-latte", "cacdd2", "light"),
+        ("catppuccin-frappe", "242735", "dark"),
+        ("catppuccin-macchiato", "1a1c2a", "dark"),
+        ("catppuccin-mocha", "151521", "dark"),
     ]:
         result = run("theme", theme_id)
         assert result.returncode == 0, result.stderr

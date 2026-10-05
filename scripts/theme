@@ -151,9 +151,9 @@ def render_theme(assets, palette_file, level="high"):
         raise ValueError(f"invalid theme data: {palette_file}")
     values = dict(palette)
     values["themeId"] = palette_file.stem
-    # Smoky glass: 80% dark base, 8% accent and 12% black.
+    # Smoky glass: 88% dark base and 12% black; no added accent tint.
     values["terminalBackground"] = "".join(
-        f"{round(int(values['backgroundDark'][i:i + 2], 16) * 0.8 + int(values['highlight'][i:i + 2], 16) * 0.08):02x}"
+        f"{round(int(values['backgroundDark'][i:i + 2], 16) * 0.88):02x}"
         for i in (0, 2, 4)
     )
     values["kittyOpacity"], values["inactiveOpacity"] = TRANSPARENCY[level]
