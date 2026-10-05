@@ -92,7 +92,6 @@ with tempfile.TemporaryDirectory() as temporary:
                ICEWINE_DEFAULT_FILES=str(defaults),
                HOME=str(root))
     env["XDG_DATA_HOME"] = str(root / "data")
-    env["ICEWINE_BROWSER_THEME_ENABLE"] = "false"
     sddm_file = root / "sddm/theme.ini"
     env["ICEWINE_SDDM_THEME_FILE"] = str(sddm_file)
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)
@@ -540,24 +539,6 @@ x-scheme-handler/https=firefox.desktop
 
     # Every shipped palette renders app-native files, including light mode.
     kitty_entry.write_text("user Kitty theme edit\n")
-    browser_log = root / "browser.log"
-    (fake_bin / "icewine-pywalfox").write_text(
-        f"#!{sys.executable}\n"
-        "import json, os, sys\nfrom pathlib import Path\n"
-        "current = Path(os.environ['XDG_CONFIG_HOME']) / 'icewine/current'\n"
-        "palette = json.loads((current / 'palette.json').read_text())\n"
-        "wal = json.loads((current.parent / 'wal/colors.json').read_text())\n"
-        f"with open({str(browser_log)!r}, 'a') as log:\n"
-        "    log.write(json.dumps([sys.argv[1], palette['themeId'], wal['colors']['color0']]) + '\\n')\n")
-    (fake_bin / "icewine-pywalfox").chmod(0o755)
-    env["ICEWINE_BROWSER_THEME_ENABLE"] = "true"
-    browser_input = config / "icewine/wal/colors.json"
-    browser_input.parent.mkdir(parents=True)
-    browser_input.write_text("custom input")
-    result = run("init")
-    assert "refusing to replace custom Pywalfox input" in result.stderr
-    assert browser_input.read_text() == "custom input" and not browser_log.exists()
-    browser_input.unlink()
     for theme_id, background, appearance in [
         ("tokyo-night", "13131a", "dark"), ("dracula", "1d1e27", "dark"),
         ("nord", "282e38", "dark"), ("gruvbox-light", "cfc19d", "light"),
@@ -578,16 +559,8 @@ x-scheme-handler/https=firefox.desktop
         assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}" in (current / "gtk-settings.ini").read_text()
         assert "gtk-theme-name=Adwaita\n" in (current / "gtk4-settings.ini").read_text()
         palette = json.loads((assets / "themes" / f"{theme_id}.json").read_text())
-        wal = json.loads((current / "pywalfox.json").read_text())
-        assert list(wal["colors"]) == [f"color{i}" for i in range(16)]
-        assert wal["wallpaper"] == ""
-        assert wal["colors"]["color0"] == "#" + palette["background"]
-        assert wal["colors"]["color8"] == "#" + palette["surface"]
-        assert wal["colors"]["color12"] == "#" + palette["highlight"]
-        assert wal["colors"]["color15"] == "#" + palette["foreground"]
+        assert not (current / "pywalfox.json").exists()
         assert not (current / "browser.css").exists()
-        calls = [json.loads(line) for line in browser_log.read_text().splitlines()]
-        assert calls[-2:] == [[appearance, theme_id, "#" + palette["background"]], ["update", theme_id, "#" + palette["background"]]], calls[-2:]
         gtk4 = (current / "gtk4.css").read_text()
         for role, color in (("window-bg", "background"), ("view-bg", "backgroundDark"),
                             ("headerbar-bg", "backgroundDark"), ("sidebar-bg", "surface"),
@@ -623,11 +596,6 @@ x-scheme-handler/https=firefox.desktop
         assert "Tokyonight-Dark" not in (current / "gtk4-settings.ini").read_text()
         for filename in ("starship.toml", "yazi-theme.toml", "yazi-keymap.toml"):
             tomllib.loads((current / filename).read_text())
-    env["ICEWINE_BROWSER_THEME_ENABLE"] = "false"
-    saved_browser_log = browser_log.read_text()
-    assert run("apply").returncode == 0
-    assert browser_log.read_text() == saved_browser_log
-    env["ICEWINE_BROWSER_THEME_ENABLE"] = "true"
     assert run("theme", "nord", policy="gruvbox-light").returncode == 0
     assert sddm_file.read_text() == "[General]\ntheme=gruvbox-light\n"
     assert 'local theme = "gruvbox-light"' in nvim_theme.read_text()
@@ -1055,7 +1023,7 @@ with tempfile.TemporaryDirectory() as temporary:
 
         # The public command waits for the defaults lock before modifying files.
         cli_env = dict(os.environ, ICEWINE_THEME_ASSETS=str(assets), ICEWINE_DEFAULT_FILES=str(defaults),
-                       ICEWINE_GTK_ENABLE="false", ICEWINE_BROWSER_THEME_ENABLE="false", ICEWINE_SDDM_THEME_FILE="")
+                       ICEWINE_GTK_ENABLE="false", ICEWINE_SDDM_THEME_FILE="")
         lock_root = Path(cli_env["XDG_STATE_HOME"]) / "icewine"
         lock_root.mkdir(parents=True)
         with (lock_root / "defaults.lock").open("w") as lock:
@@ -1117,7 +1085,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 module.install_links(config, state, False, "gtk")
                 assert (config / "gtk-3.0/gtk.css").read_bytes() == css_source.read_bytes()
             with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config), "XDG_STATE_HOME": str(state.parent),
-                                             "ICEWINE_GTK_ENABLE": "false", "ICEWINE_BROWSER_THEME_ENABLE": "false"}), \
+                                             "ICEWINE_GTK_ENABLE": "false"}), \
                  mock.patch.object(module, "reload_session", return_value=False):
                 assert module.dispatch(list(action)) == 0
             assert not (config / "gtk-3.0/gtk.css").exists(), action
@@ -1335,7 +1303,7 @@ for conflict in (None, "module", "module-directory", "entry", "entry-directory",
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_DATA_HOME=str(data),
                    XDG_STATE_HOME=str(root / "state"), ICEWINE_THEME_ASSETS=str(assets),
                    ICEWINE_DEFAULT_FILES=str(new), ICEWINE_GTK_ENABLE="false",
-                   ICEWINE_BROWSER_THEME_ENABLE="false", DBUS_SESSION_BUS_ADDRESS="", WAYLAND_DISPLAY="")
+                   DBUS_SESSION_BUS_ADDRESS="", WAYLAND_DISPLAY="")
         before_entry = module.default_signature(config / "hypr/hyprland.lua")
         before_module = module.default_signature(config / "quickshell/modules/Topbar.qml")
         before_manifest = (state / "default-files.json").read_bytes()

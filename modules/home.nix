@@ -112,14 +112,12 @@ let
   themeCli = pkgs.writeShellApplication {
     name = "icewine-theme";
     runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd pkgs.glib quickshell pkgs.neovim ]
-      ++ lib.optional cfg.browser.theme.enable (import ../theme/browser.nix { inherit pkgs; })
       ++ lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty
       ++ lib.optional (cfg.fileManager.preset == "yazi") pkgs.yazi
       ++ lib.optional config.services.flatpak.enable pkgs.flatpak;
     text = ''
       export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
-      export ICEWINE_BROWSER_THEME_ENABLE=${if cfg.browser.theme.enable then "true" else "false"}
       export ICEWINE_THEME_ASSETS=${../theme/assets}
       ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_THEME_FILE=/var/lib/icewine/sddm/theme.ini"}
       export ICEWINE_DEFAULT_FILES=${defaults}

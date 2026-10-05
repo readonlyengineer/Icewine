@@ -202,13 +202,6 @@ def render_theme(assets, palette_file, level="high"):
         }.items()},
     }, sort_keys=True) + "\n"
     files["gtk4-settings.ini"] = files["gtk-settings.ini"]
-    files["pywalfox.json"] = json.dumps({
-        "wallpaper": "",
-        "colors": {f"color{index}": "#" + values[role] for index, role in enumerate((
-            "background", "error", "success", "caution", "highlight", "secondaryHighlight", "info", "foreground",
-            "surface", "error", "success", "caution", "highlight", "secondaryHighlight", "info", "foreground",
-        ))},
-    }) + "\n"
     files["gtk4.css"] = files["gtk.css"] + files["gtk4.css"]
     files["gtk-settings.ini"] = files["gtk-settings.ini"].replace(
         "gtk-theme-name=Adwaita", "gtk-theme-name=Icewine-" + palette_file.stem
@@ -1277,17 +1270,6 @@ def dispatch(argv):
             atomic_text(Path(sddm_file), f"[General]\ntheme={theme_id}\n", 0o644)
         except OSError as error:
             print(f"Pending: SDDM colours will not update: {error}", file=sys.stderr)
-    if os.environ.get("ICEWINE_BROWSER_THEME_ENABLE") == "true":
-        wal = config / "icewine/wal/colors.json"
-        target = config / "icewine/current/pywalfox.json"
-        try:
-            if (wal.exists() or wal.is_symlink()) and (not wal.is_symlink() or os.readlink(wal) != str(target)):
-                raise ValueError(f"refusing to replace custom Pywalfox input: {wal}")
-            atomic_link(wal, target)
-            for action in ("dark" if json.loads(files["palette.json"])["dark"] else "light", "update"):
-                subprocess.run(["icewine-pywalfox", action], check=True, capture_output=True, timeout=10)
-        except (OSError, ValueError, subprocess.SubprocessError) as error:
-            print(f"Pending: Pywalfox update failed: {error}", file=sys.stderr)
     if command in {"init", "reset"}:
         install_defaults(os.environ.get("ICEWINE_DEFAULT_FILES"), config,
                          xdg("XDG_DATA_HOME", ".local/share"), state, command == "reset", app)

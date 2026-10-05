@@ -298,7 +298,7 @@ Paths below are relative to XDG_CONFIG_HOME unless a different root is named.
 | Desktop entries / Steam masks / MIME defaults | package `share/applications` entries, XDG_DATA_HOME/applications masks and editable uuctl mask | desktop-file data exception; no appearance |
 | Wallpapers | XDG_DATA_HOME/wallpapers defaults supplied by host; selection in XDG_DATA_HOME/icewine/wallpapers | image-data exception; generated selected/blurred images are not app config |
 | SDDM | immutable theme package share/sddm/themes/icewine; mutable `/var/lib/icewine/sddm/theme.ini` | system/login ownership exception; generated palette is separate from user configuration |
-| Browser integration | packaged native messaging host and MIME defaults; `Current/pywalfox.json` feeds upstream integration | native-host/extension protocol exception; browser profiles remain browser/user-owned |
+| Browser | optional Firefox package and MIME defaults; GTK styling and system light/dark preference | browser profiles, theme extensions and custom styles remain user-owned |
 | InputPlumber / services / launch tools | packaged YAML profiles, system/user units and executable scripts wired by NixOS | host/system/package ownership exception; none |
 
 The exceptions describe actual loader and ownership boundaries:
@@ -372,8 +372,8 @@ The exceptions describe actual loader and ownership boundaries:
   reads recognised assignments from one file, without include support; locale/image
   and [desktop-entry data](https://specifications.freedesktop.org/desktop-entry-spec/latest/)
   are native data formats rather than shared-code entry points. SDDM operates before
-  the user's session with system theme paths; browser native messaging/extension
-  and InputPlumber YAML are external protocols/service inputs. NixOS owns their
+  the user's session with system theme paths; InputPlumber YAML is an external
+  service input. NixOS owns their
   installation, dependencies and privilege boundary. Their immutable assets and
   mutable palette/data paths remain separate; customisation uses the existing
   host options or native user files, never a fake per-user include.
@@ -505,9 +505,7 @@ instance. GTK's theme and light/dark preference are published through
 GSettings; custom CSS in already open GTK or Flatpak apps may require reopening
 those apps. Starship uses the new theme at the next prompt and Fastfetch at its
 next run. The CLI reports failed or pending consumers separately from the saved
-selection. With Pywalfox enabled, browser palette and mode updates use its upstream
-CLI after publication; the CLI does not acknowledge whether a browser received
-an update. Browser setup and limitations are described below.
+selection.
 Icewine publishes a named GTK3 theme under `$XDG_DATA_HOME/themes` and updates
 `org.gnome.desktop.interface` GTK theme and light/dark settings using `gsettings`.
 The Settings portal must use a backend that exposes these settings (the NixOS
@@ -530,63 +528,10 @@ Flatpak GTK4 apps do not receive this host CSS through the GTK3 extension.
 Browser colour mapping remains browser-controlled; web content and privacy
 preferences are unchanged.
 
-Firefox/LibreWolf live chrome colours use the upstream [Pywalfox extension](https://addons.mozilla.org/firefox/addon/pywalfox/)
-and Nixpkgs `pywalfox-native`. Icewine exports its existing palette, without pywal
-or another colour generator. The unchanged Nixpkgs Firefox package registers the
-native host through NixOS; custom Firefox packages use manual registration below.
-Install the extension manually, open its settings, enable **Fetch on startup**
-and click **Fetch Pywal colors**.
-Enable neither optional CSS nor DuckDuckGo styling. The extension requests
-native messaging, theme, storage, tabs and alarms permissions and includes a
-DuckDuckGo content script. The upstream host can write profile CSS when those
-optional features are enabled; this integration does not enable them.
-On startup the upstream host may create an empty `chrome` directory in the
-discovered Profile0 even with CSS disabled; it does not overwrite CSS or
-preferences unless optional CSS actions are requested.
+Browser profiles, theme extensions and custom styles remain user-owned.
+Icewine supplies GTK styling and the system light/dark preference; it does not
+publish a separate browser palette or native messaging host.
 
-`browser.theme.enable` defaults to `browser.enable`. For a host-managed native
-LibreWolf, set `browser.enable = false`, your `applications.browser` command and
-`browser.theme.enable = true`. Native LibreWolf and custom Firefox packages must
-register the supplied manifest without overwriting an existing user manifest
-(inspect/back it up manually first):
-
-```sh
-mkdir -p "$HOME/.mozilla/native-messaging-hosts"
-ln -s /etc/profiles/per-user/YOUR_USER/lib/mozilla/native-messaging-hosts/pywalfox.json "$HOME/.mozilla/native-messaging-hosts/pywalfox.json"
-```
-
-Restart once after native-host registration. Do not run `pywalfox install`: its
-installer replaces existing manifests without checking ownership. A pre-existing
-user manifest can also override Firefox's packaged host; inspect it if fetching
-fails. `icewine-pywalfox` runs the upstream CLI with Icewine's own cache directory
-under `$XDG_CONFIG_HOME/icewine`; the normal wal cache remains untouched. Logs are
-writable there, outside immutable rendered generations. `icewine-pywalfox log`
-provides upstream diagnostics. Theme changes publish input then call upstream
-`dark`/`light` and `update`. Browsers started later receive the saved mode and
-palette when **Fetch on startup** is enabled; otherwise fetch manually.
-Upstream supports one live native host per Unix user, so simultaneous profiles
-or Firefox and LibreWolf instances are not guaranteed to update together.
-
-Default Pywalfox templates give related derived chrome colours. For exact Icewine
-roles, optionally set both light and dark templates to Background=0,
-Background Light=8, Background Extra=8, Accent Primary=12, Accent Secondary=13,
-Text=15 and Text Focus=15 (14 choices per profile). Tabs, navigation/bookmarks,
-address/search fields, Theme API popups, sidebar and new tab follow the theme;
-arbitrary settings/about pages, native menus/dialogs, custom sidebars and website
-content have no arbitrary-palette guarantee. Upstream derives some default colours
-and does not expose every browser element.
-
-Icewine mode updates override the extension's manual/Auto selection; successful
-fetches reset temporary colour-wheel edits in both modes, while saved templates
-remain. To opt out, disable the extension and set `browser.theme.enable = false`;
-the extension's temporary Disable theme action is undone by the next fetch.
-No extension storage, profile preference or CSS is automatically migrated. Back
-up each selected profile's CSS, remove only the exact old Icewine `browser.css`
-import from `chrome/userChrome.css`, and restart once. Keep other CSS and leave
-legacy stylesheets enabled if it is still needed. Old rendered generations remain
-recoverable. Flatpak native messaging is deferred: upstream's recommended setup
-allows host-command execution; no such permission is granted here. Existing GTK
-Flatpak theming remains available.
 The Bash starter files live under `$XDG_CONFIG_HOME/icewine/shell/`; `.bashrc`,
 `.profile` and `.bash_profile` link to them. NixOS supplies current package paths,
 feature flags and session variables, so disabling Fastfetch, ble.sh or Starship
