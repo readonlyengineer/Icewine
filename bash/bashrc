@@ -9,8 +9,9 @@ fi
 if [[ ${ICEWINE_FASTFETCH_ENABLED:-false} == true ]] && command -v fastfetch >/dev/null; then
   fastfetch
 fi
-if [[ ${ICEWINE_BLESH_ENABLED:-false} == true && -r /etc/profiles/per-user/$USER/share/blesh/ble.sh ]]; then
-  source -- /etc/profiles/per-user/$USER/share/blesh/ble.sh 2>/dev/null
+if [[ ${ICEWINE_BLESH_ENABLED:-false} == true ]] \
+  && command -v blesh-share >/dev/null \
+  && source -- "$(blesh-share)/ble.sh"; then
   bleopt exec_errexit_mark=
   bleopt exec_elapsed_mark=
   bleopt complete_menu_style=desc
