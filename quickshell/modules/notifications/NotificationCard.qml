@@ -20,7 +20,7 @@ Rectangle {
         ? Theme.Palette.error : notification?.urgency === NotificationUrgency.Normal
             ? Theme.Palette.secondary : Theme.Palette.muted
     readonly property string iconSource: notification?.appIcon === "battery-low"
-        ? Quickshell.iconPath(notification.appIcon, true)
+        ? ""
         : notification?.image || Quickshell.iconPath(notification?.appIcon ?? "", true)
 
     signal dismissRequested()

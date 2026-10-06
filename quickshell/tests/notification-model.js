@@ -19,8 +19,8 @@ assert.match(card, /Accessible\.role:\s*Accessible\.Button/,
     "Source navigation must expose button semantics")
 assert.match(card, /Controls\.ToolTip\.text:\s*"Go to source window"/,
     "Source navigation must explain itself on hover")
-assert.match(card, /notification\?\.appIcon === "battery-low"[\s\S]*?Quickshell\.iconPath\(notification\.appIcon, true\)/,
-    "Battery notifications must prefer the battery app icon over the notification image")
+assert.match(card, /notification\?\.appIcon === "battery-low"\s*\?\s*""/,
+    "Battery notifications must use the glyph instead of theme icon lookup")
 const sourceButton = card.match(/Controls\.Button\s*\{\s*id:\s*sourceButton\b([\s\S]+?)\n    \}\n\n    Column/)[1]
 assert.match(sourceButton, /root\.sourceRequested\(address\)/,
     "Source navigation must use its isolated action")
