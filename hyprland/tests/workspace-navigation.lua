@@ -5,7 +5,7 @@ local stub = setmetatable({}, {
 })
 package.loaded["icewine.modules.DefaultApps"] = dofile("hyprland/modules/DefaultApps.lua")
 package.loaded["icewine.modules.WindowPolicy"] = stub
-local binds, workspaces, active, target = {}, {}, nil, nil
+local binds, workspaces, active, target = {}, {}, { tiled_layout = "scrolling" }, nil
 local options, gestures, lastDispatch = {}, {}, nil
 hl = {
 	dsp = stub,
@@ -17,6 +17,7 @@ hl = {
 	unbind = function(key) binds[key] = nil end,
 	get_workspaces = function() return workspaces end,
 	get_active_workspace = function() return active end,
+	get_active_special_workspace = function() return nil end,
 	dispatch = function(request)
 		lastDispatch = request
 		if type(request) == "table" and type(request.workspace) == "table" then
@@ -97,3 +98,45 @@ for _, key in ipairs({"TAB", "SHIFT + TAB", "Home", "End", "SHIFT + Home", "SHIF
 	check(key, 1, nil) -- No populated normal workspace: do nothing.
 end
 print("workspace navigation: skip-empty, wraparound, move, first/last and empty-session checks pass")
+
+for _, layout in ipairs({ "scrolling", "dwindle", "master", "monocle" }) do
+	active = { tiled_layout = layout }
+	for key, direction in pairs({ left = "l", right = "r", up = "u", down = "d" }) do
+		lastDispatch = nil
+		binds["SUPER + " .. key]()
+		if layout == "scrolling" and (direction == "l" or direction == "r") then
+			assert(lastDispatch == "focus " .. direction)
+		elseif layout == "monocle" then
+			assert(lastDispatch.tiled == true and lastDispatch.next == (direction == "r" or direction == "d"),
+				"monocle must use native tiled-stack cycling")
+		else
+			assert(lastDispatch.direction == direction)
+		end
+		lastDispatch = nil
+		binds["SUPER + SHIFT + " .. key]()
+		if layout == "monocle" then
+			assert(lastDispatch == nil, "monocle invented spatial reordering")
+		elseif layout == "scrolling" and (direction == "l" or direction == "r") then
+			assert(lastDispatch == "swapcol " .. direction)
+		else
+			assert(lastDispatch.direction == direction)
+		end
+		if layout ~= "scrolling" or direction == "u" or direction == "d" then
+			binds["SUPER + CTRL + " .. key]()
+			assert(lastDispatch.relative and lastDispatch.x == (direction == "r" and 100 or direction == "l" and -100 or 0)
+				and lastDispatch.y == (direction == "d" and 100 or direction == "u" and -100 or 0))
+		end
+	end
+	for key, direction in pairs({ mouse_up = "l", mouse_down = "r" }) do
+		binds["SUPER + " .. key]()
+		local from_wheel = lastDispatch
+		gestures[direction == "l" and "right" or "left"]()
+		if type(from_wheel) == "table" then
+			assert(lastDispatch.direction == from_wheel.direction and lastDispatch.next == from_wheel.next)
+		else assert(lastDispatch == from_wheel) end
+	end
+	lastDispatch = nil
+	binds["SUPER + J"]()
+	assert(lastDispatch == (layout == "scrolling" and "consume_or_expel next" or nil))
+end
+print("desktop layout controls: dynamic focus, swap, resize, wheel/gesture equivalence and scrolling-only stacking pass")

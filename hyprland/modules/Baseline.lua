@@ -24,6 +24,8 @@ hl.config({
 		explicit_column_widths   = "0.5, 1.0",
 	},
 
+	dwindle = { force_split = 2 }, -- Native right/down placement, independent of cursor.
+
 	misc = {
 		focus_on_activate       = true,
 		force_default_wallpaper = -1,

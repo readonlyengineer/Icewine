@@ -2,6 +2,7 @@
 local events, active, windows, workspaces, configured = {}, nil, {}, {}, nil
 local rules, closed, focuses = {}, nil, 0
 local fitted = {}
+local setting = "on\n"
 hl = {
 	on = function(event, callback) events[event] = callback end,
 	window_rule = function(rule)
@@ -25,6 +26,7 @@ hl = {
 		layout = function(command) return command end,
 		focus = function(request) return { focus = request.window } end,
 		window = {
+			float = function(request) return { float = request.window } end,
 			fullscreen = function(request) return request end,
 			close = function(request) return { close = request.window } end,
 			move = function(request) return { move = request } end,
@@ -37,6 +39,8 @@ hl = {
 		elseif type(request) == "string" then
 			local width = assert(tonumber(request:match("^colresize (.+)$")))
 			active.size = { w = width * active.monitor.width }
+		elseif request.float then
+			request.float.floating = not request.float.floating
 		elseif request.focus then
 			active, focuses = request.focus, focuses + 1
 		elseif request.move then
@@ -60,7 +64,7 @@ hl = {
 local original_open = io.open
 io.open = function(path, mode)
 	if path:match("/icewine/autofullscreen$") then
-		return { read = function() return "on\n" end, close = function() end }
+		return { read = function() return setting end, close = function() end }
 	end
 	return original_open(path, mode)
 end
@@ -203,3 +207,74 @@ policy.handoff_steam(222)
 assert(closed == nil and game.workspace.id == 3,
     "Closed placeholder still moved the Steam session")
 print("Steam placeholder: PID identity, reserved workspace, fullscreen/focus, reload and close pass")
+
+-- Exercise the event-driven policy; no polling or native intent tags are needed.
+local function workspace(layout)
+	local ws = { tiled_layout = layout, windows = {}, active = true }
+	workspaces[#workspaces + 1] = ws
+	return ws
+end
+local function tiled(ws, fullscreen)
+	local win = window(normal, 1, fullscreen or false)
+	win.workspace = ws
+	ws.windows[#ws.windows + 1] = win
+	ws.last_window = win
+	events["window.open"](win)
+	return win
+end
+workspaces, windows = {}, {}
+policy = dofile(arg[1])
+for _, layout in ipairs({ "dwindle", "master" }) do
+	local ws = workspace(layout)
+	local first = tiled(ws)
+	assert(first.fullscreen, layout .. ": lone window did not fullscreen")
+	local second = tiled(ws)
+	assert(not first.fullscreen and not second.fullscreen, layout .. ": pair did not tile")
+	policy.toggle_floating()
+	assert(first.fullscreen and not second.fullscreen, "floating window counted")
+	policy.toggle_floating()
+	assert(not first.fullscreen, "unfloat did not release singleton fullscreen")
+	events["window.close"](second) -- May precede collection removal.
+	second.mapped = false
+	assert(first.fullscreen, "close did not restore singleton fullscreen")
+	setting = "off\n"
+	policy.refresh_autofullscreen()
+	assert(not first.fullscreen, "off command retained automatic fullscreen")
+	setting = "on\n"
+	policy.refresh_autofullscreen()
+	assert(first.fullscreen, "on command did not restore automatic fullscreen")
+	active = first
+	policy.toggle_fullscreen()
+	policy.refresh_autofullscreen()
+	assert(not first.fullscreen, "automatic policy erased manual off")
+	policy.toggle_fullscreen()
+	setting = "off\n"
+	policy.refresh_autofullscreen()
+	assert(first.fullscreen, "off erased explicit fullscreen")
+	setting = "on\n"
+	policy.refresh_autofullscreen()
+end
+workspaces, windows = {}, {}
+policy = dofile(arg[1])
+local source, destination = workspace("dwindle"), workspace("master")
+local first, moved = tiled(source), tiled(source)
+source.windows, destination.windows = { first }, { moved }
+moved.workspace = destination
+events["window.move_to_workspace"](moved)
+assert(first.fullscreen and moved.fullscreen, "move did not reconcile source and destination")
+source.tiled_layout = "monocle"
+local next_window = tiled(source)
+assert(not first.fullscreen and next_window.fullscreen, "monocle default did not follow focus")
+active = first
+events["window.active"](first)
+assert(first.fullscreen and not next_window.fullscreen, "monocle focus did not transfer default")
+setting = "off\n"
+policy.refresh_autofullscreen()
+assert(not first.fullscreen and not next_window.fullscreen, "monocle off retained automatic fullscreen")
+first.fullscreen = true
+events["window.fullscreen"](first)
+policy.refresh_autofullscreen()
+assert(first.fullscreen, "application fullscreen was lost")
+events["config.reloaded"]()
+assert(first.fullscreen, "reload erased current fullscreen")
+print("layout policy: singleton open/close/move/float, monocle focus, live toggle and explicit intent pass")

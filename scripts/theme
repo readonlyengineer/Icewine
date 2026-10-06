@@ -1240,9 +1240,12 @@ def dispatch(argv):
             atomic_text(path, value + "\n")
             if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
                 try:
-                    subprocess.run(["hyprctl", "reload"], check=True, timeout=10)
+                    result = subprocess.run(["hyprctl", "eval", 'require("icewine.modules.WindowPolicy").refresh_autofullscreen()'],
+                                            check=True, timeout=10, capture_output=True, text=True)
+                    if result.stdout.strip() != "ok":
+                        raise ValueError(f"autofullscreen saved, but Hyprland policy refresh failed: {result.stdout.strip()}")
                 except (OSError, subprocess.SubprocessError) as error:
-                    raise ValueError(f"autofullscreen saved, but Hyprland reload failed: {error}") from error
+                    raise ValueError(f"autofullscreen saved, but Hyprland policy refresh failed: {error}") from error
             else:
                 print("Pending: autofullscreen takes effect at next Hyprland login.")
         print(f"Autofullscreen: {value}")

@@ -5,6 +5,41 @@ local mainMod  = "SUPER"
 local apps     = require("icewine.modules.DefaultApps")
 local windows  = require("icewine.modules.WindowPolicy")
 
+local function layout()
+	local ws = hl.get_active_special_workspace() or hl.get_active_workspace()
+	return ws and ws.tiled_layout
+end
+
+local function focus(direction)
+	if layout() == "scrolling" and (direction == "l" or direction == "r") then
+		hl.dispatch(hl.dsp.layout("focus " .. direction))
+	elseif layout() == "monocle" then
+		hl.dispatch(hl.dsp.window.cycle_next({ next = direction == "r" or direction == "d", tiled = true }))
+	else
+		hl.dispatch(hl.dsp.focus({ direction = direction }))
+	end
+end
+
+local function swap(direction)
+	if layout() == "scrolling" and (direction == "l" or direction == "r") then
+		hl.dispatch(hl.dsp.layout("swapcol " .. direction))
+	elseif layout() ~= "monocle" then
+		hl.dispatch(hl.dsp.window.swap({ direction = direction }))
+	end -- Monocle has no native directional reordering of its hidden stack.
+end
+
+local function resize(direction)
+	if layout() == "scrolling" and (direction == "l" or direction == "r") then
+		windows.adjust_width(direction == "r" and 0.05 or -0.05)
+	else
+		hl.dispatch(hl.dsp.window.resize({
+			x = direction == "r" and 100 or direction == "l" and -100 or 0,
+			y = direction == "d" and 100 or direction == "u" and -100 or 0,
+			relative = true,
+		})) -- Monocle's native resize operation is a no-op.
+	end
+end
+
 local function topbar(action)
 	return hl.dsp.exec_cmd("qs ipc call topbar " .. action)
 end
@@ -71,30 +106,21 @@ hl.bind(mainMod .. " + SHIFT + W", hl.dsp.dpms({ action = "on" })) -- DPMS-wake 
 hl.bind(mainMod .. " + Q", hl.dsp.window.close())
 hl.bind(mainMod .. " + V", windows.toggle_floating)
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo())
-hl.bind(mainMod .. " + J", hl.dsp.layout("consume_or_expel next"))
+hl.bind(mainMod .. " + J", function()
+	if layout() == "scrolling" then hl.dispatch(hl.dsp.layout("consume_or_expel next")) end
+end)
 hl.bind(mainMod .. " + F", windows.toggle_fullscreen)
 hl.bind(mainMod .. " + M", windows.toggle_width)
 
 -- Screenshot menu: monitor, region or window.
 hl.bind(mainMod .. " + Print", topbar("screenshot"))
 
--- Focus movement. Scrolling uses layout focus for l/r tape movement.
-hl.bind(mainMod .. " + left",  hl.dsp.layout("focus l"))
-hl.bind(mainMod .. " + right", hl.dsp.layout("focus r"))
-hl.bind(mainMod .. " + up",    hl.dsp.focus({ direction = "u" }))
-hl.bind(mainMod .. " + down",  hl.dsp.focus({ direction = "d" }))
-
--- Reorder columns on the tape, keep vertical swaps for stacked columns.
-hl.bind(mainMod .. " + SHIFT + left",  hl.dsp.layout("swapcol l"))
-hl.bind(mainMod .. " + SHIFT + right", hl.dsp.layout("swapcol r"))
-hl.bind(mainMod .. " + SHIFT + up",    hl.dsp.window.swap({ direction = "u" }))
-hl.bind(mainMod .. " + SHIFT + down",  hl.dsp.window.swap({ direction = "d" }))
-
--- Resize active column/window.
-hl.bind(mainMod .. " + CTRL + right", function() windows.adjust_width( 0.05) end)
-hl.bind(mainMod .. " + CTRL + left",  function() windows.adjust_width(-0.05) end)
-hl.bind(mainMod .. " + CTRL + down",  hl.dsp.window.resize({ x =    0, y =  100, relative = true }))
-hl.bind(mainMod .. " + CTRL + up",    hl.dsp.window.resize({ x =    0, y = -100, relative = true }))
+-- Resolve the active layout at use time, including native runtime changes.
+for key, direction in pairs({ left = "l", right = "r", up = "u", down = "d" }) do
+	hl.bind(mainMod .. " + " .. key, function() focus(direction) end)
+	hl.bind(mainMod .. " + SHIFT + " .. key, function() swap(direction) end)
+	hl.bind(mainMod .. " + CTRL + " .. key, function() resize(direction) end)
+end
 
 -- Workspace switch and move-window-to-workspace, 1-10 (0 selects 10).
 for i = 1, 10 do
@@ -109,8 +135,8 @@ hl.bind(mainMod .. " + SHIFT + Prior", hl.dsp.window.move({ workspace = "r-1" })
 hl.bind(mainMod .. " + SHIFT + Next",  hl.dsp.window.move({ workspace = "r+1" }))
 hl.bind(mainMod .. " + TAB",           function() focus_populated_workspace_edge("next") end)
 hl.bind(mainMod .. " + SHIFT + TAB",   function() move_to_populated_workspace_edge("next") end)
-hl.bind(mainMod .. " + mouse_down",    hl.dsp.layout("focus r"))
-hl.bind(mainMod .. " + mouse_up",      hl.dsp.layout("focus l"))
+hl.bind(mainMod .. " + mouse_down",    function() focus("r") end)
+hl.bind(mainMod .. " + mouse_up",      function() focus("l") end)
 
 -- Jump to first/last populated normal workspace.
 hl.bind(mainMod .. " + Home",         function() focus_populated_workspace_edge("first") end)
@@ -166,10 +192,10 @@ hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd("icewine-monitor-brightness foc
 hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("icewine-monitor-brightness focused -5"), { locked = true, repeating = true })
 
 hl.gesture({ fingers = 3, direction = "left", action = function()
-	hl.dispatch(hl.dsp.layout("focus r"))
+	focus("r")
 end })
 hl.gesture({ fingers = 3, direction = "right", action = function()
-	hl.dispatch(hl.dsp.layout("focus l"))
+	focus("l")
 end })
 hl.gesture({ fingers = 3, direction = "up", action = function()
 	hl.dispatch(hl.dsp.focus({ workspace = "r+1" }))

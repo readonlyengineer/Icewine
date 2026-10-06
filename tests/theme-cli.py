@@ -1680,3 +1680,18 @@ with tempfile.TemporaryDirectory() as temporary:
     module.install_defaults(defaults, config, data, state, False, None)
     assert entry.read_text().endswith("-- inline user overrides\n")
 print("old loader migration and native inline edit preservation checks passed")
+
+with tempfile.TemporaryDirectory() as temp:
+    with mock.patch.dict(os.environ, {"XDG_STATE_HOME": temp, "HYPRLAND_INSTANCE_SIGNATURE": "developer-test"}), \
+         mock.patch.object(module.subprocess, "run", return_value=types.SimpleNamespace(stdout="ok\n")) as refresh:
+        module.dispatch(["autofullscreen", "off"])
+        assert refresh.call_args.args[0] == ["hyprctl", "eval", 'require("icewine.modules.WindowPolicy").refresh_autofullscreen()']
+        assert refresh.call_args.kwargs["check"] and refresh.call_args.kwargs["timeout"] == 10
+        refresh.return_value.stdout = "policy unavailable"
+        try:
+            module.dispatch(["autofullscreen", "on"])
+        except ValueError as error:
+            assert "saved, but Hyprland policy refresh failed" in str(error)
+        else:
+            raise AssertionError("An unconfirmed native refresh reported success")
+print("autofullscreen native refresh preserves Lua state and rejects unconfirmed IPC checks passed")

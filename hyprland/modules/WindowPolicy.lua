@@ -84,19 +84,22 @@ end
 local function state_for(win)
 	local key = key_for(win)
 	if not key then return nil end
-	if not states[key] then states[key] = {} end
+	if not states[key] then states[key] = { workspace = win.workspace } end
 	return states[key]
 end
 
 local function is_policy_window(win)
-	if not win or win.hidden then return false end
+	if not win or not win.mapped then return false end
 	if win.initial_title == steam_placeholder_title then return false end
 	if not win.workspace or win.workspace.special then return false end
-	return not win.workspace.tiled_layout or win.workspace.tiled_layout == "scrolling"
+	local layout = win.workspace.tiled_layout or "scrolling"
+	return layout == "scrolling" and not win.hidden
+		or layout == "dwindle" or layout == "master" or layout == "monocle"
 end
 
 local function is_resizable(win)
 	return is_policy_window(win) and not win.floating
+		and (not win.workspace.tiled_layout or win.workspace.tiled_layout == "scrolling")
 end
 
 local function opens_fullscreen_by_default(win)
@@ -112,8 +115,28 @@ local function target_for(state, fallback_width)
 	return width, fullscreen
 end
 
-local function window_target(win)
-	return target_for(state_for(win), default_width(win))
+local function single_tiled_window(ws, exclude)
+	local count = 0
+	for _, win in ipairs(hl.get_workspace_windows(ws)) do
+		if win ~= exclude and is_policy_window(win) and not win.floating then
+			count = count + 1
+			if count > 1 then return false end
+		end
+	end
+	return count == 1
+end
+
+local function window_target(win, singleton)
+	local state, layout = state_for(win), win.workspace.tiled_layout or "scrolling"
+	if layout == "scrolling" then return target_for(state, default_width(win)) end
+	if state.fullscreen ~= nil then return nil, state.fullscreen end
+	if not autofullscreen or win.floating then return nil, false end
+	if layout == "monocle" then
+		local focused = hl.get_active_window()
+		return nil, win == (focused and focused.workspace == win.workspace and focused or win.workspace.last_window)
+	end
+	if singleton == nil then singleton = single_tiled_window(win.workspace) end
+	return nil, singleton -- Dwindle/master: autofullscreen and exactly one tiled window.
 end
 
 local function intended_width(win, state)
@@ -127,16 +150,6 @@ end
 
 local function adjusted_width(width, delta)
 	return math.max(0.05, width + delta)
-end
-
-local function wants_fullscreen(win)
-	local _, fullscreen = target_for(state_for(win), default_width(win))
-	return fullscreen
-end
-
-local function toggled_fullscreen(state, fallback_width)
-	local _, fullscreen = target_for(state, fallback_width)
-	return not fullscreen
 end
 
 local function set_fullscreen(win, fullscreen)
@@ -197,10 +210,10 @@ local function set_width(win, width)
 	return true
 end
 
-local function apply_window(win)
+local function apply_window(win, singleton)
 	if not is_policy_window(win) then return false end
 
-	local width, fullscreen = window_target(win)
+	local width, fullscreen = window_target(win, singleton)
 	local was_fullscreen = fullscreen_of(win)
 	local changed = false
 	if was_fullscreen and not fullscreen then
@@ -208,7 +221,7 @@ local function apply_window(win)
 		was_fullscreen = false
 	end
 
-	if not was_fullscreen and not win.floating then changed = set_width(win, width) or changed end
+	if width and not was_fullscreen and not win.floating then changed = set_width(win, width) or changed end
 	if fullscreen then changed = set_fullscreen(win, true) or changed end
 	return changed
 end
@@ -221,22 +234,37 @@ local function sync_default_width(mon)
 	hl.config({ scrolling = { column_width = width } })
 end
 
-local function reconcile_workspace(ws)
+local function reconcile_workspace(ws, exclude)
 	if not ws then return end
 
 	local active = hl.get_active_window()
 	local focused = active and active.workspace == ws and active or ws.last_window
 	local changed = false
+	local singleton = (ws.tiled_layout == "dwindle" or ws.tiled_layout == "master")
+		and single_tiled_window(ws, exclude)
+	if ws.tiled_layout ~= "scrolling" then
+		-- A workspace has one compositor fullscreen owner: release the old
+		-- automatic owner before applying the new monocle focus/default.
+		for _, win in ipairs(hl.get_workspace_windows(ws)) do
+			if win ~= exclude and is_policy_window(win) and not select(2, window_target(win, singleton)) then
+				changed = set_fullscreen(win, false) or changed
+			end
+		end
+	end
 	for _, win in ipairs(hl.get_workspace_windows(ws)) do
-		changed = apply_window(win) or changed
+		if win ~= exclude then changed = apply_window(win, singleton) or changed end
 	end
 
 	if changed and focused and not focused.hidden then
-		if not focus_window(focused) then
+		if not focus_window(focused) and ws.tiled_layout == "scrolling" then
 			hl.dispatch(hl.dsp.layout("fit_into_view"))
 		end
 	end
 	focus_window(active)
+end
+
+local function reconcile_tiling(ws, exclude)
+	if ws and ws.tiled_layout and ws.tiled_layout ~= "scrolling" then reconcile_workspace(ws, exclude) end
 end
 
 local function reconcile_visible()
@@ -255,7 +283,7 @@ local function adopt_existing_windows()
 		local state = state_for(win)
 		if is_policy_window(win) then
 			local measured = not fullscreen_of(win) and current_width(win) or nil
-			if measured and not same_number(measured, default_width(win)) then
+			if is_resizable(win) and measured and not same_number(measured, default_width(win)) then
 				state.width = measured
 			end
 			state.fullscreen = fullscreen_of(win)
@@ -303,7 +331,7 @@ function M.toggle_fullscreen()
 	end
 
 	local state = state_for(win)
-	state.fullscreen = toggled_fullscreen(state, default_width(win))
+	state.fullscreen = not select(2, window_target(win))
 	apply_window(win)
 end
 
@@ -313,6 +341,12 @@ function M.toggle_floating()
 
 	hl.dispatch(hl.dsp.window.float({ action = "toggle", window = win }))
 	apply_window(win)
+	reconcile_tiling(win.workspace)
+end
+
+function M.refresh_autofullscreen()
+	read_autofullscreen()
+	for _, ws in ipairs(hl.get_workspaces()) do reconcile_workspace(ws) end
 end
 
 function M.handoff_steam(pid)
@@ -359,12 +393,16 @@ hl.on("window.open", function(win)
         return
     end
 	local state = state_for(win)
-	if win.floating then
+	if win.floating and (not win.workspace.tiled_layout or win.workspace.tiled_layout == "scrolling") then
 		state.fullscreen = false
 	elseif fullscreen_of(win) and not opens_fullscreen_by_default(win) then
 		state.fullscreen = true
 	end
-	apply_window(win)
+	if not win.workspace or not win.workspace.tiled_layout or win.workspace.tiled_layout == "scrolling" then
+		apply_window(win)
+	else
+		reconcile_tiling(win.workspace)
+	end
 end)
 
 hl.on("window.close", function(win)
@@ -375,10 +413,20 @@ hl.on("window.close", function(win)
 	if not key then return end
 	states[key] = nil
 	pending_fullscreen[key] = nil
+	reconcile_tiling(win.workspace, win)
 end)
 
 hl.on("window.move_to_workspace", function(win)
+	local state = state_for(win)
+	local previous = state.workspace
+	state.workspace = win.workspace
+	reconcile_tiling(previous)
+	reconcile_tiling(win.workspace)
 	apply_window(win)
+end)
+
+hl.on("window.active", function(win)
+	if win and win.workspace and win.workspace.tiled_layout == "monocle" then reconcile_tiling(win.workspace) end
 end)
 
 hl.on("window.fullscreen", function(win)

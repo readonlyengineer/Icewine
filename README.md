@@ -489,11 +489,36 @@ Blur remains unchanged. A full `icewine reset` restores `high`; targeted resets
 keep the preference.
 
 `icewine autofullscreen on|off` controls automatic fullscreen on ordinary
-windows and the width-toggle shortcut. The default is `off`; no argument shows
+scrolling windows and the width-toggle shortcut, lone tiled dwindle/master
+windows, and the focused monocle window regardless of stack size. The default
+is `off`; no argument shows
 the saved setting. It is stored at `$XDG_STATE_HOME/icewine/autofullscreen` and
-survives theme changes and login. The command reloads Hyprland when running.
-Existing windows keep their state; manual/application fullscreen and Steam's
-launch handoff are preserved. Full reset restores `off`; targeted resets keep it.
+survives theme changes and login. The command refreshes the running Lua policy
+through native `hyprctl eval`, retaining its in-memory fullscreen choices.
+Manual/application fullscreen and Steam's launch handoff are preserved; automatic
+fullscreen follows the new setting. Full reset restores `off`; targeted resets keep it.
+
+Use Hyprland's native runtime configuration for temporary layouts, for example
+`hyprctl eval 'hl.workspace_rule({ workspace = "2", layout = "dwindle" })'`.
+For permanent choices add the same `hl.workspace_rule` to your `hyprland.lua`;
+`hl.config({ general = { layout = "master" } })` sets the configured default.
+Runtime choices clear on config reload or compositor restart. Hyprland 0.56
+silently falls back to dwindle for unknown layout names; consult its supported
+layouts before changing rules.
+
+Desktop Super+arrows focus, Shift+arrows swap and Ctrl+arrows resize using native
+operations. Scrolling keeps horizontal tape focus, column swaps and 5% width
+steps. Monocle arrows cycle its stack; native monocle resizing and directional
+swapping have no effect. Super+J (stack/unstack) and Super+M (column width) apply
+only to scrolling. Dwindle uses native right/down splits independent of cursor
+position. Deck controls continue assuming scrolling.
+
+The policy is event-driven: native runtime layout/float changes take effect at
+the next window/workspace event or `icewine autofullscreen on|off` refresh.
+Config/theme reload recreates Lua state and adopts existing fullscreen choices;
+an already fullscreen window is then treated as explicit, including fullscreen
+that was previously automatic. Toggle that window off manually if needed.
+Live-session checks are still needed for placement, transitions and monocle focus.
 
 `icewine reset` backs up the Icewine-owned config paths under
 `$XDG_STATE_HOME/icewine/reset-*`, restores their shipped defaults and clears
