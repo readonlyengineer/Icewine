@@ -114,7 +114,7 @@ in {
           || builtins.elem name (map (module: "hypr/modules/${module}.lua")
             [ "Baseline" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" "Deck" ])))
           (builtins.attrNames cfg.defaultFiles.config);
-        message = "Icewine implementation is packaged; use Settings.qml, Binds.lua, Autostart.lua or entry-point/host hooks for customization."; }
+        message = "Icewine implementation is packaged; use Settings.qml or native entry-point overrides for customization."; }
     ];
 
     programs.hyprland = { enable = true; withUWSM = true; };

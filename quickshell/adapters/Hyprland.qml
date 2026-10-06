@@ -29,7 +29,7 @@ QtObject {
         Quickshell.execDetached([
             "hyprctl",
             "eval",
-            "require(\"modules.WindowPolicy\").toggle_fullscreen()"
+            "require(\"icewine.modules.WindowPolicy\").toggle_fullscreen()"
         ])
     }
 
@@ -50,7 +50,7 @@ QtObject {
         if (mouseSuppression.running || pendingMouseSuppression === null)
             return
         mouseSuppression.command = ["hyprctl", "eval",
-            'require("modules.Binds").supress_mouse_binds('
+            'require("icewine.modules.Binds").supress_mouse_binds('
                 + (pendingMouseSuppression ? "true" : "false") + ')']
         pendingMouseSuppression = null
         mouseSuppression.running = true

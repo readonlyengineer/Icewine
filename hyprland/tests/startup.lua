@@ -7,25 +7,16 @@ hl = setmetatable({
     dsp = setmetatable({ window = action }, { __index = function() return function() return {} end end }),
     bind = function() binds = binds + 1 end,
 }, { __index = function() return function() end end })
--- Deliberately exercise writable hooks, not a copy of the bootstrap logic.
-for _, name in ipairs({ "Binds", "Autostart" }) do
-    local path = config .. "modules/" .. name .. ".lua"
-    local file = assert(io.open(path, "r"))
-    local contents = file:read("*a")
-    file:close()
-    -- Hooks normally alias immutable defaults. A local replacement remains an
-    -- active compatibility/host hook; do not write through a package symlink.
-    os.remove(path)
-    file = assert(io.open(path, "w"))
-    -- Prepend because Binds returns its exported functions as its final statement.
-    file:write('_G.user_' .. name:lower() .. '_loaded = true\n' .. contents)
-    file:close()
-end
+-- Exercise the real packaged bootstrap, then an ordinary inline override.
+assert(not io.open(config .. "modules/Binds.lua"), "Shared aliases leaked into user configuration")
+local file = assert(io.open(entry, "a"))
+file:write('\n_G.user_override_loaded = package.loaded["icewine.modules.Binds"] ~= nil\n')
+file:close()
 package.path = config .. "?.lua;" .. package.path
 dofile(entry)
-assert(user_binds_loaded and user_autostart_loaded, "Writable hooks were shadowed by packaged code")
-assert(type(package.loaded["modules.Binds"].supress_mouse_binds) == "function")
-assert(package.loaded["modules.Theme"] and package.loaded["modules.WindowPolicy"])
-assert((package.loaded["modules.Deck"] ~= nil) == (profile == "handheld"))
-assert(binds > 20, "Real writable bindings were not registered")
+assert(user_override_loaded, "Inline overrides did not run after shared bindings")
+assert(type(package.loaded["icewine.modules.Binds"].supress_mouse_binds) == "function")
+assert(package.loaded["icewine.modules.WindowPolicy"])
+assert((package.loaded["icewine.modules.Deck"] ~= nil) == (profile == "handheld"))
+assert(binds > 20, "Real packaged bindings were not registered")
 print("packaged Hyprland " .. profile .. " startup checks passed")

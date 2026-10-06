@@ -151,7 +151,7 @@ assert.equal(steamCommands.length, 1, "Unrelated Gamescope cannot consume the sp
 steamRoot.steamGamescopePid = 481
 steamRoot.handoffSteam()
 assert.deepEqual(steamCommands[1], ["hyprctl", "eval",
-    'require("modules.WindowPolicy").handoff_steam(481)'])
+    'require("icewine.modules.WindowPolicy").handoff_steam(481)'])
 steamRoot.steamRequestPending = true
 steamRoot.resolveSteamRequest("unavailable")
 assert.equal(steamRoot.steamRequestPending, false)

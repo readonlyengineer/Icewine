@@ -223,7 +223,7 @@ Scope {
         }
         if (root.steamLaunching && Launcher.gamescopeWindow(compositor.toplevels, root.steamGamescopePid))
             Quickshell.execDetached(["hyprctl", "eval",
-                'require("modules.WindowPolicy").handoff_steam(' + root.steamGamescopePid + ')'])
+                'require("icewine.modules.WindowPolicy").handoff_steam(' + root.steamGamescopePid + ')'])
     }
 
     function autostartSteamGamescope() {

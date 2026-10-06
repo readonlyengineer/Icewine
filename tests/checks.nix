@@ -13,8 +13,6 @@ let
         enable = true;
         user = "demo";
         handheld.enable = handheld;
-        defaultFiles.config."hypr/modules/host.lua" = ../hyprland/modules/Autostart.lua;
-        defaultFiles.config."hypr/modules/Autostart.lua" = ../hyprland/modules/Baseline.lua;
       };
       system.stateVersion = "26.05";
     } ];
@@ -160,14 +158,12 @@ in {
       mkdir -p "$HOME"
       ${icewineCli}/bin/icewine init
       test "$(${steamShortcuts}/bin/icewine-steam-shortcuts)" = '[]'
-      cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
-      cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"
       test ! -e "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -f "$XDG_CONFIG_HOME/quickshell/icewine/Desktop.qml"
       test ! -e "$XDG_CONFIG_HOME/quickshell/modules"
       cmp ${../hyprland/hyprland.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua"
-      test -L "$XDG_CONFIG_HOME/hypr/modules/Theme.lua"
+      test ! -e "$XDG_CONFIG_HOME/hypr/modules/Theme.lua"
       test ! -e "$XDG_CONFIG_HOME/hypr/tests"
       implementation=$(dirname "$(readlink "$XDG_CONFIG_HOME/quickshell/icewine")")
       # Compare actual installed paths: individually interpolated Nix files or
@@ -187,12 +183,10 @@ in {
       grep -Fx '@import url("../icewine/current/gtk.css");' "$XDG_CONFIG_HOME/gtk-3.0/gtk.css"
       grep -Fx '@import url("../icewine/current/gtk4.css");' "$XDG_CONFIG_HOME/gtk-4.0/gtk.css"
       cmp ${../hyprland}/icewine.lua "$implementation/hyprland/icewine.lua"
-      for name in Baseline LookAndFeel WindowPolicy DefaultApps Docking Binds Autostart; do
+      for name in Baseline LookAndFeel WindowPolicy DefaultApps Docking Binds; do
         cmp ${../hyprland}/modules/"$name.lua" "$implementation/hyprland/modules/$name.lua"
       done
       cmp ${../hyprland}/deck/Deck.lua "$implementation/hyprland/modules/Deck.lua"
-      test -L "$XDG_CONFIG_HOME/hypr/modules/Binds.lua"
-      cmp ${../hyprland}/modules/Binds.lua "$XDG_CONFIG_HOME/hypr/modules/Binds.lua"
       # Runtime loaders accept an ordinary implementation root as well as Nix store paths.
       cp -r "$implementation" "$TMPDIR/portable-implementation"
       ln -sfn "$TMPDIR/portable-implementation/hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
@@ -211,12 +205,10 @@ in {
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -f "$XDG_CONFIG_HOME/quickshell/icewine/Handheld.qml"
       test ! -e "$XDG_CONFIG_HOME/quickshell/modules"
-      { cat ${../hyprland/hyprland.lua}; printf '\nrequire("modules.Deck")\n'; } > "$TMPDIR/handheld-hyprland.lua"
-      cmp "$TMPDIR/handheld-hyprland.lua" "$XDG_CONFIG_HOME/hypr/hyprland.lua"
-      cmp ${../hyprland/modules/Autostart.lua} "$XDG_CONFIG_HOME/hypr/modules/host.lua"
-      cmp ${../hyprland/modules/Baseline.lua} "$XDG_CONFIG_HOME/hypr/modules/Autostart.lua"
+      cmp ${../hyprland/hyprland.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua"
       cmp ${../quickshell/deck/shell.qml} "$XDG_CONFIG_HOME/quickshell/shell.qml"
-      ln -sfn "$TMPDIR/portable-implementation/hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
+      cp -r "$(readlink "$XDG_CONFIG_HOME/hypr/icewine")" "$TMPDIR/portable-handheld-hyprland"
+      ln -sfn "$TMPDIR/portable-handheld-hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
       unset ICEWINE_IMPLEMENTATION
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" handheld
       touch "$out"

@@ -31,6 +31,10 @@ let
     cp ${../quickshell}/deck/DeckOverlay.qml ${../quickshell}/deck/DeckMenu.js $out/quickshell/deck/
     cp ${../quickshell}/Desktop.qml ${../quickshell}/Handheld.qml $out/quickshell/
     cp ${../hyprland}/icewine.lua $out/hyprland/
+    ${lib.optionalString cfg.handheld.enable ''
+      chmod u+w $out/hyprland/icewine.lua
+      printf '\nrequire("icewine.modules.Deck")\n' >> $out/hyprland/icewine.lua
+    ''}
     cp ${../theme/assets/templates}/kitty-base.conf $out/kitty/defaults.conf
     cp ${../nvim}/defaults.lua $out/nvim/defaults.lua
     cp ${../bash}/bashrc $out/bash/bashrc
@@ -39,7 +43,7 @@ let
     cp ${../gtk}/defaults.css $out/gtk/defaults.css
     ${lib.concatMapStringsSep "\n" (name:
       "cp ${../hyprland}/modules/${name}.lua $out/hyprland/modules/"
-    ) [ "Baseline" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" "Binds" "Autostart" ]}
+    ) [ "Baseline" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" "Binds" ]}
     cp ${../hyprland}/deck/Deck.lua $out/hyprland/modules/
   '';
   defaults = pkgs.runCommand "icewine-default-files" { } ''
@@ -72,10 +76,6 @@ let
     cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
     cp ${../quickshell/config/qmldir} $out/config/quickshell/config/qmldir
     cp ${../quickshell/config/Settings.qml} $out/config/quickshell/config/Settings.qml
-    ${lib.optionalString cfg.handheld.enable ''
-      chmod u+w $out/config/hypr/hyprland.lua
-      printf '\nrequire("modules.Deck")\n' >> $out/config/hypr/hyprland.lua
-    ''}
     chmod -R u+w $out
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
       "mkdir -p $out/config/${lib.escapeShellArg (builtins.dirOf name)}; cp ${lib.escapeShellArg "${source}"} $out/config/${lib.escapeShellArg name}"
@@ -85,10 +85,6 @@ let
     ) cfg.defaultFiles.data)}
     ln -s ${implementation}/quickshell $out/config/quickshell/icewine
     ln -s ${implementation}/hyprland $out/config/hypr/icewine
-    ${lib.concatMapStringsSep "\n" (name:
-      lib.optionalString (!(builtins.hasAttr "hypr/modules/${name}.lua" cfg.defaultFiles.config))
-        "ln -s hypr/icewine/modules/${name}.lua $out/config/hypr/modules/${name}.lua"
-    ) [ "Binds" "Autostart" ]}
     ${lib.optionalString cfg.idle.enable "ln -s ${implementation}/hypridle $out/config/hypr/hypridle-icewine"}
     ln -s ${implementation}/nvim $out/config/nvim/icewine
     ln -s ${implementation}/uwsm $out/config/uwsm/icewine

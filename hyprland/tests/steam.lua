@@ -2,7 +2,7 @@
 local launches, guide = 0, nil
 local radialOptions
 local touchpad = {}
-package.loaded["modules.DefaultApps"] = { editor = "nvim" }
+package.loaded["icewine.modules.DefaultApps"] = { editor = "nvim" }
 hl = {
 	monitor=function() end, env=function() end, window_rule=function() end,
 	config=function(config)

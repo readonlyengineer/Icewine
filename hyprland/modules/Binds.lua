@@ -2,8 +2,8 @@
 -- Lid switches and display calibration remain in host hardware modules.
 
 local mainMod  = "SUPER"
-local apps     = require("modules.DefaultApps")
-local windows  = require("modules.WindowPolicy")
+local apps     = require("icewine.modules.DefaultApps")
+local windows  = require("icewine.modules.WindowPolicy")
 
 local function topbar(action)
 	return hl.dsp.exec_cmd("qs ipc call topbar " .. action)

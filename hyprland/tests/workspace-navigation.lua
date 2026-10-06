@@ -3,8 +3,8 @@ local stub = setmetatable({}, {
 	__index = function(self) return self end,
 	__call = function(self, request) return request or self end,
 })
-package.loaded["modules.DefaultApps"] = dofile("hyprland/modules/DefaultApps.lua")
-package.loaded["modules.WindowPolicy"] = stub
+package.loaded["icewine.modules.DefaultApps"] = dofile("hyprland/modules/DefaultApps.lua")
+package.loaded["icewine.modules.WindowPolicy"] = stub
 local binds, workspaces, active, target = {}, {}, nil, nil
 local options, gestures, lastDispatch = {}, {}, nil
 hl = {

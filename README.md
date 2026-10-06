@@ -81,7 +81,7 @@ Create `/etc/nixos/flake.nix` with `sudo nano /etc/nixos/flake.nix` and paste:
 Replace `YOUR_USERNAME` with the result of `id -un`. The `icewine` name is the
 configuration selected by the commands below; it does not rename your computer.
 Icewine uses NixOS user packages and services; Home Manager is optional for
-unrelated host configuration.
+host-owned configuration, including a Hyprland entry.
 
 ### 3. Build, reboot and log in
 
@@ -200,7 +200,7 @@ Recognized links are backed up under `$XDG_STATE_HOME/icewine/migration-*`;
 unrecognized symlinks remain untouched and are reported as conflicts.
 Quickshell QML/JS and Hyprland behaviour run from a read-only implementation
 package (the Nix store on NixOS).
-Writable defaults contain the small entry points, settings, bindings and hooks,
+Writable defaults contain the small entry points and settings,
 plus host-owned btop, locale and wallpaper configuration. Icewine records the bytes or symlink it installed
 in `$XDG_STATE_HOME/icewine/default-files.json`. Init refreshes a changed shipped
 default only while the current file still matches that record; your edits,
@@ -222,7 +222,7 @@ Run
 `icewine reset APP` to adopt updated shipped defaults for `hypr`, `quickshell`,
 `uwsm`, `btop`, `user-dirs`, or `wallpapers`, or use `icewine reset` for all
 defaults. Reset saves replaced content first. Generated appearance stays under
-`icewine/current`; Hyprland `modules/Theme.lua` is a managed link and the packaged
+`icewine/current`; Hyprland loads its generated Theme.lua directly and the packaged
 Quickshell palette reads `palette.json` from that generated directory.
 
 Supported writable entry points are:
@@ -231,11 +231,10 @@ Supported writable entry points are:
 - `quickshell/shell.qml` imports `"icewine" as Icewine` and runs `Icewine.Desktop {}`
   or `Icewine.Handheld {}`. Additional user components may live in separate local
   directories and be instantiated from this entry point.
-- `hypr/hyprland.lua` loads the packaged Icewine entry, then your host/Personal
-  modules or local overrides. Keep the packaged loader before those hooks.
-- `hypr/modules/Binds.lua` and `Autostart.lua` are managed aliases to shared defaults; edited or host-selected hooks remain active compatibility overrides.
-  Load order is Baseline, LookAndFeel, generated Theme, WindowPolicy, Binds,
-  Autostart, fallback monitor, then appended handheld and host overrides.
+- `hypr/hyprland.lua` starts with `require("icewine.icewine")`; put your overrides
+  below it. Shared Baseline, LookAndFeel, generated Theme, WindowPolicy, Binds,
+  fallback monitor and optional Deck behaviour run first. Shared modules use the
+  `icewine.modules` namespace; personal modules remain explicitly loaded by your entry.
 
 Shared defaults live under one immutable `ROOT`, with application subtrees such
 as `ROOT/hyprland`, `ROOT/quickshell`, `ROOT/kitty`, `ROOT/nvim`, `ROOT/bash`,
@@ -257,7 +256,7 @@ ROOT/kitty/defaults.conf
     font_size 16                       # my setting
 ```
 
-The Hyprland entry prepends `hypr/icewine/?.lua` to Lua's search path; Neovim
+The Hyprland entry uses native Lua module loading through `hypr/icewine`; Neovim
 runs `nvim/icewine/defaults.lua`; UWSM sources `uwsm/icewine/env`. These loaders
 use HOME/XDG paths, with no hardcoded `/usr/share` or `/nix/store` dependency.
 Nix provenance checks remain intentional for recognizing old Home Manager links.
@@ -282,7 +281,7 @@ Paths below are relative to XDG_CONFIG_HOME unless a different root is named.
 
 | Set | Native entry and shared package link | Appearance and personal settings |
 | --- | --- | --- |
-| Hyprland / handheld | writable `hypr/hyprland.lua`; `hypr/icewine -> ROOT/hyprland` | shared behaviour loads `hypr/modules/Theme.lua -> Current/Theme.lua`; append overrides after desktop/Deck loading |
+| Hyprland / handheld | writable `hypr/hyprland.lua`; `hypr/icewine -> ROOT/hyprland` | shared behaviour loads `Current/Theme.lua` directly; append overrides after desktop/Deck loading |
 | Quickshell / handheld | writable `quickshell/shell.qml`; `quickshell/icewine -> ROOT/quickshell` | packaged palette reads `Current/palette.json`; instantiate/customise components in the entry; singleton settings exception below |
 | Kitty | writable `kitty/kitty.conf`; `kitty/icewine -> ROOT/kitty` | include shared defaults, `Current/kitty.conf`, then inline overrides; no new `host.conf` |
 | Neovim | writable `nvim/init.lua`; `nvim/icewine -> ROOT/nvim` | shared defaults load/reload `Current/nvim-theme.lua`; append overrides in init.lua |
@@ -303,12 +302,18 @@ Paths below are relative to XDG_CONFIG_HOME unless a different root is named.
 
 The exceptions describe actual loader and ownership boundaries:
 
-- **Hyprland compatibility hooks:** shipped Binds and Autostart now live in
-  ROOT/hyprland/modules. Their old paths are managed aliases through `hypr/icewine`,
-  preserving the existing loader and Deck's Binds exports. New installs have one
-  writable Hyprland entry; add personal commands/bindings there. Edited hooks or
-  host-selected `defaultFiles` hooks remain separate and active, with ownership
-  diagnostics; they are compatibility/host overrides, not the default format.
+- **Hyprland ownership and migration:** Icewine supplies one native entry and
+  namespaced shared modules, without default user-side module aliases. Unchanged
+  old Binds/Autostart/Theme aliases and host/Personal defaults retire with backups.
+  Edited or unknown removed hooks stop init/reset before switching the entry;
+  the diagnostic names the files whose overrides must move into the active entry.
+  Host-selected `defaultFiles` modules remain available when a host entry explicitly
+  loads them. A matching-path Home Manager Hyprland link stays Home Manager-owned:
+  init/reset preserve it and drop stale Icewine entry ownership. During the namespace
+  transition, update its shared import to `require("icewine.icewine")` through Home
+  Manager; comments remain freely editable. After migration, new personal modules
+  can reuse former hook names. The host initializer runs after its Home Manager
+  service, which controls updates/backups for its own entry.
 - **Quickshell Settings:** packaged components import the local QML singleton
   `quickshell/config/Settings.qml` using its neighbouring qmldir. This native
   singleton exposes readonly policy properties used by Desktop/Handheld SessionControl

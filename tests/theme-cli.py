@@ -198,8 +198,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert tomllib.loads((config / "icewine/current/starship.toml").read_text())["git_branch"]["disabled"] is False
     assert (config / "yazi/keymap.toml").is_symlink()
     assert (config / "hypr/hyprland.lua").read_text() == "default hypr\n"
-    assert (config / "hypr/modules/Theme.lua").is_symlink()
-    assert os.readlink(config / "hypr/modules/Theme.lua") == str(config / "icewine/current/Theme.lua")
+    assert not (config / "hypr/modules/Theme.lua").exists()
     assert (config / "quickshell/modules/Thing.qml").read_text() == "default module\n"
     assert (root / "data/wallpapers/default.jpg").read_bytes() == b"default wallpaper"
     assert not (config / "quickshell/modules/Thing.qml").is_symlink()
@@ -1279,7 +1278,13 @@ for conflict in (None, "module", "module-directory", "entry", "entry-directory",
                      "hypr/modules/Binds.lua", "hypr/modules/Autostart.lua"):
             target = new / "config" / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source / name.replace("hypr/", "hyprland/"), target)
+            if name == "hypr/modules/Autostart.lua":
+                target.write_text("-- Host-selected custom hook\n")
+            else:
+                shutil.copyfile(source / name.replace("hypr/", "hyprland/"), target)
+        with (new / "config/hypr/hyprland.lua").open("a") as entry:
+            entry.write('\ndofile((os.getenv("XDG_CONFIG_HOME") or os.getenv("HOME") .. "/.config") .. "/hypr/modules/Binds.lua")\n')
+            entry.write('dofile((os.getenv("XDG_CONFIG_HOME") or os.getenv("HOME") .. "/.config") .. "/hypr/modules/Autostart.lua")\n')
         package = root / "implementation/quickshell"
         package.mkdir(parents=True)
         (new / "config/quickshell/icewine").symlink_to(package)
@@ -1326,7 +1331,7 @@ for conflict in (None, "module", "module-directory", "entry", "entry-directory",
         assert not (config / "quickshell/modules/Topbar.qml").exists()
         assert not (config / "hypr/modules/Baseline.lua").exists()
         assert settings.read_text() == "user settings\n" and binds.read_text() == "user binds\n"
-        assert (config / "hypr/hyprland.lua").read_bytes() == (source / "hyprland/hyprland.lua").read_bytes()
+        assert (config / "hypr/hyprland.lua").read_bytes() == (new / "config/hypr/hyprland.lua").read_bytes()
         assert list(state.glob("defaults-update-*/config/quickshell/modules/Topbar.qml"))
         # Package updates preserve link identity in backups, not a copied store tree.
         next_package = root / "next-implementation/quickshell"
@@ -1540,3 +1545,138 @@ for conflict in (None, "hypr-entry", "kitty-host", "unknown-link", "link-parent"
             backups = list(state.glob("defaults-update-*/config/kitty/icewine"))
             assert len(backups) == 1 and backups[0].is_symlink(), "Package update copied immutable files"
 print("native-entry migration and CSS ownership checks passed")
+
+# Native Hyprland ownership: matching-path HM provenance stays external even
+# after its old Icewine manifest record exists. Reset must not replace it.
+for old_record in (False, True):
+    with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, HOME=temporary):
+        root = Path(temporary)
+        config, data, state, defaults = (root / name for name in (".config", "data", "state", "defaults"))
+        (defaults / "config/hypr").mkdir(parents=True)
+        (defaults / "data").mkdir()
+        starter = (script.parent.parent / "hyprland/hyprland.lua").read_text()
+        (defaults / "config/hypr/hyprland.lua").write_text(starter)
+        if old_record:
+            module.install_defaults(defaults, config, data, state, False, None)
+        store = root / "store"
+        target = store / ("a" * 32 + "-home-manager-files") / ".config/hypr/hyprland.lua"
+        target.parent.mkdir(parents=True)
+        target.write_text('-- A freely edited host comment.\nrequire("icewine.icewine")\n-- calibrated host overrides\n')
+        entry = config / "hypr/hyprland.lua"
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.unlink(missing_ok=True)
+        entry.symlink_to(target)
+        package = root / "implementation"
+        package.mkdir()
+        (defaults / "config/hypr/icewine").symlink_to(package)
+        with mock.patch.object(module, "STORE_DIR", store):
+            for reset in (False, True):
+                module.install_defaults(defaults, config, data, state, reset, None)
+                assert entry.is_symlink() and entry.resolve() == target
+                assert "hypr/hyprland.lua" not in module.default_records(state)["config"]["files"]
+            # Comments are user text, not ownership identity. New HM personal
+            # modules may reuse a retired name after the actual transition.
+            target.write_text('-- Peter changed this comment.\nrequire("icewine.icewine")\nrequire("modules.Personal")\n')
+            personal_target = target.with_name("modules") / "Personal.lua"
+            personal_target.parent.mkdir()
+            personal_target.write_text("-- new active personal module\n")
+            personal = config / "hypr/modules/Personal.lua"
+            personal.parent.mkdir()
+            personal.symlink_to(personal_target)
+            for reset in (False, True):
+                module.install_defaults(defaults, config, data, state, reset, None)
+                assert entry.resolve() == target and personal.resolve() == personal_target
+                assert "hypr/modules/Personal.lua" not in module.default_records(state)["config"]["files"]
+            personal.unlink()
+            # Unknown hook content before a real migration still blocks while
+            # preserving both entry ownership and the would-be inactive edits.
+            personal.write_text("unknown legacy edits\n")
+            records = module.default_records(state)
+            records["config"]["files"]["hypr/hyprland.lua"] = "sha256:" + "0" * 64
+            (state / "default-files.json").write_text(json.dumps(records))
+            for reset in (False, True):
+                try:
+                    module.install_defaults(defaults, config, data, state, reset, None)
+                except ValueError as error:
+                    assert str(personal) in str(error)
+                else:
+                    raise AssertionError("Unknown pre-migration hook became inactive")
+                assert entry.resolve() == target and personal.read_text() == "unknown legacy edits\n"
+            personal.unlink()
+            # During a real first transition an obsolete HM loader must be
+            # updated by HM, never replaced or removed by Icewine.
+            target.write_text("unknown host entry\n")
+            (config / "hypr/icewine").unlink()
+            records = module.default_records(state)
+            records["config"]["files"].pop("hypr/icewine")
+            (state / "default-files.json").write_text(json.dumps(records))
+            try:
+                module.install_defaults(defaults, config, data, state, False, None)
+            except ValueError as error:
+                assert "hyprland.lua" in str(error)
+            else:
+                raise AssertionError("An incompatible Home Manager loader bypassed migration")
+
+for hook in ("Binds", "Autostart", "Theme", "host", "Personal"):
+    for edited in (False, True):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, data, state, defaults = (root / name for name in ("config", "data", "state", "defaults"))
+            (defaults / "config/hypr/modules").mkdir(parents=True)
+            (defaults / "data").mkdir()
+            starter = defaults / "config/hypr/hyprland.lua"
+            starter.write_text("old entry\n")
+            shipped = defaults / "config/hypr/modules" / (hook + ".lua")
+            shipped.write_text("old active hook\n")
+            module.install_defaults(defaults, config, data, state, False, None)
+            active = config / "hypr/modules" / shipped.name
+            if edited:
+                active.write_text("user calibration or behaviour\n")
+            shipped.unlink()
+            starter.write_bytes((script.parent.parent / "hyprland/hyprland.lua").read_bytes())
+            before = (config / "hypr/hyprland.lua").read_bytes()
+            if edited:
+                for reset in (False, True):
+                    try:
+                        module.install_defaults(defaults, config, data, state, reset, None)
+                    except ValueError as error:
+                        assert str(active) in str(error) and "hyprland.lua" in str(error)
+                    else:
+                        raise AssertionError("Edited removed hook became inert: " + hook)
+                    assert active.read_text() == "user calibration or behaviour\n"
+                    assert (config / "hypr/hyprland.lua").read_bytes() == before
+            else:
+                module.install_defaults(defaults, config, data, state, False, None)
+                assert not active.exists()
+print("Home Manager entry ownership and retired active-hook checks passed")
+
+# An edited old entry can still call pristine old hooks; retire neither until
+# the user has migrated that entry. Later edits to the new native entry stay active.
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    config, data, state, defaults = (root / name for name in ("config", "data", "state", "defaults"))
+    (defaults / "config/hypr/modules").mkdir(parents=True)
+    (defaults / "data").mkdir()
+    starter = defaults / "config/hypr/hyprland.lua"
+    starter.write_text('require("modules.host")\n')
+    hook = defaults / "config/hypr/modules/host.lua"
+    hook.write_text("calibrated old host\n")
+    module.install_defaults(defaults, config, data, state, False, None)
+    entry = config / "hypr/hyprland.lua"
+    entry.write_text(entry.read_text() + "-- edited loader\n")
+    hook.unlink()
+    starter.write_bytes((script.parent.parent / "hyprland/hyprland.lua").read_bytes())
+    for reset in (False, True):
+        try:
+            module.install_defaults(defaults, config, data, state, reset, None)
+        except ValueError as error:
+            assert str(entry) in str(error)
+        else:
+            raise AssertionError("Edited old loader lost its still-active host hook")
+        assert (config / "hypr/modules/host.lua").read_text() == "calibrated old host\n"
+    entry.write_text('require("modules.host")\n')
+    module.install_defaults(defaults, config, data, state, False, None)
+    entry.write_text(entry.read_text() + "-- inline user overrides\n")
+    module.install_defaults(defaults, config, data, state, False, None)
+    assert entry.read_text().endswith("-- inline user overrides\n")
+print("old loader migration and native inline edit preservation checks passed")

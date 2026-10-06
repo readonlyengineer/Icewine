@@ -89,7 +89,7 @@ function launchExpression(entry, workspace, applicationOptions) {
 
     var command = ""
     if (entry.action === "steam") {
-        command = "hyprctl eval " + shellQuote('require("modules.Deck").focus_or_start_gamescope()')
+        command = "hyprctl eval " + shellQuote('require("icewine.modules.Deck").focus_or_start_gamescope()')
     } else if (entry.action === "application" && applicationOptions
             && applicationOptions.command.length && applicationOptions.workingDirectory) {
         command = "cd -- " + shellQuote(applicationOptions.workingDirectory)

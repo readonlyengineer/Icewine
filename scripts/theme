@@ -378,6 +378,20 @@ def static_app(root_name, relative):
             "btop": "btop", "user-dirs.locale": "user-dirs"}.get(relative.parts[0], relative.parts[0])
 
 
+def home_manager_hypr_entry(path, config):
+    # Exact Home Manager entry provenance establishes ownership independently
+    # of comments or loader text. Other paths retain existing migration rules.
+    if path != config / "hypr/hyprland.lua" or not path.is_symlink():
+        return False
+    try:
+        target = Path(os.readlink(path)).relative_to(STORE_DIR)
+        return (re.fullmatch(r"[a-z0-9]{32}-home-manager-files", target.parts[0]) is not None
+                and target.parts[1:] == path.relative_to(Path.home()).parts
+                and still_current(path, config, default_signature(path)))
+    except (ValueError, IndexError, OSError, UnicodeError):
+        return False
+
+
 def managed_static_link(path, root, root_name):
     if not path.is_symlink():
         return False
@@ -547,11 +561,52 @@ def implementation_preflight(defaults, config, state, app=None, *, records=None,
                 raise ValueError("implementation migration requires icewine init without APP; scoped init/reset cannot switch the Hyprland loader")
             path = config / "hypr/hyprland.lua"
             current = default_signature(path)
-            if current is not None and (current != previous.get("hypr/hyprland.lua")
+            if not home_manager_hypr_entry(path, config) and current is not None and (current != previous.get("hypr/hyprland.lua")
                     or not still_current(path, config, current)):
                 raise ValueError(f"implementation migration blocked: preserved edited/untracked {path}; "
                                  "replace its ICEWINE_IMPLEMENTATION loader with the neighbouring icewine link, "
                                  "back up and move the old entry, then icewine init")
+        # Removed hooks must not become inert edits when the native entry starts
+        # loading namespaced shared modules. Custom defaultFiles hooks remain
+        # available to a host entry that explicitly loads them.
+        starter = source / "hypr/hyprland.lua"
+        if (app in (None, "hypr") and starter.is_file()
+                and starter.read_text(encoding="utf-8").startswith('require("icewine.icewine")\n')):
+            path = config / "hypr/hyprland.lua"
+            current = default_signature(path)
+            transition = ((source / "hypr/icewine").is_symlink() and "hypr/icewine" not in previous
+                          or previous.get("hypr/hyprland.lua") not in (None, default_signature(starter)))
+            if transition and home_manager_hypr_entry(path, config):
+                # During migration the host must already load the new shared
+                # namespace; after it owns the entry, its text is its own policy.
+                if not re.search(r"(?m)^\s*require\s*\(\s*(['\"])icewine\.icewine\1\s*\)\s*(?:--.*)?$",
+                                 path.read_text(encoding="utf-8")):
+                    raise ValueError(f"configuration migration blocked: preserved Home Manager entry {path}; "
+                                     "update its loader to require(\"icewine.icewine\") in the host configuration, "
+                                     "then activate Home Manager before icewine init; do not remove its entry")
+            if (previous.get("hypr/hyprland.lua") != default_signature(starter)
+                    and current is not None and current != previous.get("hypr/hyprland.lua")
+                    and not home_manager_hypr_entry(path, config)):
+                raise ValueError(f"configuration migration blocked: preserved edited/untracked {path}; "
+                                 "migrate its loader to require(\"icewine.icewine\") and move old hook overrides "
+                                 "into the active entry, then back up and move the old entry before icewine init; "
+                                 "reset cannot bypass migration")
+            for name in ("Binds", "Autostart", "Theme", "host", "Personal"):
+                relative = "hypr/modules/" + name + ".lua"
+                path = config / relative
+                if not transition and relative not in previous:
+                    continue
+                if (source / relative).exists() or (source / relative).is_symlink():
+                    continue
+                current = default_signature(path)
+                if current is None:
+                    continue
+                theme_alias = (name == "Theme" and path.is_symlink()
+                               and os.readlink(path) == str(config / "icewine/current/Theme.lua"))
+                if not still_current(path, config, current) or (not theme_alias and current != previous.get(relative)):
+                    raise ValueError(f"configuration migration blocked: preserved edited/untracked {path}; "
+                                     "move its active overrides into hyprland.lua or a module loaded there, "
+                                     "then back up and move this retired hook before icewine init; reset cannot bypass migration")
         if ((source / "kitty/icewine").is_symlink() and "kitty/icewine" not in previous
                 and not (source / "kitty/host.conf").is_file() and app in (None, "kitty")):
             path = config / "kitty/host.conf"
@@ -578,6 +633,8 @@ def implementation_preflight(defaults, config, state, app=None, *, records=None,
                                 *(name for name in previous if legacy_implementation(name))))
         for name in legacy:
             path = config / name
+            if home_manager_hypr_entry(path, config):
+                continue
             # Do not follow an unknown container into user data.
             if path.is_dir() and not path.is_symlink():
                 if name not in LEGACY_IMPLEMENTATION_DIRS:
@@ -653,7 +710,9 @@ def install_defaults(defaults, config, data, state, replace, app):
             # across a running session. Finish editing before init; detected
             # conflicts retain backups and roll back unchanged paths only. Use an
             # offline migration if runtime observers must not see intermediate loaders.
-            loaders = (("hypr/icewine",) if first_hyprland else ()) + ("hypr/hyprland.lua",)
+            loaders = (("hypr/icewine",) if first_hyprland else ())
+            if not home_manager_hypr_entry(config / "hypr/hyprland.lua", config):
+                loaders += ("hypr/hyprland.lua",)
             if first_quickshell:
                 loaders += ("quickshell/shell.qml", "quickshell/icewine")
             retiring = sorted(name for name in set(previous) - present if legacy_implementation(name))
@@ -751,6 +810,10 @@ def install_defaults(defaults, config, data, state, replace, app):
             relative = shipped.relative_to(source)
             name = relative.as_posix()
             path = root / relative
+            if root_name == "config" and home_manager_hypr_entry(path, config):
+                previous.pop(name, None)
+                atomic_text(manifest, json.dumps(records, sort_keys=True) + "\n")
+                continue
             blocked = False
             for parent in reversed(path.parents):
                 if parent == root:
@@ -910,25 +973,16 @@ def install_defaults(defaults, config, data, state, replace, app):
                     except OSError as error:
                         print(f"Pending: user systemd daemon-reload failed: {error}", file=sys.stderr)
 
-    if app in (None, "hypr"):
+    if app in (None, "hypr") and not ((source_root / "config/hypr/modules/Theme.lua").exists()
+                                       or (source_root / "config/hypr/modules/Theme.lua").is_symlink()):
         path = config / "hypr/modules/Theme.lua"
-        target = config / "icewine/current/Theme.lua"
-        if path.is_symlink() and os.readlink(path) == str(target):
-            return
-        if any(parent.is_symlink() for parent in (path.parent, path.parent.parent)):
-            print(f"conflict: preserved symlinked parent: {path}", file=sys.stderr)
-            return
-        if path.exists() or path.is_symlink():
-            if path.is_symlink() and not managed_static_link(path, config, "config"):
-                print(f"conflict: preserved unrecognized symlink: {path}", file=sys.stderr)
-                return
-            if not replace and not managed_static_link(path, config, "config"):
-                print(f"preserved edited file: {path}")
-                return
-            save(path, config, "config")
-            path.unlink()
-        atomic_link(path, target)
-        print(f"installed: {path}")
+        current = default_signature(path)
+        if (path.is_symlink() and os.readlink(path) == str(config / "icewine/current/Theme.lua")
+                and still_current(path, config, current)):
+            save(path, config, "config", automatic=True)
+            if still_current(path, config, current):
+                path.unlink()
+                print(f"retired: {path}")
 
 
 def install_gtk_theme(config, theme_id):

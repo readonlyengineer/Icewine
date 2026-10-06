@@ -1,9 +1,7 @@
--- Packaged desktop behaviour. User bindings and autostart remain explicit hooks.
-local config = (os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")) .. "/hypr/"
-require("modules.Baseline")
-require("modules.LookAndFeel")
-package.loaded["modules.Theme"] = dofile(config .. "modules/Theme.lua") or true
-require("modules.WindowPolicy")
-package.loaded["modules.Binds"] = dofile(config .. "modules/Binds.lua") or true
-package.loaded["modules.Autostart"] = dofile(config .. "modules/Autostart.lua") or true
+-- Shared desktop behaviour; the neighbouring entry owns user overrides.
+require("icewine.modules.Baseline")
+require("icewine.modules.LookAndFeel")
+dofile((os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")) .. "/icewine/current/Theme.lua")
+require("icewine.modules.WindowPolicy")
+require("icewine.modules.Binds")
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
