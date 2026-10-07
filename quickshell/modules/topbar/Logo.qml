@@ -1,8 +1,6 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import Quickshell
-import Quickshell.Widgets
 import qs.icewine.theme as Theme
 
 Rectangle {
@@ -20,10 +18,13 @@ Rectangle {
     border.color: Theme.Palette.alpha(Theme.Palette.tertiary, 0.55)
     border.width: 1
 
-    IconImage {
+    Text {
         anchors.centerIn: parent
-        implicitSize: 17
-        source: Quickshell.iconPath(Quickshell.env("ICEWINE_DISTRO_LOGO") || "distributor-logo", "computer")
+        text: Theme.Palette.osGlyph
+        color: Theme.Palette.tertiary
+        font.family: "JetBrainsMono Nerd Font"
+        font.pixelSize: 17
+        font.bold: true
     }
 
     Rectangle {

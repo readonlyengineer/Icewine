@@ -8,6 +8,7 @@ QtObject {
     id: root
 
     property var snapshot: ({})
+    readonly property string osGlyph: snapshot.osGlyph || "\uf31a"
     readonly property bool dark: snapshot.dark !== false
     readonly property bool animate: Quickshell.env("ICEWINE_THEME_TRANSITION") !== "off"
 

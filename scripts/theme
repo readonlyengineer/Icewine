@@ -188,6 +188,7 @@ def render_theme(assets, palette_file, level="high"):
              for name, template in TEMPLATES.items()}
     files["palette.json"] = json.dumps({
         "themeId": palette_file.stem,
+        "osGlyph": values["osGlyph"],
         "dark": values["appearance"] != "light",
         **{name: values[source] for name, source in {
             "background": "background", "backgroundDark": "backgroundDark",

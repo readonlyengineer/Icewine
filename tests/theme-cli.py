@@ -263,11 +263,15 @@ with tempfile.TemporaryDirectory() as temporary:
                            ({"ID": "cachyos", "ID_LIKE": "arch"}, "\uf385"),
                            ({"ID": "other", "ID_LIKE": "arch"}, "\uf31a"), ({}, "\uf31a")):
         with mock.patch.object(module.platform, "freedesktop_os_release", return_value=release):
-            report = json.loads(module.render_theme(assets, assets / "themes/dracula.json")["fastfetch.jsonc"])
+            rendered_theme = module.render_theme(assets, assets / "themes/dracula.json")
+            report = json.loads(rendered_theme["fastfetch.jsonc"])
+        assert json.loads(rendered_theme["palette.json"])["osGlyph"] == glyph
         assert next(item["key"] for item in report["modules"]
                     if isinstance(item, dict) and item.get("type") == "os") == f"├─ {glyph}  OS"
     with mock.patch.object(module.platform, "freedesktop_os_release", side_effect=OSError("unavailable")):
-        report = json.loads(module.render_theme(assets, assets / "themes/dracula.json")["fastfetch.jsonc"])
+        rendered_theme = module.render_theme(assets, assets / "themes/dracula.json")
+        report = json.loads(rendered_theme["fastfetch.jsonc"])
+    assert json.loads(rendered_theme["palette.json"])["osGlyph"] == "\uf31a"
     assert next(item["key"] for item in report["modules"]
                 if isinstance(item, dict) and item.get("type") == "os") == "├─ \uf31a  OS"
     concurrent_config = root / "concurrent-config"
