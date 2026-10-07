@@ -1,3 +1,6 @@
+# Use the host distribution's icon, rather than a fixed NixOS glyph.
+export ICEWINE_DISTRO_LOGO="$(. /etc/os-release; printf '%s' "${LOGO:-distributor-logo}")"
+
 # Cursor size (defaults are tiny on HiDPI; 24 is the common HiDPI pick)
 export XCURSOR_SIZE=24
 
