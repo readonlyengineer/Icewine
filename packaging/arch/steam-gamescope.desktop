@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Steam (Gamescope)
+Comment=Launch Steam inside monitor-aware Gamescope
+Exec=qs ipc call gameLauncher launchSteamGamescope
+Icon=steam
+Categories=Game;
+Terminal=false

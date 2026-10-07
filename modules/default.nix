@@ -147,7 +147,7 @@ in {
 
     services.gvfs.enable = lib.mkIf (cfg.fileManager.preset == "yazi") (lib.mkDefault true);
 
-    fonts.packages = with pkgs; [ dejavu_fonts nerd-fonts.jetbrains-mono noto-fonts-color-emoji rubik ];
+    fonts.packages = with pkgs; [ dejavu_fonts nerd-fonts.jetbrains-mono noto-fonts-color-emoji ];
     environment.systemPackages = (with pkgs; [
       quickshell hyprshutdown hyprpolkitagent glib jq nano systemd
       hyprshot libnotify libcanberra-gtk3

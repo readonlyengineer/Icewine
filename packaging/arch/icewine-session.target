@@ -1,0 +1,6 @@
+[Unit]
+Description=Icewine session services
+PartOf=graphical-session.target
+After=graphical-session.target
+Requires=icewine.service
+Wants=icewine-idle.service icewine-polkit.service icewine-refresh-flatpak-icons.path

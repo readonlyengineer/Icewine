@@ -1,0 +1,9 @@
+[Unit]
+Description=Icewine idle locking and suspend
+PartOf=icewine-session.target graphical-session.target
+After=icewine.service
+Conflicts=hypridle.service
+
+[Service]
+ExecStart=/usr/bin/hypridle
+Restart=on-failure

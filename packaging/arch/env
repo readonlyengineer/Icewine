@@ -1,0 +1,5 @@
+. /usr/share/icewine/session/env
+export ICEWINE_KITTY_PRESET=true
+export ICEWINE_STEAM_ENABLED=${ICEWINE_STEAM_ENABLED:-true}
+export ICEWINE_BATTERY_ENABLED=${ICEWINE_BATTERY_ENABLED:-true}
+export QT_IM_MODULE=qtvirtualkeyboard

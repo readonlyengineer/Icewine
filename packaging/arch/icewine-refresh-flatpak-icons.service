@@ -1,0 +1,7 @@
+[Unit]
+Description=Refresh Icewine Flatpak icons
+After=icewine.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --user try-restart icewine.service

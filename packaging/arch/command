@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -e
+case ${0##*/} in
+  icewine-theme)
+    export ICEWINE_THEME_ASSETS=/usr/share/icewine/theme
+    export ICEWINE_DEFAULT_FILES=/usr/share/icewine/defaults
+    if [[ -d /usr/share/sddm/themes/icewine && -w /var/lib/icewine/sddm ]]; then
+      export ICEWINE_SDDM_THEME_FILE=/var/lib/icewine/sddm/theme.ini
+    fi
+    exec python3 /usr/lib/icewine/theme "$@" ;;
+  icewine-wallpaper)
+    export ICEWINE_WALLPAPER_VALIDATOR=/usr/share/icewine/quickshell/modules/WallpaperValidator.qml
+    exec bash /usr/lib/icewine/wallpaper "$@" ;;
+  icewine-terminal) exec kitty "$@" ;;
+  icewine-terminal-exec) exec kitty -e "$@" ;;
+  icewine-browser) exec firefox "$@" ;;
+  icewine-editor) exec nano "$@" ;;
+  icewine-file-manager) exec icewine-terminal-exec yazi "$@" ;;
+  icewine-steam)
+    [[ ${ICEWINE_STEAM_ENABLED:-true} != false ]] || exit 1
+    exec steam "$@" ;;
+  *) exit 2 ;;
+esac

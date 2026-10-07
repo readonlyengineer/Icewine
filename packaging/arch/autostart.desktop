@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Icewine session services
+OnlyShowIn=Icewine;
+Exec=systemctl --user start icewine-session.target
+NoDisplay=true

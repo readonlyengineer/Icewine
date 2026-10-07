@@ -1,0 +1,9 @@
+[Unit]
+Description=Icewine Polkit agent
+PartOf=icewine-session.target graphical-session.target
+After=graphical-session.target
+Conflicts=hyprpolkitagent.service
+
+[Service]
+ExecStart=/usr/lib/hyprpolkitagent/hyprpolkitagent
+Restart=on-failure

@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh Icewine when Flatpak icons change
+PartOf=icewine-session.target graphical-session.target
+After=icewine.service
+
+[Path]
+PathChanged=/var/lib/flatpak/exports/share/icons/hicolor/icon-theme.cache
+PathChanged=%h/.local/share/flatpak/exports/share/icons/hicolor/icon-theme.cache

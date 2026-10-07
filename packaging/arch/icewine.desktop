@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Icewine
+Comment=Icewine desktop with Hyprland and UWSM
+Exec=icewine-session
+TryExec=Hyprland
+Type=Application
+DesktopNames=Icewine;Hyprland;
