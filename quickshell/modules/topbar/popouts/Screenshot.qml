@@ -8,10 +8,11 @@ Item {
 
     readonly property Item initialFocus: monitor
     readonly property bool clipboardOnly: clipboard.checked
+    readonly property bool delayCapture: delay.checked
 
     signal captureRequested(string mode)
 
-    implicitHeight: clipboard.y + clipboard.height + 12
+    implicitHeight: delay.y + delay.height + 12
 
     Item {
         id: header
@@ -57,5 +58,13 @@ Item {
         y: actions.y + actions.implicitHeight + 12
         width: parent.width - 24
         text: "Clipboard only"
+    }
+
+    Toggle {
+        id: delay
+        x: 12
+        y: clipboard.y + clipboard.height + 12
+        width: parent.width - 24
+        text: "3-second delay"
     }
 }

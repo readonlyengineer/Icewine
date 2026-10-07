@@ -35,6 +35,8 @@ Widget {
         if (!page) return
         const command = ["hyprshot", "--freeze", "--mode", mode]
         if (page.clipboardOnly) command.push("--clipboard-only")
+        if (page.delayCapture)
+            command.unshift("sh", "-c", 'sleep 3 && exec "$@"', "icewine-screenshot")
         instantHandoffRequested()
         // Hide the popout before Hyprshot freezes the selection surface.
         Qt.callLater(() => Quickshell.execDetached(command))
