@@ -72,12 +72,6 @@ let
   hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
   steamShortcuts = import ../quickshell/tools/steam-shortcuts.nix { inherit pkgs; };
 in {
-  screenshot = pkgs.runCommand "icewine-screenshot-checks" {
-    nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
-  } ''
-    bash ${./screenshot.sh} ${../scripts/screenshot}
-    touch "$out"
-  '';
   brightness = pkgs.runCommand "icewine-brightness-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.python3 pkgs.shellcheck pkgs.jq pkgs.util-linux ];
   } ''

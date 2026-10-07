@@ -30,15 +30,13 @@ Widget {
         pageLoader.item?.initialFocus?.forceActiveFocus(Qt.ShortcutFocusReason)
     }
 
-    function capture(mode, target) {
+    function capture(mode) {
         const page = pageLoader.item
-        if (!page || (!page.saveClipboard && !page.savePictures)) return
-        const command = ["icewine-screenshot", mode, target,
-            page.delayed ? "3" : "0",
-            page.saveClipboard ? "1" : "0",
-            page.savePictures ? "1" : "0"]
+        if (!page) return
+        const command = ["hyprshot", "--freeze", "--mode", mode]
+        if (page.clipboardOnly) command.push("--clipboard-only")
         instantHandoffRequested()
-        // The popout must be gone before grimblast freezes the selection surface.
+        // Hide the popout before Hyprshot freezes the selection surface.
         Qt.callLater(() => Quickshell.execDetached(command))
     }
 
@@ -106,8 +104,7 @@ Widget {
     Component {
         id: screenshotPage
         Popouts.Screenshot {
-            compositor: root.compositor
-            onCaptureRequested: (mode, target) => root.capture(mode, target)
+            onCaptureRequested: mode => root.capture(mode)
         }
     }
     Component {

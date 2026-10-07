@@ -17,11 +17,6 @@ let
   launchers = lib.mapAttrsToList (name: argv: pkgs.writeShellScriptBin "icewine-${name}" ''
     exec ${lib.escapeShellArgs argv} "$@"
   '') commands;
-  screenshot = pkgs.writeShellApplication {
-    name = "icewine-screenshot";
-    runtimeInputs = with pkgs; [ coreutils grim grimblast wl-clipboard libnotify xdg-user-dirs ];
-    text = builtins.readFile ../scripts/screenshot;
-  };
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
   browserDefaults = pkgs.writeTextDir "share/applications/mimeapps.list" ''
     [Default Applications]
@@ -155,10 +150,10 @@ in {
     fonts.packages = with pkgs; [ dejavu_fonts nerd-fonts.jetbrains-mono noto-fonts-color-emoji rubik ];
     environment.systemPackages = (with pkgs; [
       quickshell hyprshutdown hyprpolkitagent glib jq nano systemd
-      grim slurp wl-clipboard libnotify libcanberra-gtk3
+      hyprshot libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl
       xdg-utils gamescope
-    ]) ++ launchers ++ [ screenshot ] ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
+    ]) ++ launchers ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
     users.users.${cfg.user}.packages = lib.optional cfg.browser.enable browserDefaults
       ++ lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty;
   };

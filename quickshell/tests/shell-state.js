@@ -182,8 +182,32 @@ deck.activate({action: "screenshot"}, 0)
 assert.equal(captures.length, 0, "Dismiss the shell before capture")
 flush()
 assert.deepEqual(captures, [
-    ["icewine-screenshot", "monitor", "eDP-1", "0", "1", "1"]
+    ["hyprshot", "--mode", "output", "--mode", "eDP-1"]
 ], "Capture the built-in panel immediately to both destinations")
+
+// Exercise the real popout launcher, including dismissal before frozen selection.
+const popout = fs.readFileSync(path.join(__dirname, "../modules/topbar/StatusPopout.qml"), "utf8")
+const capture = popout.match(/    function capture\(mode\) \{[\s\S]*?^    \}/m)[0]
+for (const mode of ["output", "region", "window"]) {
+    for (const clipboardOnly of [false, true]) {
+        const events = []
+        const pending = []
+        vm.runInNewContext(`${capture}; capture(mode)`, {
+            mode,
+            pageLoader: {item: {clipboardOnly}},
+            instantHandoffRequested: () => events.push("dismiss"),
+            Qt: {callLater: callback => pending.push(callback)},
+            Quickshell: {execDetached: command => events.push(Array.from(command))}
+        })
+        assert.deepEqual(events, ["dismiss"], "Hide the popout before launching capture")
+        assert.equal(pending.length, 1)
+        pending[0]()
+        const expected = ["hyprshot", "--freeze", "--mode", mode]
+        if (clipboardOnly) expected.push("--clipboard-only")
+        assert.deepEqual(events, ["dismiss", expected])
+    }
+}
+vm.runInNewContext(`${capture}; capture("region")`, {pageLoader: {item: null}})
 
 let launches = 0
 deck.activate = () => launches++
