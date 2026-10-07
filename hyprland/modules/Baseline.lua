@@ -30,6 +30,8 @@ hl.config({
 		focus_on_activate       = true,
 		force_default_wallpaper = -1,
 		disable_hyprland_logo   = true,
+		-- Icewine's desktop identity is intentionally managed by UWSM.
+		disable_xdg_env_checks  = os.getenv("XDG_CURRENT_DESKTOP") == "Icewine:Hyprland",
 	},
 
 	ecosystem = {

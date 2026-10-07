@@ -2,4 +2,4 @@
 set -e
 # Run as the logged-in user, before UWSM starts the compositor.
 icewine init
-exec uwsm start -eD Icewine:Hyprland -N Icewine -- Hyprland
+exec uwsm start -eD Icewine:Hyprland -N Icewine -- start-hyprland

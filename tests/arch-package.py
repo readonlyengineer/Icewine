@@ -52,7 +52,7 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
     log.unlink()
     assert subprocess.run([str(session)], env=env).returncode == 0
     assert [json.loads(line) for line in log.read_text().splitlines()] == [
-        ["icewine", "init"], ["uwsm", "start", "-eD", "Icewine:Hyprland", "-N", "Icewine", "--", "Hyprland"]]
+        ["icewine", "init"], ["uwsm", "start", "-eD", "Icewine:Hyprland", "-N", "Icewine", "--", "start-hyprland"]]
     log.unlink()
     assert subprocess.run([str(session)], env=dict(env, ICEWINE_TEST_FAIL="1")).returncode != 0
     assert [json.loads(line) for line in log.read_text().splitlines()] == [["icewine", "init"]]
