@@ -5,18 +5,21 @@ from installed Arch/CachyOS sessions; neither target is hardware-qualified yet.
 Use the host's existing login manager and retain a working fallback desktop.
 Icewine does not configure users, login shells, hardware permissions or host services.
 
-On the target, enable Multilib for native Steam and install `base-devel` and
-`python`. From a committed Icewine checkout, prepare and build the local package:
+On the target, enable Multilib for native Steam. From a committed Icewine checkout,
+run as your normal desktop user:
 
 ```sh
-git archive --format=tar.gz --prefix=icewine/ HEAD -o packaging/arch/icewine.tar.gz
-cd packaging/arch
-makepkg -s
+bash install.sh
 ```
 
-The local source archive is your chosen revision; the upstream Yazi mount source
-is fixed and checksum-verified. Package installation is a separate administrator
-action: install `icewine-0.1-1-x86_64.pkg.tar.zst` with `pacman -U`.
+The installer performs a full system upgrade, installs `base-devel` and `python`,
+builds the committed revision in a temporary directory and installs Icewine.
+On CachyOS it also installs Fish integration; Arch shells remain user-managed.
+Pacman still prompts for administrator approval. The upstream Yazi mount source
+is fixed and checksum-verified. SDDM theming remains a separate optional setup.
+
+Launch from a logged-in TTY with `icewine-session`, or select **Icewine** in an
+existing login manager. The installer runs init but does not start the session.
 Keep the host's PipeWire/WirePlumber, logind, polkit, UDisks, UPower and power
 profiles services available. Networking controls require NetworkManager;
 Bluetooth controls require BlueZ. Device/backlight/i2c permissions remain host policy.
@@ -32,7 +35,7 @@ your normal PATH. Use `~/.config/uwsm/env-icewine` for session overrides, such a
 `export ICEWINE_STEAM_ENABLED=false`. Host authentication policy is included through
 `/etc/pam.d/system-auth`; no login manager or PAM bypass is installed.
 
-Ordinary Arch users manage their own shells. On CachyOS, optionally install the
+Ordinary Arch users manage their own shells. On CachyOS, the installer includes the
 `icewine-cachyos-fish` package for Starship and a Fastfetch greeting. It preserves
 host/user greeting and prompt functions and `STARSHIP_CONFIG`; it never changes
 your login shell. NixOS retains its existing Bash/ble.sh integration.
