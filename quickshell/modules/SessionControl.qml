@@ -60,7 +60,7 @@ Scope {
         const reason = message.trim() || "Suspend is unavailable"
         console.warn("Suspend failed: " + reason)
         Quickshell.execDetached(["notify-send", "--app-name=Icewine", "-u", "critical",
-            "-i", "battery-low", "Suspend failed", reason])
+            "--app-icon", "battery-low", "Suspend failed", reason])
     }
 
     function requestReboot() {

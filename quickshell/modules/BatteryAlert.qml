@@ -27,7 +27,7 @@ Scope {
         const low = level === policy.warnings[0]
         const title = low ? "Battery Low"
             : level === policy.warnings[1] ? "Battery Critical" : "Battery Danger"
-        Quickshell.execDetached(["notify-send", "--app-name=Icewine", "-i", "battery-low",
+        Quickshell.execDetached(["notify-send", "--app-name=Icewine", "--app-icon", "battery-low",
             "-u", low ? "normal" : "critical", title,
             `${Math.round(batteryDevice.percentage * 100)}% remaining`])
     }
