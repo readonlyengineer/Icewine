@@ -234,11 +234,19 @@ for _, layout in ipairs({ "dwindle", "master" }) do
 	assert(first.fullscreen and not second.fullscreen, "floating window counted")
 	policy.toggle_floating()
 	assert(not first.fullscreen, "unfloat did not release singleton fullscreen")
+	-- Focus can arrive after a close has unmapped the other window.
+	second.mapped, active = false, first
+	events["window.active"](first)
+	assert(first.fullscreen, layout .. ": refocus did not restore singleton fullscreen")
+	second.mapped, active = true, second
+	events["window.active"](second)
+	assert(not first.fullscreen and not second.fullscreen, layout .. ": refocused pair did not tile")
 	events["window.close"](second) -- May precede collection removal.
 	second.mapped = false
 	assert(first.fullscreen, "close did not restore singleton fullscreen")
 	setting = "off\n"
 	policy.refresh_autofullscreen()
+	events["window.active"](first)
 	assert(not first.fullscreen, "off command retained automatic fullscreen")
 	setting = "on\n"
 	policy.refresh_autofullscreen()
@@ -246,6 +254,7 @@ for _, layout in ipairs({ "dwindle", "master" }) do
 	active = first
 	policy.toggle_fullscreen()
 	policy.refresh_autofullscreen()
+	events["window.active"](first)
 	assert(not first.fullscreen, "automatic policy erased manual off")
 	policy.toggle_fullscreen()
 	setting = "off\n"

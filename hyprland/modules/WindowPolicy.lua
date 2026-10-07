@@ -426,7 +426,7 @@ hl.on("window.move_to_workspace", function(win)
 end)
 
 hl.on("window.active", function(win)
-	if win and win.workspace and win.workspace.tiled_layout == "monocle" then reconcile_tiling(win.workspace) end
+	if win then reconcile_tiling(win.workspace) end
 end)
 
 hl.on("window.fullscreen", function(win)
