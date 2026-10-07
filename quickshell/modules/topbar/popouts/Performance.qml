@@ -10,7 +10,6 @@ Flickable {
 
     required property var metrics
     readonly property Item initialFocus: root
-    signal advancedRequested(string tool)
     implicitHeight: contentHeight
     contentHeight: content.implicitHeight + 24
     clip: true
@@ -109,14 +108,6 @@ Flickable {
             color: Theme.Palette.muted
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 10
-        }
-
-        ActionButton {
-            width: parent.width
-            text: "Advanced · btop"
-            onClicked: root.advancedRequested("btop")
-            onActiveFocusChanged: if (activeFocus)
-                root.contentY = Math.max(0, root.contentHeight - root.height)
         }
     }
 }

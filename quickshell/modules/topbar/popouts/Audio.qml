@@ -16,8 +16,6 @@ Flickable {
     readonly property var sources: Pipewire.nodes.values.filter(node =>
         node.audio && !node.isSink && !node.isStream)
 
-    signal advancedRequested(string tool)
-
     implicitHeight: contentHeight
     contentHeight: content.implicitHeight + 24
     clip: true
@@ -133,12 +131,6 @@ Flickable {
                 selected: root.source?.id === modelData.id
                 onActivated: Pipewire.preferredDefaultAudioSource = modelData
             }
-        }
-
-        ActionButton {
-            width: parent.width
-            text: "Advanced · wiremix"
-            onClicked: root.advancedRequested("wiremix")
         }
     }
 

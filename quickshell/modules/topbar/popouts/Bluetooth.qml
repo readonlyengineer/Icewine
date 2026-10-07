@@ -17,8 +17,6 @@ Flickable {
         : []
     property var pairingDevice: null
 
-    signal advancedRequested(string tool)
-
     function busy(device) {
         return device.pairing || device.state === BluetoothDeviceState.Connecting
             || device.state === BluetoothDeviceState.Disconnecting
@@ -117,12 +115,6 @@ Flickable {
                 onActivated: root.activate(modelData)
                 onForgotten: root.forget(modelData)
             }
-        }
-
-        ActionButton {
-            width: parent.width
-            text: "Advanced · bluetui"
-            onClicked: root.advancedRequested("bluetui")
         }
     }
 

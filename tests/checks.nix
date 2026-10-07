@@ -178,7 +178,6 @@ in {
     assert !noLogin.services.xserver.enable;
     assert !disabled.services.displayManager.sddm.enable;
     assert !disabled.services.xserver.enable;
-    assert lib.elem pkgs.btop desktop.environment.systemPackages;
     assert lib.elem desktopSystem.pkgs.gamescope desktop.environment.systemPackages;
     assert lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
     assert desktop.systemd.user.services ? icewine;

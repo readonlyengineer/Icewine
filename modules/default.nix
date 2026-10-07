@@ -157,7 +157,7 @@ in {
       quickshell hyprshutdown hyprpolkitagent glib jq nano systemd
       grim slurp wl-clipboard libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl
-      bluetui impala wiremix btop xdg-utils gamescope
+      xdg-utils gamescope
     ]) ++ launchers ++ [ screenshot ] ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
     users.users.${cfg.user}.packages = lib.optional cfg.browser.enable browserDefaults
       ++ lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty;

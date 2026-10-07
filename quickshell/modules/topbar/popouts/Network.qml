@@ -26,8 +26,6 @@ Item {
     property var passwordNetwork: null
     property string errorMessage: ""
 
-    signal advancedRequested(string tool)
-
     function setScanning(enabled) {
         if (wifiDevice)
             wifiDevice.scannerEnabled = enabled && Networking.wifiEnabled
@@ -210,12 +208,6 @@ Item {
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 10
                 wrapMode: Text.Wrap
-            }
-
-            ActionButton {
-                width: parent.width
-                text: "Advanced · impala"
-                onClicked: root.advancedRequested("impala")
             }
         }
     }

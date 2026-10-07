@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check controls, live metric sampling and the performance terminal handoff.
+"""Check controls, live metric sampling and performance layout updates.
 Run with python3 tests/controls.py . (requires qs on PATH).
 """
 import os
@@ -27,7 +27,6 @@ ShellRoot {
     property int count: 0
     property var items: []
     property double now: Date.now()
-    property bool handedOff: false
     property real performanceHeightBefore: 0
     property string sessionAction: ""
     property int sleepCalls: 0
@@ -84,14 +83,6 @@ ShellRoot {
         now: root.now
     }
 
-    function findButton(item) {
-        if (item.text === "Advanced · btop") return item
-        for (const child of item.children ?? []) {
-            const button = findButton(child)
-            if (button) return button
-        }
-        return null
-    }
     Bar.MetricSampler {
         id: network
         clock: root
@@ -173,7 +164,6 @@ ShellRoot {
             player: null
             powerState: root
             monitorName: "DP-1"
-            onHandoffRequested: root.handedOff = true
             metrics: ({ now: root.now,
                 cpu: { history: [{ time: root.now, values: [25] }] },
                 cpuTemperature: { label: "Package", current: 48 },
@@ -267,9 +257,6 @@ ShellRoot {
             chargingBattery.percentage = 0.02
             cancelSleep.start()
             root.tick()
-            const button = root.findButton(performance)
-            if (!button) throw new Error("Missing btop button")
-            button.click()
             root.performanceHeightBefore = performance.implicitHeight
             performance.metrics = { now: root.now, cpu: { history: [] },
                 cpuTemperature: null, memory: { current: null, history: [] }, gpus: [] }
@@ -313,7 +300,6 @@ ShellRoot {
                 throw new Error("Battery sleep was missed or repeated after charging")
             if (network.history.length !== 2 || network.history[1].values[0] !== 0)
                 throw new Error("Network sampler did not read counters")
-            if (!root.handedOff) throw new Error("btop launch did not hand off focus")
             if (performance.implicitHeight <= 0
                     || performance.implicitHeight >= root.performanceHeightBefore)
                 throw new Error("Performance popup did not shrink after GPU removal")
@@ -361,9 +347,6 @@ with tempfile.TemporaryDirectory() as directory:
     mock = root / "bin/icewine-monitor-brightness"
     mock.write_text("#!" + shutil.which("bash") + '\necho "${2:-37}"\n')
     mock.chmod(0o755)
-    uwsm = root / "bin/uwsm"
-    uwsm.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$@" > "' + str(root / "launch") + '"\n')
-    uwsm.chmod(0o755)
     notify = root / "bin/notify-send"
     notify.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$*" >> "' + str(root / "notifications") + '"\n')
     notify.chmod(0o755)
@@ -394,7 +377,6 @@ with tempfile.TemporaryDirectory() as directory:
     output = result.stdout + result.stderr
     assert result.returncode == 0 and "CONTROL_CHECK_PASSED" in output, output
     assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
-    assert (root / "launch").read_text().splitlines() == ["app", "--", "icewine-terminal-exec", "btop"]
     notifications = (root / "notifications").read_text().splitlines()
     assert len(notifications) == 4, notifications
     assert any("-u normal Battery Low 20%" in call for call in notifications), notifications

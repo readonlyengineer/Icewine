@@ -30,11 +30,6 @@ Widget {
         pageLoader.item?.initialFocus?.forceActiveFocus(Qt.ShortcutFocusReason)
     }
 
-    function launch(tool) {
-        handoffRequested()
-        Quickshell.execDetached(["uwsm", "app", "--", "icewine-terminal-exec", tool])
-    }
-
     function capture(mode, target) {
         const page = pageLoader.item
         if (!page || (!page.saveClipboard && !page.savePictures)) return
@@ -73,23 +68,21 @@ Widget {
         id: performancePage
         Popouts.Performance {
             metrics: root.metrics
-            onAdvancedRequested: tool => root.launch(tool)
         }
     }
     Component {
         id: audioPage
-        Popouts.Audio { onAdvancedRequested: tool => root.launch(tool) }
+        Popouts.Audio {}
     }
     Component {
         id: networkPage
         Popouts.Network {
             metrics: root.metrics
-            onAdvancedRequested: tool => root.launch(tool)
         }
     }
     Component {
         id: bluetoothPage
-        Popouts.Bluetooth { onAdvancedRequested: tool => root.launch(tool) }
+        Popouts.Bluetooth {}
     }
     Component {
         id: notificationsPage
