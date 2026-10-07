@@ -58,33 +58,18 @@ with tempfile.TemporaryDirectory() as temporary:
     defaults = root / "defaults"
     for relative, contents in {
         "config/hypr/hyprland.lua": b"default hypr\n",
-        "config/hypr/modules/Baseline.lua": b"default baseline\n",
-        "config/uwsm/env": b"default env\n",
-        "config/quickshell/shell.qml": b"default shell\n",
-        "config/quickshell/theme/Palette.qml": (script.parent.parent / "quickshell/theme/Palette.qml").read_bytes(),
-        "config/quickshell/theme/qmldir": (script.parent.parent / "quickshell/theme/qmldir").read_bytes(),
-        "config/quickshell/modules/Thing.qml": b"default module\n",
-        "config/quickshell/adapters/Adapter.qml": b"default adapter\n",
-        "config/btop/btop.conf": b"default btop\n",
         "config/user-dirs.locale": b"default locale\n",
         "config/nvim/init.lua": b"default nvim\n",
-        "config/kitty/kitty.conf": (
-            b"# Icewine's editable Kitty entry point.\n"
-            b"include ../icewine/current/kitty-base.conf\n"
-            b"include ../icewine/current/kitty.conf\n"
-            b"include host.conf\n"
-        ),
-        "config/kitty/host.conf": b"",
+        "config/kitty/kitty.conf": b"default kitty\n",
         "config/icewine/shell/bashrc": b"# default bash\n",
         "config/icewine/shell/profile": b"# default profile\n",
         "config/icewine/shell/bash_profile": b"# default bash profile\n",
-        "data/wallpapers/default.jpg": b"default wallpaper",
-        "data/wallpapers/current_blurr.jpg": b"default blur",
     }.items():
         path = defaults / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(contents)
     (defaults / "home").mkdir()
+    (defaults / "data").mkdir()
     for name in ("bashrc", "profile", "bash_profile"):
         (defaults / "home" / f".{name}").symlink_to(f"icewine/shell/{name}")
     env = dict(os.environ, XDG_CONFIG_HOME=str(config), XDG_STATE_HOME=str(state),
@@ -101,13 +86,9 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_bin.mkdir()
     (fake_bin / "ya").write_text("#!/bin/sh\nexit 0\n")
     (fake_bin / "ya").chmod(0o755)
-    (fake_bin / "systemctl").write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$ICEWINE_TEST_SYSTEMCTL_LOG"\n')
-    (fake_bin / "systemctl").chmod(0o755)
     env["PATH"] = f"{fake_bin}:{os.environ['PATH']}"
-    env["ICEWINE_TEST_SYSTEMCTL_LOG"] = str(root / "systemctl.log")
     env["XDG_RUNTIME_DIR"] = str(root / "runtime")
-    (root / "runtime/systemd").mkdir(parents=True)
-    (root / "runtime/systemd/private").touch()
+    (root / "runtime").mkdir()
 
     def run(*arguments, policy="", skip="", nix_epoch=None, git_enabled="true"):
         command_env = dict(env, ICEWINE_THEME_POLICY=policy,
@@ -123,51 +104,22 @@ with tempfile.TemporaryDirectory() as temporary:
     edited = config / "gtk-3.0/settings.ini"
     edited.parent.mkdir(parents=True)
     edited.write_text("user edit\n")
-    legacy = config / "quickshell/theme/Palette.qml"
-    legacy.parent.mkdir(parents=True)
-    legacy_target = "/nix/store/" + "a" * 32 + "-home-manager-files/.config/quickshell/theme/Palette.qml"
-    legacy.symlink_to(legacy_target)
     unrelated = config / "gtk-3.0/gtk.css"
     unrelated.symlink_to("/nix/store/" + "b" * 32 + "-user-css")
     unknown_path = config / "gtk-4.0/gtk.css"
     unknown_path.parent.mkdir(parents=True)
-    unknown_target = "/nix/store/" + "d" * 32 + "-home-manager-files/.config/gtk-4.0/gtk.css"
+    unknown_target = "/nix/store/" + "d" * 32 + "-host-css"
     unknown_path.symlink_to(unknown_target)
     kitty_entry = config / "kitty/kitty.conf"
-    kitty_entry.parent.mkdir(parents=True, exist_ok=True)
-    kitty_legacy_target = "/nix/store/" + "c" * 32 + "-home-manager-files/.config/kitty/kitty.conf"
-    kitty_entry.symlink_to(kitty_legacy_target)
-    legacy_bash = root / ".bashrc"
-    legacy_bash_target = "/nix/store/" + "e" * 32 + "-home-manager-files/.bashrc"
-    legacy_bash.symlink_to(legacy_bash_target)
+    bash_entry = root / ".bashrc"
     (root / ".profile").write_text("custom login profile\n")
-    launchers = root / "data/applications"
-    launchers.mkdir(parents=True)
-    old_steam = launchers / "steam.desktop"
-    old_steam_target = "/nix/store/" + "f" * 32 + "-home-manager-files/data/applications/steam.desktop"
-    old_steam.symlink_to(old_steam_target)
-    custom_launcher = launchers / "steam-gamescope.desktop"
-    custom_launcher.write_text("user Steam launcher\n")
-    unknown_steam = launchers / "com.valvesoftware.Steam.desktop"
-    unknown_steam.symlink_to("/nix/store/" + "a" * 32 + "-host-launcher")
     units = config / "systemd/user"
     wants = units / "graphical-session.target.wants"
-    requires = units / "other.target.requires"
     wants.mkdir(parents=True)
-    requires.mkdir()
-    unit_links = [units / "icewine.service", wants / "hypridle.service",
-                  requires / "icewine-inputplumber-hyprland.service",
-                  units / "icewine-refresh-flatpak-icons.path"]
+    unit_links = [units / "icewine.service", wants / "hypridle.service"]
     for path in unit_links:
         path.symlink_to("/nix/store/" + "1" * 32 + "-home-manager-files/"
                         + path.relative_to(root).as_posix())
-    edited_unit = units / "hyprpolkitagent.service"
-    edited_unit.write_text("user Polkit unit\n")
-    unknown_unit = units / "icewine-keyboard.service"
-    unknown_unit.symlink_to("/nix/store/" + "2" * 32 + "-custom-unit")
-    unrelated_unit = units / "other.service"
-    unrelated_unit.symlink_to("/nix/store/" + "3" * 32
-                             + "-home-manager-files/.config/systemd/user/other.service")
 
     result = run("init")
     assert result.returncode == 0, result.stderr
@@ -175,21 +127,9 @@ with tempfile.TemporaryDirectory() as temporary:
     assert sddm_file.read_text() == "[General]\ntheme=catppuccin-mocha\n"
     assert sddm_file.stat().st_mode & 0o777 == 0o644
     assert edited.read_text() == "user edit\n"
-    assert not legacy.is_symlink() and "property color primary" in legacy.read_text()
     assert unrelated.is_symlink() and os.readlink(unrelated) == "/nix/store/" + "b" * 32 + "-user-css"
     assert unknown_path.is_symlink() and os.readlink(unknown_path) == unknown_target
     assert "conflict: preserved unrecognized symlink" in result.stderr
-    # Existing Icewine GTK4 links must migrate from the shared CSS to GTK4 CSS.
-    old_gtk4_css = (config / "icewine/current/gtk.css").read_text()
-    unknown_path.unlink()
-    unknown_path.symlink_to(config / "icewine/current/gtk.css")
-    result = run("init", "gtk")
-    assert result.returncode == 0, result.stderr
-    assert os.readlink(unknown_path) == str(config / "icewine/current/gtk4.css")
-    migrated_gtk4 = list((state / "icewine").glob("migration-*/gtk-4.0/gtk.css"))
-    assert len(migrated_gtk4) == 1 and migrated_gtk4[0].read_text() == old_gtk4_css
-    migration = list((state / "icewine").glob("defaults-migration-*/config/quickshell/theme/Palette.qml"))
-    assert len(migration) == 1 and os.readlink(migration[0]) == legacy_target
     assert (config / "icewine/current").is_symlink()
     nvim_theme = config / "icewine/current/nvim-theme.lua"
     assert 'local theme = "catppuccin-mocha"' in nvim_theme.read_text()
@@ -199,59 +139,28 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (config / "yazi/keymap.toml").is_symlink()
     assert (config / "hypr/hyprland.lua").read_text() == "default hypr\n"
     assert not (config / "hypr/modules/Theme.lua").exists()
-    assert (config / "quickshell/modules/Thing.qml").read_text() == "default module\n"
-    assert (root / "data/wallpapers/default.jpg").read_bytes() == b"default wallpaper"
-    assert not (config / "quickshell/modules/Thing.qml").is_symlink()
     assert (config / "nvim/init.lua").read_text() == "default nvim\n"
-    kitty_includes = [line for line in kitty_entry.read_text().splitlines() if line.startswith("include ")]
-    assert kitty_includes == [
-        "include ../icewine/current/kitty-base.conf",
-        "include ../icewine/current/kitty.conf",
-        "include host.conf",
-    ]
-    kitty_migration = list((state / "icewine").glob("defaults-migration-*/config/kitty/kitty.conf"))
-    assert len(kitty_migration) == 1 and os.readlink(kitty_migration[0]) == kitty_legacy_target
-    assert os.readlink(legacy_bash) == str(config / "icewine/shell/bashrc")
+    assert kitty_entry.read_text() == "default kitty\n"
+    assert os.readlink(bash_entry) == str(config / "icewine/shell/bashrc")
     assert (root / ".profile").read_text() == "custom login profile\n"
-    bash_migration = list((state / "icewine").glob("defaults-migration-*/home/.bashrc"))
-    assert len(bash_migration) == 1 and os.readlink(bash_migration[0]) == legacy_bash_target
-    assert old_steam.is_symlink() and os.readlink(old_steam) == old_steam_target
-    assert custom_launcher.read_text() == "user Steam launcher\n"
-    assert unknown_steam.is_symlink()
-    steam_migration = list((state / "icewine").glob("defaults-migration-*/data/applications/steam.desktop"))
-    assert not steam_migration  # Unreadable legacy content cannot establish Icewine ownership.
     for path in unit_links:
-        assert not path.exists() and not path.is_symlink()
-        backups = list((state / "icewine").glob("defaults-migration-*/config/"
-                                               + path.relative_to(config).as_posix()))
-        assert len(backups) == 1 and backups[0].is_symlink()
-    assert edited_unit.read_text() == "user Polkit unit\n"
-    assert unknown_unit.is_symlink() and unrelated_unit.is_symlink()
-    assert (root / "systemctl.log").read_text() == "--user daemon-reload\n"
+        assert path.is_symlink(), "Unknown units must not be retired"
 
-    (config / "quickshell/modules/Thing.qml").write_text("user module edit\n")
-    (root / "data/wallpapers/default.jpg").write_bytes(b"user wallpaper")
-    backups_before = set((state / "icewine").glob("defaults-migration-*"))
+    backups_before = set((state / "icewine").glob("defaults-update-*"))
     assert run("init").returncode == 0
-    assert set((state / "icewine").glob("defaults-migration-*")) == backups_before
-    assert (config / "quickshell/modules/Thing.qml").read_text() == "user module edit\n"
-    assert (root / "data/wallpapers/default.jpg").read_bytes() == b"user wallpaper"
-    assert custom_launcher.read_text() == "user Steam launcher\n"
-    assert unknown_steam.is_symlink()
-    assert (root / "systemctl.log").read_text() == "--user daemon-reload\n"
+    assert set((state / "icewine").glob("defaults-update-*")) == backups_before
     (config / "nvim/init.lua").write_text("user nvim edit\n")
     result = run("reset", "nvim")
     assert result.returncode == 0, result.stderr
     assert (config / "nvim/init.lua").read_text() == "default nvim\n"
     assert any(path.read_text() == "user nvim edit\n" for path in
                (state / "icewine").glob("defaults-reset-*/config/nvim/init.lua"))
-    assert (root / "data/wallpapers/default.jpg").read_bytes() == b"user wallpaper"
     kitty_entry.write_text("user Kitty entry edit\n")
     assert run("init").returncode == 0
     assert kitty_entry.read_text() == "user Kitty entry edit\n"
     result = run("reset", "kitty")
     assert result.returncode == 0, result.stderr
-    assert "include host.conf\n" in kitty_entry.read_text()
+    assert kitty_entry.read_text() == "default kitty\n"
     assert any(path.read_text() == "user Kitty entry edit\n" for path in
                (state / "icewine").glob("defaults-reset-*/config/kitty/kitty.conf"))
     (config / "icewine/shell/bashrc").write_text("user Bash edit\n")
@@ -271,7 +180,6 @@ with tempfile.TemporaryDirectory() as temporary:
     result = run("init", "fastfetch")
     assert result.returncode == 0 and fastfetch_path.is_symlink(), result.stderr
     assert edited.read_text() == "user edit\n"
-    assert (config / "quickshell/modules/Thing.qml").read_text() == "user module edit\n"
     assert run("init", "unknown").returncode != 0
 
     result = run("apply", nix_epoch="1790821943", git_enabled="false")
@@ -324,12 +232,6 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not (state / "icewine/theme").exists()
     assert "gtk-theme-name=Icewine-catppuccin-mocha" in edited.read_text()
     assert wallpaper.read_bytes() == b"wallpaper is independent"
-    assert (config / "quickshell/modules/Thing.qml").read_text() == "default module\n"
-    assert (root / "data/wallpapers/default.jpg").read_bytes() == b"default wallpaper"
-    assert any(path.read_text() == "user module edit\n" for path in
-               (state / "icewine").glob("defaults-reset-*/config/quickshell/modules/Thing.qml"))
-    assert any(path.read_bytes() == b"user wallpaper" for path in
-               (state / "icewine").glob("defaults-reset-*/data/wallpapers/default.jpg"))
     backups = list((state / "icewine").glob("reset-*/gtk-3.0/settings.ini"))
     assert len(backups) == 1 and backups[0].read_text() == "user edit\n"
 
@@ -353,7 +255,7 @@ with tempfile.TemporaryDirectory() as temporary:
                             text=True, capture_output=True)
     assert routed.returncode == 0 and routed.stdout == "theme\ndracula\n", routed.stderr
 
-    # Exercise migration of a live Home Manager target and its content backup.
+    # Exercise the shared implementation directly without live applications.
     module = types.ModuleType("icewine_theme")
     module.__file__ = str(script)
     importlib.machinery.SourceFileLoader(module.__name__, str(script)).exec_module(module)
@@ -407,6 +309,14 @@ with tempfile.TemporaryDirectory() as temporary:
         "HOME": str(mask_root), "XDG_CONFIG_HOME": str(mask_config),
         "ICEWINE_STEAM_MASK_FILE": str(first_mask),
     }):
+        old_mime = mask_store / ("d" * 32 + "-home-manager-files") / "config/mimeapps.list"
+        old_mime.parent.mkdir(parents=True)
+        old_mime.write_text("[Default Applications]\n" + "".join(
+            name + "=firefox.desktop\n" for name in ("application/pdf", "application/xhtml+xml",
+            "text/html", "x-scheme-handler/http", "x-scheme-handler/https")))
+        mime = mask_config / "mimeapps.list"
+        mime.parent.mkdir(parents=True)
+        mime.symlink_to(old_mime)
         def reconcile_masks():
             module.install_defaults(str(mask_defaults), mask_config, mask_data, mask_state, False, None)
         reconcile_masks()
@@ -414,44 +324,29 @@ with tempfile.TemporaryDirectory() as temporary:
                       ("steam.desktop", "com.valvesoftware.Steam.desktop")]
         assert all(path.is_symlink() and os.readlink(path) == str(first_mask) for path in mask_paths)
         reconcile_masks()
-        assert not list(mask_state.glob("defaults-migration-*"))
+        assert not list(mask_state.glob("defaults-update-*"))
         os.environ["ICEWINE_STEAM_MASK_FILE"] = str(second_mask)
         reconcile_masks()
         assert all(os.readlink(path) == str(second_mask) for path in mask_paths)
         os.environ["ICEWINE_STEAM_MASK_FILE"] = ""
         reconcile_masks()
         assert all(not path.exists() and not path.is_symlink() for path in mask_paths)
-        legacy_mask = mask_store / ("c" * 32 + "-home-manager-files") / "data/applications/steam.desktop"
-        legacy_mask.parent.mkdir(parents=True)
-        legacy_mask.write_text("[Desktop Entry]\nType=Application\nName=Steam\nNoDisplay=true\nHidden=true\n")
-        legacy_launcher = legacy_mask.with_name("steam-gamescope.desktop")
-        legacy_launcher.write_text(
-            "[Desktop Entry]\nVersion=1.0\nType=Application\nName=Steam (Gamescope)\n"
-            "Comment=Launch Steam inside monitor-aware Gamescope\nIcon=steam\n"
-            "Categories=Game;\nTerminal=false\nExec=/nix/store/" + "d" * 32
-            + "-quickshell-0.3.1/bin/qs ipc call gameLauncher launchSteamGamescope\n")
+        custom_target = mask_store / ("c" * 32 + "-home-manager-files") / "data/applications/steam.desktop"
+        custom_target.parent.mkdir(parents=True)
+        custom_target.write_text("[Desktop Entry]\nType=Application\nName=Steam\nNoDisplay=true\nHidden=true\n")
+        mask_paths[0].symlink_to(custom_target)
+        mask_paths[1].symlink_to(first_mask.parent / "missing-user-mask")
         launcher_path = mask_data / "applications/steam-gamescope.desktop"
-        launcher_path.symlink_to(legacy_launcher)
-        mask_paths[0].symlink_to(legacy_mask)
-        os.environ["ICEWINE_STEAM_MASK_FILE"] = str(first_mask)
-        reconcile_masks()
-        assert os.readlink(mask_paths[0]) == str(first_mask)
-        assert not launcher_path.exists() and not launcher_path.is_symlink()
-        os.environ["ICEWINE_STEAM_MASK_FILE"] = ""
-        reconcile_masks()
-        legacy_mask.write_text("[Desktop Entry]\nName=Custom Steam\nExec=custom-launcher\n")
-        legacy_launcher.write_text(legacy_launcher.read_text() + "X-Custom=true\n")
-        launcher_path.symlink_to(legacy_launcher)
-        mask_paths[0].symlink_to(legacy_mask)
-        mask_paths[1].symlink_to(first_mask.parent / "custom-mask")
+        launcher_path.write_text("user Steam launcher\n")
         os.environ["ICEWINE_STEAM_MASK_FILE"] = str(first_mask)
         reconcile_masks()
         os.environ["ICEWINE_STEAM_MASK_FILE"] = ""
         reconcile_masks()
-        assert os.readlink(mask_paths[0]) == str(legacy_mask)
-        assert mask_paths[0].read_text() == "[Desktop Entry]\nName=Custom Steam\nExec=custom-launcher\n"
-        assert os.readlink(mask_paths[1]) == str(first_mask.parent / "custom-mask")
-        assert launcher_path.is_symlink() and "X-Custom=true" in launcher_path.read_text()
+        assert os.readlink(mask_paths[0]) == str(custom_target)
+        assert mask_paths[0].read_text() == custom_target.read_text()
+        assert os.readlink(mask_paths[1]) == str(first_mask.parent / "missing-user-mask")
+        assert launcher_path.read_text() == "user Steam launcher\n"
+        assert mime.is_symlink() and mime.resolve() == old_mime
     mounted = config / "user-dirs.locale"
     mounted.write_text("user locale edit\n")
     replace = os.replace
@@ -464,91 +359,6 @@ with tempfile.TemporaryDirectory() as temporary:
     assert mounted.read_text() == "default locale\n"
     assert any(path.read_text() == "user locale edit\n" for path in
                (state / "icewine").glob("defaults-reset-*/config/user-dirs.locale"))
-    legacy_home = root / "migration-home"
-    old_file = root / "store" / ("c" * 32 + "-home-manager-files") / ".config/quickshell/theme/Palette.qml"
-    old_file.parent.mkdir(parents=True)
-    old_file.write_text("old managed palette\n")
-    legacy_config = legacy_home / ".config"
-    old_link = legacy_config / "quickshell/theme/Palette.qml"
-    old_link.parent.mkdir(parents=True)
-    old_link.symlink_to(old_file)
-    old_modules = root / "store" / ("e" * 32 + "-modules")
-    old_modules.mkdir()
-    (old_modules / "Thing.qml").write_text("old managed module\n")
-    module_link = legacy_config / "quickshell/modules"
-    module_link.symlink_to(old_modules)
-    unknown_adapters = root / "outside-adapters"
-    unknown_adapters.mkdir()
-    adapters_link = legacy_config / "quickshell/adapters"
-    adapters_link.symlink_to(unknown_adapters)
-    old_init = root / "store" / ("f" * 32 + "-init.lua")
-    old_init.write_text("old generated nvim\n")
-    init_link = legacy_config / "nvim/init.lua"
-    init_link.parent.mkdir(parents=True)
-    init_link.symlink_to(old_init)
-    pure_mime = """[Default Applications]
-application/pdf=firefox.desktop
-application/xhtml+xml=firefox.desktop
-text/html=firefox.desktop
-x-scheme-handler/http=firefox.desktop
-x-scheme-handler/https=firefox.desktop
-"""
-    mime_config = legacy_config / "mimeapps.list"
-    old_mime_config = root / "store" / ("1" * 32 + "-home-manager-files") / ".config/mimeapps.list"
-    old_mime_config.parent.mkdir(parents=True)
-    old_mime_config.write_text(pure_mime)
-    mime_config.symlink_to(old_mime_config)
-    mime_data = legacy_home / "data/applications/mimeapps.list"
-    old_mime_data = root / "store" / ("2" * 32 + "-home-manager-files") / "data/applications/mimeapps.list"
-    old_mime_data.parent.mkdir(parents=True)
-    old_mime_data.write_text(pure_mime + "image/png=imv.desktop\n")
-    mime_data.parent.mkdir(parents=True)
-    mime_data.symlink_to(old_mime_data)
-    old_home = os.environ.get("HOME")
-    try:
-        os.environ["HOME"] = str(legacy_home)
-        module.STORE_DIR = root / "store"
-        module.publish(legacy_config, module.render_theme(assets, assets / "themes/tokyo-night.json"))
-        module.install_defaults(str(defaults), legacy_config, legacy_home / "data",
-                                legacy_home / ".local/state/icewine", False, None)
-        assert not mime_config.exists() and not mime_config.is_symlink()
-        assert mime_data.is_symlink() and mime_data.read_text().endswith("image/png=imv.desktop\n")
-        backups = list((legacy_home / ".local/state/icewine").glob(
-            "defaults-migration-*/config/mimeapps.list"))
-        assert len(backups) == 1 and backups[0].read_text() == pure_mime
-        mime_config.write_text("[Default Applications]\napplication/pdf=org.gnome.Evince.desktop\n")
-        old_mime_data_pure = root / "store" / ("3" * 32 + "-home-manager-files") / "data/applications/mimeapps.list"
-        old_mime_data_pure.parent.mkdir(parents=True)
-        old_mime_data_pure.write_text(pure_mime)
-        mime_data.unlink()
-        mime_data.symlink_to(old_mime_data_pure)
-        module.install_defaults(str(defaults), legacy_config, legacy_home / "data",
-                                legacy_home / ".local/state/icewine", False, None)
-        assert mime_config.read_text().endswith("org.gnome.Evince.desktop\n")
-        assert not mime_data.exists() and not mime_data.is_symlink()
-        backups = list((legacy_home / ".local/state/icewine").glob(
-            "defaults-migration-*/data/applications/mimeapps.list"))
-        assert len(backups) == 1 and backups[0].read_text() == pure_mime
-        module.install_links(legacy_config, legacy_home / ".local/state/icewine", False)
-    finally:
-        if old_home is None:
-            os.environ.pop("HOME", None)
-        else:
-            os.environ["HOME"] = old_home
-    assert "property color primary" in old_link.read_text()
-    saved = list((legacy_home / ".local/state/icewine").glob("defaults-migration-*/config/quickshell/theme/Palette.qml"))
-    assert len(saved) == 1 and saved[0].read_text() == "old managed palette\n"
-    assert module_link.is_dir() and not module_link.is_symlink()
-    assert (module_link / "Thing.qml").read_text() == "default module\n"
-    assert adapters_link.is_symlink() and not (adapters_link / "Adapter.qml").exists()
-    saved_modules = list((legacy_home / ".local/state/icewine").glob(
-        "defaults-migration-*/config/quickshell/modules/Thing.qml"))
-    assert len(saved_modules) == 1 and saved_modules[0].read_text() == "old managed module\n"
-    assert init_link.read_text() == "default nvim\n" and not init_link.is_symlink()
-    saved_init = list((legacy_home / ".local/state/icewine").glob(
-        "defaults-migration-*/config/nvim/init.lua"))
-    assert len(saved_init) == 1 and saved_init[0].read_text() == "old generated nvim\n"
-
     # Every shipped palette renders app-native files, including light mode.
     kitty_entry.write_text("user Kitty theme edit\n")
     for theme_id, background, appearance in [
@@ -806,17 +616,15 @@ with tempfile.TemporaryDirectory() as temporary:
         record = state / "default-files.json"
         assert "uwsm/env" not in json.loads(record.read_text())["config"]["files"]
         before = record.read_bytes()
-        # A user-substituted known-looking legacy parent is not an untracked migration.
+        # A user-substituted parent is never adopted, even with identical bytes.
         original_modules = config / "quickshell/modules"
-        user_modules = root / "store" / ("e" * 32 + "-modules")
-        user_modules.parent.mkdir()
+        user_modules = root / "moved-shell-defaults"
         original_modules.rename(user_modules)
         original_modules.symlink_to(user_modules)
         (defaults / "config/quickshell/modules/Thing.qml").write_text("shell v2\n")
-        with mock.patch.object(module, "STORE_DIR", root / "store"), \
-             mock.patch.object(module.sys, "stderr", new_callable=io.StringIO) as errors:
+        with mock.patch.object(module.sys, "stderr", new_callable=io.StringIO) as errors:
             update("quickshell")
-        assert "preserved substituted parent" in errors.getvalue()
+        assert "preserved symlinked parent" in errors.getvalue()
         assert original_modules.is_symlink() and (user_modules / "Thing.qml").read_text() == "shell v1\n"
         assert record.read_bytes() == before
         original_modules.unlink()
@@ -1053,7 +861,7 @@ with tempfile.TemporaryDirectory() as temporary:
             assert child.returncode == 0, stderr
 
 # Consumer opt-outs retire recognised resources, without widening scoped operations.
-# Supplying native CSS defaults must not hide a pre-migration generated link.
+# Native CSS defaults and generated consumer links preserve scoped opt-outs.
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     config, data, state, defaults = (root / name for name in ("config", "data", "state/icewine", "defaults"))
@@ -1093,6 +901,7 @@ with tempfile.TemporaryDirectory() as temporary:
         (defaults / "data").mkdir()
         for action in (("theme", "nord"), ("transparency", "low"), ("apply",)):
             with mock.patch.dict(os.environ, ICEWINE_GTK_ENABLE="true"):
+                (config / "gtk-3.0/gtk.css").unlink(missing_ok=True)
                 module.install_defaults(defaults, config, data, state, False, "gtk")
                 module.install_links(config, state, False, "gtk")
                 assert (config / "gtk-3.0/gtk.css").read_bytes() == css_source.read_bytes()
@@ -1260,439 +1069,125 @@ for consumer in ("generated", "named-gtk", "flatpak-gtk"):
         if consumer == "flatpak-gtk":
             assert record.exists(), "Preserved extension lost its ownership record"
 
-# A packaged migration cannot strand an edited old implementation behind new
-# entry points. Exercise the real CLI before any generated/theme mutation.
-for conflict in (None, "module", "module-directory", "entry", "entry-directory", "untracked", "parent", "package"):
+# Current desktop/handheld identities support fresh scoped installation and updates.
+# Old ownership records cannot authorize changing an implementation lacking them.
+for handheld in (False, True):
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
-        config, data, state, old, new = (root / name for name in ("config", "data", "state/icewine", "old", "new"))
+        config, data, state, defaults = (root / name for name in ("config", "data", "state/icewine", "defaults"))
         source = script.parent.parent
-        legacy = {
-            "quickshell/shell.qml": "legacy shell\n", "hypr/hyprland.lua": "legacy hypr\n",
-            "quickshell/modules/Topbar.qml": "legacy module\n",
-            "hypr/modules/Baseline.lua": "legacy baseline\n",
-            "quickshell/config/Settings.qml": "default settings\n",
-            "hypr/modules/Binds.lua": "default binds\n",
-            "hypr/modules/Autostart.lua": "default autostart\n",
-        }
-        for name, text in legacy.items():
-            path = old / "config" / name
+        for name in ("config", "data", "home"):
+            (defaults / name).mkdir(parents=True)
+        for relative, target in {
+            "hypr/icewine": source / "hyprland",
+            "quickshell/icewine": source / "quickshell",
+            "kitty/icewine": source / "kitty",
+        }.items():
+            path = defaults / "config" / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-        (old / "data").mkdir()
-        module.install_defaults(old, config, data, state, False, None)
-        settings, binds = config / "quickshell/config/Settings.qml", config / "hypr/modules/Binds.lua"
-        settings.write_text("user settings\n")
-        binds.write_text("user binds\n")
-        (new / "config/quickshell").mkdir(parents=True)
-        (new / "config/hypr/modules").mkdir(parents=True)
-        (new / "data").mkdir()
-        for name in ("quickshell/shell.qml", "hypr/hyprland.lua", "quickshell/config/Settings.qml",
-                     "hypr/modules/Binds.lua", "hypr/modules/Autostart.lua"):
-            target = new / "config" / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if name == "hypr/modules/Autostart.lua":
-                target.write_text("-- Host-selected custom hook\n")
-            else:
-                shutil.copyfile(source / name.replace("hypr/", "hyprland/"), target)
-        with (new / "config/hypr/hyprland.lua").open("a") as entry:
-            entry.write('\ndofile((os.getenv("XDG_CONFIG_HOME") or os.getenv("HOME") .. "/.config") .. "/hypr/modules/Binds.lua")\n')
-            entry.write('dofile((os.getenv("XDG_CONFIG_HOME") or os.getenv("HOME") .. "/.config") .. "/hypr/modules/Autostart.lua")\n')
-        package = root / "implementation/quickshell"
-        package.mkdir(parents=True)
-        (new / "config/quickshell/icewine").symlink_to(package)
-        if conflict == "module":
-            (config / "quickshell/modules/Topbar.qml").write_text("user implementation\n")
-        elif conflict == "module-directory":
-            (config / "quickshell/modules/Topbar.qml").unlink()
-            (config / "quickshell/modules/Topbar.qml").mkdir()
-        elif conflict == "entry":
-            (config / "hypr/hyprland.lua").write_text("user entry\n")
-        elif conflict == "entry-directory":
-            (config / "hypr/hyprland.lua").unlink()
-            (config / "hypr/hyprland.lua").mkdir()
-        elif conflict == "untracked":
-            (config / "quickshell/modules/Custom.qml").write_text("user component\n")
-        elif conflict == "parent":
-            (config / "quickshell/modules").rename(root / "user-modules")
-            (config / "quickshell/modules").symlink_to(root / "user-modules")
-        elif conflict == "package":
-            (config / "quickshell/icewine").symlink_to(root / "unknown-package")
+            path.symlink_to(target)
+        for relative, original in {
+            "hypr/hyprland.lua": "hyprland/hyprland.lua",
+            "quickshell/shell.qml": "quickshell/deck/shell.qml" if handheld else "quickshell/shell.qml",
+            "kitty/kitty.conf": "kitty/kitty.conf",
+        }.items():
+            (defaults / "config" / relative).write_bytes((source / original).read_bytes())
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_DATA_HOME=str(data),
-                   XDG_STATE_HOME=str(root / "state"), ICEWINE_THEME_ASSETS=str(assets),
-                   ICEWINE_DEFAULT_FILES=str(new), ICEWINE_GTK_ENABLE="false",
-                   DBUS_SESSION_BUS_ADDRESS="", WAYLAND_DISPLAY="")
-        before_entry = module.default_signature(config / "hypr/hyprland.lua")
-        before_module = module.default_signature(config / "quickshell/modules/Topbar.qml")
-        before_manifest = (state / "default-files.json").read_bytes()
-        for args in ((["init"], ["reset"]) if conflict else (["init", "quickshell"],)):
-            result = subprocess.run([sys.executable, str(script), *args], env=env, capture_output=True, text=True)
-            assert result.returncode == 1, result.stdout + result.stderr
-            assert "migration" in result.stderr and "icewine init" in result.stderr, result.stderr
-            assert module.default_signature(config / "hypr/hyprland.lua") == before_entry
-            assert (config / "hypr/hyprland.lua").is_dir() == (conflict == "entry-directory")
-            assert module.default_signature(config / "quickshell/modules/Topbar.qml") == before_module
-            assert (config / "quickshell/modules/Topbar.qml").is_dir() == (conflict == "module-directory")
-            assert (state / "default-files.json").read_bytes() == before_manifest
-            assert not (config / "icewine/current").exists()
-            assert settings.read_text() == "user settings\n" and binds.read_text() == "user binds\n"
-        if conflict:
-            continue
-        result = subprocess.run([sys.executable, str(script), "init"], env=env, capture_output=True, text=True)
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert (config / "quickshell/icewine").resolve() == package
-        assert not (config / "quickshell/modules/Topbar.qml").exists()
-        assert not (config / "hypr/modules/Baseline.lua").exists()
-        assert settings.read_text() == "user settings\n" and binds.read_text() == "user binds\n"
-        assert (config / "hypr/hyprland.lua").read_bytes() == (new / "config/hypr/hyprland.lua").read_bytes()
-        assert list(state.glob("defaults-update-*/config/quickshell/modules/Topbar.qml"))
-        # Package updates preserve link identity in backups, not a copied store tree.
-        next_package = root / "next-implementation/quickshell"
-        next_package.mkdir(parents=True)
-        marker = new / "config/quickshell/icewine"
-        marker.unlink()
-        marker.symlink_to(next_package)
-        result = subprocess.run([sys.executable, str(script), "init"], env=env, capture_output=True, text=True)
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert (config / "quickshell/icewine").resolve() == next_package
-        assert any(path.is_symlink() and path.resolve() == package
-                   for path in state.glob("defaults-update-*/config/quickshell/icewine"))
-        # Substituting the immutable identity after migration also blocks reset.
-        (config / "quickshell/icewine").unlink()
-        (config / "quickshell/icewine").symlink_to(root / "unknown-package")
-        result = subprocess.run([sys.executable, str(script), "reset", "quickshell"], env=env, capture_output=True, text=True)
-        assert result.returncode == 1 and "migration blocked" in result.stderr
-        assert settings.read_text() == "user settings\n"
-print("packaged implementation migration checks passed")
-
-# Detected late conflicts must not switch entry points or strand the old entry
-# after more than one of its required modules has already been retired.
-for failure in ("after-backup", "late-edit", "mounted", "substituted-parent", "restore-collision",
-                "entry-after-backup", "custom-after-backup", "entry-after-retirement",
-                "custom-after-retirement", "during-loader-write", "after-loader-switch"):
-    with tempfile.TemporaryDirectory() as temporary:
-        root = Path(temporary)
-        config, data, state, old, new = (root / name for name in ("config", "data", "state", "old", "new"))
-        legacy = {"hypr/hyprland.lua": "legacy hypr\n", "quickshell/shell.qml": "legacy shell\n",
-                  "hypr/modules/Baseline.lua": "required baseline\n",
-                  "hypr/modules/WindowPolicy.lua": "required window policy\n",
-                  "quickshell/modules/Topbar.qml": "required topbar\n"}
-        for name, text in legacy.items():
-            path = old / "config" / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-        (old / "data").mkdir()
-        module.install_defaults(old, config, data, state, False, None)
-        (new / "config/quickshell").mkdir(parents=True)
-        (new / "config/hypr").mkdir()
-        (new / "data").mkdir()
-        (new / "config/hypr/hyprland.lua").write_text("new loader\n")
-        (new / "config/quickshell/shell.qml").write_text("new shell\n")
-        (new / "config/quickshell/icewine").symlink_to(root / "package")
-        before_manifest = (state / "default-files.json").read_bytes()
-        topbar = config / "quickshell/modules/Topbar.qml"
-        removed = []
-        original_copy, original_unlink = shutil.copy2, Path.unlink
-        original_atomic, original_fsync = module.atomic_text, os.fsync
-        shell_entry = config / "quickshell/shell.qml"
-        custom = config / "quickshell/modules/Custom.qml"
-        def change_layout():
-            if failure.startswith("entry") or failure == "during-loader-write":
-                shell_entry.write_text("user entry imports old modules\n")
-            else:
-                custom.write_text("user custom component\n")
-        def edit_after_backup(source, destination, *args, **kwargs):
-            result = original_copy(source, destination, *args, **kwargs)
-            if source == topbar:
-                if failure in ("entry-after-backup", "custom-after-backup"):
-                    change_layout()
-                else:
-                    topbar.write_text("user edit\n")
-            return result
-        def fail_after_removals(path, *args, **kwargs):
-            if path == topbar and failure in ("late-edit", "mounted", "substituted-parent", "restore-collision"):
-                assert len(removed) == 2, "Failure must follow two real implementation retirements"
-                if failure == "mounted":
-                    raise OSError(errno.EBUSY, "mounted fixture")
-                if failure == "substituted-parent":
-                    topbar.parent.rename(root / "original-modules")
-                    (root / "user-modules").mkdir()
-                    (root / "user-modules/Topbar.qml").write_text("user file\n")
-                    topbar.parent.symlink_to(root / "user-modules")
-                elif failure == "restore-collision":
-                    (config / removed[0]).write_text("new user file\n")
-                    topbar.write_text("user edit\n")
-                else:
-                    topbar.write_text("user edit\n")
-                raise OSError(errno.EBUSY, "changed fixture")
-            result = original_unlink(path, *args, **kwargs)
-            relative = path.relative_to(config).as_posix()
-            if relative in legacy and relative not in ("hypr/hyprland.lua", "quickshell/shell.qml"):
-                removed.append(relative)
-            if path == topbar and failure in ("entry-after-retirement", "custom-after-retirement"):
-                change_layout()
-            return result
-        def edit_during_fsync(fd):
-            result = original_fsync(fd)
-            change_layout()
-            return result
-        def conflict_during_loader(path, *args, **kwargs):
-            if path == shell_entry and failure == "during-loader-write":
-                with mock.patch.object(os, "fsync", side_effect=edit_during_fsync):
-                    return original_atomic(path, *args, **kwargs)
-            result = original_atomic(path, *args, **kwargs)
-            if path == config / "hypr/hyprland.lua" and failure == "after-loader-switch":
-                change_layout()
-            return result
-        with mock.patch.object(shutil, "copy2", side_effect=edit_after_backup if failure in
-                               ("after-backup", "entry-after-backup", "custom-after-backup") else original_copy), \
-             mock.patch.object(Path, "unlink", new=fail_after_removals), \
-             mock.patch.object(module, "atomic_text", side_effect=conflict_during_loader):
-            try:
-                module.install_defaults(new, config, data, state, False, None)
-            except ValueError as error:
-                assert "implementation migration aborted" in str(error), error
-            else:
-                raise AssertionError("Migration switched loaders after a detected implementation retirement conflict")
-        expected_removed = 0 if failure.endswith("after-backup") else (2 if failure in
-                           ("late-edit", "mounted", "substituted-parent", "restore-collision") else 3)
-        assert len(removed) == expected_removed, (failure, removed)
-        assert (config / "hypr/hyprland.lua").read_text() == legacy["hypr/hyprland.lua"]
-        expected_entry = "user entry imports old modules\n" if failure.startswith("entry") or failure == "during-loader-write" else legacy["quickshell/shell.qml"]
-        assert shell_entry.read_text() == expected_entry
-        assert not (config / "quickshell/icewine").is_symlink()
-        assert (state / "default-files.json").read_bytes() == before_manifest
-        for name in ("hypr/modules/Baseline.lua", "hypr/modules/WindowPolicy.lua"):
-            expected = "new user file\n" if failure == "restore-collision" and name == removed[0] else legacy[name]
-            assert (config / name).read_text() == expected, (failure, name)
-        if failure in ("mounted", "entry-after-backup", "custom-after-backup", "entry-after-retirement",
-                       "custom-after-retirement", "during-loader-write", "after-loader-switch"):
-            assert topbar.read_text() == legacy["quickshell/modules/Topbar.qml"]
-        elif failure == "substituted-parent":
-            assert (root / "user-modules/Topbar.qml").read_text() == "user file\n"
-            assert (root / "original-modules/Topbar.qml").read_text() == legacy["quickshell/modules/Topbar.qml"]
-        else:
-            assert topbar.read_text() == "user edit\n"
-        if failure.startswith("custom") or failure == "after-loader-switch":
-            assert custom.read_text() == "user custom component\n"
-print("implementation retirement/layout conflict recovery checks passed")
-
-# Native-entry migration uses the existing ownership record, never today's byte
-# equality. Verify package identity, active removed overrides and GTK CSS ownership.
-for conflict in (None, "hypr-entry", "kitty-host", "unknown-link", "link-parent"):
-    with tempfile.TemporaryDirectory() as temporary:
-        root = Path(temporary)
-        config, data, state, old, new, package = (root / name for name in
-            ("config", "data", "state", "old", "new", "package"))
-        for source in (old, new):
-            (source / "config").mkdir(parents=True)
-            (source / "data").mkdir()
-        legacy = {"hypr/hyprland.lua": "legacy loader\n", "kitty/kitty.conf": "include host.conf\n",
-                  "kitty/host.conf": "", "hypr/modules/Binds.lua": "legacy binds\n"}
-        for name, text in legacy.items():
-            path = old / "config" / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-        module.install_defaults(old, config, data, state, False, None)
-        for directory in ("hypr", "kitty", "gtk-3.0", "gtk-4.0"):
-            (package / directory).mkdir(parents=True)
-            path = new / "config" / directory
-            path.mkdir(parents=True)
-            (path / "icewine").symlink_to(package / directory)
-        (package / "hypr/modules").mkdir()
-        (package / "hypr/modules/Binds.lua").write_text("shared binds\n")
-        (new / "config/hypr/modules").mkdir()
-        (new / "config/hypr/modules/Binds.lua").symlink_to("hypr/icewine/modules/Binds.lua")
-        for name in ("hypr/hyprland.lua", "kitty/kitty.conf"):
-            source = script.parent.parent / name.replace("hypr/", "hyprland/")
-            (new / "config" / name).write_bytes(source.read_bytes())
-        for version, generated in ((3, "gtk.css"), (4, "gtk4.css")):
-            path = new / f"config/gtk-{version}.0/gtk.css"
-            path.write_text('@import url("icewine/defaults.css");\n'
-                            f'@import url("../icewine/current/{generated}");\n')
-            installed = config / f"gtk-{version}.0/gtk.css"
-            installed.parent.mkdir(parents=True)
-            installed.symlink_to(config / "icewine/current" / generated)
-        if conflict == "hypr-entry":
-            (config / "hypr/hyprland.lua").write_text("user loader\n")
-        elif conflict == "kitty-host":
-            (config / "kitty/host.conf").write_text("font_size 18\n")
-        elif conflict == "unknown-link":
-            (config / "kitty/icewine").symlink_to(root / "user-package")
-        elif conflict == "link-parent":
-            (config / "kitty").rename(root / "user-kitty")
-            (config / "kitty").symlink_to(root / "user-kitty")
-        before = (state / "default-files.json").read_bytes()
-        with mock.patch.dict(os.environ, ICEWINE_DEFAULT_FILES=str(new)):
-            if conflict:
-                for reset in (False, True):
-                    try:
-                        module.install_defaults(new, config, data, state, reset, None)
-                    except ValueError as error:
-                        assert "migration blocked" in str(error), error
-                    else:
-                        raise AssertionError(f"Native migration bypassed {conflict}")
-                    assert (state / "default-files.json").read_bytes() == before
-                continue
-            module.install_defaults(new, config, data, state, False, None)
-            assert not (config / "kitty/host.conf").exists()
-            binds = config / "hypr/modules/Binds.lua"
-            assert binds.is_symlink() and binds.read_text() == "shared binds\n"
-            binds.unlink()
-            binds.write_text("my active binds\n")
-            module.install_defaults(new, config, data, state, False, None)
-            assert binds.read_text() == "my active binds\n"
-            assert (config / "hypr/icewine").resolve() == package / "hypr"
-            assert any(path.is_symlink() for path in state.glob("defaults-update-*/config/gtk-3.0/gtk.css"))
-            css = config / "gtk-3.0/gtk.css"
-            css.write_text(css.read_text() + "/* my rules */\n")
-            module.install_links(config, state, True, "gtk")
-            assert css.read_text().endswith("/* my rules */\n"), "Theme reset bypassed native CSS tracking"
-            next_package = root / "next-kitty"
-            next_package.mkdir()
-            marker = new / "config/kitty/icewine"
+                   XDG_STATE_HOME=str(state.parent), ICEWINE_DEFAULT_FILES=str(defaults),
+                   ICEWINE_THEME_ASSETS=str(assets), ICEWINE_STEAM_MASK_FILE="",
+                   ICEWINE_GTK_ENABLE="false", DBUS_SESSION_BUS_ADDRESS="", WAYLAND_DISPLAY="",
+                   HYPRLAND_INSTANCE_SIGNATURE="", ICEWINE_SDDM_THEME_FILE="")
+        with mock.patch.dict(os.environ, env), mock.patch.object(module, "reload_session", return_value=False):
+            for app in ("hypr", "quickshell"):
+                assert module.dispatch(["init", app]) == 0
+            assert module.dispatch(["init"]) == 0
+            assert (config / "quickshell/shell.qml").read_bytes() == (defaults / "config/quickshell/shell.qml").read_bytes()
+            assert (config / "quickshell/icewine").resolve() == source / "quickshell"
+            if handheld:
+                continue  # Ownership/safety is shared; only this entrypoint differs.
+            entry = config / "hypr/hyprland.lua"
+            entry.write_text(entry.read_text() + "-- user overrides\n")
+            assert module.dispatch(["init"]) == 0
+            assert entry.read_text().endswith("-- user overrides\n")
+            assert module.dispatch(["reset", "hypr"]) == 0
+            assert entry.read_bytes() == (defaults / "config/hypr/hyprland.lua").read_bytes()
+            # Idle is an optional sibling of the established Hyprland boundary.
+            idle = defaults / "config/hypr/hypridle-icewine"
+            for command in ("init", "reset"):
+                idle.symlink_to(source / "hypridle")
+                assert module.dispatch([command, "hypr"]) == 0
+                assert (config / "hypr/hypridle-icewine").resolve() == source / "hypridle"
+                idle.unlink()
+                assert module.dispatch(["init", "hypr"]) == 0
+                assert not (config / "hypr/hypridle-icewine").is_symlink()
+            # Optional GTK, Kitty and Bash identities may be enabled alongside
+            # current host defaults; the established shell identifies this record.
+            for name, target, app in (
+                ("gtk-3.0/icewine", source / "gtk", "gtk"),
+                ("gtk-4.0/icewine", source / "gtk", "gtk"),
+                ("kitty/icewine", source / "kitty", "kitty"),
+                ("icewine/shell/icewine", source / "bash", "bash"),
+            ):
+                marker = defaults / "config" / name
+                marker.unlink(missing_ok=True)
+                host = marker.parent / "host.txt"
+                host.parent.mkdir(parents=True, exist_ok=True)
+                host.write_text("current host default\n")
+                module.install_defaults(defaults, config, data, state, False, app)
+                for replace in (False, True):
+                    marker.symlink_to(target)
+                    module.install_defaults(defaults, config, data, state, replace, app)
+                    assert (config / name).resolve() == target
+                    marker.unlink()
+                    module.install_defaults(defaults, config, data, state, False, app)
+                    assert not (config / name).is_symlink()
+                marker.symlink_to(target)
+                module.install_defaults(defaults, config, data, state, False, app)
+            # Package updates retain link backups rather than copying implementation trees.
+            replacement = root / "next-kitty"
+            replacement.mkdir()
+            marker = defaults / "config/kitty/icewine"
             marker.unlink()
-            marker.symlink_to(next_package)
-            module.install_defaults(new, config, data, state, False, "kitty")
-            assert (config / "kitty/icewine").resolve() == next_package
-            backups = list(state.glob("defaults-update-*/config/kitty/icewine"))
-            assert len(backups) == 1 and backups[0].is_symlink(), "Package update copied immutable files"
-print("native-entry migration and CSS ownership checks passed")
-
-# Native Hyprland ownership: matching-path HM provenance stays external even
-# after its old Icewine manifest record exists. Reset must not replace it.
-for old_record in (False, True):
-    with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, HOME=temporary):
-        root = Path(temporary)
-        config, data, state, defaults = (root / name for name in (".config", "data", "state", "defaults"))
-        (defaults / "config/hypr").mkdir(parents=True)
-        (defaults / "data").mkdir()
-        starter = (script.parent.parent / "hyprland/hyprland.lua").read_text()
-        (defaults / "config/hypr/hyprland.lua").write_text(starter)
-        if old_record:
-            module.install_defaults(defaults, config, data, state, False, None)
-        store = root / "store"
-        target = store / ("a" * 32 + "-home-manager-files") / ".config/hypr/hyprland.lua"
-        target.parent.mkdir(parents=True)
-        target.write_text('-- A freely edited host comment.\nrequire("icewine.icewine")\n-- calibrated host overrides\n')
-        entry = config / "hypr/hyprland.lua"
-        entry.parent.mkdir(parents=True, exist_ok=True)
-        entry.unlink(missing_ok=True)
-        entry.symlink_to(target)
-        package = root / "implementation"
-        package.mkdir()
-        (defaults / "config/hypr/icewine").symlink_to(package)
-        with mock.patch.object(module, "STORE_DIR", store):
-            for reset in (False, True):
-                module.install_defaults(defaults, config, data, state, reset, None)
-                assert entry.is_symlink() and entry.resolve() == target
-                assert "hypr/hyprland.lua" not in module.default_records(state)["config"]["files"]
-            # Comments are user text, not ownership identity. New HM personal
-            # modules may reuse a retired name after the actual transition.
-            target.write_text('-- Peter changed this comment.\nrequire("icewine.icewine")\nrequire("modules.Personal")\n')
-            personal_target = target.with_name("modules") / "Personal.lua"
-            personal_target.parent.mkdir()
-            personal_target.write_text("-- new active personal module\n")
-            personal = config / "hypr/modules/Personal.lua"
-            personal.parent.mkdir()
-            personal.symlink_to(personal_target)
-            for reset in (False, True):
-                module.install_defaults(defaults, config, data, state, reset, None)
-                assert entry.resolve() == target and personal.resolve() == personal_target
-                assert "hypr/modules/Personal.lua" not in module.default_records(state)["config"]["files"]
-            personal.unlink()
-            # Unknown hook content before a real migration still blocks while
-            # preserving both entry ownership and the would-be inactive edits.
-            personal.write_text("unknown legacy edits\n")
-            records = module.default_records(state)
-            records["config"]["files"]["hypr/hyprland.lua"] = "sha256:" + "0" * 64
-            (state / "default-files.json").write_text(json.dumps(records))
-            for reset in (False, True):
+            marker.symlink_to(replacement)
+            assert module.dispatch(["init", "kitty"]) == 0
+            assert (config / "kitty/icewine").resolve() == replacement
+            assert any(path.is_symlink() for path in state.glob("defaults-update-*/config/kitty/icewine"))
+            # Substituted current identities block both init and reset before publishing.
+            marker = config / "quickshell/icewine"
+            marker.unlink()
+            marker.symlink_to(root / "user-implementation")
+            before = (state / "default-files.json").read_bytes()
+            rendered = os.readlink(config / "icewine/current")
+            for command in ("init", "reset"):
                 try:
-                    module.install_defaults(defaults, config, data, state, reset, None)
+                    module.dispatch([command])
                 except ValueError as error:
-                    assert str(personal) in str(error)
+                    assert "unknown package link" in str(error)
                 else:
-                    raise AssertionError("Unknown pre-migration hook became inactive")
-                assert entry.resolve() == target and personal.read_text() == "unknown legacy edits\n"
-            personal.unlink()
-            # During a real first transition an obsolete HM loader must be
-            # updated by HM, never replaced or removed by Icewine.
-            target.write_text("unknown host entry\n")
-            (config / "hypr/icewine").unlink()
+                    raise AssertionError("Unknown implementation identity was overwritten")
+                assert (state / "default-files.json").read_bytes() == before
+                assert os.readlink(config / "icewine/current") == rendered
+            # No identity in a populated record: leave historical loaders/modules untouched.
+            marker.unlink()
             records = module.default_records(state)
-            records["config"]["files"].pop("hypr/icewine")
+            records["config"]["files"].pop("quickshell/icewine")
+            obsolete = config / "quickshell/modules/Old.qml"
+            obsolete.parent.mkdir()
+            obsolete.write_text("obsolete implementation\n")
+            records["config"]["files"]["quickshell/modules/Old.qml"] = module.default_signature(obsolete)
             (state / "default-files.json").write_text(json.dumps(records))
-            try:
-                module.install_defaults(defaults, config, data, state, False, None)
-            except ValueError as error:
-                assert "hyprland.lua" in str(error)
-            else:
-                raise AssertionError("An incompatible Home Manager loader bypassed migration")
-
-for hook in ("Binds", "Autostart", "Theme", "host", "Personal"):
-    for edited in (False, True):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            config, data, state, defaults = (root / name for name in ("config", "data", "state", "defaults"))
-            (defaults / "config/hypr/modules").mkdir(parents=True)
-            (defaults / "data").mkdir()
-            starter = defaults / "config/hypr/hyprland.lua"
-            starter.write_text("old entry\n")
-            shipped = defaults / "config/hypr/modules" / (hook + ".lua")
-            shipped.write_text("old active hook\n")
-            module.install_defaults(defaults, config, data, state, False, None)
-            active = config / "hypr/modules" / shipped.name
-            if edited:
-                active.write_text("user calibration or behaviour\n")
-            shipped.unlink()
-            starter.write_bytes((script.parent.parent / "hyprland/hyprland.lua").read_bytes())
-            before = (config / "hypr/hyprland.lua").read_bytes()
-            if edited:
-                for reset in (False, True):
-                    try:
-                        module.install_defaults(defaults, config, data, state, reset, None)
-                    except ValueError as error:
-                        assert str(active) in str(error) and "hyprland.lua" in str(error)
-                    else:
-                        raise AssertionError("Edited removed hook became inert: " + hook)
-                    assert active.read_text() == "user calibration or behaviour\n"
-                    assert (config / "hypr/hyprland.lua").read_bytes() == before
-            else:
-                module.install_defaults(defaults, config, data, state, False, None)
-                assert not active.exists()
-print("Home Manager entry ownership and retired active-hook checks passed")
-
-# An edited old entry can still call pristine old hooks; retire neither until
-# the user has migrated that entry. Later edits to the new native entry stay active.
-with tempfile.TemporaryDirectory() as temporary:
-    root = Path(temporary)
-    config, data, state, defaults = (root / name for name in ("config", "data", "state", "defaults"))
-    (defaults / "config/hypr/modules").mkdir(parents=True)
-    (defaults / "data").mkdir()
-    starter = defaults / "config/hypr/hyprland.lua"
-    starter.write_text('require("modules.host")\n')
-    hook = defaults / "config/hypr/modules/host.lua"
-    hook.write_text("calibrated old host\n")
-    module.install_defaults(defaults, config, data, state, False, None)
-    entry = config / "hypr/hyprland.lua"
-    entry.write_text(entry.read_text() + "-- edited loader\n")
-    hook.unlink()
-    starter.write_bytes((script.parent.parent / "hyprland/hyprland.lua").read_bytes())
-    for reset in (False, True):
-        try:
-            module.install_defaults(defaults, config, data, state, reset, None)
-        except ValueError as error:
-            assert str(entry) in str(error)
-        else:
-            raise AssertionError("Edited old loader lost its still-active host hook")
-        assert (config / "hypr/modules/host.lua").read_text() == "calibrated old host\n"
-    entry.write_text('require("modules.host")\n')
-    module.install_defaults(defaults, config, data, state, False, None)
-    entry.write_text(entry.read_text() + "-- inline user overrides\n")
-    module.install_defaults(defaults, config, data, state, False, None)
-    assert entry.read_text().endswith("-- inline user overrides\n")
-print("old loader migration and native inline edit preservation checks passed")
+            before = (state / "default-files.json").read_bytes()
+            for command in ("init", "reset"):
+                try:
+                    module.dispatch([command])
+                except ValueError as error:
+                    assert "unsupported implementation ownership record" in str(error)
+                else:
+                    raise AssertionError("Unsupported ownership record authorized conversion")
+                assert obsolete.read_text() == "obsolete implementation\n"
+                assert (state / "default-files.json").read_bytes() == before
+                assert os.readlink(config / "icewine/current") == rendered
+print("current packaged defaults and unsupported-record preservation checks passed")
 
 with tempfile.TemporaryDirectory() as temp:
     with mock.patch.dict(os.environ, {"XDG_STATE_HOME": temp, "HYPRLAND_INSTANCE_SIGNATURE": "developer-test"}), \

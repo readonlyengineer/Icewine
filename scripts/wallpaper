@@ -3,7 +3,6 @@
 usage() {
     cat >&2 <<'EOF'
 Usage: icewine wallpaper IMAGE
-       icewine wallpaper --migrate LEGACY_IMAGE DATA_HOME
 
 Select a local PNG, JPEG, GIF, or BMP wallpaper. Icewine stores a private copy
 under XDG_DATA_HOME and updates the running desktop and handheld shell.
@@ -16,29 +15,9 @@ fail() {
 }
 
 data_home=${ICEWINE_WALLPAPER_DATA_HOME:-${XDG_DATA_HOME:-"${HOME:?HOME is not set}/.local/share"}}
-migrate=false
-
-if [[ ${1:-} == --migrate ]]; then
-    [[ $# == 3 ]] || { usage; exit 2; }
-    source_path=$2
-    data_home=$3
-    migrate=true
-elif [[ $# == 1 ]]; then
-    source_path=$1
-else
-    usage
-    exit 2
-fi
-
+[[ $# == 1 ]] || { usage; exit 2; }
+source_path=$1
 [[ $data_home == /* ]] || fail 'XDG_DATA_HOME must be an absolute path'
-
-if [[ $migrate == true ]]; then
-    [[ -e $source_path || -L $source_path ]] || exit 0
-    resolved=$(readlink -f -- "$source_path") || exit 0
-    # The old Home Manager path normally points into the Nix store. That is the
-    # shipped default, not a user selection to preserve.
-    [[ $resolved == /nix/store/* ]] && exit 0
-fi
 
 [[ -f $source_path && -r $source_path ]] || fail 'image path is not a readable regular file'
 source_path=$(realpath -- "$source_path") || fail 'could not resolve image path'
@@ -46,10 +25,6 @@ source_path=$(realpath -- "$source_path") || fail 'could not resolve image path'
 directory="$data_home/icewine/wallpapers"
 selection="$directory/selection.img"
 mkdir -p -- "$directory" || fail 'could not create the wallpaper data directory'
-
-if [[ $migrate == true && ( -e $selection || -L $selection ) ]]; then
-    exit 0
-fi
 
 temporary=$(mktemp "$directory/selection.XXXXXXXX") || fail 'could not create a temporary wallpaper file'
 cleanup() { rm -f -- "$temporary"; }
@@ -64,18 +39,6 @@ case $validation in
     *ICEWINE_WALLPAPER_VALID*) ;;
     *) fail 'Qt does not support this image; the saved wallpaper was left unchanged' ;;
 esac
-
-if [[ $migrate == true ]]; then
-    # A hard link is an atomic no-clobber install because the temporary file is
-    # in the same directory. A concurrent user selection always wins.
-    ln -- "$temporary" "$selection" 2>/dev/null || {
-        [[ -e $selection || -L $selection ]] && exit 0
-        fail 'could not preserve the existing wallpaper selection'
-    }
-    rm -f -- "$temporary"
-    trap - EXIT
-    exit 0
-fi
 
 mv -fT -- "$temporary" "$selection" || fail 'could not save the wallpaper'
 trap - EXIT

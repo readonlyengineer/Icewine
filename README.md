@@ -133,8 +133,6 @@ overrides. Backups are under `$XDG_STATE_HOME/icewine/defaults-reset-*` and `res
 A full reset also clears theme, transparency and autofullscreen choices; a scoped
 reset retains them. Neither clears your selected wallpaper.
 
-Run these commands as your normal user. Reset cannot bypass migration conflicts
-or replace a Hyprland entry managed by Home Manager.
 
 If `icewine init` reports a conflict, it has preserved a file it cannot safely
 replace. Read the reported path and back up the file before changing it.

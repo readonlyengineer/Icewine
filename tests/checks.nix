@@ -174,6 +174,14 @@ in {
     assert !disabled.services.xserver.enable;
     assert lib.elem desktopSystem.pkgs.gamescope desktop.environment.systemPackages;
     assert lib.elem handheldSystem.pkgs.gamescope handheld.environment.systemPackages;
+    assert lib.all (c:
+      !(c.systemd.services.icewine-init.serviceConfig ? ExecStartPost)
+      && lib.hasSuffix "/bin/icewine init" c.systemd.services.icewine-init.serviceConfig.ExecStart
+      && !(lib.hasInfix "--migrate" c.system.userActivationScripts.script)
+      && lib.hasInfix "/bin/icewine init" c.system.userActivationScripts.script
+      && lib.hasInfix "/bin/icewine-theme apply" c.system.userActivationScripts.script
+      && lib.hasSuffix "/bin/icewine init" c.systemd.user.services.icewine.serviceConfig.ExecStartPre
+    ) [ desktop handheld ];
     assert desktop.systemd.user.services ? icewine;
     assert desktop.systemd.user.services.icewine.unitConfig.ConditionUser == "demo";
     assert lib.elem "QT_IM_MODULE=qtvirtualkeyboard" desktop.systemd.user.services.icewine.serviceConfig.Environment;
@@ -228,7 +236,6 @@ in {
       # Runtime loaders accept an ordinary implementation root as well as Nix store paths.
       cp -r "$implementation" "$TMPDIR/portable-implementation"
       ln -sfn "$TMPDIR/portable-implementation/hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
-      unset ICEWINE_IMPLEMENTATION
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" desktop
       export HOME=$TMPDIR/handheld XDG_CONFIG_HOME=$TMPDIR/handheld/.config XDG_DATA_HOME=$TMPDIR/handheld/.local/share XDG_STATE_HOME=$TMPDIR/handheld/.local/state
       mkdir -p "$HOME"
@@ -247,7 +254,6 @@ in {
       cmp ${../quickshell/deck/shell.qml} "$XDG_CONFIG_HOME/quickshell/shell.qml"
       cp -r "$(readlink "$XDG_CONFIG_HOME/hypr/icewine")" "$TMPDIR/portable-handheld-hyprland"
       ln -sfn "$TMPDIR/portable-handheld-hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
-      unset ICEWINE_IMPLEMENTATION
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" handheld
       touch "$out"
     '';

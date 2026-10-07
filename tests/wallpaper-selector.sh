@@ -24,14 +24,14 @@ if "$cli" wallpaper "$test_home/broken.png"; then
 fi
 cmp "$test_home/previous-selection" "$selection"
 
-XDG_DATA_HOME="$test_home/migrated" "$cli" wallpaper --migrate \
-    "$test_home/source image.png" "$test_home/migrated"
-cmp "$test_home/source image.png" \
-    "$test_home/migrated/icewine/wallpapers/selection.img"
+if "$cli" wallpaper --migrate "$test_home/source image.png" "$test_home/old-data"; then
+    echo "obsolete migration command unexpectedly succeeded" >&2
+    exit 1
+fi
+[[ ! -e $test_home/old-data ]]
+cmp "$test_home/previous-selection" "$selection"
 
-printf 'keep me\n' > "$test_home/existing-selection"
-mkdir -p "$test_home/existing/icewine/wallpapers"
-cp "$test_home/existing-selection" "$test_home/existing/icewine/wallpapers/selection.img"
-XDG_DATA_HOME="$test_home/existing" "$cli" wallpaper --migrate \
-    "$test_home/source image.png" "$test_home/existing"
-cmp "$test_home/existing-selection" "$test_home/existing/icewine/wallpapers/selection.img"
+# Replacing a selection copies bytes; later edits to the source do not change it.
+"$cli" wallpaper "$test_home/source image.png"
+printf 'source changed\n' > "$test_home/source image.png"
+cmp "$test_home/previous-selection" "$selection"

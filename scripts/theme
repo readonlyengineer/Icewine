@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Manage only Icewine's user-owned theme files and selection."""
 
-import configparser
 import os
 import errno
 import fcntl
@@ -54,13 +53,6 @@ TEMPLATES = {
     "starship.toml": "starship.toml.in",
     "ls-colors.sh": "ls-colors.sh.in",
 }
-LEGACY_MANAGED = (set(OWNED) - {"gtk-4.0/gtk.css"}) | {"quickshell/theme/Palette.qml"}
-LEGACY_UNITS = (
-    "icewine.service", "icewine-refresh-flatpak-icons.service",
-    "icewine-refresh-flatpak-icons.path", "hyprpolkitagent.service",
-    "hypridle.service", "icewine-controller-idle.service",
-    "icewine-inputplumber-hyprland.service", "icewine-keyboard.service",
-)
 STORE_DIR = Path("/nix/store")
 
 
@@ -281,32 +273,7 @@ def publish(config, files):
                 shutil.rmtree(previous)
 
 
-def managed_link(path, config):
-    if not path.is_symlink():
-        return False
-    if (path == config / "gtk-4.0/settings.ini"
-            and os.readlink(path) == str(config / "icewine/current/gtk-settings.ini")):
-        return True
-    if (path == config / "gtk-4.0/gtk.css"
-            and os.readlink(path) == str(config / "icewine/current/gtk.css")):
-        return True
-    try:
-        if path.relative_to(config).as_posix() not in LEGACY_MANAGED:
-            return False
-        relative = path.relative_to(Path.home())
-        store_path = Path(os.readlink(path)).relative_to(STORE_DIR)
-    except ValueError:
-        return False
-    return (len(store_path.parts) > 1
-            and re.fullmatch(r"[a-z0-9]{32}-home-manager-files", store_path.parts[0]) is not None
-            and store_path.parts[1:] == relative.parts)
-
-
 def install_links(config, state, replace, app=None, install=True):
-    if install and not replace:
-        migration = [config / relative for relative in owned(app)
-                     if managed_link(config / relative, config)]
-        backup_owned(config, state, migration, "migration-")
     enabled = owned(app)
     for relative, name in owned(app, include_disabled=True).items():
         defaults = os.environ.get("ICEWINE_DEFAULT_FILES")
@@ -324,15 +291,13 @@ def install_links(config, state, replace, app=None, install=True):
                 entry = default_records(state).get("config", {})
                 # Ownership records also track host CSS; only the shipped import
                 # stub is Icewine styling. Keep unrelated host rules active.
-                # Ponytail: extend recognised stub versions if this format changes.
                 stub = ('@import url("icewine/defaults.css");\n'
                         f'@import url("../icewine/current/{name}");\n'
                         '/* Add your overrides below. */\n').encode()
                 recorded_css = (entry.get("root") == str(config)
                                 and signature == entry.get("files", {}).get(relative)
                                 and path.read_bytes() == stub)
-            if (recorded_css or (path.is_symlink() and os.readlink(path) == str(target))
-                    or managed_link(path, config)):
+            if recorded_css or (path.is_symlink() and os.readlink(path) == str(target)):
                 backup_owned(config, state, [path], "opt-out-")
                 if still_current(path, config, signature):
                     path.unlink()
@@ -345,7 +310,7 @@ def install_links(config, state, replace, app=None, install=True):
         if path.is_symlink() and os.readlink(path) == str(target):
             continue
         if path.exists() or path.is_symlink():
-            if not replace and not managed_link(path, config):
+            if path.is_symlink() or not replace:
                 if path.is_symlink():
                     print(f"conflict: preserved unrecognized symlink: {path}", file=sys.stderr)
                 else:
@@ -386,117 +351,21 @@ def static_app(root_name, relative):
             "btop": "btop", "user-dirs.locale": "user-dirs"}.get(relative.parts[0], relative.parts[0])
 
 
-def home_manager_hypr_entry(path, config):
-    # Exact Home Manager entry provenance establishes ownership independently
-    # of comments or loader text. Other paths retain existing migration rules.
-    if path != config / "hypr/hyprland.lua" or not path.is_symlink():
-        return False
-    try:
-        target = Path(os.readlink(path)).relative_to(STORE_DIR)
-        return (re.fullmatch(r"[a-z0-9]{32}-home-manager-files", target.parts[0]) is not None
-                and target.parts[1:] == path.relative_to(Path.home()).parts
-                and still_current(path, config, default_signature(path)))
-    except (ValueError, IndexError, OSError, UnicodeError):
-        return False
-
-
 def managed_static_link(path, root, root_name):
     if not path.is_symlink():
         return False
-    if root_name == "config" and path.relative_to(root).as_posix() in {"gtk-3.0/gtk.css", "gtk-4.0/gtk.css"}:
-        names = ("gtk.css", "gtk4.css") if path.parent.name == "gtk-4.0" else ("gtk.css",)
-        return os.readlink(path) in {str(root / "icewine/current" / name) for name in names} or managed_link(path, root)
     if root_name == "home" and path.name in {".bashrc", ".profile", ".bash_profile"}:
-        if os.readlink(path) == str(xdg("XDG_CONFIG_HOME", ".config") / "icewine/shell" / path.name.lstrip(".")):
-            return True
-    if (root_name == "config" and path == root / "quickshell/theme/Palette.qml"
-            and os.readlink(path) == str(root / "icewine/current/Palette.qml")):
-        return True
+        return os.readlink(path) == str(xdg("XDG_CONFIG_HOME", ".config") / "icewine/shell" / path.name.lstrip("."))
+    if root_name != "data":
+        return False
     try:
         target = Path(os.readlink(path)).relative_to(STORE_DIR)
     except ValueError:
         return False
-    if not target.parts or not re.fullmatch(r"[a-z0-9]{32}-.+", target.parts[0]):
-        return False
-    store_name = target.parts[0][33:]
-    relative = path.relative_to(root)
-    if store_name == "icewine-steam-mask.desktop":
-        return (root_name == "data" and len(target.parts) == 1
-                and relative.as_posix() in {"applications/steam.desktop",
-                                           "applications/com.valvesoftware.Steam.desktop"})
-    if store_name == "home-manager-files":
-        try:
-            if target.parts[1:] != path.relative_to(Path.home()).parts:
-                return False
-            if root_name == "data" and relative.as_posix() in {
-                "applications/steam.desktop", "applications/com.valvesoftware.Steam.desktop",
-                "applications/steam-gamescope.desktop",
-            }:
-                return pure_legacy_steam_entry(path)
-            return True
-        except ValueError:
-            return False
-    if store_name == "icewine-hyprland":
-        return root_name == "config" and relative.parts[0] == "hypr"
-    names = {
-        "config": {"uwsm/env": "env", "quickshell/shell.qml": "shell.qml",
-                   "quickshell/adapters": "adapters", "quickshell/modules": "modules",
-                   "quickshell/theme/Palette.qml": "Palette.qml",
-                   "quickshell/DeckOverlay.qml": "DeckOverlay.qml",
-                   "quickshell/DeckMenu.js": "DeckMenu.js",
-                   "quickshell/config/qmldir": "qmldir",
-                   "quickshell/config/Settings.qml": "Settings.qml",
-                   "btop/btop.conf": "btop.conf.in", "user-dirs.locale": "user-dirs.locale",
-                   "nvim/init.lua": "init.lua"},
-        "home": {},
-        "data": {"wallpapers/default.jpg": "tokyo-night-wallpaper.jpg",
-                 "wallpapers/current_blurr.jpg": "tokyo-night-lockscreen.jpg"},
-    }
-    return len(target.parts) == 1 and store_name == names[root_name].get(relative.as_posix())
-
-
-def pure_legacy_steam_entry(path):
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.optionxform = str
-    try:
-        with path.open(encoding="utf-8") as stream:
-            parser.read_file(stream)
-    except (OSError, UnicodeError, configparser.Error):
-        return False
-    if parser.defaults() or parser.sections() != ["Desktop Entry"]:
-        return False
-    entry = dict(parser["Desktop Entry"])
-    if path.name != "steam-gamescope.desktop":
-        return entry == {"Type": "Application", "Name": "Steam",
-                         "NoDisplay": "true", "Hidden": "true"}
-    executable = entry.pop("Exec", "")
-    icon = entry.pop("Icon", "")
-    version = entry.pop("Version", "1.0")
-    return (re.fullmatch(r"/nix/store/[a-z0-9]{32}-quickshell-[^/]+/bin/qs ipc call gameLauncher launchSteamGamescope", executable) is not None
-            and icon in {"steam", "com.valvesoftware.Steam"} and version == "1.0"
-            and entry == {"Type": "Application", "Name": "Steam (Gamescope)",
-                          "Comment": "Launch Steam inside monitor-aware Gamescope",
-                          "Categories": "Game;", "Terminal": "false"})
-
-
-def pure_legacy_browser_mime(path):
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.optionxform = str
-    try:
-        with path.open(encoding="utf-8") as stream:
-            parser.read_file(stream)
-    except (OSError, UnicodeError, configparser.Error):
-        return False
-    browser_types = {"x-scheme-handler/http", "x-scheme-handler/https", "text/html",
-                     "application/xhtml+xml", "application/pdf"}
-    return (not parser.defaults()
-            and set(parser.sections()) <= {"Default Applications", "Added Associations", "Removed Associations"}
-            and parser.has_section("Default Applications")
-            and set(parser["Default Applications"]) == browser_types
-            and all(value in {"firefox.desktop", "firefox.desktop;"}
-                    for value in parser["Default Applications"].values())
-            and all(not parser[section] for section in ("Added Associations", "Removed Associations")
-                    if parser.has_section(section)))
+    return (len(target.parts) == 1
+            and re.fullmatch(r"[a-z0-9]{32}-icewine-steam-mask.desktop", target.parts[0]) is not None
+            and path.relative_to(root).as_posix() in {"applications/steam.desktop",
+                                                    "applications/com.valvesoftware.Steam.desktop"})
 
 
 def default_signature(path):
@@ -536,135 +405,29 @@ def default_records(state):
     return records
 
 
-LEGACY_IMPLEMENTATION_DIRS = ("quickshell/modules", "quickshell/adapters", "quickshell/theme")
-LEGACY_IMPLEMENTATION_FILES = ("quickshell/shell.qml", "quickshell/DeckOverlay.qml", "quickshell/DeckMenu.js",
-                               "hypr/hyprland.lua") + tuple("hypr/modules/" + name + ".lua" for name in
-                               ("Baseline", "LookAndFeel", "WindowPolicy", "DefaultApps", "Docking", "Deck"))
-
-
-def legacy_implementation(name):
-    return name in LEGACY_IMPLEMENTATION_FILES or any(name.startswith(directory + "/")
-                                                     for directory in LEGACY_IMPLEMENTATION_DIRS)
-
-
-def implementation_preflight(defaults, config, state, app=None, *, records=None, migrating=False):
-    if defaults:
-        source = Path(defaults) / "config"
-        entry = (default_records(state) if records is None else records).get("config", {})
-        previous = entry.get("files", {}) if entry.get("root") == str(config) else {}
-        # Package links are identity, never writable override hooks. Check before
-        # switching any entry during init/reset. Theme-only commands do not switch package links.
-        for name in ("gtk-3.0/icewine", "gtk-4.0/icewine", "hypr/icewine", "hypr/hypridle-icewine", "nvim/icewine", "kitty/icewine",
-                     "uwsm/icewine", "icewine/shell/icewine"):
-            shipped, path = source / name, config / name
-            if not shipped.is_symlink() or (app and static_app("config", Path(name)) != app):
-                continue
-            current = default_signature(path)
-            if not still_current(path, config, current) or (current is not None
-                    and (current != previous.get(name) or not path.is_symlink())):
-                raise ValueError(f"implementation migration blocked: preserved unknown package link {path}; "
-                                 "back up and move the conflict before icewine init")
-        if (source / "hypr/icewine").is_symlink() and "hypr/icewine" not in previous and app in (None, "hypr"):
-            if app:
-                raise ValueError("implementation migration requires icewine init without APP; scoped init/reset cannot switch the Hyprland loader")
-            path = config / "hypr/hyprland.lua"
-            current = default_signature(path)
-            if not home_manager_hypr_entry(path, config) and current is not None and (current != previous.get("hypr/hyprland.lua")
-                    or not still_current(path, config, current)):
-                raise ValueError(f"implementation migration blocked: preserved edited/untracked {path}; "
-                                 "replace its ICEWINE_IMPLEMENTATION loader with the neighbouring icewine link, "
-                                 "back up and move the old entry, then icewine init")
-        # Removed hooks must not become inert edits when the native entry starts
-        # loading namespaced shared modules. Custom defaultFiles hooks remain
-        # available to a host entry that explicitly loads them.
-        starter = source / "hypr/hyprland.lua"
-        if (app in (None, "hypr") and starter.is_file()
-                and starter.read_text(encoding="utf-8").startswith('require("icewine.icewine")\n')):
-            path = config / "hypr/hyprland.lua"
-            current = default_signature(path)
-            transition = ((source / "hypr/icewine").is_symlink() and "hypr/icewine" not in previous
-                          or previous.get("hypr/hyprland.lua") not in (None, default_signature(starter)))
-            if transition and home_manager_hypr_entry(path, config):
-                # During migration the host must already load the new shared
-                # namespace; after it owns the entry, its text is its own policy.
-                if not re.search(r"(?m)^\s*require\s*\(\s*(['\"])icewine\.icewine\1\s*\)\s*(?:--.*)?$",
-                                 path.read_text(encoding="utf-8")):
-                    raise ValueError(f"configuration migration blocked: preserved Home Manager entry {path}; "
-                                     "update its loader to require(\"icewine.icewine\") in the host configuration, "
-                                     "then activate Home Manager before icewine init; do not remove its entry")
-            if (previous.get("hypr/hyprland.lua") != default_signature(starter)
-                    and current is not None and current != previous.get("hypr/hyprland.lua")
-                    and not home_manager_hypr_entry(path, config)):
-                raise ValueError(f"configuration migration blocked: preserved edited/untracked {path}; "
-                                 "migrate its loader to require(\"icewine.icewine\") and move old hook overrides "
-                                 "into the active entry, then back up and move the old entry before icewine init; "
-                                 "reset cannot bypass migration")
-            for name in ("Binds", "Autostart", "Theme", "host", "Personal"):
-                relative = "hypr/modules/" + name + ".lua"
-                path = config / relative
-                if not transition and relative not in previous:
-                    continue
-                if (source / relative).exists() or (source / relative).is_symlink():
-                    continue
-                current = default_signature(path)
-                if current is None:
-                    continue
-                theme_alias = (name == "Theme" and path.is_symlink()
-                               and os.readlink(path) == str(config / "icewine/current/Theme.lua"))
-                if not still_current(path, config, current) or (not theme_alias and current != previous.get(relative)):
-                    raise ValueError(f"configuration migration blocked: preserved edited/untracked {path}; "
-                                     "move its active overrides into hyprland.lua or a module loaded there, "
-                                     "then back up and move this retired hook before icewine init; reset cannot bypass migration")
-        if ((source / "kitty/icewine").is_symlink() and "kitty/icewine" not in previous
-                and not (source / "kitty/host.conf").is_file() and app in (None, "kitty")):
-            path = config / "kitty/host.conf"
-            if path.exists() or path.is_symlink():
-                if not still_current(path, config, default_signature(path)) or not path.is_file() or path.read_bytes():
-                    raise ValueError(f"configuration migration blocked: preserved {path}; move its overrides "
-                                     "after the includes in kitty.conf, back up and move host.conf, then icewine init; "
-                                     "reset cannot bypass active overrides")
-    if app not in (None, "hypr", "quickshell") or not defaults or not (Path(defaults) / "config/quickshell/icewine").is_symlink():
+def implementation_preflight(defaults, config, state, app=None):
+    if not defaults:
         return
-    entry = (default_records(state) if records is None else records).get("config", {})
+    source = Path(defaults) / "config"
+    entry = default_records(state).get("config", {})
     previous = entry.get("files", {}) if entry.get("root") == str(config) else {}
-    if app and "quickshell/icewine" not in previous:
-        raise ValueError("implementation migration requires icewine init without APP; scoped init/reset cannot switch only one entry point")
-    marker = config / "quickshell/icewine"
-    conflicts = []
-    # This link is the immutable implementation boundary, including after migration.
-    if not still_current(marker, config, default_signature(marker)) or (
-            (marker.exists() or marker.is_symlink())
-            and (default_signature(marker) != previous.get("quickshell/icewine") or not marker.is_symlink())):
-        conflicts.append(marker)
-    if migrating or "quickshell/icewine" not in previous:
-        legacy = dict.fromkeys((*LEGACY_IMPLEMENTATION_FILES, *LEGACY_IMPLEMENTATION_DIRS,
-                                *(name for name in previous if legacy_implementation(name))))
-        for name in legacy:
-            path = config / name
-            if home_manager_hypr_entry(path, config):
-                continue
-            # Do not follow an unknown container into user data.
-            if path.is_dir() and not path.is_symlink():
-                if name not in LEGACY_IMPLEMENTATION_DIRS:
-                    conflicts.append(path)
-                    continue
-                candidates = [item for item in path.rglob("*") if not item.is_dir() or item.is_symlink()]
-            else:
-                if not still_current(path, config, default_signature(path)):
-                    conflicts.append(path)
-                    continue
-                candidates = [path] if path.exists() or path.is_symlink() else []
-            for item in candidates:
-                relative = item.relative_to(config).as_posix()
-                if (not still_current(item, config, default_signature(item))
-                        or default_signature(item) != previous.get(relative)):
-                    conflicts.append(item)
-    if conflicts:
-        names = "\n  ".join(str(path) for path in dict.fromkeys(conflicts))
-        raise ValueError("implementation migration blocked; preserved existing entry points and code:\n  " + names
-                         + "\nBack up these paths, migrate Settings/Binds/Autostart or local entry-point hooks, "
-                         "then move the conflicting legacy implementation out of the configuration and retry icewine init. "
-                         "Do not use reset to bypass migration; current legacy code remains in place.")
+    # Immutable package identities cannot be adopted from unknown files or
+    # an ownership record that lacks the current implementation boundary.
+    for name in ("gtk-3.0/icewine", "gtk-4.0/icewine", "hypr/icewine", "hypr/hypridle-icewine", "nvim/icewine", "kitty/icewine",
+                 "uwsm/icewine", "icewine/shell/icewine", "quickshell/icewine"):
+        shipped, path = source / name, config / name
+        if not shipped.is_symlink() or (app and static_app("config", Path(name)) != app):
+            continue
+        if (name not in previous and "quickshell/icewine" not in previous
+                and str(Path(name).parent / "icewine") not in previous
+                and any(Path(record).is_relative_to(Path(name).parent) for record in previous)):
+            raise ValueError(f"unsupported implementation ownership record: {path}; "
+                             "back up and prepare a fresh configuration before icewine init")
+        current = default_signature(path)
+        if not still_current(path, config, current) or (current is not None
+                and (current != previous.get(name) or not path.is_symlink())):
+            raise ValueError(f"implementation blocked: preserved unknown package link {path}; "
+                             "back up and move the conflict before icewine init")
 
 
 def install_defaults(defaults, config, data, state, replace, app):
@@ -677,13 +440,13 @@ def install_defaults(defaults, config, data, state, replace, app):
     backup = None
     backed_up = set()
 
-    def save(path, root, root_name, automatic=False):
+    def save(path, root, root_name):
         nonlocal backup
         if path in backed_up:
             return
         if backup is None:
             state.mkdir(parents=True, exist_ok=True)
-            backup = Path(tempfile.mkdtemp(prefix="defaults-update-" if automatic else ("defaults-reset-" if replace else "defaults-migration-"), dir=state))
+            backup = Path(tempfile.mkdtemp(prefix="defaults-reset-" if replace else "defaults-update-", dir=state))
         destination = backup / root_name / path.relative_to(root)
         destination.parent.mkdir(parents=True, exist_ok=True)
         signature = default_signature(path)
@@ -711,83 +474,6 @@ def install_defaults(defaults, config, data, state, replace, app):
                                if (item.is_file() or item.is_symlink())
                                and (not app or static_app(root_name, item.relative_to(source)) == app))
         present = {item.relative_to(source).as_posix() for item in shipped_files}
-        first_quickshell = "quickshell/icewine" in present and "quickshell/icewine" not in previous
-        first_hyprland = "hypr/icewine" in present and "hypr/icewine" not in previous
-        if root_name == "config" and not app and (first_quickshell or first_hyprland):
-            # Ponytail: these loaders switch individually, not atomically
-            # across a running session. Finish editing before init; detected
-            # conflicts retain backups and roll back unchanged paths only. Use an
-            # offline migration if runtime observers must not see intermediate loaders.
-            loaders = (("hypr/icewine",) if first_hyprland else ())
-            if not home_manager_hypr_entry(config / "hypr/hyprland.lua", config):
-                loaders += ("hypr/hyprland.lua",)
-            if first_quickshell:
-                loaders += ("quickshell/shell.qml", "quickshell/icewine")
-            retiring = sorted(name for name in set(previous) - present if legacy_implementation(name))
-            original = previous.copy()
-            removed, switched = [], {}
-            try:
-                for name in (*retiring, *loaders):
-                    path = root / name
-                    if not still_current(path, root, original.get(name) if path.exists() or path.is_symlink() else None):
-                        raise ValueError(f"implementation changed before migration: {path}")
-                    if path.exists() or path.is_symlink():
-                        save(path, root, root_name, automatic=True)
-                implementation_preflight(defaults, config, state, records=records, migrating=True)
-                for name in retiring:
-                    path = root / name
-                    if not still_current(path, root, original[name] if path in backed_up else None):
-                        raise ValueError(f"implementation changed during migration: {path}")
-                    if path.exists() or path.is_symlink():
-                        path.unlink()
-                        removed.append(name)
-                implementation_preflight(defaults, config, state, records=records, migrating=True)
-                for name in loaders:
-                    path, shipped = root / name, source / name
-                    implementation_preflight(defaults, config, state, records=records, migrating=True)
-                    current = original.get(name) if path in backed_up else None
-                    if shipped.is_symlink():
-                        target = config / os.readlink(shipped)
-                        atomic_link(path, target, root=root, signature=current)
-                        expected = "link:" + str(target)
-                    else:
-                        atomic_text(path, shipped.read_text(encoding="utf-8"), 0o644, root=root, signature=current)
-                        expected = default_signature(shipped)
-                    switched[name] = expected
-                    previous[name] = expected
-                implementation_preflight(defaults, config, state, records=records, migrating=True)
-            except (OSError, ValueError) as error:
-                for name, expected in switched.items():
-                    path = root / name
-                    if not still_current(path, root, expected):
-                        continue
-                    try:
-                        path.unlink()
-                    except OSError as restore_error:
-                        print(f"conflict: could not retire migration loader {path}: {restore_error}", file=sys.stderr)
-                for name in (*removed, *switched):
-                    path = root / name
-                    if name not in original or not still_current(path, root, None):
-                        continue
-                    try:
-                        if original[name].startswith("link:"):
-                            path.symlink_to(original[name].removeprefix("link:"))
-                        else:
-                            saved_path = backup / root_name / name
-                            with saved_path.open("rb") as saved, path.open("xb") as restored:
-                                shutil.copyfileobj(saved, restored)
-                                os.fchmod(restored.fileno(), saved_path.stat().st_mode & 0o777)
-                        print(f"restored: {path}")
-                    except OSError as restore_error:
-                        print(f"conflict: could not restore legacy implementation {path}: {restore_error}", file=sys.stderr)
-                previous.clear()
-                previous.update(original)
-                raise ValueError(f"implementation migration aborted: {error}; "
-                                 f"existing edits remain preserved; recovery backups: {backup}") from error
-            for name in retiring:
-                del previous[name]
-                print(f"retired: {root / name}")
-            atomic_text(manifest, json.dumps(records, sort_keys=True) + "\n")
         for name in sorted(set(previous) - present):
             relative = Path(name)
             if app and static_app(root_name, relative) != app:
@@ -801,7 +487,7 @@ def install_defaults(defaults, config, data, state, replace, app):
                 if default_signature(path) != previous[name]:
                     print(f"conflict: preserved edited removed default: {path}", file=sys.stderr)
                     continue
-                save(path, root, root_name, automatic=True)
+                save(path, root, root_name)
                 if not still_current(path, root, previous[name]):
                     continue
                 try:
@@ -818,10 +504,6 @@ def install_defaults(defaults, config, data, state, replace, app):
             relative = shipped.relative_to(source)
             name = relative.as_posix()
             path = root / relative
-            if root_name == "config" and home_manager_hypr_entry(path, config):
-                previous.pop(name, None)
-                atomic_text(manifest, json.dumps(records, sort_keys=True) + "\n")
-                continue
             blocked = False
             for parent in reversed(path.parents):
                 if parent == root:
@@ -834,20 +516,9 @@ def install_defaults(defaults, config, data, state, replace, app):
                     break
                 if not parent.is_symlink():
                     continue
-                if any(Path(name).is_relative_to(parent.relative_to(root)) for name in previous):
-                    print(f"conflict: preserved substituted parent of recorded defaults: {parent}", file=sys.stderr)
-                    blocked = True
-                    break
-                if not managed_static_link(parent, root, root_name):
-                    print(f"conflict: preserved unrecognized symlink: {parent}", file=sys.stderr)
-                    blocked = True
-                    break
-                parent_signature = default_signature(parent)
-                save(parent, root, root_name)
-                if not still_current(parent, root, parent_signature):
-                    blocked = True
-                    break
-                parent.unlink()
+                print(f"conflict: preserved symlinked parent: {parent}", file=sys.stderr)
+                blocked = True
+                break
             if blocked:
                 continue
             current = default_signature(path)
@@ -865,7 +536,7 @@ def install_defaults(defaults, config, data, state, replace, app):
                                       or not managed_static_link(path, root, root_name)):
                     print(f"conflict: preserved unrecognized symlink: {path}", file=sys.stderr)
                     continue
-                save(path, root, root_name, automatic=unchanged and not replace)
+                save(path, root, root_name)
             elif path.exists():
                 if not path.is_file():
                     print(f"conflict: preserved non-file: {path}; back up and move its remaining contents before retrying init", file=sys.stderr)
@@ -876,7 +547,7 @@ def install_defaults(defaults, config, data, state, replace, app):
                     action = f"icewine reset {target_app}" if target_app in APPS else "icewine reset"
                     print(f"conflict: preserved {reason} default: {path}; compare {shipped} or back up with {action}", file=sys.stderr)
                     continue
-                save(path, root, root_name, automatic=unchanged and not replace)
+                save(path, root, root_name)
             if not still_current(path, root, current):
                 continue
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -917,18 +588,6 @@ def install_defaults(defaults, config, data, state, replace, app):
     # The Gamescope launcher comes from the user profile; Steam masks must
     # outrank Flatpak exports. Local overrides remain user-owned.
     if app is None:
-        for root_name, root, relative in (("config", config, "mimeapps.list"),
-                                          ("data", data, "applications/mimeapps.list")):
-            path = root / relative
-            if managed_static_link(path, root, root_name):
-                if pure_legacy_browser_mime(path):
-                    save(path, root, root_name)
-                    path.unlink()
-                    print(f"retired: {path}")
-                else:
-                    print(f"conflict: preserved combined or unreadable Home Manager MIME defaults: {path}",
-                          file=sys.stderr)
-
         for relative in ("applications/steam-gamescope.desktop", "applications/steam.desktop",
                          "applications/com.valvesoftware.Steam.desktop"):
             path = data / relative
@@ -950,47 +609,6 @@ def install_defaults(defaults, config, data, state, replace, app):
                     atomic_link(path, Path(mask))
                     print(f"installed: {path}")
 
-        # Home Manager's old unit links override the native NixOS user units.
-        # Retire only Icewine's known links, including its generated target links.
-        unit_root = config / "systemd/user"
-        if not (config / "systemd").is_symlink() and not unit_root.is_symlink() and unit_root.is_dir():
-            candidates = [unit_root / name for name in LEGACY_UNITS]
-            candidates += [directory / name for directory in unit_root.iterdir()
-                           if directory.is_dir() and not directory.is_symlink()
-                           and directory.name.endswith((".wants", ".requires"))
-                           for name in LEGACY_UNITS]
-            retired = False
-            for path in candidates:
-                if managed_static_link(path, config, "config"):
-                    save(path, config, "config")
-                    path.unlink()
-                    retired = True
-                    print(f"retired: {path}")
-                elif path.exists() or path.is_symlink():
-                    print(f"conflict: preserved user unit link or file: {path}", file=sys.stderr)
-            if retired:
-                runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
-                if (runtime / "systemd/private").exists():
-                    env = dict(os.environ, XDG_RUNTIME_DIR=str(runtime))
-                    try:
-                        result = subprocess.run(["systemctl", "--user", "daemon-reload"],
-                                                env=env, capture_output=True, text=True)
-                        if result.returncode:
-                            print(f"Pending: user systemd daemon-reload failed: {result.stderr.strip()}",
-                                  file=sys.stderr)
-                    except OSError as error:
-                        print(f"Pending: user systemd daemon-reload failed: {error}", file=sys.stderr)
-
-    if app in (None, "hypr") and not ((source_root / "config/hypr/modules/Theme.lua").exists()
-                                       or (source_root / "config/hypr/modules/Theme.lua").is_symlink()):
-        path = config / "hypr/modules/Theme.lua"
-        current = default_signature(path)
-        if (path.is_symlink() and os.readlink(path) == str(config / "icewine/current/Theme.lua")
-                and still_current(path, config, current)):
-            save(path, config, "config", automatic=True)
-            if still_current(path, config, current):
-                path.unlink()
-                print(f"retired: {path}")
 
 
 def install_gtk_theme(config, theme_id):

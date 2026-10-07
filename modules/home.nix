@@ -163,7 +163,6 @@ in {
           "XDG_STATE_HOME=${stateHome}"
         ];
         ExecStart = "${icewineCli}/bin/icewine init";
-        ExecStartPost = "-${icewineCli}/bin/icewine wallpaper --migrate ${dataHome}/wallpapers/current.jpg ${dataHome}";
       };
     };
     systemd.services.display-manager = lib.mkIf cfg.login.enable {
@@ -178,11 +177,6 @@ in {
     system.userActivationScripts.icewine.text = ''
       if [ "$(${pkgs.coreutils}/bin/id -un)" = ${lib.escapeShellArg cfg.user} ]; then
         ${icewineCli}/bin/icewine init
-        if ! ${icewineCli}/bin/icewine wallpaper --migrate \
-          ${lib.escapeShellArg "${dataHome}/wallpapers/current.jpg"} \
-          ${lib.escapeShellArg dataHome}; then
-          echo "Icewine: legacy wallpaper could not be migrated; it was left unchanged." >&2
-        fi
         if ! ${themeCli}/bin/icewine-theme apply; then
           echo "Icewine: theme selection is saved; check reported live-application failures." >&2
         fi
