@@ -131,6 +131,7 @@ ShellRoot {
             text: "Keyboard button"
             onClicked: ++root.buttonCalls
         }
+        Bar.Widget { id: animatedWidget; width: 20; height: 20; shown: false }
         TestCase { id: toggleKeys; when: false }
     }
     Popouts.Media {
@@ -194,6 +195,18 @@ ShellRoot {
             for (const name of ["Previous track", "Play", "Next track"])
                 if (!root.findAccessible(media, name))
                     throw new Error("Missing named media action: " + name)
+            animatedWidget.shown = true
+            toggleKeys.tryCompare(animatedWidget, "reveal", 1, 400)
+            animatedWidget.shown = false
+            if (!animatedWidget.visible || animatedWidget.enabled)
+                throw new Error("Closing widget must remain drawn without accepting input")
+            toggleKeys.tryCompare(animatedWidget, "visible", false, 400)
+            animatedWidget.shown = true
+            toggleKeys.tryCompare(animatedWidget, "reveal", 1, 400)
+            animatedWidget.animateClose = false
+            animatedWidget.shown = false
+            if (animatedWidget.visible || animatedWidget.reveal !== 0)
+                throw new Error("Screenshot dismissal must hide the widget immediately")
             toggleWindow.requestActivate()
             toggleKeys.tryCompare(toggleWindow, "active", true)
             keyboardToggle.forceActiveFocus()

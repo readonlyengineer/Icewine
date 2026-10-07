@@ -42,10 +42,7 @@ Widget {
             page.delayed ? "3" : "0",
             page.saveClipboard ? "1" : "0",
             page.savePictures ? "1" : "0"]
-        if (mode === "region")
-            instantHandoffRequested()
-        else
-            handoffRequested()
+        instantHandoffRequested()
         // The popout must be gone before grimblast freezes the selection surface.
         Qt.callLater(() => Quickshell.execDetached(command))
     }

@@ -191,7 +191,7 @@ Scope {
             function focusWidget() {
                 if (!widgetHere || !root.widgetEngaged)
                     return
-                if (launcher.visible) launcher.focusInitial()
+                if (launcher.shown) launcher.focusInitial()
                 else statusPopout.focusInitial()
             }
 
@@ -230,8 +230,8 @@ Scope {
             mask: Region {
                 Region { item: panel.modal && !root.oskVisible && !root.sessionLocked ? input : null }
                 Region { item: root.barVisible ? surface : null }
-                Region { item: launcher.visible ? launcher : null }
-                Region { item: statusPopout.visible ? statusPopout : null }
+                Region { item: launcher.shown ? launcher : null }
+                Region { item: statusPopout.shown ? statusPopout : null }
             }
 
             Timer {
@@ -363,7 +363,8 @@ Scope {
                         shadowVerticalOffset: 4
                     }
                     excludeSteamApps: root.excludeSteamApps
-                    visible: panel.widgetHere && root.ui.page === "launcher"
+                    shown: panel.widgetHere && root.ui.page === "launcher"
+                    animateClose: !root.instantBarHide && !root.sessionLocked
                     engaged: root.widgetEngaged
                     x: Math.max(8, surface.x)
                     y: root.barHeight + 4
@@ -384,9 +385,16 @@ Scope {
                         blurMax: 16
                         shadowVerticalOffset: 4
                     }
-                    visible: panel.widgetHere && root.ui.page !== "launcher"
+                    shown: panel.widgetHere && root.ui.page !== "launcher"
+                    animateClose: !root.instantBarHide && !root.sessionLocked
                     engaged: root.widgetEngaged
-                    currentPage: visible ? root.ui.page : "audio"
+                    Binding {
+                        target: statusPopout
+                        property: "currentPage"
+                        value: root.ui.page
+                        when: statusPopout.shown
+                        restoreMode: Binding.RestoreNone
+                    }
                     x: Math.max(8, Math.min(surface.x + surface.width - width, panel.width - width - 8))
                     y: root.barHeight + 4
                     width: Math.min(380, panel.width - 16)

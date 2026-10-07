@@ -5,6 +5,9 @@ import QtQuick
 FocusScope {
     id: root
 
+    property bool shown: true
+    property bool animateClose: true
+    property real reveal: 0
     property bool engaged: false
     readonly property alias hovered: hover.hovered
     default property alias contentData: content.data
@@ -13,6 +16,26 @@ FocusScope {
     signal engageRequested()
     signal handoffRequested()
 
+    visible: shown || reveal > 0
+    enabled: shown
+    opacity: reveal
+    transform: Translate { y: -12 * (1 - root.reveal) }
+    Component.onCompleted: reveal = shown ? 1 : 0
+    onShownChanged: {
+        revealAnimation.stop()
+        if (!shown && !animateClose) reveal = 0
+        else {
+            revealAnimation.to = shown ? 1 : 0
+            revealAnimation.restart()
+        }
+    }
+    NumberAnimation {
+        id: revealAnimation
+        target: root
+        property: "reveal"
+        duration: root.shown ? 180 : 140
+        easing.type: root.shown ? Easing.OutCubic : Easing.InCubic
+    }
     clip: true
 
     HoverHandler { id: hover }
