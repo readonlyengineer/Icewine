@@ -245,32 +245,40 @@ def effective(state, themes):
 
 
 def publish(config, files):
-    current = config / "icewine/current"
-    if current.exists() and not current.is_symlink():
-        raise ValueError(f"refusing to replace non-link: {current}")
     root = config / "icewine/rendered"
+    if root.is_symlink():
+        raise ValueError(f"refusing symlinked render directory: {root}")
     root.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256("".join(f"{name}\0{files[name]}\0" for name in sorted(files)).encode()).hexdigest()
-    destination = root / digest
-    if not destination.exists():
-        temporary = Path(tempfile.mkdtemp(prefix=".render-", dir=root))
-        try:
-            for name, contents in files.items():
-                (temporary / name).write_text(contents, encoding="utf-8")
-                (temporary / name).chmod(0o444)
+    fd = os.open(root / ".publish.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        current = config / "icewine/current"
+        if current.exists() and not current.is_symlink():
+            raise ValueError(f"refusing to replace non-link: {current}")
+        digest = hashlib.sha256("".join(f"{name}\0{files[name]}\0" for name in sorted(files)).encode()).hexdigest()
+        destination = root / digest
+        if not destination.exists():
+            temporary = Path(tempfile.mkdtemp(prefix=".render-", dir=root))
             try:
-                temporary.rename(destination)
-            except OSError as error:
-                if error.errno not in (errno.EEXIST, errno.ENOTEMPTY):
-                    raise
-        finally:
-            if temporary.exists():
-                shutil.rmtree(temporary)
-    if not destination.is_dir() or any((destination / name).read_text(encoding="utf-8") != contents
-                                        for name, contents in files.items()):
-        raise ValueError(f"rendered theme files were modified: {destination}")
-    # Old content-addressed generations remain recoverable; prune only with a dedicated lifecycle policy.
-    atomic_link(current, destination)
+                for name, contents in files.items():
+                    (temporary / name).write_text(contents, encoding="utf-8")
+                    (temporary / name).chmod(0o444)
+                try:
+                    temporary.rename(destination)
+                except OSError as error:
+                    if error.errno not in (errno.EEXIST, errno.ENOTEMPTY):
+                        raise
+            finally:
+                if temporary.exists():
+                    shutil.rmtree(temporary)
+        if not destination.is_dir() or any((destination / name).read_text(encoding="utf-8") != contents
+                                            for name, contents in files.items()):
+            raise ValueError(f"rendered theme files were modified: {destination}")
+        atomic_link(current, destination)
+        for previous in root.iterdir():
+            if (previous != destination and re.fullmatch(r"[0-9a-f]{64}", previous.name)
+                    and previous.is_dir() and not previous.is_symlink()):
+                shutil.rmtree(previous)
 
 
 def managed_link(path, config):

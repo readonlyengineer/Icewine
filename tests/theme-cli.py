@@ -357,19 +357,31 @@ with tempfile.TemporaryDirectory() as temporary:
     module = types.ModuleType("icewine_theme")
     module.__file__ = str(script)
     importlib.machinery.SourceFileLoader(module.__name__, str(script)).exec_module(module)
-    # Force both publishers past the existence check before the real rename.
     concurrent_config = root / "concurrent-config"
+    module.publish(concurrent_config, {"palette.json": "old\n"})
+    rendered = concurrent_config / "icewine/rendered"
+    old_generation = (concurrent_config / "icewine/current").resolve()
+    unrelated = rendered / "user-files"
+    unrelated.mkdir()
+    external = root / "external-render"
+    external.mkdir()
+    (external / "keep").write_text("user data")
+    (rendered / ("f" * 64)).symlink_to(external, target_is_directory=True)
     barrier = threading.Barrier(2)
-    rename = Path.rename
-    def simultaneous_rename(path, destination):
-        if path.name.startswith(".render-"):
-            barrier.wait(timeout=5)
-        return rename(path, destination)
-    with mock.patch.object(Path, "rename", simultaneous_rename), ThreadPoolExecutor(max_workers=2) as publishers:
-        jobs = [publishers.submit(module.publish, concurrent_config, {"palette.json": "{}\n"}) for _ in range(2)]
+    def simultaneous_publish(contents):
+        barrier.wait(timeout=5)
+        module.publish(concurrent_config, {"palette.json": contents})
+    with ThreadPoolExecutor(max_workers=2) as publishers:
+        jobs = [publishers.submit(simultaneous_publish, contents) for contents in ("first\n", "second\n")]
         for job in jobs:
             job.result(timeout=10)
-    assert (concurrent_config / "icewine/current/palette.json").read_text() == "{}\n"
+    current = concurrent_config / "icewine/current"
+    assert (current / "palette.json").read_text() in {"first\n", "second\n"}
+    assert not old_generation.exists()
+    assert [path for path in rendered.iterdir() if path.is_dir() and not path.is_symlink()
+            and path != unrelated] == [current.resolve()]
+    assert unrelated.is_dir() and (external / "keep").read_text() == "user data"
+    previous = current.resolve()
     with mock.patch.object(Path, "rename", side_effect=PermissionError(errno.EACCES, "denied")):
         try:
             module.publish(concurrent_config, {"palette.json": "changed\n"})
@@ -377,6 +389,7 @@ with tempfile.TemporaryDirectory() as temporary:
             pass
         else:
             raise AssertionError("publication must propagate non-collision errors")
+    assert current.resolve() == previous and (current / "palette.json").is_file()
     # User-data masks override exported launchers, survive unchanged init, and
     # retire on opt-out without removing edited files or unrelated symlinks.
     mask_root = root / "mask-home"
