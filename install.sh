@@ -19,7 +19,7 @@ package_list=$(makepkg --packagelist)
 packages=()
 while IFS= read -r package; do
     case "${package##*/}" in
-        icewine-sddm-*|*-debug-*) ;;
+        *-debug-*) ;;
         icewine-cachyos-fish-*)
             if [[ $distro == cachyos ]]; then packages+=("$package"); fi ;;
         icewine-*) packages+=("$package") ;;
@@ -30,5 +30,16 @@ if (( ${#packages[@]} == 0 )); then
     exit 1
 fi
 sudo pacman -U "${packages[@]}"
+sudo install -d -m0755 -o "$(id -u)" -g "$(id -g)" /var/lib/icewine/sddm
+cat > "$build_dir/sddm.conf" <<'EOF'
+[General]
+DisplayServer=x11
+InputMethod=qtvirtualkeyboard
+[Theme]
+Current=icewine
+EOF
+sudo install -Dm644 "$build_dir/sddm.conf" /etc/sddm.conf.d/90-icewine.conf
 icewine init
-printf '\nInstalled. From a TTY, run: icewine-session\n'
+sudo systemctl enable sddm.service
+sudo systemctl set-default graphical.target
+printf '\nInstalled. Reboot when ready, then select Icewine in SDDM. TTY launch: icewine-session\n'

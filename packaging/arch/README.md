@@ -2,8 +2,9 @@
 
 Native desktop packaging is experimental. Package production is checked separately
 from installed Arch/CachyOS sessions; neither target is hardware-qualified yet.
-Use the host's existing login manager and retain a working fallback desktop.
-Icewine does not configure users, login shells, hardware permissions or host services.
+The installer configures SDDM; keep TTY recovery and any fallback desktop available.
+Icewine does not configure users, login shells, hardware permissions or other
+host services.
 
 On the target, enable Multilib for native Steam. From a committed Icewine checkout,
 run as your normal desktop user:
@@ -13,13 +14,16 @@ bash install.sh
 ```
 
 The installer performs a full system upgrade, installs `base-devel` and `python`,
-builds the committed revision in a temporary directory and installs Icewine.
+builds the committed revision in a temporary directory and installs Icewine and
+its SDDM theme.
 On CachyOS it also installs Fish integration; Arch shells remain user-managed.
 Pacman still prompts for administrator approval. The upstream Yazi mount source
-is fixed and checksum-verified. SDDM theming remains a separate optional setup.
+is fixed and checksum-verified.
 
-Launch from a logged-in TTY with `icewine-session`, or select **Icewine** in an
-existing login manager. The installer runs init but does not start the session.
+Reboot when ready, then select **Icewine** in SDDM. The installer enables SDDM and
+graphical boot without starting or restarting the greeter. An existing display
+manager service alias must be disabled before enabling SDDM. You can also launch
+from a logged-in TTY with `icewine-session`.
 Keep the host's PipeWire/WirePlumber, logind, polkit, UDisks, UPower and power
 profiles services available. Networking controls require NetworkManager;
 Bluetooth controls require BlueZ. Device/backlight/i2c permissions remain host policy.
@@ -40,18 +44,18 @@ Ordinary Arch users manage their own shells. On CachyOS, the installer includes 
 host/user greeting and prompt functions and `STARSHIP_CONFIG`; it never changes
 your login shell. NixOS retains its existing Bash/ble.sh integration.
 
-For an existing SDDM host, optionally install `icewine-sddm`. An administrator
-must create `/var/lib/icewine/sddm` owned by the desktop user, mode 0755, and select
-`Current=icewine` under `[Theme]` in an SDDM configuration file. Set
-`InputMethod=qtvirtualkeyboard` under `[General]`. Icewine publishes only a theme
-ID to `/var/lib/icewine/sddm/theme.ini`; the login screen uses packaged palettes.
-This shared selection supports one desktop user; use a fixed login-screen theme
-or revisit ownership if multiple users need to publish. Keep the previous SDDM
-selection available for recovery.
+The installer selects the theme and Qt virtual keyboard in
+`/etc/sddm.conf.d/90-icewine.conf`, using SDDM's X11 greeter. Icewine sessions use
+Wayland. Existing settings in `/etc/sddm.conf` take precedence over this snippet;
+remove conflicting theme/input-method/display-server settings if needed.
+Icewine publishes a theme ID to `/var/lib/icewine/sddm/theme.ini`, in a directory
+owned by the installing desktop user; the login screen uses packaged palettes.
+This shared selection supports one desktop user.
 
 To remove Icewine, first log into the fallback desktop, restore any selected SDDM
-theme and remove the optional packages and `icewine` with `pacman -R`. User
-configuration, theme state and wallpaper data are retained; back them up before
+theme, remove `/etc/sddm.conf.d/90-icewine.conf`, and remove the Icewine packages
+with `pacman -R`. User configuration, theme state and wallpaper data are retained;
+back them up before
 manually removing them. No uninstall hook deletes user files.
 
 Installed login/logout, unlock, sleep/resume, portals, controls, screenshots,

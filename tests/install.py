@@ -33,6 +33,10 @@ elif name == "makepkg" and args == ["-sf"]:
 elif name == "makepkg" and args == ["--packagelist"]:
     for name in ("icewine", "icewine-cachyos-fish", "icewine-sddm", "icewine-debug", "icewine-cachyos-fish-debug"):
         print(str(Path.cwd() / "packages with spaces" / (name + "-0.1-1-x86_64.pkg.tar.zst")))
+elif name == "sudo" and args[:2] == ["install", "-Dm644"]:
+    Path(os.environ["INSTALL_TEST_SDDM"]).write_text(Path(args[-2]).read_text())
+elif name == "sudo" and args == ["systemctl", "enable", "sddm.service"] and os.environ.get("INSTALL_TEST_ENABLE_FAIL"):
+    sys.exit(1)
 elif name == "sudo" and args[1] == "-Syu" and os.environ.get("INSTALL_TEST_FAIL"):
     sys.exit(1)
 ''')
@@ -41,8 +45,9 @@ elif name == "sudo" and args[1] == "-Syu" and os.environ.get("INSTALL_TEST_FAIL"
         (commands / name).symlink_to(fake)
     env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
                INSTALL_TEST_LOG=str(log), INSTALL_TEST_GIT=shutil.which("git"),
-               INSTALL_TEST_SOURCE=str(source))
-    for distro, expected in (("arch", ["icewine"]), ("cachyos", ["icewine", "icewine-cachyos-fish"])):
+               INSTALL_TEST_SOURCE=str(source), INSTALL_TEST_SDDM=str(root / "sddm.conf"))
+    for distro, expected in (("arch", ["icewine", "icewine-sddm"]),
+                             ("cachyos", ["icewine", "icewine-cachyos-fish", "icewine-sddm"])):
         log.unlink(missing_ok=True)
         result = subprocess.run(["bash", str(checkout / "install.sh")],
                                 env=dict(env, INSTALL_TEST_DISTRO=distro), capture_output=True, text=True)
@@ -51,7 +56,13 @@ elif name == "sudo" and args[1] == "-Syu" and os.environ.get("INSTALL_TEST_FAIL"
         assert ["makepkg", "-sf"] in calls
         install = next(call for call in calls if call[:3] == ["sudo", "pacman", "-U"])
         assert [Path(path).name.removesuffix("-0.1-1-x86_64.pkg.tar.zst") for path in install[3:]] == expected
-        assert calls[-1] == ["icewine", "init"]
+        directory = ["sudo", "install", "-d", "-m0755", "-o", "1000", "-g", "1000", "/var/lib/icewine/sddm"]
+        config = next(call for call in calls if call[:3] == ["sudo", "install", "-Dm644"])
+        assert config[-1] == "/etc/sddm.conf.d/90-icewine.conf"
+        assert (root / "sddm.conf").read_text() == "[General]\nDisplayServer=x11\nInputMethod=qtvirtualkeyboard\n[Theme]\nCurrent=icewine\n"
+        assert calls.index(directory) < calls.index(config) < calls.index(["icewine", "init"])
+        assert calls[-2:] == [["sudo", "systemctl", "enable", "sddm.service"],
+                              ["sudo", "systemctl", "set-default", "graphical.target"]]
         assert not Path(install[3]).parent.parent.exists(), "Temporary build directory was retained"
     for failure in ({"INSTALL_TEST_UID": "0"}, {"INSTALL_TEST_FAIL": "1"}):
         log.unlink()
@@ -60,4 +71,11 @@ elif name == "sudo" and args[1] == "-Syu" and os.environ.get("INSTALL_TEST_FAIL"
         assert result.returncode != 0
         calls = [json.loads(line) for line in log.read_text().splitlines()]
         assert not any(call[0] in ("git", "makepkg", "icewine") for call in calls)
-print("PASS: Arch/CachyOS selection, literal paths, cleanup and failure-before-build")
+    log.unlink()
+    result = subprocess.run(["bash", str(checkout / "install.sh")],
+                            env=dict(env, INSTALL_TEST_DISTRO="cachyos", INSTALL_TEST_ENABLE_FAIL="1"),
+                            capture_output=True, text=True)
+    assert result.returncode != 0
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert calls[-1] == ["sudo", "systemctl", "enable", "sddm.service"]
+print("PASS: Arch/CachyOS selection, SDDM setup, cleanup and failure handling")
