@@ -2,6 +2,7 @@
 """Manage only Icewine's user-owned theme files and selection."""
 
 import os
+import platform
 import errno
 import fcntl
 import hashlib
@@ -146,6 +147,11 @@ def render_theme(assets, palette_file, level="high"):
         raise ValueError(f"invalid theme data: {palette_file}")
     values = dict(palette)
     values["themeId"] = palette_file.stem
+    try:
+        distro = platform.freedesktop_os_release().get("ID", "")
+    except OSError:
+        distro = ""
+    values["osGlyph"] = {"nixos": "\uf313", "arch": "\uf303", "cachyos": "\uf385"}.get(distro, "\uf31a")
     # Smoky glass: 88% dark base and 12% black; no added accent tint.
     values["terminalBackground"] = "".join(
         f"{round(int(values['backgroundDark'][i:i + 2], 16) * 0.88):02x}"

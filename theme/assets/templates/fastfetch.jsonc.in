@@ -9,7 +9,7 @@
   "modules": [
     "break",
     { "type": "custom", "format": "{#38;2;@highlightSgr@}󰟀   System{#}" },
-    { "type": "os", "key": "├─   OS", "keyColor": "#@muted@" },
+    { "type": "os", "key": "├─ @osGlyph@  OS", "keyColor": "#@muted@" },
     { "type": "host", "key": "├─ 󰌢  Host", "keyColor": "#@muted@" },
     { "type": "command", "key": "├─ 󰌽  Kernel", "keyColor": "#@muted@", "shell": "/bin/sh", "text": @kernelCommandJson@ },
     @nixpkgsRow@

@@ -259,6 +259,17 @@ with tempfile.TemporaryDirectory() as temporary:
     module = types.ModuleType("icewine_theme")
     module.__file__ = str(script)
     importlib.machinery.SourceFileLoader(module.__name__, str(script)).exec_module(module)
+    for release, glyph in (({"ID": "nixos"}, "\uf313"), ({"ID": "arch"}, "\uf303"),
+                           ({"ID": "cachyos", "ID_LIKE": "arch"}, "\uf385"),
+                           ({"ID": "other", "ID_LIKE": "arch"}, "\uf31a"), ({}, "\uf31a")):
+        with mock.patch.object(module.platform, "freedesktop_os_release", return_value=release):
+            report = json.loads(module.render_theme(assets, assets / "themes/dracula.json")["fastfetch.jsonc"])
+        assert next(item["key"] for item in report["modules"]
+                    if isinstance(item, dict) and item.get("type") == "os") == f"├─ {glyph}  OS"
+    with mock.patch.object(module.platform, "freedesktop_os_release", side_effect=OSError("unavailable")):
+        report = json.loads(module.render_theme(assets, assets / "themes/dracula.json")["fastfetch.jsonc"])
+    assert next(item["key"] for item in report["modules"]
+                if isinstance(item, dict) and item.get("type") == "os") == "├─ \uf31a  OS"
     concurrent_config = root / "concurrent-config"
     module.publish(concurrent_config, {"palette.json": "old\n"})
     rendered = concurrent_config / "icewine/rendered"
