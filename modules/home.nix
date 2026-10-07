@@ -48,6 +48,7 @@ let
   '';
   defaults = pkgs.runCommand "icewine-default-files" { } ''
     mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/config/nvim $out/data
+    install -Dm644 ${../theme/assets/flower-branch.png} $out/data/wallpapers/default.jpg
     cp ${../hyprland}/hyprland.lua $out/config/hypr/hyprland.lua
     printf '%s\n' '# Shared session defaults first; add your overrides below.' '. "''${XDG_CONFIG_HOME:-$HOME/.config}/uwsm/icewine/env"' > $out/config/uwsm/env
     cp ${../nvim/init.lua} $out/config/nvim/init.lua

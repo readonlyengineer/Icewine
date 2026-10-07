@@ -34,6 +34,7 @@ package_icewine() {
   local share="$pkgdir/usr/share/icewine" defaults="$pkgdir/usr/share/icewine/defaults/config"
   install -d "$share" "$defaults" "$share/defaults/data" "$pkgdir/usr/bin" "$pkgdir/usr/lib/icewine"
   cp -r theme/assets "$share/theme"
+  install -Dm644 theme/assets/flower-branch.png "$share/defaults/data/wallpapers/default.jpg"
   install -d "$share/quickshell"
   cp -r quickshell/{modules,adapters,theme} "$share/quickshell/"
   cp quickshell/Desktop.qml "$share/quickshell/"
