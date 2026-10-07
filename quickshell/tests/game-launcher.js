@@ -7,7 +7,8 @@ const source = fs.readFileSync(path.join(__dirname, "../modules/GameLauncher.qml
 const deckShell = fs.readFileSync(path.join(__dirname, "../Handheld.qml"), "utf8")
 const launcher = require("../modules/GameLauncher.js")
 
-function qmlFunction(name) {
+function qmlFunction(name, sourceText = source) {
+    const source = sourceText
     const start = source.indexOf(`    function ${name}(`)
     assert.notEqual(start, -1, `Missing QML function ${name}`)
     const brace = source.indexOf("{", start)
@@ -65,6 +66,7 @@ const steamQueries = []
 const steamCommands = []
 const steamRoot = {
     handheld: true,
+    steamEnabled: true,
     steamLaunching: false,
     steamSplashVisible: false,
     steamSplashScreen: "",
@@ -208,3 +210,15 @@ assert.match(source, /RenderReady[\s\S]*onReady: root\.startSteamProcess\(\)/,
     "The host splash renders before Gamescope starts")
 assert.doesNotMatch(source, /GAMESCOPE_FOCUSED_APP_GFX|icewine-steam-session/,
     "Steam readiness no longer waits for an inner X11 property")
+
+steamRoot.steamEnabled = false
+assert.equal(JSON.parse(steamContext.launchSteamGamescope()).ok, false,
+    "Disabled Steam must reject launches before querying or focusing a session")
+const shortcutsSource = fs.readFileSync(path.join(__dirname, "../modules/topbar/SteamShortcuts.qml"), "utf8")
+const shortcutsContext = vm.createContext({root: {steamEnabled: false}, reader: {running: false}})
+vm.runInContext(qmlFunction("refresh", shortcutsSource), shortcutsContext)
+shortcutsContext.refresh()
+assert.equal(shortcutsContext.reader.running, false, "Disabled Steam must not discover shortcuts")
+shortcutsContext.root.steamEnabled = true
+shortcutsContext.refresh()
+assert.equal(shortcutsContext.reader.running, true)

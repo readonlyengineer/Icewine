@@ -7,8 +7,6 @@ let
     modules = [ self.nixosModules.default {
       users.users.demo.isNormalUser = true;
       users.users.other.isNormalUser = true;
-      nixpkgs.config.allowUnfreePredicate = pkg:
-        builtins.elem (nixpkgs.lib.getName pkg) [ "steam" "steam-unwrapped" "steam-run" ];
       services.icewine = {
         enable = true;
         user = "demo";
@@ -35,12 +33,31 @@ let
   }).config;
   steamDesktop = (desktopSystem.extendModules {
     modules = [ {
-      services.icewine.steam.enable = true;
-      services.icewine.applications.steam = [ "flatpak" "run" "com.valvesoftware.Steam" ];
+      services.icewine.steam = "flatpak";
     } ];
   }).config;
-  steamOptOut = (handheldSystem.extendModules {
-    modules = [ { services.icewine.steam.enable = false; } ];
+  steamOptOut = (desktopSystem.extendModules {
+    modules = [ { services.icewine.steam = "none"; } ];
+  }).config;
+  incompatibleHandheld = method: (handheldSystem.extendModules {
+    modules = [ { services.icewine.steam = method; } ];
+  }).config;
+  hostPolicySystem = desktopSystem.extendModules {
+    modules = [ {
+      nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "host-proprietary";
+      nixpkgs.config.allowUnfreePackages = [ "host-listed" ];
+    } ];
+  };
+  independent = (desktopSystem.extendModules {
+    modules = [ {
+      services.icewine.steam = "none";
+      programs.steam.enable = true;
+      nixpkgs.config.allowUnfreePackages = [ "steam" "steam-unwrapped" ];
+      services.flatpak = {
+        enable = true;
+        packages = [ "com.valvesoftware.Steam" "org.videolan.VLC" ];
+      };
+    } ];
   }).config;
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
   sddmTheme = pkgs.callPackage ../sddm { };
@@ -104,11 +121,39 @@ in {
     assert desktop.services.icewine.applications.steam == [ "steam" ];
     assert handheld.services.icewine.applications.steam == [ "steam" "-gamepadui" ];
     assert steamDesktop.services.icewine.applications.steam == [ "flatpak" "run" "com.valvesoftware.Steam" ];
-    assert !(hasPackage "icewine-steam-desktop-entries" desktop.users.users.demo.packages);
+    assert hasPackage "icewine-steam-desktop-entries" desktop.users.users.demo.packages;
     assert !(hasPackage "icewine-steam-desktop-entries" steamOptOut.users.users.demo.packages);
     assert hasPackage "icewine-steam-desktop-entries" steamDesktop.users.users.demo.packages;
     assert hasPackage "icewine-steam-desktop-entries" handheld.users.users.demo.packages;
     assert !steamDesktop.programs.steam.enable;
+    assert desktop.services.icewine.steam == "native";
+    assert lib.all desktopSystem.options.services.icewine.steam.type.check [ "native" "flatpak" "none" ];
+    assert !desktopSystem.options.services.icewine.steam.type.check "invalid";
+    assert lib.elem "ICEWINE_STEAM_ENABLED=false" steamOptOut.systemd.user.services.icewine.serviceConfig.Environment;
+    assert lib.elem "ICEWINE_STEAM_ENABLED=true" desktop.systemd.user.services.icewine.serviceConfig.Environment;
+    assert desktop.nixpkgs.config.allowUnfreePackages == [ "steam" "steam-unwrapped" ];
+    assert !(desktop.nixpkgs.config.allowUnfree or false);
+    assert steamDesktop.services.flatpak.enable;
+    assert map (package: package.appId) steamDesktop.services.flatpak.packages == [ "com.valvesoftware.Steam" ];
+    assert lib.any (remote: remote.name == "flathub") steamDesktop.services.flatpak.remotes;
+    assert !steamDesktop.services.flatpak.uninstallUnmanaged;
+    assert (steamDesktop.nixpkgs.config.allowUnfreePackages or [ ]) == [ ];
+    assert steamOptOut.services.icewine.applications.steam == [ ];
+    assert !steamOptOut.programs.steam.enable;
+    assert !steamOptOut.services.flatpak.enable;
+    assert (steamOptOut.nixpkgs.config.allowUnfreePackages or [ ]) == [ ];
+    assert (disabled.nixpkgs.config.allowUnfreePackages or [ ]) == [ ];
+    assert !(hasPackage "icewine-steam" steamOptOut.environment.systemPackages);
+    assert !(hasPackage "icewine-steam" disabled.environment.systemPackages);
+    assert hasPackage "icewine-steam" desktop.environment.systemPackages;
+    assert hostPolicySystem.config.nixpkgs.config.allowUnfreePredicate { name = "host-proprietary"; };
+    assert lib.elem "host-listed" hostPolicySystem.config.nixpkgs.config.allowUnfreePackages;
+    assert lib.elem "steam" hostPolicySystem.config.nixpkgs.config.allowUnfreePackages;
+    assert builtins.isString hostPolicySystem.pkgs.steam.drvPath;
+    assert independent.programs.steam.enable;
+    assert map (package: package.appId) independent.services.flatpak.packages == [ "com.valvesoftware.Steam" "org.videolan.VLC" ];
+    assert lib.all (method: lib.any (a: !a.assertion && lib.hasInfix "handheld integration requires" a.message)
+      (incompatibleHandheld method).assertions) [ "flatpak" "none" ];
     assert desktop.programs.firefox.enable;
     assert desktop.programs.firefox.nativeMessagingHosts.packages == [ ];
     assert unmanaged.programs.firefox.nativeMessagingHosts.packages == [ ];
@@ -147,7 +192,7 @@ in {
     assert handheld.services.icewine.authenticationRequired;
     assert handheld.programs.steam.enable;
     assert handheld.services.inputplumber.enable;
-    assert !desktop.programs.steam.enable;
+    assert desktop.programs.steam.enable;
     assert !desktop.services.inputplumber.enable;
     assert !disabled.programs.steam.enable;
     assert !disabled.services.inputplumber.enable;

@@ -11,6 +11,7 @@ Scope {
 
     required property var compositor
     property bool handheld: false
+    readonly property bool steamEnabled: Quickshell.env("ICEWINE_STEAM_ENABLED") !== "false"
 
     readonly property var monitors: compositor.getMonitors().map(monitor => monitorRecord(monitor))
     property var monitorCapabilities: ({})
@@ -143,6 +144,8 @@ Scope {
     }
 
     function launchSteamGamescope() {
+        if (!root.steamEnabled)
+            return JSON.stringify({ok: false, error: "Steam integration is disabled"}, null, 2)
         var decision = Launcher.steamLaunchAction(compositor.toplevels, root.steamLaunching)
         if (decision.action === "focus") {
             root.finishSteamLaunch()

@@ -117,7 +117,7 @@ let
       export ICEWINE_THEME_ASSETS=${../theme/assets}
       ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_THEME_FILE=/var/lib/icewine/sddm/theme.ini"}
       export ICEWINE_DEFAULT_FILES=${defaults}
-      export ICEWINE_STEAM_MASK_FILE=${if cfg.steam.enable then steamMask else ""}
+      export ICEWINE_STEAM_MASK_FILE=${if (cfg.steam != "none") then steamMask else ""}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
       export ICEWINE_THEME_GIT_ENABLE=${if cfg.shell.starship.git.enable then "true" else "false"}
@@ -206,6 +206,7 @@ in {
         "ICEWINE_THEME_IDS=${lib.concatStringsSep ":" themeIds}"
         "ICEWINE_THEME_POLICY=${if cfg.theme == null then "" else cfg.theme}"
         "ICEWINE_AUTHENTICATION_REQUIRED=${if cfg.authenticationRequired then "true" else "false"}"
+        "ICEWINE_STEAM_ENABLED=${if cfg.steam != "none" then "true" else "false"}"
         "ICEWINE_BATTERY_ENABLED=${if cfg.battery.enable then "true" else "false"}"
         "PATH=/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness steamShortcuts ]}"
         "QT_IM_MODULE=qtvirtualkeyboard"

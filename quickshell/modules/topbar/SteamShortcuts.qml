@@ -4,9 +4,10 @@ import Quickshell.Io
 Scope {
     id: root
     property var commands: []
+    readonly property bool steamEnabled: Quickshell.env("ICEWINE_STEAM_ENABLED") !== "false"
 
     function refresh() {
-        if (!reader.running)
+        if (root.steamEnabled && !reader.running)
             reader.running = true
     }
 

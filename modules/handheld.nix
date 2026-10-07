@@ -73,7 +73,10 @@ in {
   ];
 
 
-    programs.steam.enable = true;
+    assertions = [ {
+      assertion = cfg.steam == "native";
+      message = "Icewine handheld integration requires services.icewine.steam = \"native\".";
+    } ];
     services.inputplumber.enable = true;
     services.pipewire.alsa.support32Bit = true;
     environment.systemPackages = [ pkgs.squeekboard

@@ -11,6 +11,7 @@ let
     editor = cfg.applications.editor;
     browser = cfg.applications.browser;
     file-manager = cfg.applications.fileManager;
+  } // lib.optionalAttrs (cfg.steam != "none") {
     steam = cfg.applications.steam;
   };
   launchers = lib.mapAttrsToList (name: argv: pkgs.writeShellScriptBin "icewine-${name}" ''
@@ -42,8 +43,10 @@ in {
     };
     handheld.enable = lib.mkEnableOption "handheld shell, controller routing and on-screen keyboard";
     browser.enable = lib.mkEnableOption "Icewine's native Firefox browser" // { default = true; };
-    steam.enable = lib.mkEnableOption "Steam (Gamescope) launcher and ordinary Steam entry hiding" // {
-      default = cfg.handheld.enable;
+    steam = lib.mkOption {
+      type = lib.types.enum [ "native" "flatpak" "none" ];
+      default = "native";
+      description = "Steam installation method, or none to disable Steam integration.";
     };
     authenticationRequired = lib.mkOption {
       type = lib.types.bool;
@@ -82,7 +85,10 @@ in {
       terminalExecute = command "Terminal command prefix for running an application." (cfg.applications.terminal ++ [ "-e" ]);
       editor = command "Editor command used by compositor bindings." [ "nano" ];
       fileManager = command "File manager command." (if cfg.fileManager.preset == "yazi" then [ "icewine-terminal-exec" "yazi" ] else [ "xdg-open" "." ]);
-      steam = command "Steam command used inside Gamescope; installed by handheld mode or the host." ([ "steam" ] ++ lib.optional cfg.handheld.enable "-gamepadui");
+      steam = command "Steam command used inside Gamescope."
+        (if cfg.steam == "flatpak" then [ "flatpak" "run" "com.valvesoftware.Steam" ]
+         else if cfg.steam == "native" then [ "steam" ] ++ lib.optional cfg.handheld.enable "-gamepadui"
+         else [ ]);
     };
     defaultFiles = {
       config = lib.mkOption {
@@ -116,6 +122,15 @@ in {
           (builtins.attrNames cfg.defaultFiles.config);
         message = "Icewine implementation is packaged; use Settings.qml or native entry-point overrides for customization."; }
     ];
+
+    programs.steam.enable = lib.mkIf (cfg.steam == "native") true;
+    nixpkgs.config.allowUnfreePackages = lib.optionals (cfg.steam == "native")
+      [ "steam" "steam-unwrapped" ];
+    services.flatpak = lib.mkIf (cfg.steam == "flatpak") {
+      enable = true;
+      remotes = [ { name = "flathub"; location = "https://dl.flathub.org/repo/flathub.flatpakrepo"; } ];
+      packages = [ "com.valvesoftware.Steam" ];
+    };
 
     programs.hyprland = { enable = true; withUWSM = true; };
     programs.dconf.enable = lib.mkIf cfg.gtk.enable (lib.mkDefault true);
