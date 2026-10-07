@@ -75,8 +75,8 @@ local function move_to_populated_workspace_edge(kind)
 end
 
 -- Application launchers
-hl.bind(mainMod .. " + SPACE",  hl.dsp.exec_cmd(apps.terminal))
-hl.bind(mainMod .. " + RETURN", topbar("launcher"))
+hl.bind(mainMod .. " + RETURN", hl.dsp.exec_cmd(apps.terminal))
+hl.bind(mainMod .. " + SPACE",  topbar("launcher"))
 hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd(apps.file_manager))
 hl.bind(mainMod .. " + B",      hl.dsp.exec_cmd(apps.browser))
 hl.bind(mainMod .. " + L",      hl.dsp.exec_cmd(apps.lock))
