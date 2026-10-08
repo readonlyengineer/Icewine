@@ -72,6 +72,23 @@ let
   hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
   steamShortcuts = import ../quickshell/tools/steam-shortcuts.nix { inherit pkgs; };
 in {
+  pcmanfm = pkgs.runCommandCC "icewine-pcmanfm-checks" {
+    nativeBuildInputs = [ pkgs.pkg-config ];
+    buildInputs = [ pkgs.qt6.qtbase ];
+  } ''
+    export HOME=$TMPDIR/home XDG_CONFIG_HOME=$TMPDIR/home/.config XDG_DATA_HOME=$TMPDIR/home/.local/share XDG_STATE_HOME=$TMPDIR/home/.local/state
+    export QT_QPA_PLATFORM=offscreen QT_PLUGIN_PATH=${pkgs.qt6.qtbase}/lib/qt-6/plugins
+    mkdir -p "$HOME" "$XDG_STATE_HOME/icewine"
+    c++ ${./pcmanfm-theme.cpp} $(pkg-config --cflags --libs Qt6Widgets) -o pcmanfm-theme
+    for theme in catppuccin-mocha catppuccin-latte; do
+      printf '%s\n' "$theme" > "$XDG_STATE_HOME/icewine/theme"
+      ${icewineCli}/bin/icewine init pcmanfm-qt
+      ./pcmanfm-theme -style Fusion -stylesheet "$XDG_CONFIG_HOME/pcmanfm-qt/icewine/style.qss" "$XDG_CONFIG_HOME/icewine/current"
+      ${pkgs.lxqt.pcmanfm-qt}/bin/pcmanfm-qt -style Fusion -stylesheet "$XDG_CONFIG_HOME/pcmanfm-qt/icewine/style.qss" --profile icewine --help > help
+      grep -F -- '--profile' help
+    done
+    touch "$out"
+  '';
   brightness = pkgs.runCommand "icewine-brightness-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.python3 pkgs.shellcheck pkgs.jq pkgs.util-linux ];
   } ''
@@ -221,6 +238,8 @@ in {
       test ! -e "$XDG_CONFIG_HOME/nvim/icewine"
       grep -Fx 'include "${pkgs.nano}/share/nano/*.nanorc"' "$XDG_CONFIG_HOME/nano/nanorc"
       for syntax in sh python c; do test -s ${pkgs.nano}/share/nano/$syntax.nanorc; done
+      cmp ${../pcmanfm-qt/settings.conf} "$XDG_CONFIG_HOME/pcmanfm-qt/icewine/settings.conf"
+      test -L "$XDG_CONFIG_HOME/pcmanfm-qt/icewine/style.qss"
       cmp ${../bash}/bashrc "$XDG_CONFIG_HOME/icewine/shell/icewine/bashrc"
       cmp ${../session}/env "$XDG_CONFIG_HOME/uwsm/icewine/env"
       cmp ${../hypridle}/defaults.conf "$XDG_CONFIG_HOME/hypr/hypridle-icewine/defaults.conf"

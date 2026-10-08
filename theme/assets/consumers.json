@@ -9,6 +9,13 @@
     "yazi/theme.toml": "yazi-theme.toml",
     "yazi/keymap.toml": "yazi-keymap.toml"
   },
-  "fastfetch": { "fastfetch/config.jsonc": "fastfetch.jsonc" },
-  "starship": { "starship.toml": "starship.toml" }
+  "fastfetch": {
+    "fastfetch/config.jsonc": "fastfetch.jsonc"
+  },
+  "starship": {
+    "starship.toml": "starship.toml"
+  },
+  "pcmanfm-qt": {
+    "pcmanfm-qt/icewine/style.qss": "pcmanfm-qt.qss"
+  }
 }

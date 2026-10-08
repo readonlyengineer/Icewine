@@ -1,0 +1,4 @@
+set -e
+# Start the shared editable defaults and current palette before opening a window.
+icewine init pcmanfm-qt
+exec pcmanfm-qt --profile icewine -style Fusion -stylesheet "${XDG_CONFIG_HOME:-$HOME/.config}/pcmanfm-qt/icewine/style.qss" -- "$@"

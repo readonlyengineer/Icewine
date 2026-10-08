@@ -22,6 +22,11 @@ installed editors; an existing default is kept when accepting the prompt. Neovim
 uses its own configuration, with no Icewine plugins. With both terminals installed, Kitty is preferred. Neither leaves terminal commands to your own PATH overrides;
 Icewine's terminal actions need a configured terminal. Alacritty does not receive
 Icewine's Kitty theme configuration.
+PCManFM-Qt is included as an additional graphical application; Yazi remains the
+default. Open **PCManFM-Qt (Icewine)** to use the terminal palette without a terminal
+emulator. Existing PCManFM-Qt instances must exit before launching the themed
+entry or picking up a new theme; settings use its separate `icewine` profile.
+See the main README for styling overrides and reset behaviour.
 On CachyOS it also installs Fish integration; Arch shells remain user-managed.
 Pacman still prompts for administrator approval. The upstream Yazi mount source
 is fixed and checksum-verified.

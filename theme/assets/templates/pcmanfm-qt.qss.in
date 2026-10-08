@@ -1,0 +1,17 @@
+QWidget {
+    background-color: #@terminalBackground@;
+    color: #@foreground@;
+    selection-background-color: #@selection@;
+    selection-color: #@pcmanSelectionFg@;
+}
+QAbstractItemView { alternate-background-color: #@surface@; }
+QHeaderView::section, QToolBar, QStatusBar { background-color: #@surface@; }
+QMenu::item:selected {
+    background-color: #@selection@;
+    color: #@pcmanSelectionFg@;
+}
+QPushButton:hover, QToolButton:hover, QTabBar::tab:selected {
+    background-color: #@surface@;
+    border: 1px solid #@highlight@;
+}
+QLineEdit:focus { border: 1px solid #@highlight@; }

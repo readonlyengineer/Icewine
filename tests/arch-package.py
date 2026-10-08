@@ -29,7 +29,7 @@ with open(os.environ["ICEWINE_TEST_LOG"], "a") as log:
 sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
 ''')
     fake.chmod(0o755)
-    for name in ("kitty", "alacritty", "firefox", "nano", "nvim", "steam", "icewine", "uwsm"):
+    for name in ("kitty", "alacritty", "firefox", "nano", "nvim", "pcmanfm-qt", "steam", "icewine", "uwsm"):
         (commands / name).symlink_to(fake)
     for name in ("terminal", "terminal-exec", "browser", "editor", "file-manager", "steam"):
         (commands / ("icewine-" + name)).symlink_to(native / "command")
@@ -48,6 +48,16 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
         argument = "literal argument; $(must-not-run)"
         assert run("icewine-" + name, argument).returncode == 0
         assert json.loads(log.read_text().splitlines()[-1]) == expected + [argument]
+    pcman = [shutil.which("bash"), str(source / "scripts/pcmanfm-qt"), argument]
+    before = len(log.read_text().splitlines())
+    assert subprocess.run(pcman, env=env, capture_output=True).returncode == 0
+    assert [json.loads(line) for line in log.read_text().splitlines()[before:]] == [
+        ["icewine", "init", "pcmanfm-qt"],
+        ["pcmanfm-qt", "--profile", "icewine", "-style", "Fusion", "-stylesheet",
+         str(root / "config/pcmanfm-qt/icewine/style.qss"), "--", argument]]
+    before = len(log.read_text().splitlines())
+    assert subprocess.run(pcman, env=dict(env, ICEWINE_TEST_FAIL="1"), capture_output=True).returncode != 0
+    assert [json.loads(line) for line in log.read_text().splitlines()[before:]] == [["icewine", "init", "pcmanfm-qt"]]
     editor_file = root / "config/icewine/editor"
     editor_file.parent.mkdir(parents=True)
     for selection in ("nvim\n", "nvim"):
@@ -99,6 +109,7 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
     assert run("icewine-terminal").returncode != 0
     assert run("icewine-terminal-exec", "icewine-editor", argument).returncode != 0
     assert json.loads(log.read_text().splitlines()[-1])[0] == "notify-send"
+    assert subprocess.run(pcman, env=env, capture_output=True).returncode == 0
     env["PATH"] = str(commands) + ":" + os.environ["PATH"]
     before = log.read_text()
     assert run("icewine-steam", ICEWINE_STEAM_ENABLED="false").returncode != 0
@@ -131,6 +142,7 @@ if len(sys.argv) == 2:
 desktop, fish, sddm = map(Path, sys.argv[2:5])
 payload = desktop / "usr/share/icewine"
 defaults = payload / "defaults"
+assert (desktop / "usr/share/applications/icewine-pcmanfm-qt.desktop").read_bytes() == (native / "icewine-pcmanfm-qt.desktop").read_bytes()
 assert (desktop / "usr/share/applications/icewine-editor.desktop").read_bytes() == (native / "icewine-editor.desktop").read_bytes()
 assert not (defaults / "home").exists(), "Native package must not replace login shells"
 assert not (desktop / "usr/share/fish").exists(), "Arch's shell must remain user-managed"
@@ -167,6 +179,10 @@ with tempfile.TemporaryDirectory() as directory:
     associations.write_text("[Default Applications]\ntext/plain=my-editor.desktop;\ntext/html=my-browser.desktop;\n")
     subprocess.run(init, env=env, check=True, stdout=subprocess.DEVNULL)
     assert (config / "quickshell/icewine/Desktop.qml").is_file()
+    assert (config / "pcmanfm-qt/icewine/style.qss").is_file()
+    pcman_settings = config / "pcmanfm-qt/icewine/settings.conf"
+    assert pcman_settings.read_bytes() == (source / "pcmanfm-qt/settings.conf").read_bytes()
+    pcman_settings.write_text(pcman_settings.read_text() + "# user setting\n")
     assert not (config / "nvim/init.lua").exists()
     assert not (config / "nvim/icewine").exists()
     assert (config / "nano/nanorc").read_text() == 'include "/usr/share/nano/*.nanorc"\n'
@@ -175,6 +191,7 @@ with tempfile.TemporaryDirectory() as directory:
     edited.write_text(edited.read_text() + "# user override\n")
     subprocess.run(init, env=env, check=True, stdout=subprocess.DEVNULL)
     assert edited.read_text().endswith("# user override\n")
+    assert pcman_settings.read_text().endswith("# user setting\n")
     subprocess.run([sys.executable, str(desktop / "usr/lib/icewine/theme"), "reset"],
                    env=env, check=True, stdout=subprocess.DEVNULL)
     assert selection.read_text() == "nvim\n"

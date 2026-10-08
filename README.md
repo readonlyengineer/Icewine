@@ -183,6 +183,7 @@ This schema was chosen to allow Icewine to update with the package, but still gi
 | Hyprland | `hypr/hyprland.lua` |
 | Quickshell | `quickshell/shell.qml`; settings in `quickshell/config/Settings.qml` |
 | Kitty | `kitty/kitty.conf` |
+| PCManFM-Qt | `pcmanfm-qt/icewine/settings.conf`; appearance in `style.qss` |
 | Nano | `nano/nanorc` |
 | Bash | `icewine/shell/bashrc`, `profile`, `bash_profile`; home dot files link here |
 | UWSM | `uwsm/env` |
@@ -275,6 +276,15 @@ flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flath
 flatpak install --user flathub io.github.kolunmi.Bazaar
 ```
 
+PCManFM-Qt is also available from **PCManFM-Qt (Icewine)** or `icewine-pcmanfm-qt`;
+Yazi remains the default file manager. It uses the terminal palette with opaque Qt
+widgets and Papirus as the icon fallback. Existing icon preferences remain available.
+After changing themes, finish file operations, exit all PCManFM-Qt instances and
+reopen the themed entry. A running ordinary instance or daemon also needs to exit:
+PCManFM-Qt shares one session instance across profiles. Use the ordinary application
+entry or a PATH override for unmanaged styling. `icewine reset pcmanfm-qt` backs up
+edited settings/stylesheet before restoring defaults.
+
 ### Alternative applications and opt-outs
 
 Set replacement commands and disable the corresponding preset together:
@@ -313,7 +323,8 @@ These options belong under `services.icewine`:
 | --- | --- |
 | `browser.enable = false;` | Firefox and its web/PDF defaults |
 | `terminal.preset = null;` | Kitty installation and configuration; set `applications.terminal` and `applications.terminalExecute` |
-| `fileManager.preset = null;` | Yazi and its GVfs default; set `applications.fileManager` if needed |
+| `fileManager.preset = null;` | Yazi; set `applications.fileManager` if needed |
+| `fileManager.pcmanfmQt.enable = false;` | Additional PCManFM-Qt application and defaults; GVfs remains while Yazi or PCManFM-Qt is enabled |
 | `login.enable = false;` | SDDM; provide your own login method |
 | `gtk.enable = false;` | GTK styling |
 | `idle.enable = false;` | Automatic idle locking and sleep; manual locking remains |

@@ -60,6 +60,7 @@ with tempfile.TemporaryDirectory() as temporary:
         "config/hypr/hyprland.lua": b"default hypr\n",
         "config/user-dirs.locale": b"default locale\n",
         "config/nvim/init.lua": b"default nvim\n", # Host-supplied default.
+        "config/pcmanfm-qt/icewine/settings.conf": (assets.parent.parent / "pcmanfm-qt/settings.conf").read_bytes(),
         "config/nano/nanorc": b'include "/packaged/nano/*.nanorc"\n',
         "config/kitty/kitty.conf": b"default kitty\n",
         "config/icewine/shell/bashrc": b"# default bash\n",
@@ -385,6 +386,21 @@ with tempfile.TemporaryDirectory() as temporary:
     assert any(path.read_text() == "user locale edit\n" for path in
                (state / "icewine").glob("defaults-reset-*/config/user-dirs.locale"))
     # Every shipped palette renders app-native files, including light mode.
+    pcman_settings = config / "pcmanfm-qt/icewine/settings.conf"
+    pcman_settings.write_text(pcman_settings.read_text() + "# user setting\n")
+    style = config / "pcmanfm-qt/icewine/style.qss"
+    style.unlink()
+    style.write_text("/* user stylesheet */\n")
+    assert run("init", "pcmanfm-qt").returncode == 0
+    assert style.read_text() == "/* user stylesheet */\n"
+    assert pcman_settings.read_text().endswith("# user setting\n")
+    assert run("reset", "pcmanfm-qt").returncode == 0
+    assert style.is_symlink()
+    assert any(path.read_text() == "/* user stylesheet */\n" for path in
+               (state / "icewine").glob("reset-*/pcmanfm-qt/icewine/style.qss"))
+    assert any(path.read_text().endswith("# user setting\n") for path in
+               (state / "icewine").glob("defaults-reset-*/config/pcmanfm-qt/icewine/settings.conf"))
+    pcman_settings.write_text(pcman_settings.read_text() + "# user setting\n")
     kitty_entry.write_text("user Kitty theme edit\n")
     for theme_id, background, appearance in [
         ("tokyo-night", "13131a", "dark"), ("dracula", "1d1e27", "dark"),
@@ -401,6 +417,14 @@ with tempfile.TemporaryDirectory() as temporary:
         current = config / "icewine/current"
         assert f"background #{background}\n" in (current / "kitty.conf").read_text()
         assert kitty_entry.read_text() == "user Kitty theme edit\n"
+        assert pcman_settings.read_text().endswith("# user setting\n")
+        qss = (current / "pcmanfm-qt.qss").read_text()
+        palette = json.loads((assets / "themes" / (theme_id + ".json")).read_text())
+        assert f"background-color: #{background};" in qss
+        assert f"selection-background-color: #{palette['selection']};" in qss
+        selected_fg = re.search(r"selection-color: #([0-9a-f]{6});", qss).group(1)
+        assert contrast(palette["selection"], selected_fg) >= 4.5
+        assert (config / "pcmanfm-qt/icewine/style.qss").read_text() == qss
         assert f'vim.opt.background = "{appearance}"' in nvim_theme.read_text()
         assert f'dark: "{appearance}"' in (current / "Palette.qml").read_text()
         assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}" in (current / "gtk-settings.ini").read_text()
