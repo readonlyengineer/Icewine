@@ -57,7 +57,6 @@ in {
     };
     idle.enable = lib.mkEnableOption "Icewine idle locking and suspend" // { default = true; };
     battery.enable = lib.mkEnableOption "Icewine Quickshell battery warnings and sleep" // { default = true; };
-    fileManager.pcmanfmQt.enable = lib.mkEnableOption "the additional themed PCManFM-Qt application" // { default = true; };
     fileManager.preset = lib.mkOption {
       type = lib.types.nullOr (lib.types.enum [ "yazi" ]);
       default = "yazi";
@@ -146,7 +145,7 @@ in {
     services.upower.enable = lib.mkDefault true;
     services.power-profiles-daemon.enable = lib.mkDefault true;
 
-    services.gvfs.enable = lib.mkIf (cfg.fileManager.preset == "yazi" || cfg.fileManager.pcmanfmQt.enable) (lib.mkDefault true);
+    services.gvfs.enable = lib.mkIf (cfg.fileManager.preset == "yazi") (lib.mkDefault true);
 
     fonts.packages = with pkgs; [ dejavu_fonts nerd-fonts.jetbrains-mono noto-fonts-color-emoji ];
     environment.systemPackages = (with pkgs; [

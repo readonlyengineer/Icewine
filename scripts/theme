@@ -45,7 +45,6 @@ TEMPLATES = {
     "Theme.lua": "Theme.lua.in",
     "kitty.conf": "kitty.conf.in",
     "nvim-theme.lua": "nvim-theme.lua.in",
-    "pcmanfm-qt.qss": "pcmanfm-qt.qss.in",
     "kitty-base.conf": "kitty-base.conf",
     "gtk.css": "gtk.css.in",
     "gtk4.css": "gtk4.css.in",
@@ -160,7 +159,6 @@ def render_theme(assets, palette_file, level="high"):
         for i in (0, 2, 4)
     )
     values["kittyOpacity"], values["inactiveOpacity"] = TRANSPARENCY[level]
-    values["pcmanSelectionFg"] = gtk_foreground(values["selection"], values["foreground"])
     values["gtkPreferDark"] = "0" if values["appearance"] == "light" else "1"
     for role, source in (("gtkAccentFg", "highlight"), ("gtkSuccessFg", "success"),
                          ("gtkWarningFg", "caution"), ("gtkErrorFg", "error")):

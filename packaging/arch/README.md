@@ -23,11 +23,6 @@ Icewine plugins. If multiple terminals are installed manually, Kitty is preferre
 then Alacritty, then Ghostty. Neither leaves terminal commands to your own PATH
 overrides; Icewine's terminal actions need a configured terminal. Alacritty and
 Ghostty do not receive Icewine's Kitty theme configuration.
-PCManFM-Qt is included as an additional graphical application; Yazi remains the
-default. Open **PCManFM-Qt (Icewine)** to use the terminal palette without a terminal
-emulator. Existing PCManFM-Qt instances must exit before launching the themed
-entry or picking up a new theme; settings use its separate `icewine` profile.
-See the main README for styling overrides and reset behaviour.
 On CachyOS it also installs Fish integration; Arch shells remain user-managed.
 Pacman still prompts for administrator approval. The upstream Yazi mount source
 is fixed and checksum-verified.
@@ -57,7 +52,7 @@ printf 'nvim\n' > "${XDG_CONFIG_HOME:-$HOME/.config}/icewine/editor" # or nano/v
 `icewine-editor` and the **Icewine Text Editor** Open With entry use that selection;
 the graphical entry uses Icewine's selected terminal. Existing `EDITOR`/`VISUAL`
 overrides are respected by terminal tools such as Yazi. Choose the entry in
-PCManFM-Qt's Open With dialogue and remember it for a file type if wanted; Icewine
+your file manager's Open With dialogue and remember it for a file type if wanted; Icewine
 does not replace your MIME defaults, including HTML/browser associations. Use `~/.config/uwsm/env-icewine` for session overrides, such as
 `export ICEWINE_STEAM_ENABLED=false`. Host authentication policy is included through
 `/etc/pam.d/system-auth`; no login manager or PAM bypass is installed.

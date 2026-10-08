@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=PCManFM-Qt (Icewine)
-Comment=Browse files with Icewine's palette
-Exec=icewine-pcmanfm-qt %U
-Icon=system-file-manager
-Terminal=false
-Categories=System;FileTools;FileManager;
-MimeType=inode/directory;

@@ -19,7 +19,6 @@ let
   enabledConsumers = {
     gtk = cfg.gtk.enable;
     yazi = cfg.fileManager.preset == "yazi";
-    pcmanfm-qt = cfg.fileManager.pcmanfmQt.enable;
     fastfetch = cfg.shell.enable && cfg.shell.fastfetch.enable;
     starship = cfg.shell.enable && cfg.shell.starship.enable;
   };
@@ -134,11 +133,6 @@ let
     runtimeInputs = [ wallpaperSelector themeCli ];
     text = builtins.readFile ../scripts/icewine;
   };
-  pcmanfm = pkgs.writeShellApplication {
-    name = "icewine-pcmanfm-qt";
-    runtimeInputs = [ icewineCli pkgs.lxqt.pcmanfm-qt ];
-    text = builtins.readFile ../scripts/pcmanfm-qt;
-  };
   monitorCapabilities = pkgs.writeShellApplication {
     name = "icewine-monitor-capabilities";
     runtimeInputs = [ pkgs.edid-decode ];
@@ -152,8 +146,7 @@ let
   };
 in {
   config = lib.mkIf cfg.enable {
-    users.users.${cfg.user}.packages = [ icewineCli ]
-      ++ lib.optional cfg.fileManager.pcmanfmQt.enable pcmanfm;
+    users.users.${cfg.user}.packages = [ icewineCli ];
     systemd.services.icewine-init = {
       description = "Prepare Icewine user defaults before login";
       wantedBy = [ "multi-user.target" ];

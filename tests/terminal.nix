@@ -17,16 +17,10 @@ let
       idle.enable = false;
       battery.enable = false;
       fileManager.preset = null;
-      fileManager.pcmanfmQt.enable = false;
       terminal.preset = null;
       shell.enable = false;
       applications.terminal = [ "custom-terminal" ];
     };
-  };
-  pcmanOnly = example {
-    services.icewine.fileManager.preset = null;
-    services.icewine.terminal.preset = null;
-    services.icewine.applications.terminal = [ "custom-terminal" ];
   };
   bareShell = example {
     services.icewine.shell = {
@@ -61,15 +55,6 @@ assert lib.elem pkgs.fastfetch defaults.users.users.demo.packages;
 assert lib.elem pkgs.blesh defaults.users.users.demo.packages;
 assert lib.elem pkgs.starship defaults.users.users.demo.packages;
 assert defaults.services.gvfs.enable;
-assert defaults.services.icewine.fileManager.pcmanfmQt.enable;
-assert lib.all (check: check.assertion || !(lib.hasPrefix "Icewine " check.message)) pcmanOnly.assertions;
-assert pcmanOnly.services.gvfs.enable;
-assert lib.elem pkgs.lxqt.pcmanfm-qt pcmanOnly.users.users.demo.packages;
-assert !(lib.elem pkgs.kitty pcmanOnly.users.users.demo.packages);
-assert !(lib.elem pkgs.yazi pcmanOnly.users.users.demo.packages);
-assert lib.elem pkgs.lxqt.pcmanfm-qt defaults.users.users.demo.packages;
-assert !(lib.elem pkgs.lxqt.pcmanfm-qt unmanaged.users.users.demo.packages);
-assert !(unmanaged.services.icewine.defaultFiles.config ? "pcmanfm-qt/icewine/settings.conf");
 assert defaults.services.icewine.applications.fileManager == [ "icewine-terminal-exec" "yazi" ];
 assert defaults.services.icewine.applications.editor == [ "nano" ];
 assert defaults.environment.sessionVariables.EDITOR == "icewine-editor";

@@ -3,8 +3,6 @@ let
   cfg = config.services.icewine;
   editorEntry = (pkgs.writeTextDir "share/applications/icewine-editor.desktop"
     (builtins.readFile ../packaging/arch/icewine-editor.desktop)).overrideAttrs { name = "icewine-editor-desktop-entry"; };
-  pcmanfmEntry = (pkgs.writeTextDir "share/applications/icewine-pcmanfm-qt.desktop"
-    (builtins.readFile ../packaging/arch/icewine-pcmanfm-qt.desktop)).overrideAttrs { name = "icewine-pcmanfm-desktop-entry"; };
   steamEntries = (pkgs.writeTextDir "share/applications/steam-gamescope.desktop" ''
     [Desktop Entry]
     Type=Application
@@ -27,17 +25,14 @@ in {
       '';
     };
     users.users.${cfg.user}.packages = lib.optionals (cfg.fileManager.preset == "yazi")
-      [ pkgs.yazi pkgs.ffmpegthumbnailer pkgs._7zz ]
-      ++ lib.optionals cfg.fileManager.pcmanfmQt.enable [ pkgs.lxqt.pcmanfm-qt pcmanfmEntry ] ++ [ editorEntry ] ++ lib.optional (cfg.steam != "none") steamEntries;
-    services.icewine.defaultFiles.config = lib.mkMerge [ (lib.mkIf cfg.fileManager.pcmanfmQt.enable {
-      "pcmanfm-qt/icewine/settings.conf" = ../pcmanfm-qt/settings.conf;
-    }) (lib.mkIf cfg.idle.enable {
+      [ pkgs.yazi pkgs.ffmpegthumbnailer pkgs._7zz ] ++ [ editorEntry ] ++ lib.optional (cfg.steam != "none") steamEntries;
+    services.icewine.defaultFiles.config = lib.mkIf cfg.idle.enable {
       "hypr/hypridle.conf" = pkgs.writeText "icewine-hypridle.conf" ''
         # Shared idle defaults first; add your general settings below.
         # Listener blocks append; edit a local full copy to replace shipped timers.
         source = hypridle-icewine/defaults.conf
       '';
-    }) ];
+    };
     systemd.user.services.hypridle = lib.mkIf cfg.idle.enable {
       description = "Icewine idle locking and suspend";
       partOf = [ "graphical-session.target" ];

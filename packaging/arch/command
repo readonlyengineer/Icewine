@@ -36,7 +36,6 @@ case ${0##*/} in
       exit 127
     fi
     exec "$editor" "$@" ;;
-  icewine-pcmanfm-qt) exec bash /usr/lib/icewine/pcmanfm-qt "$@" ;;
   icewine-file-manager) exec icewine-terminal-exec yazi "$@" ;;
   icewine-steam)
     [[ ${ICEWINE_STEAM_ENABLED:-true} != false ]] || exit 1
