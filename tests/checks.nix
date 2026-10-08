@@ -217,7 +217,10 @@ in {
       for name in adapters/Hyprland.qml modules/Topbar.qml theme/qmldir theme/Palette.qml Desktop.qml Handheld.qml deck/DeckOverlay.qml deck/DeckMenu.js; do
         cmp ${../quickshell}/"$name" "$implementation/quickshell/$name"
       done
-      cmp ${../nvim}/defaults.lua "$XDG_CONFIG_HOME/nvim/icewine/defaults.lua"
+      test ! -e "$XDG_CONFIG_HOME/nvim/init.lua"
+      test ! -e "$XDG_CONFIG_HOME/nvim/icewine"
+      grep -Fx 'include "${pkgs.nano}/share/nano/*.nanorc"' "$XDG_CONFIG_HOME/nano/nanorc"
+      for syntax in sh python c; do test -s ${pkgs.nano}/share/nano/$syntax.nanorc; done
       cmp ${../bash}/bashrc "$XDG_CONFIG_HOME/icewine/shell/icewine/bashrc"
       cmp ${../session}/env "$XDG_CONFIG_HOME/uwsm/icewine/env"
       cmp ${../hypridle}/defaults.conf "$XDG_CONFIG_HOME/hypr/hypridle-icewine/defaults.conf"

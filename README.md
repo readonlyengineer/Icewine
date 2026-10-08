@@ -183,7 +183,7 @@ This schema was chosen to allow Icewine to update with the package, but still gi
 | Hyprland | `hypr/hyprland.lua` |
 | Quickshell | `quickshell/shell.qml`; settings in `quickshell/config/Settings.qml` |
 | Kitty | `kitty/kitty.conf` |
-| Neovim | `nvim/init.lua` |
+| Nano | `nano/nanorc` |
 | Bash | `icewine/shell/bashrc`, `profile`, `bash_profile`; home dot files link here |
 | UWSM | `uwsm/env` |
 | Hypridle | `hypr/hypridle.conf` |
@@ -287,9 +287,20 @@ services.icewine = {
 };
 ```
 
-Install the replacement applications in your host configuration. The Neovim
-starter is installed by `icewine init nvim`; plugins and language servers must
-also be supplied by the host.
+Nano is the default editor, with syntax colouring from its installed package.
+An existing `~/.nanorc` takes precedence over `nano/nanorc`; keep your settings
+and add its packaged syntax includes there if needed.
+
+Install replacement applications and their configuration in your host. Neovim
+plugins and language servers are host-owned; Icewine generates the optional
+`icewine/current/nvim-theme.lua` appearance adapter and signals themed instances.
+
+On existing installs, `icewine init` retires unchanged tracked Neovim defaults
+and preserves edited or untracked files. Before using a host Neovim configuration,
+back up preserved `nvim/init.lua` and any old `nvim/icewine` link, then move
+conflicting files aside and run `icewine init nvim`. To keep personal edits, merge
+them with your host configuration instead. `icewine reset nano` and host-supplied
+`icewine reset nvim` save replaced files under the Icewine state directory.
 
 These options belong under `services.icewine`:
 

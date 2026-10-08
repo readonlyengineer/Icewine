@@ -36,6 +36,7 @@ APPS = {
     "wallpapers": (),
     "user-dirs": (),
     "nvim": (),
+    "nano": (),
     "kitty": (),
     "bash": (),
 }
@@ -420,7 +421,7 @@ def implementation_preflight(defaults, config, state, app=None):
     previous = entry.get("files", {}) if entry.get("root") == str(config) else {}
     # Immutable package identities cannot be adopted from unknown files or
     # an ownership record that lacks the current implementation boundary.
-    for name in ("gtk-3.0/icewine", "gtk-4.0/icewine", "hypr/icewine", "hypr/hypridle-icewine", "nvim/icewine", "kitty/icewine",
+    for name in ("gtk-3.0/icewine", "gtk-4.0/icewine", "hypr/icewine", "hypr/hypridle-icewine", "kitty/icewine",
                  "uwsm/icewine", "icewine/shell/icewine", "quickshell/icewine"):
         shipped, path = source / name, config / name
         if not shipped.is_symlink() or (app and static_app("config", Path(name)) != app):

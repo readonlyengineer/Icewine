@@ -59,7 +59,8 @@ with tempfile.TemporaryDirectory() as temporary:
     for relative, contents in {
         "config/hypr/hyprland.lua": b"default hypr\n",
         "config/user-dirs.locale": b"default locale\n",
-        "config/nvim/init.lua": b"default nvim\n",
+        "config/nvim/init.lua": b"default nvim\n", # Host-supplied default.
+        "config/nano/nanorc": b'include "/packaged/nano/*.nanorc"\n',
         "config/kitty/kitty.conf": b"default kitty\n",
         "config/icewine/shell/bashrc": b"# default bash\n",
         "config/icewine/shell/profile": b"# default profile\n",
@@ -155,6 +156,15 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (config / "nvim/init.lua").read_text() == "default nvim\n"
     assert any(path.read_text() == "user nvim edit\n" for path in
                (state / "icewine").glob("defaults-reset-*/config/nvim/init.lua"))
+    nano = config / "nano/nanorc"
+    nano.write_text(nano.read_text() + "# user nano edit\n")
+    (defaults / "config/nano/nanorc").write_text('include "/updated/nano/*.nanorc"\n')
+    assert run("init", "nano").returncode == 0
+    assert nano.read_text().endswith("# user nano edit\n")
+    assert run("reset", "nano").returncode == 0
+    assert nano.read_text() == 'include "/updated/nano/*.nanorc"\n'
+    assert any(path.read_text().endswith("# user nano edit\n") for path in
+               (state / "icewine").glob("defaults-reset-*/config/nano/nanorc"))
     kitty_entry.write_text("user Kitty entry edit\n")
     assert run("init").returncode == 0
     assert kitty_entry.read_text() == "user Kitty entry edit\n"
@@ -1218,3 +1228,34 @@ with tempfile.TemporaryDirectory() as temp:
         else:
             raise AssertionError("An unconfirmed native refresh reported success")
 print("autofullscreen native refresh preserves Lua state and rejects unconfirmed IPC checks passed")
+
+# Move a tracked immutable Neovim link to host-owned editable defaults safely.
+for edited in (False, True):
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        defaults, config, data, state = (root / name for name in ("defaults", "config", "data", "state"))
+        (defaults / "config/nvim").mkdir(parents=True)
+        (defaults / "data").mkdir()
+        old = root / "implementation"
+        old.mkdir()
+        (old / "defaults.lua").write_text("old defaults\n")
+        entry = defaults / "config/nvim/init.lua"
+        entry.write_text("host entry\n")
+        link = defaults / "config/nvim/icewine"
+        link.symlink_to(old)
+        module.install_defaults(str(defaults), config, data, state, False, None)
+        if edited:
+            (config / "nvim/init.lua").write_text("user edits\n")
+        link.unlink()
+        link.mkdir()
+        (link / "defaults.lua").write_text("host defaults\n")
+        module.install_defaults(str(defaults), config, data, state, False, None)
+        assert not (config / "nvim/icewine").is_symlink()
+        assert (config / "nvim/icewine/defaults.lua").read_text() == "host defaults\n"
+        assert (config / "nvim/init.lua").read_text() == ("user edits\n" if edited else "host entry\n")
+        assert any(path.is_symlink() for path in state.glob("defaults-update-*/config/nvim/icewine"))
+        # Retirement must retain user edits when the host/default disappears.
+        entry.unlink()
+        module.install_defaults(str(defaults), config, data, state, False, None)
+        assert (config / "nvim/init.lua").exists() == edited
+print("PASS: Neovim host relocation and edited obsolete entry preservation")

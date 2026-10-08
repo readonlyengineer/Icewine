@@ -26,7 +26,7 @@ let
     lib.optionals (!enabledConsumers.${name}) (builtins.attrNames files)
   ) themeConsumers);
   implementation = pkgs.runCommand "icewine-implementation" { } ''
-    mkdir -p $out/quickshell/deck $out/hyprland/modules $out/kitty $out/nvim $out/bash $out/uwsm $out/hypridle $out/gtk
+    mkdir -p $out/quickshell/deck $out/hyprland/modules $out/kitty $out/bash $out/uwsm $out/hypridle $out/gtk
     cp -r ${../quickshell}/adapters ${../quickshell}/modules ${../quickshell}/theme $out/quickshell/
     cp ${../quickshell}/deck/DeckOverlay.qml ${../quickshell}/deck/DeckMenu.js $out/quickshell/deck/
     cp ${../quickshell}/Desktop.qml ${../quickshell}/Handheld.qml $out/quickshell/
@@ -36,7 +36,6 @@ let
       printf '\nrequire("icewine.modules.Deck")\n' >> $out/hyprland/icewine.lua
     ''}
     cp ${../theme/assets/templates}/kitty-base.conf $out/kitty/defaults.conf
-    cp ${../nvim}/defaults.lua $out/nvim/defaults.lua
     cp ${../bash}/bashrc $out/bash/bashrc
     cp ${../session}/env $out/uwsm/env
     cp ${../hypridle}/defaults.conf $out/hypridle/defaults.conf
@@ -47,11 +46,12 @@ let
     cp ${../hyprland}/deck/Deck.lua $out/hyprland/modules/
   '';
   defaults = pkgs.runCommand "icewine-default-files" { } ''
-    mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/config/nvim $out/data
+    mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/data
     install -Dm644 ${../theme/assets/flower-branch.png} $out/data/wallpapers/default.jpg
+    mkdir -p $out/config/nano
+    printf 'include "${pkgs.nano}/share/nano/*.nanorc"\n' > $out/config/nano/nanorc
     cp ${../hyprland}/hyprland.lua $out/config/hypr/hyprland.lua
     printf '%s\n' '# Shared session defaults first; add your overrides below.' '. "''${XDG_CONFIG_HOME:-$HOME/.config}/uwsm/icewine/env"' > $out/config/uwsm/env
-    cp ${../nvim/init.lua} $out/config/nvim/init.lua
     ${lib.optionalString cfg.gtk.enable ''
       for version in 3 4; do
         mkdir -p $out/config/gtk-$version.0
@@ -87,7 +87,6 @@ let
     ln -s ${implementation}/quickshell $out/config/quickshell/icewine
     ln -s ${implementation}/hyprland $out/config/hypr/icewine
     ${lib.optionalString cfg.idle.enable "ln -s ${implementation}/hypridle $out/config/hypr/hypridle-icewine"}
-    ln -s ${implementation}/nvim $out/config/nvim/icewine
     ln -s ${implementation}/uwsm $out/config/uwsm/icewine
     ${lib.optionalString cfg.gtk.enable ''
       ln -s ${implementation}/gtk $out/config/gtk-3.0/icewine
@@ -108,7 +107,7 @@ let
   };
   themeCli = pkgs.writeShellApplication {
     name = "icewine-theme";
-    runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd pkgs.glib quickshell pkgs.neovim ]
+    runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd pkgs.glib quickshell ]
       ++ lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty
       ++ lib.optional (cfg.fileManager.preset == "yazi") pkgs.yazi
       ++ lib.optional config.services.flatpak.enable pkgs.flatpak;

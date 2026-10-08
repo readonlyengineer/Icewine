@@ -119,7 +119,9 @@ with tempfile.TemporaryDirectory() as directory:
     init = [sys.executable, str(desktop / "usr/lib/icewine/theme"), "init"]
     subprocess.run(init, env=env, check=True, stdout=subprocess.DEVNULL)
     assert (config / "quickshell/icewine/Desktop.qml").is_file()
-    assert (config / "nvim/icewine/defaults.lua").is_file()
+    assert not (config / "nvim/init.lua").exists()
+    assert not (config / "nvim/icewine").exists()
+    assert (config / "nano/nanorc").read_text() == 'include "/usr/share/nano/*.nanorc"\n'
     assert (config / "yazi/plugins/mount.yazi/sudo.lua").is_file()
     edited = config / "kitty/kitty.conf"
     edited.write_text(edited.read_text() + "# user override\n")
