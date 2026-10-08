@@ -25,9 +25,10 @@ package_icewine() {
     xdg-utils xdg-user-dirs hyprshot hyprpicker libnotify libcanberra brightnessctl ddcutil v4l-utils
     pam pambase polkit upower power-profiles-daemon pipewire wireplumber
     ttf-dejavu ttf-jetbrains-mono-nerd noto-fonts-emoji adwaita-icon-theme adwaita-cursors
-    papirus-icon-theme dconf gsettings-desktop-schemas firefox kitty neovim 'yazi>=26.5.6'
+    papirus-icon-theme dconf gsettings-desktop-schemas firefox neovim 'yazi>=26.5.6'
     ffmpegthumbnailer 7zip gvfs udisks2 steam gamescope)
-  optdepends=('networkmanager: network controls' 'bluez: Bluetooth controls'
+  optdepends=('kitty: terminal emulator' 'alacritty: alternative terminal emulator'
+    'networkmanager: network controls' 'bluez: Bluetooth controls'
     'sudo: upstream Yazi mount authorization fallback')
   backup=(etc/pam.d/icewine)
   cd "$srcdir/icewine"

@@ -15,7 +15,11 @@ bash install.sh
 
 The installer performs a full system upgrade, installs `base-devel` and `python`,
 builds the committed revision in a temporary directory and installs Icewine and
-its SDDM theme.
+its SDDM theme. It offers Kitty, Alacritty, Both or Neither; unselected terminal
+packages are removed with normal Pacman dependency checks and confirmation.
+Both prefers Kitty. Neither leaves terminal commands to your own PATH overrides;
+Icewine's terminal actions need a configured terminal. Alacritty does not receive
+Icewine's Kitty theme configuration.
 On CachyOS it also installs Fish integration; Arch shells remain user-managed.
 Pacman still prompts for administrator approval. The upstream Yazi mount source
 is fixed and checksum-verified.

@@ -26,7 +26,7 @@ with open(os.environ["ICEWINE_TEST_LOG"], "a") as log:
 sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
 ''')
     fake.chmod(0o755)
-    for name in ("kitty", "firefox", "nano", "steam", "icewine", "uwsm"):
+    for name in ("kitty", "alacritty", "firefox", "nano", "steam", "icewine", "uwsm"):
         (commands / name).symlink_to(fake)
     for name in ("terminal", "terminal-exec", "browser", "editor", "file-manager", "steam"):
         (commands / ("icewine-" + name)).symlink_to(native / "command")
@@ -43,6 +43,21 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
         argument = "literal argument; $(must-not-run)"
         assert run("icewine-" + name, argument).returncode == 0
         assert json.loads(log.read_text().splitlines()[-1]) == expected + [argument]
+    (commands / "kitty").unlink()
+    env["PATH"] = str(commands)
+    (commands / "bash").symlink_to(shutil.which("bash"))
+    for name, expected in {
+        "terminal": ["alacritty"], "terminal-exec": ["alacritty", "-e"],
+        "file-manager": ["alacritty", "-e", "yazi"],
+    }.items():
+        argument = "literal argument; $(must-not-run)"
+        assert run("icewine-" + name, argument).returncode == 0
+        assert json.loads(log.read_text().splitlines()[-1]) == expected + [argument]
+    (commands / "alacritty").unlink()
+    (commands / "notify-send").symlink_to(fake)
+    assert run("icewine-terminal").returncode != 0
+    assert json.loads(log.read_text().splitlines()[-1])[0] == "notify-send"
+    env["PATH"] = str(commands) + ":" + os.environ["PATH"]
     before = log.read_text()
     assert run("icewine-steam", ICEWINE_STEAM_ENABLED="false").returncode != 0
     assert log.read_text() == before

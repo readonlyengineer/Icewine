@@ -6,6 +6,17 @@ if [[ $(id -u) == 0 ]]; then
     exit 1
 fi
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+printf 'Terminals: 1) Kitty  2) Alacritty  3) Both  4) Neither\nUnselected terminals will be removed if installed.\n'
+while true; do
+    read -r -p 'Choose [1]: ' choice
+    case ${choice:-1} in
+        1) terminals=(kitty); unwanted=(alacritty); break ;;
+        2) terminals=(alacritty); unwanted=(kitty); break ;;
+        3) terminals=(kitty alacritty); unwanted=(); break ;;
+        4) terminals=(); unwanted=(kitty alacritty); break ;;
+        *) echo 'Choose 1, 2, 3 or 4.' >&2 ;;
+    esac
+done
 sudo pacman -Syu --needed base-devel python
 distro=$(python -c 'import platform; print(platform.freedesktop_os_release().get("ID", ""))')
 
@@ -30,6 +41,12 @@ if (( ${#packages[@]} == 0 )); then
     exit 1
 fi
 sudo pacman -U "${packages[@]}"
+if (( ${#terminals[@]} )); then sudo pacman -S --needed "${terminals[@]}"; fi
+remove=()
+for terminal in "${unwanted[@]}"; do
+    if pacman -Qq "$terminal" >/dev/null 2>&1; then remove+=("$terminal"); fi
+done
+if (( ${#remove[@]} )); then sudo pacman -R "${remove[@]}"; fi
 sudo install -d -m0755 -o "$(id -u)" -g "$(id -g)" /var/lib/icewine/sddm
 cat > "$build_dir/sddm.conf" <<'EOF'
 [General]

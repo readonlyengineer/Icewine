@@ -11,8 +11,15 @@ case ${0##*/} in
   icewine-wallpaper)
     export ICEWINE_WALLPAPER_VALIDATOR=/usr/share/icewine/quickshell/modules/WallpaperValidator.qml
     exec bash /usr/lib/icewine/wallpaper "$@" ;;
-  icewine-terminal) exec kitty "$@" ;;
-  icewine-terminal-exec) exec kitty -e "$@" ;;
+  icewine-terminal|icewine-terminal-exec)
+    if command -v kitty >/dev/null 2>&1; then terminal=kitty
+    elif command -v alacritty >/dev/null 2>&1; then terminal=alacritty
+    else
+      notify-send --app-name=Icewine 'No terminal installed' 'Install Kitty or Alacritty, or override Icewine terminal commands through PATH.'
+      exit 1
+    fi
+    [[ ${0##*/} != icewine-terminal-exec ]] || set -- -e "$@"
+    exec "$terminal" "$@" ;;
   icewine-browser) exec firefox "$@" ;;
   icewine-editor) exec nano "$@" ;;
   icewine-file-manager) exec icewine-terminal-exec yazi "$@" ;;
