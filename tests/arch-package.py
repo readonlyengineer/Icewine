@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Direct native launcher checks; pass makepkg roots to also check built payloads."""
 import json
+import configparser
+import shlex
 import os
 from pathlib import Path
 import shutil
@@ -17,6 +19,7 @@ with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     commands = root / "bin"
     commands.mkdir()
+    (commands / "bash").symlink_to(shutil.which("bash"))
     log = root / "calls.jsonl"
     fake = commands / "record"
     fake.write_text(f'#!{sys.executable}\n' + '''
@@ -26,12 +29,14 @@ with open(os.environ["ICEWINE_TEST_LOG"], "a") as log:
 sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
 ''')
     fake.chmod(0o755)
-    for name in ("kitty", "alacritty", "firefox", "nano", "steam", "icewine", "uwsm"):
+    for name in ("kitty", "alacritty", "firefox", "nano", "nvim", "steam", "icewine", "uwsm"):
         (commands / name).symlink_to(fake)
     for name in ("terminal", "terminal-exec", "browser", "editor", "file-manager", "steam"):
         (commands / ("icewine-" + name)).symlink_to(native / "command")
     env = dict(os.environ, PATH=str(commands) + ":" + os.environ["PATH"],
-               ICEWINE_TEST_LOG=str(log))
+               HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), ICEWINE_TEST_LOG=str(log))
+    env.pop("EDITOR", None)
+    env.pop("VISUAL", None)
     def run(name, *args, **extra):
         return subprocess.run([str(commands / name), *args], env=dict(env, **extra),
                               capture_output=True, text=True)
@@ -43,9 +48,45 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
         argument = "literal argument; $(must-not-run)"
         assert run("icewine-" + name, argument).returncode == 0
         assert json.loads(log.read_text().splitlines()[-1]) == expected + [argument]
+    editor_file = root / "config/icewine/editor"
+    editor_file.parent.mkdir(parents=True)
+    for selection in ("nvim\n", "nvim"):
+        editor_file.write_text(selection)
+        assert run("icewine-editor", argument).returncode == 0
+        assert json.loads(log.read_text().splitlines()[-1]) == ["nvim", argument]
+    desktop_entry = configparser.ConfigParser(interpolation=None)
+    desktop_entry.read(native / "icewine-editor.desktop")
+    entry = desktop_entry["Desktop Entry"]
+    assert entry["Terminal"] == "false" and "text/html" not in entry["MimeType"]
+    argv = shlex.split(entry["Exec"])
+    argv[-1:] = [argument]
+    assert run(*argv).returncode == 0
+    assert json.loads(log.read_text().splitlines()[-1]) == ["kitty", "-e", "icewine-editor", argument]
+    (commands / "nvim").unlink()
+    result = run("icewine-editor", argument, PATH=str(commands))
+    assert result.returncode == 127 and "nvim is not installed" in result.stderr
+    for invalid in ("", "nvim; must-not-run\n"):
+        editor_file.write_text(invalid)
+        before = log.read_text()
+        result = run("icewine-editor", argument)
+        assert result.returncode != 0 and "invalid editor" in result.stderr
+        assert log.read_text() == before
+    editor_file.write_text("nvim\n")
+    editor_file.chmod(0)
+    before = log.read_text()
+    result = run("icewine-editor", argument)
+    editor_file.chmod(0o600)
+    assert result.returncode != 0 and "invalid editor" in result.stderr
+    assert log.read_text() == before and editor_file.read_text() == "nvim\n"
+    editor_file.write_text("nano\n")
+    for overrides, expected in (({}, ("icewine-editor", "icewine-editor")),
+                                 ({"EDITOR": "my-editor", "VISUAL": "my-visual"}, ("my-editor", "my-visual"))):
+        result = subprocess.run(["bash", "-c", 'source "$1"; printf "%s\\n%s\\n" "$EDITOR" "$VISUAL"',
+                                 "session", str(source / "session/env")], env=dict(env, **overrides),
+                                capture_output=True, text=True)
+        assert result.returncode == 0 and tuple(result.stdout.splitlines()) == expected
     (commands / "kitty").unlink()
     env["PATH"] = str(commands)
-    (commands / "bash").symlink_to(shutil.which("bash"))
     for name, expected in {
         "terminal": ["alacritty"], "terminal-exec": ["alacritty", "-e"],
         "file-manager": ["alacritty", "-e", "yazi"],
@@ -56,6 +97,7 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
     (commands / "alacritty").unlink()
     (commands / "notify-send").symlink_to(fake)
     assert run("icewine-terminal").returncode != 0
+    assert run("icewine-terminal-exec", "icewine-editor", argument).returncode != 0
     assert json.loads(log.read_text().splitlines()[-1])[0] == "notify-send"
     env["PATH"] = str(commands) + ":" + os.environ["PATH"]
     before = log.read_text()
@@ -89,6 +131,7 @@ if len(sys.argv) == 2:
 desktop, fish, sddm = map(Path, sys.argv[2:5])
 payload = desktop / "usr/share/icewine"
 defaults = payload / "defaults"
+assert (desktop / "usr/share/applications/icewine-editor.desktop").read_bytes() == (native / "icewine-editor.desktop").read_bytes()
 assert not (defaults / "home").exists(), "Native package must not replace login shells"
 assert not (desktop / "usr/share/fish").exists(), "Arch's shell must remain user-managed"
 assert not (desktop / "etc/sddm.conf.d").exists(), "SDDM selection must remain optional"
@@ -117,6 +160,11 @@ with tempfile.TemporaryDirectory() as directory:
     for name in ("DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE"):
         env.pop(name, None)
     init = [sys.executable, str(desktop / "usr/lib/icewine/theme"), "init"]
+    (config / "icewine").mkdir(parents=True)
+    selection = config / "icewine/editor"
+    selection.write_text("nvim\n")
+    associations = config / "mimeapps.list"
+    associations.write_text("[Default Applications]\ntext/plain=my-editor.desktop;\ntext/html=my-browser.desktop;\n")
     subprocess.run(init, env=env, check=True, stdout=subprocess.DEVNULL)
     assert (config / "quickshell/icewine/Desktop.qml").is_file()
     assert not (config / "nvim/init.lua").exists()
@@ -127,6 +175,10 @@ with tempfile.TemporaryDirectory() as directory:
     edited.write_text(edited.read_text() + "# user override\n")
     subprocess.run(init, env=env, check=True, stdout=subprocess.DEVNULL)
     assert edited.read_text().endswith("# user override\n")
+    subprocess.run([sys.executable, str(desktop / "usr/lib/icewine/theme"), "reset"],
+                   env=env, check=True, stdout=subprocess.DEVNULL)
+    assert selection.read_text() == "nvim\n"
+    assert associations.read_text().endswith("text/html=my-browser.desktop;\n")
     subprocess.run(["lua", str(source / "hyprland/tests/startup.lua"),
                     str(config / "hypr/hyprland.lua"), "desktop"], env=env, check=True)
 assert (sddm / "usr/share/sddm/themes/icewine/theme/Palette.qml").read_text() == subprocess.check_output(

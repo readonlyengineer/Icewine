@@ -29,6 +29,15 @@ let
       starship.enable = false;
     };
   };
+  editorOverride = example {
+    services.icewine.applications.editor = [ "nvim" "--clean" ];
+    environment.sessionVariables.EDITOR = "host-editor";
+  };
+  visualOverride = example {
+    environment.sessionVariables.EDITOR = "host-editor";
+    environment.sessionVariables.VISUAL = "host-visual";
+  };
+  editorEntry = builtins.head (lib.filter (pkg: lib.getName pkg == "icewine-editor-desktop-entry") defaults.users.users.demo.packages);
   cli = builtins.head (lib.filter (pkg: lib.getName pkg == "icewine") defaults.users.users.demo.packages);
 in
 assert defaults.systemd.user.services.hypridle.unitConfig.ConditionUser == "demo";
@@ -38,6 +47,7 @@ assert !(lib.elem "icewine-init.service" defaults.systemd.services.display-manag
 assert lib.elem "icewine-init.service" defaults.systemd.services.display-manager.after;
 assert defaults.environment.sessionVariables.ICEWINE_KITTY_PRESET == "true";
 assert unmanaged.environment.sessionVariables.ICEWINE_KITTY_PRESET == "false";
+assert unmanaged.services.icewine.applications.terminalExecute == [ "custom-terminal" "-e" ];
 assert defaults.systemd.services.icewine-init.serviceConfig.User == "demo";
 assert lib.elem pkgs.yazi defaults.users.users.demo.packages;
 assert lib.elem pkgs.kitty defaults.users.users.demo.packages;
@@ -47,7 +57,13 @@ assert lib.elem pkgs.starship defaults.users.users.demo.packages;
 assert defaults.services.gvfs.enable;
 assert defaults.services.icewine.applications.fileManager == [ "icewine-terminal-exec" "yazi" ];
 assert defaults.services.icewine.applications.editor == [ "nano" ];
-assert defaults.environment.sessionVariables.EDITOR == "nano";
+assert defaults.environment.sessionVariables.EDITOR == "icewine-editor";
+assert !(defaults.environment.sessionVariables ? VISUAL);
+assert editorOverride.services.icewine.applications.editor == [ "nvim" "--clean" ];
+assert editorOverride.environment.sessionVariables.EDITOR == "host-editor";
+assert !(editorOverride.environment.sessionVariables ? VISUAL);
+assert visualOverride.environment.sessionVariables.EDITOR == "host-editor";
+assert visualOverride.environment.sessionVariables.VISUAL == "host-visual";
 assert defaults.services.icewine.defaultFiles.config ? "icewine/shell/bashrc";
 assert defaults.services.icewine.defaultFiles.config ? "hypr/hypridle.conf";
 assert !(unmanaged.services.icewine.defaultFiles.config ? "icewine/shell/bashrc");
@@ -62,6 +78,21 @@ pkgs.runCommand "icewine-terminal-checks" {
   nativeBuildInputs = [ pkgs.bashInteractive pkgs.coreutils pkgs.python3 pkgs.git pkgs.starship ];
 } ''
   export HOME="$TMPDIR/home" XDG_CONFIG_HOME="$TMPDIR/home/.config" XDG_DATA_HOME="$TMPDIR/home/.local/share" XDG_STATE_HOME="$TMPDIR/home/.local/state"
+  grep -Fx 'Exec=icewine-terminal-exec icewine-editor %F' ${editorEntry}/share/applications/icewine-editor.desktop
+  grep -Fx 'Terminal=false' ${editorEntry}/share/applications/icewine-editor.desktop
+  # The real shared session defaults derive VISUAL at startup without a recursive Nix alias.
+  (
+    unset EDITOR VISUAL
+    . ${../session/env}
+    test "$EDITOR" = icewine-editor && test "$VISUAL" = icewine-editor
+    unset VISUAL
+    export EDITOR='host-editor --flag'
+    . ${../session/env}
+    test "$VISUAL" = "$EDITOR"
+    export VISUAL=host-visual
+    . ${../session/env}
+    test "$EDITOR" = 'host-editor --flag' && test "$VISUAL" = host-visual
+  )
   mkdir -p "$HOME" "$TMPDIR/fake-bin"
   printf '#!/bin/sh\ntest "$#" -eq 0 && echo ICEWINE_FASTFETCH\n' > "$TMPDIR/fake-bin/fastfetch"
   chmod +x "$TMPDIR/fake-bin/fastfetch"

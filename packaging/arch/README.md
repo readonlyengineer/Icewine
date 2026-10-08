@@ -17,7 +17,9 @@ The installer performs a full system upgrade, installs `base-devel` and `python`
 builds the committed revision in a temporary directory and installs Icewine and
 its SDDM theme. It offers Kitty, Alacritty, Both or Neither; unselected terminal
 packages are removed with normal Pacman dependency checks and confirmation.
-Both prefers Kitty. Neither leaves terminal commands to your own PATH overrides;
+It also offers Nano, Neovim or Both and records the chosen default without removing
+installed editors; an existing default is kept when accepting the prompt. Neovim
+uses its own configuration, with no Icewine plugins. With both terminals installed, Kitty is preferred. Neither leaves terminal commands to your own PATH overrides;
 Icewine's terminal actions need a configured terminal. Alacritty does not receive
 Icewine's Kitty theme configuration.
 On CachyOS it also installs Fish integration; Arch shells remain user-managed.
@@ -39,7 +41,18 @@ move them before init. Editable defaults are kept in your XDG configuration and
 data directories; untouched defaults update at the next Icewine login. Package
 implementation files live in `/usr/share/icewine`. Change themes with
 `icewine theme dracula`; native application entry points can be overridden through
-your normal PATH. Use `~/.config/uwsm/env-icewine` for session overrides, such as
+your normal PATH. Change the native editor without privileged edits:
+
+```sh
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/icewine"
+printf 'nvim\n' > "${XDG_CONFIG_HOME:-$HOME/.config}/icewine/editor" # or nano
+```
+
+`icewine-editor` and the **Icewine Text Editor** Open With entry use that selection;
+the graphical entry uses Icewine's selected terminal. Existing `EDITOR`/`VISUAL`
+overrides are respected by terminal tools such as Yazi. Choose the entry in
+PCManFM-Qt's Open With dialogue and remember it for a file type if wanted; Icewine
+does not replace your MIME defaults, including HTML/browser associations. Use `~/.config/uwsm/env-icewine` for session overrides, such as
 `export ICEWINE_STEAM_ENABLED=false`. Host authentication policy is included through
 `/etc/pam.d/system-auth`; no login manager or PAM bypass is installed.
 

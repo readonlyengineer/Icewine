@@ -170,7 +170,7 @@ in {
       after = [ "icewine-init.service" ];
     };
     environment.sessionVariables = {
-      EDITOR = lib.mkDefault (lib.escapeShellArgs cfg.applications.editor);
+      EDITOR = lib.mkDefault "icewine-editor";
       ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";
       ICEWINE_KITTY_PRESET = if cfg.terminal.preset == "kitty" then "true" else "false";
     };

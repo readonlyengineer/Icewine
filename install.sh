@@ -17,6 +17,34 @@ while true; do
         *) echo 'Choose 1, 2, 3 or 4.' >&2 ;;
     esac
 done
+editor_file=${XDG_CONFIG_HOME:-$HOME/.config}/icewine/editor
+editor=nano
+if [[ -f $editor_file ]]; then editor=; IFS= read -r editor < "$editor_file" || true; fi
+case $editor in
+    nano) editor_choice=1 ;;
+    nvim) editor_choice=2 ;;
+    *) echo "Invalid editor selection in $editor_file; choose Nano or Neovim." >&2; exit 1 ;;
+esac
+printf 'Editors: 1) Nano  2) Neovim  3) Both\nInstalled editors will not be removed.\n'
+while true; do
+    read -r -p "Choose [$editor_choice]: " choice
+    case ${choice:-$editor_choice} in
+        1) editors=(nano); editor=nano; break ;;
+        2) editors=(neovim); editor=nvim; break ;;
+        3)
+            editors=(nano neovim)
+            while true; do
+                read -r -p "Default editor: 1) Nano  2) Neovim [$editor_choice]: " choice
+                case ${choice:-$editor_choice} in
+                    1) editor=nano; break ;;
+                    2) editor=nvim; break ;;
+                    *) echo 'Choose 1 or 2.' >&2 ;;
+                esac
+            done
+            break ;;
+        *) echo 'Choose 1, 2 or 3.' >&2 ;;
+    esac
+done
 sudo pacman -Syu --needed base-devel python
 distro=$(python -c 'import platform; print(platform.freedesktop_os_release().get("ID", ""))')
 
@@ -41,7 +69,9 @@ if (( ${#packages[@]} == 0 )); then
     exit 1
 fi
 sudo pacman -U "${packages[@]}"
-if (( ${#terminals[@]} )); then sudo pacman -S --needed "${terminals[@]}"; fi
+sudo pacman -S --needed "${editors[@]}" "${terminals[@]}"
+printf '%s\n' "$editor" > "$build_dir/editor"
+install -Dm644 "$build_dir/editor" "$editor_file"
 remove=()
 for terminal in "${unwanted[@]}"; do
     if pacman -Qq "$terminal" >/dev/null 2>&1; then remove+=("$terminal"); fi

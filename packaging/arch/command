@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -e
+export EDITOR=${EDITOR:-icewine-editor}
+export VISUAL=${VISUAL:-$EDITOR}
 case ${0##*/} in
   icewine-theme)
     export ICEWINE_THEME_ASSETS=/usr/share/icewine/theme
@@ -21,7 +23,19 @@ case ${0##*/} in
     [[ ${0##*/} != icewine-terminal-exec ]] || set -- -e "$@"
     exec "$terminal" "$@" ;;
   icewine-browser) exec firefox "$@" ;;
-  icewine-editor) exec nano "$@" ;;
+  icewine-editor)
+    editor=nano
+    editor_file=${XDG_CONFIG_HOME:-$HOME/.config}/icewine/editor
+    if [[ -f $editor_file ]]; then editor=; IFS= read -r editor < "$editor_file" || true; fi
+    case $editor in
+      nano|nvim) ;;
+      *) echo "Icewine: invalid editor in $editor_file; choose nano or nvim." >&2; exit 1 ;;
+    esac
+    if ! command -v "$editor" >/dev/null 2>&1; then
+      echo "Icewine: $editor is not installed; install it or change $editor_file." >&2
+      exit 127
+    fi
+    exec "$editor" "$@" ;;
   icewine-file-manager) exec icewine-terminal-exec yazi "$@" ;;
   icewine-steam)
     [[ ${ICEWINE_STEAM_ENABLED:-true} != false ]] || exit 1
