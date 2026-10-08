@@ -21,14 +21,14 @@ build() {
 package_icewine() {
   depends=(hyprland quickshell uwsm hyprshutdown hyprpolkitagent hypridle
     xdg-desktop-portal-hyprland xdg-desktop-portal-gtk qt6-svg qt6-wayland qt6-virtualkeyboard
-    bash coreutils grep glib2 jq nano systemd util-linux python python-vdf procps-ng
+    bash coreutils grep glib2 jq systemd util-linux python python-vdf procps-ng
     xdg-utils xdg-user-dirs hyprshot hyprpicker libnotify libcanberra brightnessctl ddcutil v4l-utils
     pam pambase polkit upower power-profiles-daemon pipewire wireplumber
     ttf-dejavu ttf-jetbrains-mono-nerd noto-fonts-emoji adwaita-icon-theme adwaita-cursors
     papirus-icon-theme dconf gsettings-desktop-schemas firefox pcmanfm-qt 'yazi>=26.5.6'
     ffmpegthumbnailer 7zip gvfs udisks2 steam gamescope)
-  optdepends=('kitty: terminal emulator' 'alacritty: alternative terminal emulator'
-    'neovim: optional text editor' 'networkmanager: network controls' 'bluez: Bluetooth controls'
+  optdepends=('kitty: terminal emulator' 'alacritty: alternative terminal emulator' 'ghostty: alternative terminal emulator'
+    'nano: text editor' 'neovim: text editor' 'vim: text editor' 'networkmanager: network controls' 'bluez: Bluetooth controls'
     'sudo: upstream Yazi mount authorization fallback')
   backup=(etc/pam.d/icewine)
   cd "$srcdir/icewine"

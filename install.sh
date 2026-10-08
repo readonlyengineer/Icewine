@@ -6,14 +6,14 @@ if [[ $(id -u) == 0 ]]; then
     exit 1
 fi
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
-printf 'Terminals: 1) Kitty  2) Alacritty  3) Both  4) Neither\nUnselected terminals will be removed if installed.\n'
+printf 'Terminals: 1) Kitty  2) Alacritty  3) Ghostty  4) Neither\nUnselected terminals will be removed if installed.\n'
 while true; do
     read -r -p 'Choose [1]: ' choice
     case ${choice:-1} in
-        1) terminals=(kitty); unwanted=(alacritty); break ;;
-        2) terminals=(alacritty); unwanted=(kitty); break ;;
-        3) terminals=(kitty alacritty); unwanted=(); break ;;
-        4) terminals=(); unwanted=(kitty alacritty); break ;;
+        1) terminals=(kitty); unwanted=(alacritty ghostty); break ;;
+        2) terminals=(alacritty); unwanted=(kitty ghostty); break ;;
+        3) terminals=(ghostty); unwanted=(kitty alacritty); break ;;
+        4) terminals=(); unwanted=(kitty alacritty ghostty); break ;;
         *) echo 'Choose 1, 2, 3 or 4.' >&2 ;;
     esac
 done
@@ -23,29 +23,20 @@ if [[ -f $editor_file ]]; then editor=; IFS= read -r editor < "$editor_file" || 
 case $editor in
     nano) editor_choice=1 ;;
     nvim) editor_choice=2 ;;
-    *) echo "Invalid editor selection in $editor_file; choose Nano or Neovim." >&2; exit 1 ;;
+    vim) editor_choice=3 ;;
+    *) echo "Invalid editor selection in $editor_file; choose Nano, Neovim or Vim." >&2; exit 1 ;;
 esac
-printf 'Editors: 1) Nano  2) Neovim  3) Both\nInstalled editors will not be removed.\n'
+printf 'Editors: 1) Nano  2) Neovim  3) Vim\nUnselected editors will be removed if installed.\n'
 while true; do
     read -r -p "Choose [$editor_choice]: " choice
     case ${choice:-$editor_choice} in
-        1) editors=(nano); editor=nano; break ;;
-        2) editors=(neovim); editor=nvim; break ;;
-        3)
-            editors=(nano neovim)
-            while true; do
-                read -r -p "Default editor: 1) Nano  2) Neovim [$editor_choice]: " choice
-                case ${choice:-$editor_choice} in
-                    1) editor=nano; break ;;
-                    2) editor=nvim; break ;;
-                    *) echo 'Choose 1 or 2.' >&2 ;;
-                esac
-            done
-            break ;;
+        1) editors=(nano); editor=nano; unwanted_editors=(neovim vim); break ;;
+        2) editors=(neovim); editor=nvim; unwanted_editors=(nano vim); break ;;
+        3) editors=(vim); editor=vim; unwanted_editors=(nano neovim); break ;;
         *) echo 'Choose 1, 2 or 3.' >&2 ;;
     esac
 done
-sudo pacman -Syu --needed base-devel python
+sudo pacman -Syu --needed base-devel python "${editors[@]}" "${terminals[@]}"
 distro=$(python -c 'import platform; print(platform.freedesktop_os_release().get("ID", ""))')
 
 build_dir=$(mktemp -d)
@@ -69,12 +60,11 @@ if (( ${#packages[@]} == 0 )); then
     exit 1
 fi
 sudo pacman -U "${packages[@]}"
-sudo pacman -S --needed "${editors[@]}" "${terminals[@]}"
 printf '%s\n' "$editor" > "$build_dir/editor"
 install -Dm644 "$build_dir/editor" "$editor_file"
 remove=()
-for terminal in "${unwanted[@]}"; do
-    if pacman -Qq "$terminal" >/dev/null 2>&1; then remove+=("$terminal"); fi
+for package in "${unwanted[@]}" "${unwanted_editors[@]}"; do
+    if pacman -Qq "$package" >/dev/null 2>&1; then remove+=("$package"); fi
 done
 if (( ${#remove[@]} )); then sudo pacman -R "${remove[@]}"; fi
 sudo install -d -m0755 -o "$(id -u)" -g "$(id -g)" /var/lib/icewine/sddm

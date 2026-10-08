@@ -69,37 +69,37 @@ elif name == "sudo" and args[1] == "-Syu" and os.environ.get("INSTALL_TEST_FAIL"
                               ["sudo", "systemctl", "set-default", "graphical.target"]]
         assert not Path(install[3]).parent.parent.exists(), "Temporary build directory was retained"
     for choice, wanted, unwanted in (
-        ("invalid\n1\n", ["kitty"], ["alacritty"]),
-        ("2\n", ["alacritty"], ["kitty"]),
-        ("3\n", ["kitty", "alacritty"], []),
-        ("4\n", [], ["kitty", "alacritty"]),
+        ("invalid\n1\n", ["kitty"], ["alacritty", "ghostty"]),
+        ("2\n", ["alacritty"], ["kitty", "ghostty"]),
+        ("3\n", ["ghostty"], ["kitty", "alacritty"]),
+        ("4\n", [], ["kitty", "alacritty", "ghostty"]),
     ):
         log.unlink()
         result = subprocess.run(["bash", str(checkout / "install.sh")],
                                 env=dict(env, INSTALL_TEST_DISTRO="cachyos",
-                                         INSTALL_TEST_TERMINALS="kitty alacritty"),
+                                         INSTALL_TEST_TERMINALS="kitty alacritty ghostty"),
                                 input=choice + "1\n", capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-        installs = [call for call in calls if call[:4] == ["sudo", "pacman", "-S", "--needed"]]
+        installs = [call for call in calls if call[:4] == ["sudo", "pacman", "-Syu", "--needed"]]
         removals = [call for call in calls if call[:3] == ["sudo", "pacman", "-R"]]
-        assert installs == [["sudo", "pacman", "-S", "--needed", "nano", *wanted]]
+        assert installs == [["sudo", "pacman", "-Syu", "--needed", "base-devel", "python", "nano", *wanted]]
         assert removals == ([["sudo", "pacman", "-R", *unwanted]] if unwanted else [])
     editor_file = root / "config/icewine/editor"
     for choice, installed, selected in (("1\n", ["nano"], "nano"),
                                          ("2\n", ["neovim"], "nvim"),
-                                         ("3\n2\n", ["nano", "neovim"], "nvim"),
+                                         ("3\n", ["vim"], "vim"),
                                          ("\n", ["neovim"], "nvim")):
         editor_file.write_text("nvim" if choice == "\n" else "nvim\n")
         log.unlink()
         result = subprocess.run(["bash", str(checkout / "install.sh")],
-                                env=dict(env, INSTALL_TEST_DISTRO="arch"),
+                                env=dict(env, INSTALL_TEST_DISTRO="arch", INSTALL_TEST_TERMINALS="nano neovim vim"),
                                 input="4\n" + choice, capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-        assert ["sudo", "pacman", "-S", "--needed", *installed] in calls
-        assert not any(call[:3] == ["sudo", "pacman", "-R"] and
-                       any(name in call for name in ("nano", "neovim")) for call in calls)
+        assert ["sudo", "pacman", "-Syu", "--needed", "base-devel", "python", *installed] in calls
+        assert [call for call in calls if call[:3] == ["sudo", "pacman", "-R"]] == [
+            ["sudo", "pacman", "-R", *[name for name in ("nano", "neovim", "vim") if name not in installed]]]
         assert editor_file.read_text() == selected + "\n"
     for invalid in ("", "nvim; must-not-run"):
         editor_file.write_text(invalid)

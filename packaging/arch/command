@@ -16,8 +16,8 @@ case ${0##*/} in
   icewine-terminal|icewine-terminal-exec)
     if command -v kitty >/dev/null 2>&1; then terminal=kitty
     elif command -v alacritty >/dev/null 2>&1; then terminal=alacritty
+    elif command -v ghostty >/dev/null 2>&1; then terminal=ghostty
     else
-      notify-send --app-name=Icewine 'No terminal installed' 'Install Kitty or Alacritty, or override Icewine terminal commands through PATH.'
       exit 1
     fi
     [[ ${0##*/} != icewine-terminal-exec ]] || set -- -e "$@"
@@ -28,8 +28,8 @@ case ${0##*/} in
     editor_file=${XDG_CONFIG_HOME:-$HOME/.config}/icewine/editor
     if [[ -f $editor_file ]]; then editor=; IFS= read -r editor < "$editor_file" || true; fi
     case $editor in
-      nano|nvim) ;;
-      *) echo "Icewine: invalid editor in $editor_file; choose nano or nvim." >&2; exit 1 ;;
+      nano|nvim|vim) ;;
+      *) echo "Icewine: invalid editor in $editor_file; choose nano, nvim or vim." >&2; exit 1 ;;
     esac
     if ! command -v "$editor" >/dev/null 2>&1; then
       echo "Icewine: $editor is not installed; install it or change $editor_file." >&2

@@ -15,13 +15,14 @@ bash install.sh
 
 The installer performs a full system upgrade, installs `base-devel` and `python`,
 builds the committed revision in a temporary directory and installs Icewine and
-its SDDM theme. It offers Kitty, Alacritty, Both or Neither; unselected terminal
-packages are removed with normal Pacman dependency checks and confirmation.
-It also offers Nano, Neovim or Both and records the chosen default without removing
-installed editors; an existing default is kept when accepting the prompt. Neovim
-uses its own configuration, with no Icewine plugins. With both terminals installed, Kitty is preferred. Neither leaves terminal commands to your own PATH overrides;
-Icewine's terminal actions need a configured terminal. Alacritty does not receive
-Icewine's Kitty theme configuration.
+its SDDM theme. It offers Kitty, Alacritty, Ghostty or Neither, and Nano, Neovim
+or Vim. Unselected terminal/editor packages are removed with normal Pacman
+dependency checks and confirmation. An existing editor default is kept when
+accepting its prompt. Neovim and Vim use their own configurations, without
+Icewine plugins. If multiple terminals are installed manually, Kitty is preferred,
+then Alacritty, then Ghostty. Neither leaves terminal commands to your own PATH
+overrides; Icewine's terminal actions need a configured terminal. Alacritty and
+Ghostty do not receive Icewine's Kitty theme configuration.
 PCManFM-Qt is included as an additional graphical application; Yazi remains the
 default. Open **PCManFM-Qt (Icewine)** to use the terminal palette without a terminal
 emulator. Existing PCManFM-Qt instances must exit before launching the themed
@@ -50,7 +51,7 @@ your normal PATH. Change the native editor without privileged edits:
 
 ```sh
 mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/icewine"
-printf 'nvim\n' > "${XDG_CONFIG_HOME:-$HOME/.config}/icewine/editor" # or nano
+printf 'nvim\n' > "${XDG_CONFIG_HOME:-$HOME/.config}/icewine/editor" # or nano/vim
 ```
 
 `icewine-editor` and the **Icewine Text Editor** Open With entry use that selection;

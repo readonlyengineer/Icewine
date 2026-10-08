@@ -29,7 +29,7 @@ with open(os.environ["ICEWINE_TEST_LOG"], "a") as log:
 sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
 ''')
     fake.chmod(0o755)
-    for name in ("kitty", "alacritty", "firefox", "nano", "nvim", "pcmanfm-qt", "steam", "icewine", "uwsm"):
+    for name in ("kitty", "alacritty", "firefox", "nano", "nvim", "vim", "ghostty", "pcmanfm-qt", "steam", "icewine", "uwsm"):
         (commands / name).symlink_to(fake)
     for name in ("terminal", "terminal-exec", "browser", "editor", "file-manager", "steam"):
         (commands / ("icewine-" + name)).symlink_to(native / "command")
@@ -60,10 +60,11 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
     assert [json.loads(line) for line in log.read_text().splitlines()[before:]] == [["icewine", "init", "pcmanfm-qt"]]
     editor_file = root / "config/icewine/editor"
     editor_file.parent.mkdir(parents=True)
-    for selection in ("nvim\n", "nvim"):
+    for selection in ("nvim\n", "nvim", "vim\n", "vim"):
         editor_file.write_text(selection)
         assert run("icewine-editor", argument).returncode == 0
-        assert json.loads(log.read_text().splitlines()[-1]) == ["nvim", argument]
+        assert json.loads(log.read_text().splitlines()[-1]) == [selection.strip(), argument]
+    editor_file.write_text("nvim\n")
     desktop_entry = configparser.ConfigParser(interpolation=None)
     desktop_entry.read(native / "icewine-editor.desktop")
     entry = desktop_entry["Desktop Entry"]
@@ -105,10 +106,17 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
         assert run("icewine-" + name, argument).returncode == 0
         assert json.loads(log.read_text().splitlines()[-1]) == expected + [argument]
     (commands / "alacritty").unlink()
-    (commands / "notify-send").symlink_to(fake)
+    for name, expected in {
+        "terminal": ["ghostty"], "terminal-exec": ["ghostty", "-e"],
+        "file-manager": ["ghostty", "-e", "yazi"],
+    }.items():
+        assert run("icewine-" + name, argument).returncode == 0
+        assert json.loads(log.read_text().splitlines()[-1]) == expected + [argument]
+    (commands / "ghostty").unlink()
+    before = log.read_text()
     assert run("icewine-terminal").returncode != 0
     assert run("icewine-terminal-exec", "icewine-editor", argument).returncode != 0
-    assert json.loads(log.read_text().splitlines()[-1])[0] == "notify-send"
+    assert log.read_text() == before
     assert subprocess.run(pcman, env=env, capture_output=True).returncode == 0
     env["PATH"] = str(commands) + ":" + os.environ["PATH"]
     before = log.read_text()
