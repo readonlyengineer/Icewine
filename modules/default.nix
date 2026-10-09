@@ -10,7 +10,7 @@ let
     terminal-exec = cfg.applications.terminalExecute;
     editor = cfg.applications.editor;
     file-manager = cfg.applications.fileManager;
-  } // lib.optionalAttrs (cfg.steam != "none") {
+  } // lib.optionalAttrs (cfg.gaming.enable) {
     steam = cfg.applications.steam;
   };
   launchers = lib.mapAttrsToList (name: argv: pkgs.writeShellScriptBin "icewine-${name}" ''
@@ -19,7 +19,7 @@ let
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
 
 in {
-  imports = [ ./home.nix ./desktop.nix ./shell.nix ./handheld.nix ./login.nix ];
+  imports = [ ./home.nix ./desktop.nix ./handheld.nix ./login.nix ];
 
   options.services.icewine = {
     enable = lib.mkEnableOption "Icewine desktop environment";
@@ -29,17 +29,12 @@ in {
       description = "Existing user who receives Icewine configuration and services.";
     };
     handheld.enable = lib.mkEnableOption "handheld shell, controller routing and on-screen keyboard";
-    steam = lib.mkOption {
-      type = lib.types.enum [ "native" "flatpak" "none" ];
-      default = "native";
-      description = "Steam installation method, or none to disable Steam integration.";
-    };
     authenticationRequired = lib.mkOption {
       type = lib.types.bool;
       default = true;
       description = "Require PAM authentication to unlock the session.";
     };
-    gtk.enable = lib.mkEnableOption "Icewine GTK styling" // { default = true; };
+    gtk.enable = lib.mkEnableOption "Icewine GTK styling" // { default = cfg.desktop.enable; };
     theme = lib.mkOption {
       type = lib.types.nullOr (lib.types.enum [ "tokyo-night" "dracula" "nord" "gruvbox-light" "gruvbox-dark"
         "catppuccin-latte" "catppuccin-frappe" "catppuccin-macchiato" "catppuccin-mocha" ]);
@@ -48,35 +43,28 @@ in {
     };
     idle.enable = lib.mkEnableOption "Icewine idle locking and suspend" // { default = true; };
     battery.enable = lib.mkEnableOption "Icewine Quickshell battery warnings and sleep" // { default = true; };
-    fileManager.preset = lib.mkOption {
-      type = lib.types.nullOr (lib.types.enum [ "yazi" ]);
-      default = "yazi";
-      description = "File manager to install and configure; null leaves it to the host.";
-    };
-    terminal.preset = lib.mkOption {
-      type = lib.types.nullOr (lib.types.enum [ "kitty" ]);
-      default = "kitty";
-      description = "Terminal to install and configure; null leaves terminal management to the host.";
-    };
-    shell = {
-      enable = lib.mkEnableOption "Icewine's interactive Bash configuration" // { default = true; };
-      fastfetch.enable = lib.mkEnableOption "the Icewine Fastfetch report at interactive Bash startup" // { default = true; };
-      blesh.enable = lib.mkEnableOption "ble.sh interactive Bash editing" // { default = true; };
-      starship.enable = lib.mkEnableOption "the Icewine Starship prompt" // { default = true; };
-      starship.git.enable = lib.mkEnableOption "Starship's default Git prompt modules" // { default = true; };
+    desktop.enable = lib.mkEnableOption "Hyprland desktop session with Icewine";
+    terminal.enable = lib.mkEnableOption "Kitty terminal and defaults";
+    texteditor.enable = lib.mkEnableOption "Nano text editor and defaults";
+    filemanager.enable = lib.mkEnableOption "Yazi file manager and defaults";
+    gaming.enable = lib.mkEnableOption "Steam and Gamescope (allows unfree)";
+    flatpak.enable = lib.mkEnableOption "Flatpak support and Bazaar; prefer Flatpak Steam when gaming is enabled";
+    shellExtras = {
+      enable = lib.mkEnableOption "Starship and Fastfetch shell extras";
+      git.enable = lib.mkEnableOption "Starship Git prompt modules" // { default = true; };
     };
     applications = {
       browser = command "Host browser command; empty disables its binding." [
         "${pkgs.runtimeShell}" "-c"
         ''exec ${pkgs.gtk3}/bin/gtk-launch "$(${pkgs.xdg-utils}/bin/xdg-settings get default-web-browser)" "$@"'' "icewine-browser"
       ];
-      terminal = command "Terminal command; supplied by the preset, or installed and specified by the host." (lib.optional (cfg.terminal.preset == "kitty") "kitty");
+      terminal = command "Terminal command; the terminal selection installs Kitty, or the host supplies an alternative." [ "kitty" ];
       terminalExecute = command "Terminal command prefix for running an application." (cfg.applications.terminal ++ [ "-e" ]);
       editor = command "Editor command used by compositor bindings." [ "nano" ];
-      fileManager = command "File manager command." (if cfg.fileManager.preset == "yazi" then [ "icewine-terminal-exec" "yazi" ] else [ "xdg-open" "." ]);
+      fileManager = command "File manager command." [ "icewine-terminal-exec" "yazi" ];
       steam = command "Steam command used inside Gamescope."
-        (if cfg.steam == "flatpak" then [ "flatpak" "run" "com.valvesoftware.Steam" ]
-         else if cfg.steam == "native" then [ "steam" ] ++ lib.optional cfg.handheld.enable "-gamepadui"
+        (if cfg.gaming.enable && cfg.flatpak.enable then [ "flatpak" "run" "com.valvesoftware.Steam" ]
+         else if cfg.gaming.enable && !cfg.flatpak.enable then [ "steam" ] ++ lib.optional cfg.handheld.enable "-gamepadui"
          else [ ]);
     };
     defaultFiles = {
@@ -98,7 +86,7 @@ in {
       { assertion = cfg.user != "" && builtins.hasAttr cfg.user config.users.users;
         message = "Icewine requires services.icewine.user to name an existing user."; }
       { assertion = lib.all (argv: argv != [ ] && builtins.head argv != "") (builtins.attrValues commands);
-        message = "Icewine application commands must be nonempty; set the corresponding applications command when disabling its managed preset."; }
+        message = "Icewine application commands must be nonempty; supply a nonempty applications command."; }
       { assertion = lib.all (name: name != "" && lib.all (part: part != "" && part != "." && part != "..") (lib.splitString "/" name))
           (builtins.attrNames cfg.defaultFiles.config ++ builtins.attrNames cfg.defaultFiles.data);
         message = "Icewine defaultFiles keys must be relative paths without . or .. components."; }
@@ -112,41 +100,43 @@ in {
         message = "Icewine implementation is packaged; use Settings.qml or native entry-point overrides for customization."; }
     ];
 
-    programs.steam.enable = lib.mkIf (cfg.steam == "native") true;
-    nixpkgs.config.allowUnfreePackages = lib.optionals (cfg.steam == "native")
+    programs.steam.enable = lib.mkIf (cfg.gaming.enable && !cfg.flatpak.enable) true;
+    nixpkgs.config.allowUnfreePackages = lib.optionals (cfg.gaming.enable && !cfg.flatpak.enable)
       [ "steam" "steam-unwrapped" ];
-    services.flatpak = lib.mkIf (cfg.steam == "flatpak") {
+    services.flatpak = lib.mkIf cfg.flatpak.enable {
       enable = true;
       remotes = [ { name = "flathub"; location = "https://dl.flathub.org/repo/flathub.flatpakrepo"; } ];
-      packages = [ "com.valvesoftware.Steam" ];
+      packages = lib.optional cfg.gaming.enable "com.valvesoftware.Steam";
     };
 
-    programs.hyprland = { enable = true; withUWSM = true; };
+    programs.hyprland = lib.mkIf cfg.desktop.enable { enable = true; withUWSM = true; };
     programs.dconf.enable = lib.mkIf cfg.gtk.enable (lib.mkDefault true);
     xdg.portal = lib.mkIf cfg.gtk.enable {
       extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
       config.hyprland."org.freedesktop.impl.portal.Settings" = [ "gtk" ];
     };
-    security.pam.services.icewine = { };
-    security.polkit.enable = true;
-    services.pipewire = {
+    security.pam.services.icewine = lib.mkIf cfg.desktop.enable { };
+    security.polkit.enable = lib.mkIf cfg.desktop.enable true;
+    services.pipewire = lib.mkIf cfg.desktop.enable {
       enable = true;
       alsa.enable = true;
       pulse.enable = true;
     };
-    hardware.i2c.enable = lib.mkDefault true;
-    services.upower.enable = lib.mkDefault true;
-    services.power-profiles-daemon.enable = lib.mkDefault true;
+    hardware.i2c.enable = lib.mkIf cfg.desktop.enable (lib.mkDefault true);
+    services.upower.enable = lib.mkIf cfg.desktop.enable (lib.mkDefault true);
+    services.power-profiles-daemon.enable = lib.mkIf cfg.desktop.enable (lib.mkDefault true);
 
-    services.gvfs.enable = lib.mkIf (cfg.fileManager.preset == "yazi") (lib.mkDefault true);
+    services.gvfs.enable = lib.mkIf (cfg.filemanager.enable) (lib.mkDefault true);
 
     fonts.packages = with pkgs; [ dejavu_fonts nerd-fonts.jetbrains-mono noto-fonts-color-emoji ];
-    environment.systemPackages = (with pkgs; [
-      quickshell hyprshutdown hyprpolkitagent glib jq nano systemd
-      hyprshot libnotify libcanberra-gtk3
-      adwaita-icon-theme papirus-icon-theme brightnessctl
-      xdg-utils gtk3 gamescope
-    ]) ++ launchers ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
-    users.users.${cfg.user}.packages = lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty;
+    environment.systemPackages = (with pkgs; [ quickshell glib jq systemd libnotify libcanberra-gtk3
+      adwaita-icon-theme papirus-icon-theme brightnessctl xdg-utils gtk3 ]) ++ launchers
+      ++ lib.optionals cfg.desktop.enable (with pkgs; [ hyprshutdown hyprpolkitagent hyprshot hypridle ])
+      ++ lib.optional cfg.gaming.enable pkgs.gamescope
+      ++ lib.optional cfg.flatpak.enable pkgs.bazaar
+      ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
+    users.users.${cfg.user}.packages = lib.optional cfg.terminal.enable pkgs.kitty
+      ++ lib.optional cfg.texteditor.enable pkgs.nano
+      ++ lib.optionals cfg.shellExtras.enable [ pkgs.starship pkgs.fastfetch ];
   };
 }

@@ -5,12 +5,21 @@ let
     url = "https://codeload.github.com/yazi-rs/plugins/tar.gz/4dc7f1b6458c2578f4494f10d468c68c1082214f";
     sha256 = "0e65f2858d06c0889a652be1c400c2df02f0cbda782dc452da52dd0cd6e27867";
   };
-in pkgs.runCommand "icewine-native-packages" {
+in pkgs.stdenv.mkDerivation {
+  pname = "icewine-native-packages";
+  version = "0.1";
+  inherit src;
+  cargoRoot = "manager";
+  cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ../../manager/Cargo.lock; };
+  dontConfigure = true;
+  dontInstall = true;
+  dontWrapQtApps = true;
   nativeBuildInputs = [ pkgs.pacman pkgs.libarchive pkgs.fakeroot
     (pkgs.python3.withPackages (python: [ python.vdf ])) pkgs.fish pkgs.lua pkgs.zstd
-    pkgs.qt6.qtdeclarative ];
-} ''
+    pkgs.qt6.qtdeclarative pkgs.cargo pkgs.rustc pkgs.rustPlatform.cargoSetupHook ];
+  buildPhase = ''
   export HOME="$TMPDIR/home"
+  export CARGO_NET_OFFLINE=true
   mkdir -p "$HOME" work/icewine $out
   cp -r ${src}/. work/icewine/
   chmod -R u+w work
@@ -48,7 +57,8 @@ in pkgs.runCommand "icewine-native-packages" {
   done
   # These copies are test inputs; leave the native /usr/bin/env shebangs in archives.
   patchShebangs icewine/packaging/arch/command icewine/packaging/arch/session
-  python icewine/tests/arch-package.py "$PWD/icewine" "$PWD/pkg/icewine" "$PWD/pkg/icewine-cachyos-fish" "$PWD/pkg/icewine-sddm"
+  python icewine/tests/arch-package.py "$PWD/icewine" "$PWD/pkg/icewine" "$PWD/pkg/icewine-session" "$PWD/pkg/icewine-sddm"
   python icewine/tests/sddm-palette.py "$PWD/pkg/icewine-sddm/usr/share/sddm/themes/icewine/theme/Palette.qml" \
     ${pkgs.qt6.qtdeclarative}/bin/qml ${pkgs.qt6.qtdeclarative}/lib/qt-6/qml
-''
+'';
+}

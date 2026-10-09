@@ -18,9 +18,9 @@ let
   themeConsumers = builtins.fromJSON (builtins.readFile ../theme/assets/consumers.json);
   enabledConsumers = {
     gtk = cfg.gtk.enable;
-    yazi = cfg.fileManager.preset == "yazi";
-    fastfetch = cfg.shell.enable && cfg.shell.fastfetch.enable;
-    starship = cfg.shell.enable && cfg.shell.starship.enable;
+    yazi = cfg.filemanager.enable;
+    fastfetch = cfg.shellExtras.enable;
+    starship = cfg.shellExtras.enable;
   };
   skippedThemeFiles = lib.concatLists (lib.mapAttrsToList (name: files:
     lib.optionals (!enabledConsumers.${name}) (builtins.attrNames files)
@@ -36,7 +36,6 @@ let
       printf '\nrequire("icewine.modules.Deck")\n' >> $out/hyprland/icewine.lua
     ''}
     cp ${../theme/assets/templates}/kitty-base.conf $out/kitty/defaults.conf
-    cp ${../bash}/bashrc $out/bash/bashrc
     cp ${../session}/env $out/uwsm/env
     cp ${../hypridle}/defaults.conf $out/hypridle/defaults.conf
     cp ${../gtk}/defaults.css $out/gtk/defaults.css
@@ -59,9 +58,16 @@ let
     (builtins.readFile ../hyprland/hyprland.lua));
   defaults = pkgs.runCommand "icewine-default-files" { } ''
     mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/data
+    ${lib.optionalString cfg.gaming.enable ''
+      mkdir -p $out/data/applications
+      ln -s ${steamMask} $out/data/applications/steam.desktop
+      ln -s ${steamMask} $out/data/applications/com.valvesoftware.Steam.desktop
+    ''}
     install -Dm644 ${../theme/assets/flower-branch.png} $out/data/wallpapers/default.jpg
-    mkdir -p $out/config/nano
-    printf 'include "${pkgs.nano}/share/nano/*.nanorc"\n' > $out/config/nano/nanorc
+    ${lib.optionalString cfg.texteditor.enable ''
+      mkdir -p $out/config/nano
+      printf 'include "${pkgs.nano}/share/nano/*.nanorc"\n' > $out/config/nano/nanorc
+    ''}
     cp ${hyprlandTemplate} $out/config/hypr/hyprland.lua
     printf '%s\n' '# Shared session defaults first; add your overrides below.' '. "''${XDG_CONFIG_HOME:-$HOME/.config}/uwsm/icewine/env"' > $out/config/uwsm/env
     ${lib.optionalString cfg.gtk.enable ''
@@ -71,20 +77,18 @@ let
       done
       substituteInPlace $out/config/gtk-3.0/gtk.css --replace-fail gtk3.css gtk.css
     ''}
-    ${lib.optionalString (cfg.terminal.preset == "kitty") ''
+    ${lib.optionalString (cfg.terminal.enable) ''
       mkdir -p $out/config/kitty
       cp ${../kitty/kitty.conf} $out/config/kitty/kitty.conf
       ${lib.optionalString (builtins.hasAttr "kitty/host.conf" cfg.defaultFiles.config) "printf '%s\\n' 'include host.conf' >> $out/config/kitty/kitty.conf"}
     ''}
-    ${lib.optionalString (cfg.fileManager.preset == "yazi") ''
+    ${lib.optionalString (cfg.filemanager.enable) ''
       mkdir -p $out/config/yazi/plugins/mount.yazi
       cp -r ${pkgs.yaziPlugins.mount}/. $out/config/yazi/plugins/mount.yazi/
     ''}
-    ${lib.optionalString cfg.shell.enable ''
+    ${lib.optionalString cfg.shellExtras.enable ''
       mkdir -p $out/home
-      ln -s icewine/shell/bashrc $out/home/.bashrc
-      ln -s icewine/shell/profile $out/home/.profile
-      ln -s icewine/shell/bash_profile $out/home/.bash_profile
+      printf '%s\n' '# Icewine shell extras; add your overrides below.' '[[ $- == *i* ]] || return' 'fastfetch' 'eval "$(starship init bash)"' > $out/home/.bashrc
     ''}
     cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
     cp ${../quickshell/config/qmldir} $out/config/quickshell/config/qmldir
@@ -104,8 +108,7 @@ let
       ln -s ${implementation}/gtk $out/config/gtk-3.0/icewine
       ln -s ${implementation}/gtk $out/config/gtk-4.0/icewine
     ''}
-    ${lib.optionalString (cfg.terminal.preset == "kitty") "ln -s ${implementation}/kitty $out/config/kitty/icewine"}
-    ${lib.optionalString cfg.shell.enable "ln -s ${implementation}/bash $out/config/icewine/shell/icewine"}
+    ${lib.optionalString (cfg.terminal.enable) "ln -s ${implementation}/kitty $out/config/kitty/icewine"}
   '';
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
   wallpaperSelector = pkgs.writeShellApplication {
@@ -119,9 +122,10 @@ let
   };
   themeCli = pkgs.writeShellApplication {
     name = "icewine-theme";
-    runtimeInputs = [ pkgs.python3 pkgs.hyprland pkgs.systemd pkgs.glib quickshell ]
-      ++ lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty
-      ++ lib.optional (cfg.fileManager.preset == "yazi") pkgs.yazi
+    runtimeInputs = [ pkgs.python3 pkgs.systemd pkgs.glib quickshell ]
+      ++ lib.optional cfg.desktop.enable pkgs.hyprland
+      ++ lib.optional (cfg.terminal.enable) pkgs.kitty
+      ++ lib.optional (cfg.filemanager.enable) pkgs.yazi
       ++ lib.optional config.services.flatpak.enable pkgs.flatpak;
     text = ''
       export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
@@ -129,10 +133,9 @@ let
       export ICEWINE_THEME_ASSETS=${../theme/assets}
       ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_THEME_FILE=/var/lib/icewine/sddm/theme.ini"}
       export ICEWINE_DEFAULT_FILES=${defaults}
-      export ICEWINE_STEAM_MASK_FILE=${if (cfg.steam != "none") then steamMask else ""}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
-      export ICEWINE_THEME_GIT_ENABLE=${if cfg.shell.starship.git.enable then "true" else "false"}
+      export ICEWINE_THEME_GIT_ENABLE=${if cfg.shellExtras.git.enable then "true" else "false"}
       export ICEWINE_NIXPKGS_LAST_MODIFIED=${toString icewineNixpkgsLastModified}
       export XDG_CONFIG_HOME=''${XDG_CONFIG_HOME:-${configHome}}
       export XDG_DATA_HOME=''${XDG_DATA_HOME:-${dataHome}}
@@ -140,10 +143,33 @@ let
       exec python3 ${../scripts/theme} "$@"
     '';
   };
-  icewineCli = pkgs.writeShellApplication {
+  manager = pkgs.callPackage ../manager/package.nix { };
+  managerBackend = pkgs.writeShellApplication {
+    name = "icewine-manage-backend";
+    runtimeInputs = [ pkgs.python3 ];
+    text = ''
+      export ICEWINE_THEME_SCRIPT=${../scripts/theme}
+      export ICEWINE_THEME_ASSETS=${../theme/assets}
+      export ICEWINE_DEFAULT_FILES=${defaults}
+      export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
+      export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
+      export ICEWINE_MANAGE_SELECTIONS=${lib.escapeShellArg (builtins.toJSON (lib.genAttrs
+        [ "desktop" "terminal" "texteditor" "filemanager" "gaming" "flatpak" "login" "shellExtras" ]
+        (name: cfg.${name}.enable)))}
+      export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
+      export ICEWINE_NIXPKGS_LAST_MODIFIED=${toString icewineNixpkgsLastModified}
+      export ICEWINE_THEME_GIT_ENABLE=${if cfg.shellExtras.git.enable then "true" else "false"}
+      exec python3 ${../scripts/manage} "$@"
+    '';
+  };
+  icewineDispatcher = pkgs.writeShellApplication {
     name = "icewine";
-    runtimeInputs = [ wallpaperSelector themeCli ];
+    runtimeInputs = [ wallpaperSelector themeCli manager managerBackend ];
     text = builtins.readFile ../scripts/icewine;
+  };
+  icewineCli = pkgs.symlinkJoin {
+    name = "icewine";
+    paths = [ icewineDispatcher manager managerBackend themeCli wallpaperSelector ];
   };
   monitorCapabilities = pkgs.writeShellApplication {
     name = "icewine-monitor-capabilities";
@@ -159,43 +185,12 @@ let
 in {
   config = lib.mkIf cfg.enable {
     users.users.${cfg.user}.packages = [ icewineCli ];
-    systemd.services.icewine-init = {
-      description = "Prepare Icewine user defaults before login";
-      wantedBy = [ "multi-user.target" ];
-      before = [ "display-manager.service" "greetd.service" ];
-      unitConfig.RequiresMountsFor = [ userHome configHome dataHome stateHome ];
-      serviceConfig = {
-        Type = "oneshot";
-        User = cfg.user;
-        WorkingDirectory = userHome;
-        Environment = [
-          "HOME=${userHome}"
-          "XDG_CONFIG_HOME=${configHome}"
-          "XDG_DATA_HOME=${dataHome}"
-          "XDG_STATE_HOME=${stateHome}"
-        ];
-        ExecStart = "${icewineCli}/bin/icewine init";
-      };
-    };
-    systemd.services.display-manager = lib.mkIf cfg.login.enable {
-      wants = [ "icewine-init.service" ];
-      after = [ "icewine-init.service" ];
-    };
     environment.sessionVariables = {
       EDITOR = lib.mkDefault "icewine-editor";
       ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";
-      ICEWINE_KITTY_PRESET = if cfg.terminal.preset == "kitty" then "true" else "false";
+      ICEWINE_KITTY_PRESET = if cfg.terminal.enable then "true" else "false";
     };
-    system.userActivationScripts.icewine.text = ''
-      if [ "$(${pkgs.coreutils}/bin/id -un)" = ${lib.escapeShellArg cfg.user} ]; then
-        ${icewineCli}/bin/icewine init
-        if ! ${themeCli}/bin/icewine-theme apply; then
-          echo "Icewine: theme selection is saved; check reported live-application failures." >&2
-        fi
-      fi
-    '';
-
-  systemd.user.services.icewine = {
+  systemd.user.services.icewine = lib.mkIf cfg.desktop.enable {
     description = "Icewine desktop shell";
     partOf = [ "graphical-session.target" ];
     after = [ "graphical-session.target" "nixos-activation.service" ];
@@ -203,7 +198,6 @@ in {
     conflicts = [ "mako.service" ];
     unitConfig.ConditionUser = cfg.user;
     serviceConfig = {
-      ExecStartPre = "${icewineCli}/bin/icewine init";
       ExecStart = "${quickshell}/bin/qs";
       Environment = [
         "XDG_DATA_HOME=${dataHome}"
@@ -212,7 +206,7 @@ in {
         "ICEWINE_THEME_IDS=${lib.concatStringsSep ":" themeIds}"
         "ICEWINE_THEME_POLICY=${if cfg.theme == null then "" else cfg.theme}"
         "ICEWINE_AUTHENTICATION_REQUIRED=${if cfg.authenticationRequired then "true" else "false"}"
-        "ICEWINE_STEAM_ENABLED=${if cfg.steam != "none" then "true" else "false"}"
+        "ICEWINE_STEAM_ENABLED=${if cfg.gaming.enable then "true" else "false"}"
         "ICEWINE_BATTERY_ENABLED=${if cfg.battery.enable then "true" else "false"}"
         "PATH=/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness steamShortcuts ]}"
         "QT_IM_MODULE=qtvirtualkeyboard"
@@ -221,7 +215,7 @@ in {
     };
     wantedBy = [ "graphical-session.target" ];
   };
-  systemd.user.paths.icewine-refresh-flatpak-icons = {
+  systemd.user.paths.icewine-refresh-flatpak-icons = lib.mkIf (cfg.desktop.enable && cfg.flatpak.enable) {
     description = "Refresh Icewine when Flatpak's icon cache changes";
     partOf = [ "graphical-session.target" ];
     after = [ "graphical-session.target" ];
@@ -232,7 +226,7 @@ in {
     ];
     wantedBy = [ "graphical-session.target" ];
   };
-  systemd.user.services.icewine-refresh-flatpak-icons = {
+  systemd.user.services.icewine-refresh-flatpak-icons = lib.mkIf (cfg.desktop.enable && cfg.flatpak.enable) {
     description = "Refresh Icewine's Flatpak icon cache";
     after = [ "icewine.service" ];
     unitConfig.ConditionUser = cfg.user;
@@ -241,7 +235,7 @@ in {
       ExecStart = "${pkgs.systemd}/bin/systemctl --user try-restart icewine.service";
     };
   };
-  systemd.user.services.hyprpolkitagent = {
+  systemd.user.services.hyprpolkitagent = lib.mkIf cfg.desktop.enable {
     description = "Hyprland Polkit authentication agent";
     partOf = [ "graphical-session.target" ];
     after = [ "graphical-session.target" ];

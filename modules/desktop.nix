@@ -22,16 +22,16 @@ in {
         Hidden=true
       '';
     };
-    users.users.${cfg.user}.packages = lib.optionals (cfg.fileManager.preset == "yazi")
-      [ pkgs.yazi pkgs.ffmpegthumbnailer pkgs._7zz ] ++ lib.optional (cfg.steam != "none") steamEntries;
-    services.icewine.defaultFiles.config = lib.mkIf cfg.idle.enable {
+    users.users.${cfg.user}.packages = lib.optionals (cfg.filemanager.enable)
+      [ pkgs.yazi pkgs.ffmpegthumbnailer pkgs._7zz ] ++ lib.optional (cfg.gaming.enable) steamEntries;
+    services.icewine.defaultFiles.config = lib.mkIf (cfg.desktop.enable && cfg.idle.enable) {
       "hypr/hypridle.conf" = pkgs.writeText "icewine-hypridle.conf" ''
         # Shared idle defaults first; add your general settings below.
         # Listener blocks append; edit a local full copy to replace shipped timers.
         source = hypridle-icewine/defaults.conf
       '';
     };
-    systemd.user.services.hypridle = lib.mkIf cfg.idle.enable {
+    systemd.user.services.hypridle = lib.mkIf (cfg.desktop.enable && cfg.idle.enable) {
       description = "Icewine idle locking and suspend";
       partOf = [ "graphical-session.target" ];
       after = [ "graphical-session.target" ];

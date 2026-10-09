@@ -47,9 +47,19 @@ In your `flake.nix`:
         ./configuration.nix
         icewine.nixosModules.default
         {
+          # Host login policy survives deselecting Icewine's login styling.
+          services.displayManager.sddm.enable = true;
           services.icewine = {
             enable = true;
             user = "YOUR_USERNAME";
+            desktop.enable = true;
+            terminal.enable = true;
+            texteditor.enable = true;
+            filemanager.enable = true;
+            gaming.enable = true;
+            flatpak.enable = true;
+            login.enable = true;
+            shellExtras.enable = true;
           };
         }
       ];
@@ -60,15 +70,21 @@ In your `flake.nix`:
 
 Use your existing host target and username. Keep your hardware, users, storage
 and persistence configuration. Disable the previous desktop and display manager;
-Icewine supplies Hyprland and SDDM by default. Rebuild your host and select
-**Hyprland (UWSM)** at login.
+The template opts into the complete experience; optional integrations default off.
+Rebuild your host, run `icewine manage` as your desktop user from a TTY and Apply
+to deploy editable defaults, then select **Hyprland (UWSM)** at login.
 
 ### Handheld
 
 Enable the handheld interface and its native Steam and InputPlumber dependencies:
 
 ```nix
-services.icewine.handheld.enable = true;
+services.icewine = {
+  handheld.enable = true;
+  desktop.enable = true;
+  gaming.enable = true;
+  flatpak.enable = false; # Handheld Steam uses the native client.
+};
 ```
 
 Kernel and hardware drivers remain host choices. The controls currently target Steam Deck; controller input,
@@ -113,29 +129,17 @@ updated.
 Selections survive login and theme changes. An explicit `services.icewine.theme`
 setting overrides the CLI theme choice; leave it unset to choose themes yourself.
 
-### Init and reset
+### Manage integrations and dotfiles
 
 ```sh
-icewine init
+icewine manage
 ```
 
-Init creates missing dot files, updates untouched shipped defaults and preserves
-user-edited entries. Icewine runs it automatically during NixOS activation,
-before login and before its shell starts; you normally do not need to run it yourself.
-
-```sh
-icewine reset hypr               # Restore Hyprland defaults only
-icewine reset                    # Restore all managed defaults
-```
-
-Reset backs up and replaces editable defaults, including `hyprland.lua` and your
-overrides. Backups are under `$XDG_STATE_HOME/icewine/defaults-reset-*` and `reset-*`.
-A full reset also clears theme, transparency and autofullscreen choices; a scoped
-reset retains them. Neither clears your selected wallpaper.
-
-
-If `icewine init` reports a conflict, it has preserved a file it cannot safely
-replace. Read the reported path and back up the file before changing it.
+Use Tab or arrows to navigate, Space to select, and Enter on Apply or Cancel.
+NixOS utility selections reflect the module options and are read-only. Apply
+creates missing dotfiles; **Overwrite existing dotfiles** replaces selected defaults
+without backups. It starts unchecked each time. Existing files are otherwise
+preserved, including on rebuild, login and reboot. Host persistence remains host policy.
 
 ## Basic hotkeys
 
@@ -184,7 +188,6 @@ This schema was chosen to allow Icewine to update with the package, but still gi
 | Quickshell | `quickshell/shell.qml`; settings in `quickshell/config/Settings.qml` |
 | Kitty | `kitty/kitty.conf` |
 | Nano | `nano/nanorc` |
-| Bash | `icewine/shell/bashrc`, `profile`, `bash_profile`; home dot files link here |
 | UWSM | `uwsm/env` |
 | Hypridle | `hypr/hypridle.conf` |
 | GTK CSS | `gtk-3.0/gtk.css`, `gtk-4.0/gtk.css` |
@@ -196,8 +199,8 @@ the complete config yourself.
 
 Fastfetch, Starship, Yazi theme/keymap and GTK settings normally link to generated
 files. To customise one, copy its contents, replace the link with a regular file
-at the same path, then edit it. That file is preserved by init but no longer
-follows generated theme changes. Keep your own copy before a reset.
+at the same path, then edit it. That file is preserved by Apply unless overwrite is checked, and no longer
+follows generated theme changes. Shell Extras also offers an editable `~/.bashrc`.
 
 ### Hyprland example
 
@@ -250,38 +253,21 @@ Manual and application fullscreen choices take precedence.
 
 ## Applications
 
-Icewine provides Firefox, Kitty, Yazi and desktop controls. Other applications
-belong in your host configuration. Browser profiles and browser themes are yours;
-Icewine supplies GTK styling and the system light/dark preference.
+The manager/module offers Kitty, Nano, Yazi, Steam/Gamescope, Flatpak/Bazaar,
+SDDM styling and Starship/Fastfetch alongside the optional desktop session.
+Browser profiles and themes belong to you; Icewine uses the host browser.
 
-### Steam
+### Steam and Flatpak
 
-Steam is proprietary, installed natively by default, and Icewine permits the
-required unfree Steam packages. Set `services.icewine.steam = "native"` or
-`"flatpak"` to choose its installation method. Set `"none"` to disable Steam
-installation and integration; Icewine then grants no Steam-related unfree permission.
-
-When switching away from Flatpak Steam, keep `services.flatpak.enable = true;`
-until rebuilding has removed it. Game and client data are preserved.
-
-### Optional Flatpak app store
-
-Enable Flatpak in your host configuration:
-
-```nix
-services.flatpak.enable = true;
-```
-
-After rebuilding, add Flathub and optionally install Bazaar as your normal user:
-
-```sh
-flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user flathub io.github.kolunmi.Bazaar
-```
+Gaming is opt-in and allows proprietary Steam. Gaming alone selects native
+Steam; selecting Flatpak Utility as well selects Flatpak Steam instead.
+Flatpak Utility supplies Bazaar and Flathub support independently of Gaming.
+On NixOS use `gaming.enable` and `flatpak.enable` under `services.icewine`.
 
 ### Alternative applications and opt-outs
 
-Set first-use commands in Nix; disable managed presets when replacing them:
+Set application commands in Nix; disable the corresponding optional integration
+when the host supplies its replacement:
 
 ```nix
 services.icewine = {
@@ -300,28 +286,22 @@ Install replacement applications and their configuration in your host. Neovim
 plugins and language servers are host-owned; Icewine generates the optional
 `icewine/current/nvim-theme.lua` appearance adapter and signals themed instances.
 
-On existing installs, `icewine init` retires unchanged tracked Neovim defaults
-and preserves edited or untracked files. Before using a host Neovim configuration,
-back up preserved `nvim/init.lua` and any old `nvim/icewine` link, then move
-conflicting files aside and run `icewine init nvim`. To keep personal edits, merge
-them with your host configuration instead. `icewine reset nano` and host-supplied
-`icewine reset nvim` save replaced files under the Icewine state directory.
-
 These options belong under `services.icewine`:
 
 | Option | Stops Icewine providing |
 | --- | --- |
-| `terminal.preset = null;` | Kitty installation and configuration; set `applications.terminal` and `applications.terminalExecute` |
-| `fileManager.preset = null;` | Yazi and its GVfs default; set `applications.fileManager` if needed |
-| `login.enable = false;` | SDDM; provide your own login method |
+| `desktop.enable = false;` | Hyprland session integration; explicit Apply removes its implementation link |
+| `terminal.enable = false;` | Kitty defaults; set `applications.terminal` and `applications.terminalExecute` |
+| `texteditor.enable = false;` | Nano defaults |
+| `filemanager.enable = false;` | Yazi and its GVfs default; set `applications.fileManager` if needed |
+| `gaming.enable = false;` | Steam/Gamescope integration |
+| `flatpak.enable = false;` | Flatpak/Bazaar integration; Gaming uses native Steam |
+| `login.enable = false;` | Icewine SDDM styling; host SDDM enablement is retained |
+| `shellExtras.enable = false;` | Starship/Fastfetch defaults |
+| `shellExtras.git.enable = false;` | Git information in the prompt |
 | `gtk.enable = false;` | GTK styling |
 | `idle.enable = false;` | Automatic idle locking and sleep; manual locking remains |
 | `battery.enable = false;` | Battery warnings and automatic sleep; UPower remains |
-| `shell.enable = false;` | Bash configuration and its integrations |
-| `shell.fastfetch.enable = false;` | Fastfetch |
-| `shell.blesh.enable = false;` | ble.sh |
-| `shell.starship.enable = false;` | Starship |
-| `shell.starship.git.enable = false;` | Git information in the prompt |
 
 Battery thresholds live in `quickshell/config/Settings.qml`: warnings at 20%,
 10% and 5%, then a suspend request at 3%. The shell must be running; test sleep

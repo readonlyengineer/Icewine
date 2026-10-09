@@ -14,6 +14,7 @@ import time
 
 source = Path(sys.argv[1]).resolve()
 quickshell = shutil.which("qs")
+shell_header = "#!" + shutil.which("sh") + "\n"
 colors = {
     "background": "background", "backgroundDark": "backgroundDark",
     "surface": "surface", "selection": "selection", "border": "border",
@@ -58,7 +59,7 @@ ShellRoot {
     for theme in ("tokyo-night", "dracula", "nord"):
         (root / (theme + ".json")).write_text(json.dumps(palette(theme)))
     renderer = root / "bin/icewine-theme"
-    renderer.write_text("#!/bin/sh\n"
+    renderer.write_text(shell_header +
                         "sleep 0.15\n"
                         'test ! -e "$TEST_ROOT/fail" || exit 2\n'
                         'theme=$(cat "$XDG_STATE_HOME/icewine/theme")\n'
@@ -122,14 +123,14 @@ ShellRoot {
         finally:
             state_dir.chmod(0o700)
 
-        # Use the real CLI/renderer for reset and same-theme reselection. Route
+        # Use the real CLI/renderer for reapplication and same-theme reselection. Route
         # its IPC into this disposable offscreen shell, never the user's shell.
-        renderer.write_text("#!/bin/sh\nexec " + shlex.join([sys.executable, str(source / "scripts/theme")]) + ' "$@"\n')
+        renderer.write_text(shell_header + "exec " + shlex.join([sys.executable, str(source / "scripts/theme")]) + ' "$@"\n')
         ipc = root / "bin/qs"
-        ipc.write_text("#!/bin/sh\nexec " + shlex.join([quickshell, "-p", str(root)]) + ' "$@"\n')
+        ipc.write_text(shell_header + "exec " + shlex.join([quickshell, "-p", str(root)]) + ' "$@"\n')
         ipc.chmod(0o755)
         yazi = root / "bin/ya"
-        yazi.write_text("#!/bin/sh\nexit 0\n")
+        yazi.write_text(shell_header + "exit 0\n")
         yazi.chmod(0o755)
 
         def cli(*args):
@@ -141,12 +142,12 @@ ShellRoot {
         cli("theme", "nord")
         until("applied: nord")
         for _ in range(2):
-            cli("reset", "kitty")
+            cli("apply")
             assert (state_dir / "theme").read_text() == "nord\n"
             assert json.loads((current / "palette.json").read_text())["themeId"] == "nord"
-            cli("reset")
+            cli("theme", "catppuccin-mocha")
             until("applied: catppuccin-mocha")
-            assert not (state_dir / "theme").exists()
+            assert (state_dir / "theme").read_text() == "catppuccin-mocha\n"
             cli("theme", "nord")
             until("applied: nord")
             assert (state_dir / "theme").read_text() == "nord\n"

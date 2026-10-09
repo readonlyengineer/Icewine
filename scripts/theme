@@ -55,7 +55,6 @@ TEMPLATES = {
     "starship.toml": "starship.toml.in",
     "ls-colors.sh": "ls-colors.sh.in",
 }
-STORE_DIR = Path("/nix/store")
 
 
 def owned(app=None, include_disabled=False):
@@ -78,7 +77,8 @@ def atomic_text(path, contents, mode=None, *, root=None, signature=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".icewine-", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        with os.fdopen(fd, "wb" if isinstance(contents, bytes) else "w",
+                       **({} if isinstance(contents, bytes) else {"encoding": "utf-8"})) as stream:
             stream.write(contents)
             stream.flush()
             if mode is not None:
@@ -86,7 +86,21 @@ def atomic_text(path, contents, mode=None, *, root=None, signature=None):
             os.fsync(stream.fileno())
         if root is not None and not still_current(path, root, signature):
             raise ValueError(f"default changed during atomic write: {path}")
-        os.replace(temporary, path)
+        try:
+            os.replace(temporary, path)
+        except OSError as error:
+            if error.errno != errno.EBUSY or root is None or path.is_symlink():
+                raise
+            # Individually persisted files are bind mounts and cannot be renamed.
+            fd = os.open(path, os.O_WRONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, "wb") as destination:
+                if not still_current(path, root, signature):
+                    raise ValueError(f"default changed before mounted-file write: {path}")
+                with open(temporary, "rb") as source:
+                    destination.truncate(0)
+                    shutil.copyfileobj(source, destination)
+                destination.flush()
+                os.fsync(destination.fileno())
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -246,7 +260,7 @@ def effective(state, themes):
 
 def publish(config, files):
     root = config / "icewine/rendered"
-    if root.is_symlink():
+    if any(parent.is_symlink() for parent in (root, *root.parents)):
         raise ValueError(f"refusing symlinked render directory: {root}")
     root.mkdir(parents=True, exist_ok=True)
     fd = os.open(root / ".publish.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -281,99 +295,42 @@ def publish(config, files):
                 shutil.rmtree(previous)
 
 
-def install_links(config, state, replace, app=None, install=True):
-    enabled = owned(app)
-    for relative, name in owned(app, include_disabled=True).items():
+def install_links(config, state, replace, app=None):
+    records = default_records(state)
+    entry = records.setdefault("config", {"root": str(config), "files": {}})
+    if entry["root"] != str(config):
+        raise ValueError("configuration ownership root changed")
+    for relative, name in owned(app).items():
         defaults = os.environ.get("ICEWINE_DEFAULT_FILES")
-        native_css = relative in {"gtk-3.0/gtk.css", "gtk-4.0/gtk.css"}
-        writable_css = native_css and defaults and (Path(defaults) / "config" / relative).is_file()
+        if defaults and (Path(defaults) / "config" / relative).is_file():
+            continue
         path = config / relative
-        if any(parent.is_symlink() for parent in path.parents if parent != config and config in parent.parents):
-            print(f"conflict: preserved symlinked parent: {path}", file=sys.stderr)
+        signature = default_signature(path)
+        if not still_current(path, config, signature):
             continue
         target = config / "icewine/current" / name
-        if relative not in enabled:
-            signature = default_signature(path)
-            recorded_css = False
-            if native_css and path.is_file() and not path.is_symlink():
-                entry = default_records(state).get("config", {})
-                # Ownership records also track host CSS; only the shipped import
-                # stub is Icewine styling. Keep unrelated host rules active.
-                stub = ('@import url("icewine/defaults.css");\n'
-                        f'@import url("../icewine/current/{name}");\n'
-                        '/* Add your overrides below. */\n').encode()
-                recorded_css = (entry.get("root") == str(config)
-                                and signature == entry.get("files", {}).get(relative)
-                                and path.read_bytes() == stub)
-            if recorded_css or (path.is_symlink() and os.readlink(path) == str(target)):
-                backup_owned(config, state, [path], "opt-out-")
-                if still_current(path, config, signature):
-                    path.unlink()
-                    print(f"retired: {path}")
+        if signature == "link:" + str(target):
             continue
-        if writable_css:
-            continue  # Enabled writable CSS belongs to default-file tracking, including reset.
-        if not install:
+        if signature is not None and not replace:
             continue
-        if path.is_symlink() and os.readlink(path) == str(target):
-            continue
-        if path.exists() or path.is_symlink():
-            if path.is_symlink() or not replace:
-                if path.is_symlink():
-                    print(f"conflict: preserved unrecognized symlink: {path}", file=sys.stderr)
-                else:
-                    print(f"preserved edited file: {path}")
-                continue
-            path.unlink()
-        atomic_link(path, target)
-        print(f"installed: {path}")
-
-
-def backup_owned(config, state, paths=None, prefix="reset-"):
-    existing = paths if paths is not None else [config / relative for relative in owned()
-                                                if (config / relative).exists() or (config / relative).is_symlink()]
-    if not existing:
-        return
-    state.mkdir(parents=True, exist_ok=True)
-    backup = Path(tempfile.mkdtemp(prefix=prefix, dir=state))
-    for path in existing:
-        destination = backup / path.relative_to(config)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if path.is_symlink() and not path.exists():
-            destination.symlink_to(os.readlink(path))
-        else:
-            shutil.copy2(path, destination)
-        print(f"saved: {path} -> {destination}")
+        if path.exists() and not path.is_file() and not path.is_symlink():
+            raise ValueError(f"refusing to replace non-file: {path}")
+        atomic_link(path, target, root=config, signature=signature)
+        entry["files"][relative] = "link:" + str(target)
+        atomic_text(state / "default-files.json", json.dumps(records, sort_keys=True) + "\n")
 
 
 def static_app(root_name, relative):
     if root_name == "home":
-        return "bash"
+        return "shellExtras"
     if root_name == "data":
-        return relative.parts[0]
+        return "gaming" if relative.parts[0] == "applications" and "steam" in relative.name else relative.parts[0]
     if relative.parts[:2] == ("icewine", "shell"):
-        return "bash"
+        return "shellExtras"
     return {"hypr": "hypr", "uwsm": "uwsm", "quickshell": "quickshell",
             "kitty": "kitty",
             "gtk-3.0": "gtk", "gtk-4.0": "gtk",
             "btop": "btop", "user-dirs.locale": "user-dirs"}.get(relative.parts[0], relative.parts[0])
-
-
-def managed_static_link(path, root, root_name):
-    if not path.is_symlink():
-        return False
-    if root_name == "home" and path.name in {".bashrc", ".profile", ".bash_profile"}:
-        return os.readlink(path) == str(xdg("XDG_CONFIG_HOME", ".config") / "icewine/shell" / path.name.lstrip("."))
-    if root_name != "data":
-        return False
-    try:
-        target = Path(os.readlink(path)).relative_to(STORE_DIR)
-    except ValueError:
-        return False
-    return (len(target.parts) == 1
-            and re.fullmatch(r"[a-z0-9]{32}-icewine-steam-mask.desktop", target.parts[0]) is not None
-            and path.relative_to(root).as_posix() in {"applications/steam.desktop",
-                                                    "applications/com.valvesoftware.Steam.desktop"})
 
 
 def default_signature(path):
@@ -413,222 +370,48 @@ def default_records(state):
     return records
 
 
-def implementation_preflight(defaults, config, state, app=None):
-    if not defaults:
-        return
-    source = Path(defaults) / "config"
-    entry = default_records(state).get("config", {})
-    previous = entry.get("files", {}) if entry.get("root") == str(config) else {}
-    # Immutable package identities cannot be adopted from unknown files or
-    # an ownership record that lacks the current implementation boundary.
-    for name in ("gtk-3.0/icewine", "gtk-4.0/icewine", "hypr/icewine", "hypr/hypridle-icewine", "kitty/icewine",
-                 "uwsm/icewine", "icewine/shell/icewine", "quickshell/icewine"):
-        shipped, path = source / name, config / name
-        if not shipped.is_symlink() or (app and static_app("config", Path(name)) != app):
-            continue
-        if (name not in previous and "quickshell/icewine" not in previous
-                and str(Path(name).parent / "icewine") not in previous
-                and any(Path(record).is_relative_to(Path(name).parent) for record in previous)):
-            raise ValueError(f"unsupported implementation ownership record: {path}; "
-                             "back up and prepare a fresh configuration before icewine init")
-        current = default_signature(path)
-        if not still_current(path, config, current) or (current is not None
-                and (current != previous.get(name) or not path.is_symlink())):
-            raise ValueError(f"implementation blocked: preserved unknown package link {path}; "
-                             "back up and move the conflict before icewine init")
-
-
 def install_defaults(defaults, config, data, state, replace, app):
+    """Explicit Apply only: copy missing files, or replace without backups."""
     if not defaults:
-        return
-    source_root = Path(defaults)
-    manifest = state / "default-files.json"
+        raise ValueError("Icewine default files are unavailable")
     records = default_records(state)
-    implementation_preflight(defaults, config, state, app)
-    backup = None
-    backed_up = set()
-
-    def save(path, root, root_name):
-        nonlocal backup
-        if path in backed_up:
-            return
-        if backup is None:
-            state.mkdir(parents=True, exist_ok=True)
-            backup = Path(tempfile.mkdtemp(prefix="defaults-reset-" if replace else "defaults-update-", dir=state))
-        destination = backup / root_name / path.relative_to(root)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        signature = default_signature(path)
-        if root_name == "config" and (path.name == "icewine" or path.name == "hypridle-icewine") and path.is_symlink():
-            destination.symlink_to(os.readlink(path))
-        elif path.is_dir():
-            shutil.copytree(path, destination)
-        elif path.exists():
-            shutil.copy2(path, destination)
-        else:
-            destination.symlink_to(os.readlink(path))
-        if signature and signature.startswith("sha256:") and default_signature(destination) != signature:
-            raise ValueError(f"defaults backup changed during copying; preserved {path}: {destination}")
-        backed_up.add(path)
-        print(f"saved: {path} -> {destination}")
-
     for root_name, root in (("config", config), ("data", data), ("home", Path.home())):
-        source = source_root / root_name
-        if not source.is_dir() and root_name != "home":
-            raise ValueError(f"default files are unavailable: {source}")
-        if records.get(root_name, {}).get("root") != str(root):
-            records[root_name] = {"root": str(root), "files": {}}
-        previous = records[root_name]["files"]
-        shipped_files = sorted(item for item in source.rglob("*")
-                               if (item.is_file() or item.is_symlink())
-                               and (not app or static_app(root_name, item.relative_to(source)) == app))
-        present = {item.relative_to(source).as_posix() for item in shipped_files}
-        for name in sorted(set(previous) - present):
-            relative = Path(name)
+        source = Path(defaults) / root_name
+        entry = records.setdefault(root_name, {"root": str(root), "files": {}})
+        if entry["root"] != str(root):
+            raise ValueError(f"ownership root changed: {root}")
+        for shipped in sorted(source.rglob("*")):
+            if not (shipped.is_file() or shipped.is_symlink()):
+                continue
+            relative = shipped.relative_to(source)
             if app and static_app(root_name, relative) != app:
                 continue
             path = root / relative
-            if any(parent.is_symlink() or (parent.exists() and not parent.is_dir())
-                   for parent in path.parents if parent != root and root in parent.parents):
-                print(f"conflict: preserved removed default behind changed parent: {path}", file=sys.stderr)
+            signature = default_signature(path)
+            if not still_current(path, root, signature):
                 continue
-            if path.exists() or path.is_symlink():
-                if default_signature(path) != previous[name]:
-                    print(f"conflict: preserved edited removed default: {path}", file=sys.stderr)
-                    continue
-                save(path, root, root_name)
-                if not still_current(path, root, previous[name]):
-                    continue
-                try:
-                    path.unlink()
-                except OSError as error:
-                    if error.errno != errno.EBUSY:
-                        raise
-                    print(f"conflict: preserved mounted removed default: {path}", file=sys.stderr)
-                    continue
-                print(f"retired: {path}")
-            del previous[name]
-            atomic_text(manifest, json.dumps(records, sort_keys=True) + "\n")
-        for shipped in shipped_files:
-            relative = shipped.relative_to(source)
-            name = relative.as_posix()
-            path = root / relative
-            blocked = False
-            for parent in reversed(path.parents):
-                if parent == root:
-                    continue
-                if root not in parent.parents:
-                    continue
-                if parent.exists() and not parent.is_dir():
-                    print(f"conflict: preserved non-directory: {parent}", file=sys.stderr)
-                    blocked = True
-                    break
-                if not parent.is_symlink():
-                    continue
-                print(f"conflict: preserved symlinked parent: {parent}", file=sys.stderr)
-                blocked = True
-                break
-            if blocked:
+            implementation = shipped.is_symlink()
+            target = config / os.readlink(shipped) if implementation else None
+            expected = "link:" + str(target) if implementation else default_signature(shipped)
+            if signature == expected:
                 continue
-            contents = None
-            if root_name == "config" and name == "hypr/hyprland.lua" and '"@terminal@"' in shipped.read_text():
-                contents = shipped.read_text()
-                terminal = next((name for name in ("kitty", "alacritty", "ghostty") if shutil.which(name)), "")
-                for key, value in {"terminal": terminal,
-                                   "file_manager": "icewine-file-manager",
-                                   "browser": 'gtk-launch "$(xdg-settings get default-web-browser)"'}.items():
-                    contents = contents.replace(json.dumps("@" + key + "@"), json.dumps(value, ensure_ascii=False))
-                contents = contents.encode()
-            current = default_signature(path)
-            expected = ("link:" + str(config / os.readlink(shipped)) if shipped.is_symlink()
-                        else ("sha256:" + hashlib.sha256(contents).hexdigest()) if contents is not None else default_signature(shipped))
-            unchanged = current is not None and current == previous.get(name)
-            if unchanged and current == expected:
+            # Package links may follow a package update only when we still own them.
+            if signature is not None and not replace and not (implementation and signature == entry["files"].get(relative.as_posix())):
                 continue
-            if path.is_symlink():
-                if (current == expected and (unchanged or
-                        (name not in previous and managed_static_link(path, root, root_name)))):
-                    previous[name] = current
-                    continue
-                if not unchanged and ((name in previous and not replace)
-                                      or not managed_static_link(path, root, root_name)):
-                    print(f"conflict: preserved unrecognized symlink: {path}", file=sys.stderr)
-                    continue
-                save(path, root, root_name)
-            elif path.exists():
-                if not path.is_file():
-                    print(f"conflict: preserved non-file: {path}; back up and move its remaining contents before retrying init", file=sys.stderr)
-                    continue
-                if not replace and not unchanged:
-                    reason = "edited" if name in previous else "untracked"
-                    target_app = static_app(root_name, relative)
-                    action = f"icewine reset {target_app}" if target_app in APPS else "icewine reset"
-                    print(f"conflict: preserved {reason} default: {path}; compare {shipped} or back up with {action}", file=sys.stderr)
-                    continue
-                save(path, root, root_name)
-            if not still_current(path, root, current):
-                continue
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if shipped.is_symlink():
-                if not still_current(path, root, current):
-                    continue
-                atomic_link(path, config / os.readlink(shipped))
+            if path.exists() and not path.is_file() and not path.is_symlink():
+                raise ValueError(f"refusing to replace non-file: {path}")
+            if implementation:
+                atomic_link(path, target, root=root, signature=signature)
             else:
-                fd, temporary = tempfile.mkstemp(prefix=".icewine-", dir=path.parent)
-                try:
-                    with os.fdopen(fd, "wb") as stream, shipped.open("rb") as source_file:
-                        if contents is None:
-                            shutil.copyfileobj(source_file, stream)
-                        else:
-                            stream.write(contents)
-                        stream.flush()
-                        os.fsync(stream.fileno())
-                    os.chmod(temporary, 0o644)
-                    if not still_current(path, root, current):
-                        continue
-                    try:
-                        os.replace(temporary, path)
-                    except OSError as error:
-                        if error.errno != errno.EBUSY or path not in backed_up:
-                            raise
-                        if not still_current(path, root, current):
-                            continue
-                        # A persisted file bind mount cannot be renamed; its scoped backup is the recovery path.
-                        with open(temporary, "rb") as source_file, path.open("wb") as destination:
-                            shutil.copyfileobj(source_file, destination)
-                            destination.flush()
-                            os.fsync(destination.fileno())
-                finally:
-                    if os.path.exists(temporary):
-                        os.unlink(temporary)
-            previous[name] = expected
-            atomic_text(manifest, json.dumps(records, sort_keys=True) + "\n")
-            print(f"installed: {path}")
-
-
-    # The Gamescope launcher comes from the user profile; Steam masks must
-    # outrank Flatpak exports. Local overrides remain user-owned.
-    if app is None:
-        for relative in ("applications/steam-gamescope.desktop", "applications/steam.desktop",
-                         "applications/com.valvesoftware.Steam.desktop"):
-            path = data / relative
-            mask = os.environ.get("ICEWINE_STEAM_MASK_FILE") if relative != "applications/steam-gamescope.desktop" else None
-            if mask and path.is_symlink() and os.readlink(path) == mask:
-                continue
-            if any(parent.is_symlink() for parent in path.parents
-                   if parent != data and data in parent.parents):
-                print(f"conflict: preserved symlinked parent: {path}", file=sys.stderr)
-                continue
-            if managed_static_link(path, data, "data"):
-                save(path, data, "data")
-                path.unlink()
-                print(f"retired: {path}")
-            if mask:
-                if path.exists() or path.is_symlink():
-                    print(f"conflict: preserved user Steam entry: {path}", file=sys.stderr)
-                else:
-                    atomic_link(path, Path(mask))
-                    print(f"installed: {path}")
-
+                contents = shipped.read_bytes()
+                if root_name == "config" and relative.as_posix() == "hypr/hyprland.lua":
+                    contents = contents.decode("utf-8")
+                    for key, value in {"terminal": "icewine-terminal", "file_manager": "icewine-file-manager",
+                                       "browser": 'gtk-launch "$(xdg-settings get default-web-browser)"'}.items():
+                        contents = contents.replace(json.dumps("@" + key + "@"), json.dumps(value))
+                atomic_text(path, contents, 0o644, root=root, signature=signature)
+            entry["files"][relative.as_posix()] = default_signature(path)
+            atomic_text(state / "default-files.json", json.dumps(records, sort_keys=True) + "\n")
 
 
 def install_gtk_theme(config, theme_id):
@@ -638,57 +421,10 @@ def install_gtk_theme(config, theme_id):
         return
     if path.exists() or path.is_symlink():
         raise ValueError(f"refusing to replace existing GTK theme: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_link(path, target)
-
-
-def retire_gtk_theme(config, state, themes):
     data = xdg("XDG_DATA_HOME", ".local/share")
-    for theme_id in themes:
-        path = data / "themes" / ("Icewine-" + theme_id) / "gtk-3.0/gtk.css"
-        if (path.is_symlink() and os.readlink(path) == str(config / "icewine/current/gtk3-theme.css")
-                and not any(parent.is_symlink() for parent in path.parents)
-                and still_current(path, data, "link:" + str(config / "icewine/current/gtk3-theme.css"))):
-            path.unlink()
-            print(f"retired: {path}")
-    records = state / "flatpak-themes"
-    if records.is_dir() and not records.is_symlink():
-        for record in records.glob("*/*.sha256"):
-            arch, theme_id = record.parent.name, record.stem
-            if theme_id not in themes or not re.fullmatch(r"[A-Za-z0-9_]+", arch):
-                continue
-            path = data / "flatpak/extension" / ("org.gtk.Gtk3theme.Icewine-" + theme_id) / arch / "3.22/gtk.css"
-            if any(parent.is_symlink() for parent in (path, record, *path.parents, *record.parents)):
-                continue
-            record_signature = default_signature(record)
-            signature = "sha256:" + record.read_text(encoding="utf-8").strip()
-            if (path.is_file() and still_current(record, state, record_signature)
-                    and still_current(path, data, signature)):
-                path.unlink()
-                if still_current(record, state, record_signature):
-                    record.unlink()
-                print(f"retired: {path}")
-    if not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
-        print("Pending: log into a session to retire the Icewine GTK setting.")
-        return True
-    try:
-        current = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"],
-                                 check=True, capture_output=True, text=True, timeout=10).stdout.strip()
-        record = state / "gtk-theme"
-        previous = record.read_text(encoding="utf-8").strip() if record.is_file() and not record.is_symlink() else None
-        record_signature = default_signature(record)
-        if previous in {"Icewine-" + theme_id for theme_id in themes} and current == repr(previous):
-            subprocess.run(["gsettings", "reset", "org.gnome.desktop.interface", "gtk-theme"],
-                           check=True, timeout=10)
-            if still_current(record, state, record_signature):
-                record.unlink()
-        elif current in {f"'Icewine-{theme_id}'" for theme_id in themes}:
-            print("Pending: preserved unrecorded GTK selection; select another GTK theme or run gsettings reset org.gnome.desktop.interface gtk-theme.")
-    except (OSError, subprocess.SubprocessError) as error:
-        print(f"Pending: Icewine GTK setting could not be retired: {error}", file=sys.stderr)
-        return False
-    # color-scheme has no ownership record; preserve the user's current preference.
-    return True
+    if not still_current(path, data, None):
+        raise ValueError(f"refusing changed GTK theme path: {path}")
+    atomic_link(path, target, root=data, signature=None)
 
 
 def install_flatpak_theme(state, theme_id, files):
@@ -834,7 +570,7 @@ def reload_session(config, app=None):
         failed = signal_reload("kitty", config, runtime) or failed
     if app in (None, "nvim"):
         failed = signal_reload("nvim", config, runtime) or failed
-    if app in (None, "yazi") and shutil.which("ya"):
+    if app in (None, "yazi") and (config / "yazi").is_dir() and shutil.which("ya"):
         try:
             subprocess.run(["ya", "emit-to", "0", "app:theme"], check=True,
                            capture_output=True, text=True, timeout=5)
@@ -863,20 +599,14 @@ def reload_session(config, app=None):
 
 
 def dispatch(argv):
-    if not argv or argv[0] not in {"init", "reset", "theme", "transparency", "autofullscreen", "apply"}:
-        raise ValueError("Usage: icewine {init [APP]|reset [APP]|theme [THEME_ID]|transparency [off|low|med|high]|autofullscreen [on|off]}")
+    if not argv or argv[0] not in {"theme", "transparency", "autofullscreen", "apply"}:
+        raise ValueError("Usage: icewine {theme [THEME_ID]|transparency [off|low|med|high]|autofullscreen [on|off]}")
     command, *args = argv
     if len(args) > (0 if command == "apply" else 1):
         raise ValueError("unexpected arguments")
-    app = args[0] if command in {"init", "reset"} and args else None
-    if app and app not in APPS:
-        raise ValueError(f"unsupported app: {app}; choose {', '.join(APPS)}")
+    app = None
     config = xdg("XDG_CONFIG_HOME", ".config")
     state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
-    if command in {"init", "reset"}:
-        implementation_preflight(os.environ.get("ICEWINE_DEFAULT_FILES"), config, state, app)
-    if command == "init":
-        state.mkdir(parents=True, exist_ok=True)
     if command == "autofullscreen":
         path = state / "autofullscreen"
         value = args[0] if args else (path.read_text(encoding="utf-8").strip() if path.exists() else "off")
@@ -945,27 +675,11 @@ def dispatch(argv):
         if args[0] not in TRANSPARENCY:
             raise ValueError("invalid transparency; choose off, low, med or high")
         atomic_text(state / "transparency", args[0] + "\n")
-    elif command == "reset":
-        state.mkdir(parents=True, exist_ok=True)
-        backup_owned(config, state, [config / relative for relative in owned(app)
-                                     if (config / relative).exists() or (config / relative).is_symlink()])
-        if app is None:
-            (state / "theme").unlink(missing_ok=True)
-            (state / "transparency").unlink(missing_ok=True)
-            (state / "autofullscreen").unlink(missing_ok=True)
     theme_id, policy = effective(state, themes)
     level = transparency_level(state)
     files = render_theme(assets, themes[theme_id], level)
     gtk_enabled = os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false"
-    install_links(config, state, False, app, install=False)
     gtk_complete = True
-    if not gtk_enabled and app in (None, "gtk"):
-        gtk_complete = retire_gtk_theme(config, state, themes)
-    if gtk_enabled and app in (None, "gtk"):
-        try:
-            install_gtk_theme(config, theme_id)
-        except (OSError, ValueError) as error:
-            print(f"Pending: GTK custom CSS theme could not be installed: {error}", file=sys.stderr)
     publish(config, files)
     sddm_file = os.environ.get("ICEWINE_SDDM_THEME_FILE")
     if sddm_file:
@@ -973,30 +687,18 @@ def dispatch(argv):
             atomic_text(Path(sddm_file), f"[General]\ntheme={theme_id}\n", 0o644)
         except OSError as error:
             print(f"Pending: SDDM colours will not update: {error}", file=sys.stderr)
-    if command in {"init", "reset"}:
-        install_defaults(os.environ.get("ICEWINE_DEFAULT_FILES"), config,
-                         xdg("XDG_DATA_HOME", ".local/share"), state, command == "reset", app)
-    if command in {"init", "reset", "theme", "transparency", "apply"}:
-        install_links(config, state, command == "reset", app, install=command != "apply")
     if gtk_enabled and app in (None, "gtk"):
+        install_gtk_theme(config, theme_id)
         install_flatpak_theme(state, theme_id, files)
         appearance = json.loads(themes[theme_id].read_text(encoding="utf-8"))["appearance"]
         gtk_complete = sync_gtk_settings(theme_id, appearance, state)
     print(f"Theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else "") + f" · Transparency: {level}")
-    if command in {"theme", "reset", "transparency", "apply"}:
-        return int(reload_session(config, app if command == "reset" else None) or not gtk_complete)
+    if command in {"theme", "transparency", "apply"}:
+        return int(reload_session(config) or not gtk_complete)
     return 0
 
 
 def main(argv):
-    if argv and argv[0] in {"init", "reset"}:
-        state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
-        state.mkdir(parents=True, exist_ok=True)
-        # Ponytail: one lock serialises init/reset, including backups; split by root if contention matters.
-        fd = os.open(state / "defaults.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, "r+") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            return dispatch(argv)
     return dispatch(argv)
 
 

@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Backend for explicit manager Apply; deployment shares the theme helpers."""
+import fcntl
+import importlib.machinery
+import json
+import os
+from pathlib import Path
+import platform
+import subprocess
+import sys
+import tempfile
+import types
+
+# Installed beside theme on Arch; Nix wrappers provide the source path.
+theme = types.ModuleType("icewine_theme")
+theme.__file__ = os.environ.get("ICEWINE_THEME_SCRIPT", str(Path(__file__).with_name("theme")))
+importlib.machinery.SourceFileLoader(theme.__name__, theme.__file__).exec_module(theme)
+FEATURES = ("desktop", "terminal", "texteditor", "filemanager", "gaming", "flatpak", "login", "shellExtras")
+APPS = {
+    "desktop": ("hypr", "uwsm", "gtk", "btop", "user-dirs", "applications"),
+    "terminal": ("kitty",), "texteditor": ("nano", "nvim"), "filemanager": ("yazi",),
+    "gaming": ("gaming",), "flatpak": (), "login": (),
+    "shellExtras": ("shellExtras", "starship", "fastfetch"),
+}
+PACKAGES = {
+    "desktop": ("icewine-session",), "terminal": ("kitty",), "texteditor": ("nano",),
+    "filemanager": ("yazi", "ffmpegthumbnailer", "7zip", "gvfs", "udisks2"),
+    "gaming": ("gamescope",), "flatpak": ("flatpak", "bazaar"),
+    "login": ("icewine-sddm",), "shellExtras": ("starship", "fastfetch"),
+}
+LOGIN_CONFIG = Path("/etc/sddm.conf.d/90-icewine.conf")
+LOGIN_CONTENTS = "[General]\nDisplayServer=x11\nInputMethod=qtvirtualkeyboard\n[Theme]\nCurrent=icewine\n"
+
+
+def validate(value):
+    if not isinstance(value, dict) or set(value) != set(FEATURES) or any(type(bit) is not bool for bit in value.values()):
+        raise ValueError("invalid manager selections")
+    return value
+
+
+def selections(state):
+    declared = os.environ.get("ICEWINE_MANAGE_SELECTIONS")
+    if declared is not None:
+        return True, validate(json.loads(declared))
+    if platform.freedesktop_os_release().get("ID") not in {"arch", "cachyos"}:
+        raise ValueError("Icewine manager supports Arch/CachyOS or the NixOS module")
+    path = state / "manage.json"
+    if path.is_symlink():
+        raise ValueError("refusing symlinked manager state")
+    return False, validate(json.loads(path.read_text())) if path.exists() else dict.fromkeys(FEATURES, False)
+
+
+def run(argv):
+    print("Running: " + " ".join(argv), flush=True)
+    subprocess.run(argv, check=True)
+
+
+def retire(config, data, state, feature):
+    records = theme.default_records(state)
+    for root_name, root in (("config", config), ("data", data), ("home", Path.home())):
+        entry = records.get(root_name, {})
+        if entry.get("root") != str(root):
+            continue
+        for name, signature in list(entry["files"].items()):
+            if feature == "desktop":
+                matches = root_name == "config" and name == "hypr/icewine"
+            else:
+                matches = theme.static_app(root_name, Path(name)) in APPS[feature]
+            if not matches:
+                continue
+            path = root / name
+            if theme.still_current(path, root, signature):
+                path.unlink(missing_ok=True)
+                del entry["files"][name]
+    theme.atomic_text(state / "default-files.json", json.dumps(records, sort_keys=True) + "\n")
+
+
+def login(state, enabled):
+    record = state / "login.sha256"
+    if record.is_symlink():
+        raise ValueError("refusing symlinked login ownership record")
+    signature = theme.default_signature(LOGIN_CONFIG)
+    previous = record.read_text().strip() if record.exists() else None
+    if enabled:
+        if signature is not None and signature != previous:
+            raise ValueError(f"preserved unrelated login configuration: {LOGIN_CONFIG}")
+        with tempfile.TemporaryDirectory(prefix="icewine-login-") as temporary:
+            source = Path(temporary) / "sddm.conf"
+            source.write_text(LOGIN_CONTENTS)
+            run(["sudo", "install", "-Dm644", str(source), str(LOGIN_CONFIG)])
+            theme.atomic_text(record, theme.default_signature(source) + "\n")
+        run(["sudo", "install", "-d", "-m0755", "-o", str(os.getuid()), "-g", str(os.getgid()), "/var/lib/icewine/sddm"])
+        run(["sudo", "systemctl", "enable", "sddm.service"])
+        run(["sudo", "systemctl", "set-default", "graphical.target"])
+    elif previous:
+        if signature == previous and not LOGIN_CONFIG.is_symlink():
+            run(["sudo", "unlink", str(LOGIN_CONFIG)])
+        record.unlink()
+
+
+def apply(selected, overwrite, readonly, previous, config, data, state):
+    if readonly and selected != previous:
+        raise ValueError("NixOS utility selections are read-only")
+    if not readonly:
+        packages = [package for feature in FEATURES if selected[feature] for package in PACKAGES[feature]]
+        if selected["gaming"] and not selected["flatpak"]:
+            packages.append("steam")
+        local = []
+        package_dir = os.environ.get("ICEWINE_PACKAGE_DIR")
+        for package in ("icewine-session", "icewine-sddm"):
+            if package not in packages:
+                continue
+            installed = subprocess.run(["pacman", "-Qq", package], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if installed.returncode == 0:
+                packages.remove(package)
+            elif package_dir:
+                archives = sorted(path for path in Path(package_dir).glob(package + "-[0-9]*.pkg.tar.*") if path.suffix != ".sig")
+                if len(archives) != 1:
+                    raise ValueError(f"expected one {package} archive in {package_dir}")
+                local.append(str(archives[0].resolve()))
+                packages.remove(package)
+        if packages:
+            run(["sudo", "pacman", "-S", "--needed", *packages])
+        if local:
+            run(["sudo", "pacman", "-U", "--needed", *local])
+        if selected["flatpak"]:
+            run(["flatpak", "remote-add", "--user", "--if-not-exists", "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"])
+            if selected["gaming"]:
+                run(["flatpak", "install", "--user", "--noninteractive", "flathub", "com.valvesoftware.Steam"])
+        # Host prerequisites finish before any per-user configuration is deployed.
+        if selected["login"] or previous["login"]:
+            login(state, selected["login"])
+    defaults = os.environ.get("ICEWINE_DEFAULT_FILES", "/usr/share/icewine/defaults")
+    if not (Path(defaults) / "config").is_dir() or not (Path(defaults) / "data").is_dir():
+        raise ValueError(f"Icewine default files are unavailable: {defaults}")
+    assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine/theme"))
+    themes = theme.installed(assets)
+    theme_id, _ = theme.effective(state, themes)
+    theme.publish(config, theme.render_theme(assets, themes[theme_id], theme.transparency_level(state)))
+    # Read the previous explicit Apply on NixOS too: rebuilds never touch dotfiles.
+    applied_path = state / "applied.json"
+    if applied_path.is_symlink():
+        raise ValueError("refusing symlinked applied-selection record")
+    applied = validate(json.loads(applied_path.read_text())) if applied_path.exists() else previous
+    for feature in FEATURES:
+        if applied[feature] and not selected[feature]:
+            retire(config, data, state, feature)
+    for app in ("quickshell", "wallpapers"):
+        theme.install_defaults(defaults, config, data, state, overwrite, app)
+    for feature in FEATURES:
+        if not selected[feature]:
+            continue
+        for app in APPS[feature]:
+            theme.install_defaults(defaults, config, data, state, overwrite, app)
+            if app in theme.APPS and theme.APPS[app]:
+                theme.install_links(config, state, overwrite, app)
+    if selected["desktop"] and os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false":
+        theme.install_gtk_theme(config, theme_id)
+    theme.atomic_text(applied_path, json.dumps(selected, sort_keys=True) + "\n")
+    if not readonly:
+        theme.atomic_text(state / "manage.json", json.dumps(selected, sort_keys=True) + "\n")
+    print("Applied Icewine selections.")
+
+
+def main(argv):
+    config, data = theme.xdg("XDG_CONFIG_HOME", ".config"), theme.xdg("XDG_DATA_HOME", ".local/share")
+    state = theme.xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    readonly, previous = selections(state)
+    if argv == ["state"]:
+        print(" ".join("1" if bit else "0" for bit in (readonly, *(previous[name] for name in FEATURES))))
+        return
+    if len(argv) != 10 or argv[0] != "apply" or any(bit not in {"0", "1"} for bit in argv[1:]):
+        raise ValueError("invalid manager request")
+    if os.getuid() == 0:
+        raise ValueError("run icewine manage as your desktop user")
+    # Never follow symlinked manager/configuration roots into someone else's files.
+    for root in (Path.home(), config, data, state):
+        if any(parent.is_symlink() for parent in (root, *root.parents)):
+            raise ValueError(f"refusing symlinked deployment root: {root}")
+    state.mkdir(parents=True, exist_ok=True)
+    fd = os.open(state / "defaults.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "r+") as lock:
+        # Ponytail: one lock serialises explicit Apply; split by root if contention matters.
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        readonly, previous = selections(state)
+        selected = dict(zip(FEATURES, (bit == "1" for bit in argv[1:9])))
+        apply(selected, argv[9] == "1", readonly, previous, config, data, state)
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        print(f"Icewine Apply failed: {error}", file=sys.stderr)
+        sys.exit(1)

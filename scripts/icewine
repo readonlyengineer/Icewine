@@ -2,12 +2,16 @@
 
 usage() {
     cat >&2 <<'EOF'
-Usage: icewine {init [APP]|reset [APP]|theme [THEME_ID|status]|transparency [off|low|med|high]|autofullscreen [on|off]|wallpaper IMAGE}
+Usage: icewine {manage|theme [THEME_ID|status]|transparency [off|low|med|high]|autofullscreen [on|off]|wallpaper IMAGE}
 EOF
 }
 
 case ${1:-} in
-    init|reset|theme|transparency|autofullscreen)
+    manage)
+        shift
+        exec icewine-manage "$@"
+        ;;
+    theme|transparency|autofullscreen)
         exec icewine-theme "$@"
         ;;
     wallpaper)

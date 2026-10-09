@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Check installer orchestration with fake host commands; no build or installation."""
+"""Exercise explicit Apply with isolated dotfiles and mocked host operations."""
+import errno
+import contextlib
+import io
+import importlib.machinery
 import json
 import os
 from pathlib import Path
@@ -7,144 +11,244 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
+from unittest.mock import patch
 
 source = Path(sys.argv[1]).resolve()
-with tempfile.TemporaryDirectory() as directory:
-    root = Path(directory)
-    checkout = root / "checkout with spaces"
-    checkout.mkdir()
-    shutil.copy2(source / "install.sh", checkout / "install.sh")
-    commands = root / "bin"
-    commands.mkdir()
-    log = root / "calls.jsonl"
-    fake = commands / "record"
-    fake.write_text("#!" + sys.executable + "\n" + r'''
-import json, os, sys
-from pathlib import Path
-name, args = Path(sys.argv[0]).name, sys.argv[1:]
-with open(os.environ["INSTALL_TEST_LOG"], "a") as log:
-    log.write(json.dumps([name, *args]) + "\n")
-if name == "id": print(os.environ.get("INSTALL_TEST_UID", "1000"))
-elif name == "pacman" and args[:1] == ["-Qq"]:
-    sys.exit(0 if args[1] in os.environ.get("INSTALL_TEST_TERMINALS", "").split() else 1)
-elif name == "python": print(os.environ["INSTALL_TEST_DISTRO"])
-elif name == "git":
-    os.execv(os.environ["INSTALL_TEST_GIT"], ["git", "-C", os.environ["INSTALL_TEST_SOURCE"], *args])
-elif name == "makepkg" and args == ["-sf"]:
-    assert Path("PKGBUILD").is_file() and Path("icewine.tar.gz").is_file()
-elif name == "makepkg" and args == ["--packagelist"]:
-    for name in ("icewine", "icewine-cachyos-fish", "icewine-sddm", "icewine-debug", "icewine-cachyos-fish-debug"):
-        print(str(Path.cwd() / "packages with spaces" / (name + "-0.1-1-x86_64.pkg.tar.zst")))
-elif name == "sudo" and args[:2] == ["install", "-Dm644"]:
-    Path(os.environ["INSTALL_TEST_SDDM"]).write_text(Path(args[-2]).read_text())
-elif name == "sudo" and args == ["systemctl", "enable", "sddm.service"] and os.environ.get("INSTALL_TEST_ENABLE_FAIL"):
-    sys.exit(1)
-elif name == "sudo" and args[:2] == ["pacman", "-R"] and os.environ.get("INSTALL_TEST_REMOVE_FAIL"):
-    sys.exit(1)
-elif name == "sudo" and args[1] == "-Syu" and os.environ.get("INSTALL_TEST_FAIL"):
-    sys.exit(1)
-''')
-    fake.chmod(0o755)
-    for name in ("id", "python", "git", "makepkg", "sudo", "icewine", "pacman"):
-        (commands / name).symlink_to(fake)
-    env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
-               HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), INSTALL_TEST_LOG=str(log), INSTALL_TEST_GIT=shutil.which("git"),
-               INSTALL_TEST_SOURCE=str(source), INSTALL_TEST_SDDM=str(root / "sddm.conf"))
-    for distro, expected in (("arch", ["icewine", "icewine-sddm"]),
-                             ("cachyos", ["icewine", "icewine-cachyos-fish", "icewine-sddm"])):
-        log.unlink(missing_ok=True)
-        result = subprocess.run(["bash", str(checkout / "install.sh")],
-                                env=dict(env, INSTALL_TEST_DISTRO=distro), input="1\n1\n", capture_output=True, text=True)
-        assert result.returncode == 0, result.stderr
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        assert ["makepkg", "-sf"] in calls
-        install = next(call for call in calls if call[:3] == ["sudo", "pacman", "-U"])
-        assert [Path(path).name.removesuffix("-0.1-1-x86_64.pkg.tar.zst") for path in install[3:]] == expected
-        directory = ["sudo", "install", "-d", "-m0755", "-o", "1000", "-g", "1000", "/var/lib/icewine/sddm"]
-        config = next(call for call in calls if call[:3] == ["sudo", "install", "-Dm644"])
-        assert config[-1] == "/etc/sddm.conf.d/90-icewine.conf"
-        assert (root / "sddm.conf").read_text() == "[General]\nDisplayServer=x11\nInputMethod=qtvirtualkeyboard\n[Theme]\nCurrent=icewine\n"
-        assert calls.index(directory) < calls.index(config) < calls.index(["icewine", "init"])
-        assert calls[-2:] == [["sudo", "systemctl", "enable", "sddm.service"],
-                              ["sudo", "systemctl", "set-default", "graphical.target"]]
-        assert not Path(install[3]).parent.parent.exists(), "Temporary build directory was retained"
-    for choice, wanted, unwanted in (
-        ("invalid\n1\n", ["kitty"], ["alacritty", "ghostty"]),
-        ("2\n", ["alacritty"], ["kitty", "ghostty"]),
-        ("3\n", ["ghostty"], ["kitty", "alacritty"]),
-        ("4\n", [], ["kitty", "alacritty", "ghostty"]),
-    ):
-        log.unlink()
-        result = subprocess.run(["bash", str(checkout / "install.sh")],
-                                env=dict(env, INSTALL_TEST_DISTRO="cachyos",
-                                         INSTALL_TEST_TERMINALS="kitty alacritty ghostty"),
-                                input=choice + "1\n", capture_output=True, text=True)
-        assert result.returncode == 0, result.stderr
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        installs = [call for call in calls if call[:4] == ["sudo", "pacman", "-Syu", "--needed"]]
-        removals = [call for call in calls if call[:3] == ["sudo", "pacman", "-R"]]
-        assert installs == [["sudo", "pacman", "-Syu", "--needed", "base-devel", "python", "nano", *wanted]]
-        assert removals == ([["sudo", "pacman", "-R", *unwanted]] if unwanted else [])
-    editor_file = root / "config/icewine/editor"
-    for choice, installed, selected in (("1\n", ["nano"], "nano"),
-                                         ("2\n", ["neovim"], "nvim"),
-                                         ("3\n", ["vim"], "vim"),
-                                         ("\n", ["neovim"], "nvim")):
-        editor_file.write_text("nvim" if choice == "\n" else "nvim\n")
-        log.unlink()
-        result = subprocess.run(["bash", str(checkout / "install.sh")],
-                                env=dict(env, INSTALL_TEST_DISTRO="arch", INSTALL_TEST_TERMINALS="nano neovim vim"),
-                                input="4\n" + choice, capture_output=True, text=True)
-        assert result.returncode == 0, result.stderr
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        assert ["sudo", "pacman", "-Syu", "--needed", "base-devel", "python", *installed] in calls
-        assert [call for call in calls if call[:3] == ["sudo", "pacman", "-R"]] == [
-            ["sudo", "pacman", "-R", *[name for name in ("nano", "neovim", "vim") if name not in installed]]]
-        assert editor_file.read_text() == selected + "\n"
-    for invalid in ("", "nvim; must-not-run"):
-        editor_file.write_text(invalid)
-        log.unlink()
-        result = subprocess.run(["bash", str(checkout / "install.sh")],
-                                env=dict(env, INSTALL_TEST_DISTRO="arch"),
-                                input="4\n", capture_output=True, text=True)
-        assert result.returncode != 0 and "Invalid editor selection" in result.stderr
-        assert not any(json.loads(line)[0] == "sudo" for line in log.read_text().splitlines())
-    editor_file.write_text("nvim\n")
-    editor_file.chmod(0)
-    log.unlink()
-    result = subprocess.run(["bash", str(checkout / "install.sh")],
-                            env=dict(env, INSTALL_TEST_DISTRO="arch"),
-                            input="4\n", capture_output=True, text=True)
-    editor_file.chmod(0o600)
-    assert result.returncode != 0 and "Invalid editor selection" in result.stderr
-    assert not any(json.loads(line)[0] == "sudo" for line in log.read_text().splitlines())
-    assert editor_file.read_text() == "nvim\n"
-    editor_file.write_text("nano\n")
-    log.unlink()
-    result = subprocess.run(["bash", str(checkout / "install.sh")],
-                            env=dict(env, INSTALL_TEST_DISTRO="arch"),
-                            input="", capture_output=True, text=True)
-    assert result.returncode != 0
-    assert not any(json.loads(line)[0] == "sudo" for line in log.read_text().splitlines())
-    log.unlink()
-    result = subprocess.run(["bash", str(checkout / "install.sh")],
-                            env=dict(env, INSTALL_TEST_DISTRO="cachyos",
-                                     INSTALL_TEST_TERMINALS="alacritty", INSTALL_TEST_REMOVE_FAIL="1"),
-                            input="1\n1\n", capture_output=True, text=True)
-    assert result.returncode != 0
-    assert json.loads(log.read_text().splitlines()[-1]) == ["sudo", "pacman", "-R", "alacritty"]
-    for failure in ({"INSTALL_TEST_UID": "0"}, {"INSTALL_TEST_FAIL": "1"}):
-        log.unlink()
-        result = subprocess.run(["bash", str(checkout / "install.sh")],
-                                env=dict(env, INSTALL_TEST_DISTRO="cachyos", **failure), input="1\n1\n", capture_output=True, text=True)
-        assert result.returncode != 0
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        assert not any(call[0] in ("git", "makepkg", "icewine") for call in calls)
-    log.unlink()
-    result = subprocess.run(["bash", str(checkout / "install.sh")],
-                            env=dict(env, INSTALL_TEST_DISTRO="cachyos", INSTALL_TEST_ENABLE_FAIL="1"),
-                            input="1\n1\n", capture_output=True, text=True)
-    assert result.returncode != 0
-    calls = [json.loads(line) for line in log.read_text().splitlines()]
-    assert calls[-1] == ["sudo", "systemctl", "enable", "sddm.service"]
-print("PASS: Arch/CachyOS selection, SDDM setup, cleanup and failure handling")
+manage = types.ModuleType("icewine_manage")
+manage.__file__ = str(source / "scripts/manage")
+importlib.machinery.SourceFileLoader(manage.__name__, manage.__file__).exec_module(manage)
+
+with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as temporary:
+    root = Path(temporary)
+    defaults = root / "defaults"
+    for folder in ("config", "data", "home"):
+        (defaults / folder).mkdir(parents=True)
+    for name, text in {
+        "config/quickshell/shell.qml": "shell\n", "config/hypr/hyprland.lua": "hypr\n",
+        "config/kitty/kitty.conf": "kitty\n", "config/nano/nanorc": "nano\n",
+        "config/yazi/yazi.toml": "yazi\n", "home/.bashrc": "shell extras\n",
+        "data/applications/steam-gamescope.desktop": "steam launcher\n",
+    }.items():
+        path = defaults / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    (defaults / "config/hypr/icewine").symlink_to(source / "hyprland")
+    (defaults / "config/quickshell/icewine").symlink_to(source / "quickshell")
+    (defaults / "data/wallpapers").mkdir()
+    (defaults / "data/wallpapers/default.jpg").write_bytes(b"\xff\xd8binary wallpaper")
+    config, data, state = (root / name for name in ("config", "data", "state/icewine"))
+    env = dict(HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_DATA_HOME=str(data),
+               XDG_STATE_HOME=str(state.parent), ICEWINE_DEFAULT_FILES=str(defaults),
+               ICEWINE_THEME_ASSETS=str(source / "theme/assets"), ICEWINE_THEME_POLICY="")
+    false = dict.fromkeys(manage.FEATURES, False)
+    def apply(features=(), overwrite=False, readonly=False):
+        selected = {name: name in features for name in manage.FEATURES}
+        extra = {"ICEWINE_MANAGE_SELECTIONS": json.dumps(selected)} if readonly else {}
+        with patch.dict(os.environ, dict(env, **extra)), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}):
+            manage.main(["apply", *[str(int(selected[name])) for name in manage.FEATURES], str(int(overwrite))])
+        return selected
+    # Merely querying state does not even create the state directory.
+    with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+        manage.main(["state"])
+        assert not state.exists() and not commands.called
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+        apply()
+        assert not commands.called
+    assert (config / "quickshell/icewine").is_symlink()
+    assert not (config / "hypr").exists() and not (config / "kitty").exists()
+    # Local split packages bootstrap from archives with literal spaced paths;
+    # signatures are not mistaken for a second archive.
+    archives = root / "package archives"
+    archives.mkdir()
+    (archives / "icewine-session-0.1-1-x86_64.pkg.tar.zst").touch()
+    (archives / "icewine-session-0.1-1-x86_64.pkg.tar.zst.sig").touch()
+    with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives)), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)) as commands:
+        apply(("desktop",))
+        assert [call.args[0] for call in commands.call_args_list] == [
+            ["pacman", "-Qq", "icewine-session"],
+            ["sudo", "pacman", "-U", "--needed", str(archives / "icewine-session-0.1-1-x86_64.pkg.tar.zst")]]
+    # Theme switches maintain runtime GTK artifacts without redeploying dotfiles.
+    mocha = data / "themes/Icewine-catppuccin-mocha/gtk-3.0/gtk.css"
+    assert mocha.is_file()
+    css = config / "gtk-3.0/gtk.css"
+    css.parent.mkdir(parents=True, exist_ok=True)
+    css.unlink(missing_ok=True)
+    css.write_text("user CSS\n")
+    with patch.dict(os.environ, dict(env, ICEWINE_GTK_ENABLE="true", WAYLAND_DISPLAY="", DBUS_SESSION_BUS_ADDRESS="", HYPRLAND_INSTANCE_SIGNATURE="")), \
+         patch.object(manage.theme, "reload_session", return_value=False), \
+         patch.object(manage.theme, "install_flatpak_theme"), patch.object(manage.theme, "sync_gtk_settings", return_value=True):
+        assert manage.theme.main(["theme", "dracula"]) == 0
+    dracula = data / "themes/Icewine-dracula/gtk-3.0/gtk.css"
+    assert dracula.is_file() and dracula.is_symlink()
+    assert dracula.resolve() == (config / "icewine/current/gtk3-theme.css").resolve()
+    assert css.read_text() == "user CSS\n"
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+        apply()
+
+    assert (data / "wallpapers/default.jpg").read_bytes().startswith(b"\xff\xd8")
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+        apply(("terminal",))
+        assert commands.call_args_list[0].args[0] == ["sudo", "pacman", "-S", "--needed", "kitty"]
+    with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), contextlib.redirect_stdout(io.StringIO()) as saved:
+        manage.main(["state"])
+        assert saved.getvalue().strip() == "0 0 1 0 0 0 0 0 0"
+    kitty = config / "kitty/kitty.conf"
+    kitty.write_text("my edits\n")
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+        apply(("terminal",))
+        assert kitty.read_text() == "my edits\n"
+        apply(("terminal",), overwrite=True)
+        assert kitty.read_text() == "kitty\n"
+        assert not list(state.glob("*reset*")) and not list(state.glob("*backup*"))
+        target = root / "unrelated"
+        target.write_text("keep me\n")
+        kitty.unlink()
+        kitty.symlink_to(target)
+        apply(("terminal",), overwrite=True)
+        assert not kitty.is_symlink() and kitty.read_text() == "kitty\n"
+        assert target.read_text() == "keep me\n"
+        # An edited deselected entry remains; untouched Icewine files retire.
+        kitty.write_text("keep user edits\n")
+        apply()
+        assert kitty.read_text() == "keep user edits\n"
+        apply(("terminal",), overwrite=True)
+        apply()
+        assert not kitty.exists()
+        apply(("desktop",))
+        apply()
+        assert not (config / "hypr/icewine").is_symlink()
+        assert (config / "hypr/hyprland.lua").read_text() == "hypr\n"
+    with patch.dict(os.environ, ICEWINE_GTK_ENABLE="false"), patch.object(manage.theme, "install_gtk_theme", side_effect=AssertionError("disabled GTK installed")):
+        apply(("desktop",), readonly=True)
+    for features, steam, flatpak in [(("gaming",), True, False), (("gaming", "flatpak"), False, True), (("flatpak",), False, False)]:
+        with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+            apply(features)
+        calls = [call.args[0] for call in commands.call_args_list]
+        packages = next(call for call in calls if call[:2] == ["sudo", "pacman"])[4:]
+        assert ("steam" in packages) == steam
+        assert any(call[:2] == ["flatpak", "install"] for call in calls) == flatpak
+        assert ("gamescope" in packages) == ("gaming" in features)
+        assert ("bazaar" in packages) == ("flatpak" in features)
+        assert not any("-R" in call or "uninstall" in call for call in calls)
+    # Host persistence may bind-mount a single file; overwrite must not rely
+    # on rename succeeding, and a leaf symlink must never reach its target.
+    locale = config / "user-dirs.locale"
+    (defaults / "config/user-dirs.locale").write_text("default locale\n")
+    locale.write_text("edited locale\n")
+    original_replace = manage.theme.os.replace
+    def busy(source, destination):
+        if destination == locale:
+            raise OSError(errno.EBUSY, "bind mount")
+        return original_replace(source, destination)
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), patch.object(manage.theme.os, "replace", side_effect=busy):
+        apply(("desktop",), overwrite=True)
+    assert locale.read_text() == "default locale\n"
+    locale.unlink()
+    locale.symlink_to(target)
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), patch.object(manage.theme.os, "replace", side_effect=busy):
+        try:
+            apply(("desktop",), overwrite=True)
+        except OSError as error:
+            assert error.errno == errno.EBUSY
+        else:
+            raise AssertionError("Busy symlink reached unrelated target")
+    assert target.read_text() == "keep me\n"
+    locale.unlink()
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+        apply()
+    before = (state / "manage.json").read_bytes()
+    with patch.object(manage.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["pacman"])):
+        try:
+            apply(("texteditor",))
+        except subprocess.CalledProcessError:
+            pass
+        else:
+            raise AssertionError("Failed install reported success")
+    assert (state / "manage.json").read_bytes() == before
+    assert not (config / "nano/nanorc").exists()
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+        apply(("texteditor", "filemanager", "shellExtras"), readonly=True)
+        assert not commands.called
+        assert (config / "nano/nanorc").read_text() == "nano\n"
+        assert (root / ".bashrc").read_text() == "shell extras\n"
+        assert (config / "yazi/theme.toml").is_symlink()
+        # Package defaults change; repeated Apply preserves even untouched mutable files.
+        (defaults / "config/nano/nanorc").write_text("updated nano\n")
+        apply(("texteditor", "filemanager", "shellExtras"), readonly=True)
+        assert (config / "nano/nanorc").read_text() == "nano\n"
+        apply(("texteditor",), overwrite=True, readonly=True)
+        assert (config / "nano/nanorc").read_text() == "updated nano\n"
+        assert not (config / "yazi/theme.toml").is_symlink()
+    with patch.dict(os.environ, dict(env, ICEWINE_MANAGE_SELECTIONS=json.dumps(false))):
+        try:
+            manage.main(["apply", "1", *("0" for _ in range(8))])
+        except ValueError as error:
+            assert "read-only" in str(error)
+        else:
+            raise AssertionError("NixOS choices were editable")
+    # Overwrite may replace a leaf symlink but cannot traverse a symlinked parent.
+    unrelated = root / "outside kitty"
+    unrelated.mkdir()
+    (unrelated / "kitty.conf").write_text("outside\n")
+    shutil.rmtree(config / "kitty")
+    (config / "kitty").symlink_to(unrelated)
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+        apply(("terminal",), overwrite=True)
+    assert (unrelated / "kitty.conf").read_text() == "outside\n"
+    login_config = root / "sddm.conf"
+    with patch.object(manage, "LOGIN_CONFIG", login_config), patch.object(manage, "run") as host:
+        login_config.write_text("unrelated login policy\n")
+        try:
+            manage.login(state, True)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Unrelated login policy was overwritten")
+        assert not host.called
+        login_config.write_text(manage.LOGIN_CONTENTS)
+        (state / "login.sha256").write_text(manage.theme.default_signature(login_config))
+        manage.login(state, False)
+        host.assert_called_once_with(["sudo", "unlink", str(login_config)])
+        assert not (state / "login.sha256").exists()
+
+# HOME participates in deployment independently of XDG roots.
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    outside = root / "external home"
+    outside.mkdir()
+    (outside / ".bashrc").write_text("external shell config\n")
+    home = root / "home link"
+    home.symlink_to(outside)
+    declared = dict.fromkeys(manage.FEATURES, False)
+    declared["shellExtras"] = True
+    env = dict(HOME=str(home), XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"),
+               XDG_STATE_HOME=str(root / "state"), ICEWINE_MANAGE_SELECTIONS=json.dumps(declared))
+    with patch.dict(os.environ, env), patch.object(manage.subprocess, "run", side_effect=AssertionError("host operation before root validation")):
+        try:
+            manage.main(["apply", "0", "0", "0", "0", "0", "0", "0", "1", "1"])
+        except ValueError as error:
+            assert "symlinked deployment root" in str(error)
+        else:
+            raise AssertionError("Apply followed symlinked HOME")
+    assert (outside / ".bashrc").read_text() == "external shell config\n"
+    assert not (root / "state").exists() and not (root / "config").exists()
+
+# Public setup entry points are gone; manager routes unchanged literal arguments.
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    command = root / "icewine-manage"
+    command.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+    command.chmod(0o755)
+    env = dict(os.environ, PATH=str(root) + ":" + os.environ["PATH"])
+    for old in ("init", "reset"):
+        assert subprocess.run(["bash", str(source / "scripts/icewine"), old], env=env, capture_output=True).returncode == 2
+    assert subprocess.run(["bash", str(source / "scripts/icewine"), "manage", "literal space"], env=env, capture_output=True, text=True).stdout == "literal space\n"
+print("PASS: explicit Apply, selections, ownership, overwrite, failures and read-only NixOS")
+
+module_options = (source / "modules/default.nix").read_text() + (source / "modules/login.nix").read_text()
+for name in manage.FEATURES:
+    assert name + ".enable = lib.mkEnableOption" in module_options or name + " = {" in module_options
+assert len(manage.FEATURES) == 8
+assert "[(&str, &str); 8]" in (source / "manager/src/main.rs").read_text()
+print("PASS: utility option parity and local split-package bootstrap")

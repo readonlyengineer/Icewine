@@ -74,8 +74,8 @@ in {
 
 
     assertions = [ {
-      assertion = cfg.steam == "native";
-      message = "Icewine handheld integration requires services.icewine.steam = \"native\".";
+      assertion = cfg.desktop.enable && cfg.gaming.enable && !cfg.flatpak.enable;
+      message = "Icewine handheld integration requires desktop and gaming enabled with flatpak disabled.";
     } ];
     services.inputplumber.enable = true;
     services.pipewire.alsa.support32Bit = true;

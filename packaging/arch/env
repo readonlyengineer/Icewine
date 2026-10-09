@@ -1,6 +1,9 @@
 . /usr/share/icewine/session/env
 export ICEWINE_KITTY_PRESET=false
 if command -v kitty >/dev/null 2>&1; then export ICEWINE_KITTY_PRESET=true; fi
-export ICEWINE_STEAM_ENABLED=${ICEWINE_STEAM_ENABLED:-true}
+export ICEWINE_STEAM_ENABLED=false
+if python3 -c 'import json,os,sys; from pathlib import Path; p=Path(os.environ.get("XDG_STATE_HOME", str(Path.home()/".local/state")))/"icewine/manage.json"; sys.exit(not (p.is_file() and json.loads(p.read_text()).get("gaming",False)))'; then
+  export ICEWINE_STEAM_ENABLED=true
+fi
 export ICEWINE_BATTERY_ENABLED=${ICEWINE_BATTERY_ENABLED:-true}
 export QT_IM_MODULE=qtvirtualkeyboard
