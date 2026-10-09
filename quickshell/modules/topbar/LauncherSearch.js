@@ -63,8 +63,8 @@ function applications(entries, rawQuery, excludeSteam = false, shortcuts = []) {
     const query = String(rawQuery || "").trim().toLowerCase()
 
     return entries
-        .filter(entry => !entry.noDisplay)
-        .filter(entry => !excludeSteam || !steamManaged(entry, shortcuts))
+        .filter(entry => !entry.noDisplay
+            && (!excludeSteam || !steamManaged(entry, shortcuts)))
         .map(entry => ({ entry, score: rank(entry, query) }))
         .filter(result => result.score >= 0)
         .sort((left, right) => left.score - right.score

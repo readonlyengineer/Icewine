@@ -261,6 +261,8 @@ Flickable {
         }
 
         SectionLabel {
+            id: batteryConditionLabel
+
             visible: root.batteryPresent && (root.battery?.healthSupported
                 || (root.battery?.energyCapacity ?? 0) > 0
             )
@@ -268,9 +270,7 @@ Flickable {
         }
 
         Text {
-            visible: root.batteryPresent && (root.battery?.healthSupported
-                || (root.battery?.energyCapacity ?? 0) > 0
-            )
+            visible: batteryConditionLabel.visible
             width: parent.width
             text: [
                 root.battery?.healthSupported

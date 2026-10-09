@@ -23,7 +23,7 @@ function sourceWindowAddress(notification, windows, desktopEntry) {
     const identities = [notification?.desktopEntry, desktopEntry?.id,
         desktopEntry?.startupClass]
         .map(identity => String(identity || "").replace(/\.desktop$/i, "").toLowerCase())
-        .filter((identity, index, values) => identity && values.indexOf(identity) === index)
+        .filter(Boolean)
     if (!identities.length)
         return ""
 

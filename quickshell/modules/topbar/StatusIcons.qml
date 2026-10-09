@@ -70,7 +70,6 @@ Rectangle {
             page: "audio"
             icon: root.muted ? "󰝟" : root.volume < 34 ? "" : root.volume < 67 ? "" : ""
             colour: Theme.Palette.tertiary
-            onActivated: root.popoutActivated("audio")
             onScrolled: delta => root.adjustVolume(delta)
         }
 
@@ -78,21 +77,18 @@ Rectangle {
             page: "performance"
             icon: "󰓅"
             colour: Theme.Palette.caution
-            onActivated: root.popoutActivated("performance")
         }
 
         StatusButton {
             page: "screenshot"
             icon: "󰄀"
             colour: Theme.Palette.secondary
-            onActivated: root.popoutActivated("screenshot")
         }
 
         StatusButton {
             page: "network"
             icon: root.wifiConnected ? "" : root.networkConnected ? "" : "󰯡"
             colour: root.networkConnected ? Theme.Palette.success : Theme.Palette.muted
-            onActivated: root.popoutActivated("network")
         }
 
         StatusButton {
@@ -100,7 +96,6 @@ Rectangle {
             visible: root.bluetoothAdapter !== null
             icon: root.bluetoothConnections > 0 ? "󰂰" : root.bluetoothAdapter?.enabled ? "" : "󰂲"
             colour: root.bluetoothAdapter?.enabled ? Theme.Palette.info : Theme.Palette.muted
-            onActivated: root.popoutActivated("bluetooth")
         }
 
         StatusButton {
@@ -112,7 +107,6 @@ Rectangle {
                 : root.notificationService.count > 0
                     ? String(root.notificationService.count) : ""
             pulseToken: root.notificationService.pulseToken
-            onActivated: root.popoutActivated("notifications")
         }
 
         StatusButton {
@@ -125,7 +119,6 @@ Rectangle {
             colour: root.battery?.isLaptopBattery && (root.battery?.percentage ?? 1) < 0.15
                 ? Theme.Palette.error
                 : root.batteryCharging ? Theme.Palette.success : Theme.Palette.primary
-            onActivated: root.popoutActivated("battery")
         }
     }
 
@@ -151,7 +144,6 @@ Rectangle {
         property string badge: ""
         property int pulseToken: 0
 
-        signal activated()
         signal scrolled(real delta)
 
         implicitWidth: Math.max(badge.length > 0 ? 25 : 21, statusContent.implicitWidth + 8)
@@ -271,7 +263,7 @@ Rectangle {
         }
 
         TapHandler {
-            onTapped: statusButton.activated()
+            onTapped: root.popoutActivated(statusButton.page)
         }
 
         WheelHandler {

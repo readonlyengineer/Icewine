@@ -128,7 +128,7 @@ function append(history, time, values) {
 }
 
 function format(value, unit) {
-    if (value === null || value === undefined || !Number.isFinite(value)) return "Unavailable"
+    if (!Number.isFinite(value)) return "Unavailable"
     if (unit !== "B/s") return `${Math.round(value)}${unit}`
     const units = ["B/s", "KiB/s", "MiB/s", "GiB/s"]
     let index = 0
