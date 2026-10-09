@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Controls as Controls
 import Quickshell.Services.UPower
 import "StatusModel.js" as StatusModel
 import qs.icewine.theme as Theme
@@ -66,21 +65,17 @@ Flickable {
             ActionButton {
                 id: lockButton
                 width: (parent.width - parent.spacing) / 2
-                text: "󰍁"
+                text: "󰍁  Lock"
                 Accessible.role: Accessible.Button
                 Accessible.name: "Lock"
-                Controls.ToolTip.visible: hovered || activeFocus
-                Controls.ToolTip.text: "Lock"
                 onClicked: root.session.requestLock()
             }
 
             ActionButton {
                 width: (parent.width - parent.spacing) / 2
-                text: "󰒲"
+                text: "󰒲  Sleep"
                 Accessible.role: Accessible.Button
                 Accessible.name: "Sleep"
-                Controls.ToolTip.visible: hovered || activeFocus
-                Controls.ToolTip.text: "Sleep"
                 onClicked: root.session.requestSleep()
             }
         }
@@ -91,21 +86,17 @@ Flickable {
 
             ActionButton {
                 width: (parent.width - parent.spacing) / 2
-                text: "󰑐"
+                text: "󰑐  Reboot"
                 Accessible.role: Accessible.Button
                 Accessible.name: "Reboot"
-                Controls.ToolTip.visible: hovered || activeFocus
-                Controls.ToolTip.text: "Reboot"
                 onClicked: root.session.requestReboot()
             }
 
             ActionButton {
                 width: (parent.width - parent.spacing) / 2
-                text: "󰐥"
+                text: "󰐥  Shutdown"
                 Accessible.role: Accessible.Button
                 Accessible.name: "Shutdown"
-                Controls.ToolTip.visible: hovered || activeFocus
-                Controls.ToolTip.text: "Shutdown"
                 onClicked: root.session.requestShutdown()
             }
         }
