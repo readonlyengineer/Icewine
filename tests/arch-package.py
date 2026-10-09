@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Direct native launcher checks; pass makepkg roots to also check built payloads."""
 import json
-import configparser
-import shlex
 import os
 from pathlib import Path
 import shutil
@@ -55,14 +53,6 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
         assert run("icewine-editor", argument).returncode == 0
         assert json.loads(log.read_text().splitlines()[-1]) == [selection.strip(), argument]
     editor_file.write_text("nvim\n")
-    desktop_entry = configparser.ConfigParser(interpolation=None)
-    desktop_entry.read(native / "icewine-editor.desktop")
-    entry = desktop_entry["Desktop Entry"]
-    assert entry["Terminal"] == "false" and "text/html" not in entry["MimeType"]
-    argv = shlex.split(entry["Exec"])
-    argv[-1:] = [argument]
-    assert run(*argv).returncode == 0
-    assert json.loads(log.read_text().splitlines()[-1]) == ["kitty", "-e", "icewine-editor", argument]
     (commands / "nvim").unlink()
     result = run("icewine-editor", argument, PATH=str(commands))
     assert result.returncode == 127 and "nvim is not installed" in result.stderr
@@ -139,7 +129,6 @@ if len(sys.argv) == 2:
 desktop, fish, sddm = map(Path, sys.argv[2:5])
 payload = desktop / "usr/share/icewine"
 defaults = payload / "defaults"
-assert (desktop / "usr/share/applications/icewine-editor.desktop").read_bytes() == (native / "icewine-editor.desktop").read_bytes()
 assert not (defaults / "home").exists(), "Native package must not replace login shells"
 assert not (desktop / "usr/share/fish").exists(), "Arch's shell must remain user-managed"
 assert not (desktop / "usr/bin/icewine-browser").exists()

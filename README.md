@@ -293,10 +293,8 @@ Nano is the default editor, with syntax colouring from its installed package.
 An existing `~/.nanorc` takes precedence over `nano/nanorc`; keep your settings
 and add its packaged syntax includes there if needed.
 
-The **Icewine Text Editor** Open With entry launches the chosen editor through
-Icewine's configured terminal. Choose it per file type in a graphical file
-manager; existing MIME defaults remain yours. `EDITOR` and `VISUAL` default to
-`icewine-editor`, while deliberate environment overrides remain available to Yazi.
+`EDITOR` and `VISUAL` default to `icewine-editor`, while deliberate environment
+overrides remain available to Yazi.
 
 Install replacement applications and their configuration in your host. Neovim
 plugins and language servers are host-owned; Icewine generates the optional

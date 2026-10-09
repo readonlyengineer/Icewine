@@ -1,8 +1,6 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.icewine;
-  editorEntry = (pkgs.writeTextDir "share/applications/icewine-editor.desktop"
-    (builtins.readFile ../packaging/arch/icewine-editor.desktop)).overrideAttrs { name = "icewine-editor-desktop-entry"; };
   steamEntries = (pkgs.writeTextDir "share/applications/steam-gamescope.desktop" ''
     [Desktop Entry]
     Type=Application
@@ -25,7 +23,7 @@ in {
       '';
     };
     users.users.${cfg.user}.packages = lib.optionals (cfg.fileManager.preset == "yazi")
-      [ pkgs.yazi pkgs.ffmpegthumbnailer pkgs._7zz ] ++ [ editorEntry ] ++ lib.optional (cfg.steam != "none") steamEntries;
+      [ pkgs.yazi pkgs.ffmpegthumbnailer pkgs._7zz ] ++ lib.optional (cfg.steam != "none") steamEntries;
     services.icewine.defaultFiles.config = lib.mkIf cfg.idle.enable {
       "hypr/hypridle.conf" = pkgs.writeText "icewine-hypridle.conf" ''
         # Shared idle defaults first; add your general settings below.

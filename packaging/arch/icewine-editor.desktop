@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Icewine Text Editor
-Comment=Edit text in Icewine's selected terminal
-Exec=icewine-terminal-exec icewine-editor %F
-Icon=accessories-text-editor
-Terminal=false
-Categories=Utility;TextEditor;
-MimeType=text/plain;text/x-shellscript;text/x-python;text/x-csrc;text/x-c++src;

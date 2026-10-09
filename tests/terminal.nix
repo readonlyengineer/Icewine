@@ -37,7 +37,6 @@ let
     environment.sessionVariables.EDITOR = "host-editor";
     environment.sessionVariables.VISUAL = "host-visual";
   };
-  editorEntry = builtins.head (lib.filter (pkg: lib.getName pkg == "icewine-editor-desktop-entry") defaults.users.users.demo.packages);
   cli = builtins.head (lib.filter (pkg: lib.getName pkg == "icewine") defaults.users.users.demo.packages);
 in
 assert defaults.systemd.user.services.hypridle.unitConfig.ConditionUser == "demo";
@@ -78,8 +77,6 @@ pkgs.runCommand "icewine-terminal-checks" {
   nativeBuildInputs = [ pkgs.bashInteractive pkgs.coreutils pkgs.python3 pkgs.git pkgs.starship ];
 } ''
   export HOME="$TMPDIR/home" XDG_CONFIG_HOME="$TMPDIR/home/.config" XDG_DATA_HOME="$TMPDIR/home/.local/share" XDG_STATE_HOME="$TMPDIR/home/.local/state"
-  grep -Fx 'Exec=icewine-terminal-exec icewine-editor %F' ${editorEntry}/share/applications/icewine-editor.desktop
-  grep -Fx 'Terminal=false' ${editorEntry}/share/applications/icewine-editor.desktop
   # The real shared session defaults derive VISUAL at startup without a recursive Nix alias.
   (
     unset EDITOR VISUAL

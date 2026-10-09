@@ -89,7 +89,6 @@ package_icewine() {
   for unit in packaging/arch/*.service packaging/arch/*.target packaging/arch/*.path; do
     install -Dm644 "$unit" "$pkgdir/usr/lib/systemd/user/${unit##*/}"
   done
-  install -Dm644 packaging/arch/icewine-editor.desktop "$pkgdir/usr/share/applications/icewine-editor.desktop"
   install -Dm644 packaging/arch/steam-gamescope.desktop "$pkgdir/usr/share/applications/steam-gamescope.desktop"
   install -Dm644 theme/assets/themes/CATPPUCCIN-LICENSE "$pkgdir/usr/share/licenses/icewine/CATPPUCCIN-LICENSE"
   install -Dm644 "$srcdir/plugins-$_plugins/mount.yazi/LICENSE" "$pkgdir/usr/share/licenses/icewine/YAZI-MOUNT-LICENSE"
