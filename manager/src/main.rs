@@ -22,20 +22,25 @@ fn choose(readonly: bool, selected: &mut [bool; 8]) -> io::Result<Option<bool>> 
                 let focused = Style::default().fg(Color::Black).bg(Color::Cyan).bold();
                 let [panel] = Layout::horizontal([Constraint::Max(90)])
                     .flex(Flex::Center).areas(frame.area());
-                let [panel] = Layout::vertical([Constraint::Max(24)])
+                let [panel] = Layout::vertical([Constraint::Max(21)])
                     .flex(Flex::Center).areas(panel);
                 let block = Block::bordered().border_type(BorderType::Rounded)
                     .border_style(muted).title(Line::from(" Icewine Installer ").style(accent))
                     .padding(Padding::uniform(1));
                 let inner = block.inner(panel);
                 frame.render_widget(block, panel);
-                let [intro, utilities, notice, reset, buttons, help] = Layout::vertical([
-                    Constraint::Length(3), Constraint::Length(10), Constraint::Length(2),
+                let [intro, utilities, reset, buttons, help] = Layout::vertical([
+                    Constraint::Length(3), Constraint::Length(9),
                     Constraint::Length(2), Constraint::Length(2), Constraint::Length(1),
                 ]).areas(inner);
                 frame.render_widget(Paragraph::new(vec![
                     Line::from("Optional utilities, configured for Icewine."),
                     Line::from("Selected utilities are installed and configured.").style(muted),
+                    Line::from(if readonly {
+                        "NixOS: utility selections are read-only."
+                    } else {
+                        "Deselecting removes Icewine configuration; packages stay installed."
+                    }).style(muted),
                 ]), intro);
                 let rows = ROWS.iter().enumerate().map(|(i, (purpose, defaults))| {
                     Row::new(vec![
@@ -49,12 +54,7 @@ fn choose(readonly: bool, selected: &mut [bool; 8]) -> io::Result<Option<bool>> 
                     Constraint::Length(23), Constraint::Min(20), Constraint::Length(9),
                 ]).column_spacing(2).header(Row::new([
                     "Purpose", "Defaults", "Configure",
-                ]).style(accent).bottom_margin(1)), utilities);
-                frame.render_widget(Paragraph::new(if readonly {
-                    "NixOS: utility selections are read-only."
-                } else {
-                    "Deselecting removes Icewine configuration; packages stay installed."
-                }).style(muted), notice);
+                ]).style(accent)), utilities);
                 frame.render_widget(Paragraph::new(format!("[{}] Overwrite existing dotfiles",
                     if overwrite { "x" } else { " " }))
                     .style(if focus == 8 { focused } else { Style::default() }), reset);
