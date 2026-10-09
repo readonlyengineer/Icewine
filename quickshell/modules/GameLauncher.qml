@@ -224,7 +224,7 @@ Scope {
             compositor.activateWindow(existing.address)
             return
         }
-        if (root.steamLaunching && Launcher.gamescopeWindow(compositor.toplevels, root.steamGamescopePid))
+        if (root.steamLaunching && root.steamGamescopePid > 0)
             Quickshell.execDetached(["hyprctl", "eval",
                 'require("icewine.modules.WindowPolicy").handoff_steam(' + root.steamGamescopePid + ')'])
     }
@@ -249,13 +249,18 @@ Scope {
     }
 
     Timer {
-        // Ponytail: bounded startup polling until MainPID appears; use service
+        // Ponytail: bounded startup polling until handoff completes; use service
         // notifications if repeated systemctl calls become measurable.
         interval: 250
         repeat: true
         running: root.steamRequestPending
-            || (root.steamLaunching && root.pendingSteamCommand === null && root.steamGamescopePid === 0)
-        onTriggered: root.probeSteamSession()
+            || (root.steamLaunching && root.pendingSteamCommand === null)
+        onTriggered: {
+            if (root.steamRequestPending || root.steamGamescopePid === 0)
+                root.probeSteamSession()
+            else
+                root.handoffSteam()
+        }
     }
 
     Process {

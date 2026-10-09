@@ -147,13 +147,15 @@ steamRoot.resolveSteamRequest("LoadState=loaded\nMainPID=481")
 assert.equal(steamCompositor.activated, existing.address)
 assert.equal(steamCommands.length, 1, "Matching Gamescope is focused without another session")
 steamRoot.steamLaunching = true
-steamRoot.steamGamescopePid = 999
+steamRoot.steamGamescopePid = 0
 steamRoot.handoffSteam()
-assert.equal(steamCommands.length, 1, "Unrelated Gamescope cannot consume the splash")
+assert.equal(steamCommands.length, 1, "Handoff waits for the managed service PID")
 steamRoot.steamGamescopePid = 481
+steamCompositor.toplevels = [{wayland: null, lastIpcObject: {}}]
 steamRoot.handoffSteam()
 assert.deepEqual(steamCommands[1], ["hyprctl", "eval",
-    'require("icewine.modules.WindowPolicy").handoff_steam(481)'])
+    'require("icewine.modules.WindowPolicy").handoff_steam(481)'],
+    "Hyprland checks readiness even before Quickshell receives window metadata")
 steamRoot.steamRequestPending = true
 steamRoot.resolveSteamRequest("unavailable")
 assert.equal(steamRoot.steamRequestPending, false)
@@ -196,6 +198,24 @@ steamRoot.pendingSteamCommand = ["must-not-run"]
 steamRoot.finishSteamLaunch()
 assert.equal(steamRoot.steamLaunching, false)
 assert.equal(steamRoot.pendingSteamCommand, null, "Timeout cleanup drops stale launch work")
+
+const startupTimer = source.match(/Timer \{\s*\/\/ Ponytail: bounded startup polling[\s\S]*?\n    \}/)[0]
+const timerRunning = startupTimer.match(/running: ([\s\S]*?)\n        onTriggered:/)[1]
+vm.runInContext(qmlFunction("tick", startupTimer.replace("onTriggered:", "function tick()")), steamContext)
+steamRoot.steamLaunching = true
+steamRoot.steamGamescopePid = 481
+steamCompositor.toplevels = []
+assert.equal(vm.runInContext(timerRunning, steamContext), true,
+    "Startup retries continue after MainPID appears and before a window maps")
+const beforeRetry = steamCommands.length
+steamContext.tick()
+steamContext.tick()
+assert.equal(steamCommands.length, beforeRetry + 2, "Startup retries the compositor handoff")
+assert.deepEqual(steamCommands.at(-1), ["hyprctl", "eval",
+    'require("icewine.modules.WindowPolicy").handoff_steam(481)'])
+steamRoot.finishSteamLaunch()
+assert.equal(vm.runInContext(timerRunning, steamContext), false,
+    "Closing the splash or timing out stops startup retries")
 
 assert.equal((deckShell.match(/gameLauncher\.autostartSteamGamescope\(\)/g) || []).length, 1,
     "Handheld autostart runs once from the Topbar first-frame hook")
