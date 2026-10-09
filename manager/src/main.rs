@@ -1,6 +1,6 @@
 use std::{io, process::{Command, ExitCode}};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::{prelude::*, widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table}};
+use ratatui::{layout::Flex, prelude::*, widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table}};
 
 const ROWS: [(&str, &str); 8] = [
     ("Desktop session", "Hyprland + Icewine Quickshell"),
