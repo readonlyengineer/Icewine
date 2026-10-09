@@ -29,9 +29,9 @@ with open(os.environ["ICEWINE_TEST_LOG"], "a") as log:
 sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
 ''')
     fake.chmod(0o755)
-    for name in ("kitty", "alacritty", "firefox", "nano", "nvim", "vim", "ghostty", "steam", "icewine", "uwsm"):
+    for name in ("kitty", "alacritty", "nano", "nvim", "vim", "ghostty", "steam", "icewine", "uwsm"):
         (commands / name).symlink_to(fake)
-    for name in ("terminal", "terminal-exec", "browser", "editor", "file-manager", "steam"):
+    for name in ("terminal", "terminal-exec", "editor", "file-manager", "steam"):
         (commands / ("icewine-" + name)).symlink_to(native / "command")
     env = dict(os.environ, PATH=str(commands) + ":" + os.environ["PATH"],
                HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), ICEWINE_TEST_LOG=str(log))
@@ -42,7 +42,7 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
                               capture_output=True, text=True)
     for name, expected in {
         "terminal": ["kitty"], "terminal-exec": ["kitty", "-e"],
-        "browser": ["firefox"], "editor": ["nano"],
+        "editor": ["nano"],
         "file-manager": ["kitty", "-e", "yazi"], "steam": ["steam"],
     }.items():
         argument = "literal argument; $(must-not-run)"
@@ -142,6 +142,8 @@ defaults = payload / "defaults"
 assert (desktop / "usr/share/applications/icewine-editor.desktop").read_bytes() == (native / "icewine-editor.desktop").read_bytes()
 assert not (defaults / "home").exists(), "Native package must not replace login shells"
 assert not (desktop / "usr/share/fish").exists(), "Arch's shell must remain user-managed"
+assert not (desktop / "usr/bin/icewine-browser").exists()
+assert "firefox" not in (native / "PKGBUILD").read_text()
 assert not (desktop / "etc/sddm.conf.d").exists(), "SDDM selection must remain optional"
 assert (desktop / "etc/pam.d/icewine").read_text().splitlines()[1:] == [
     "auth include system-auth", "account include system-auth"]

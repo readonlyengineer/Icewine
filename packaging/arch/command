@@ -22,7 +22,6 @@ case ${0##*/} in
     fi
     [[ ${0##*/} != icewine-terminal-exec ]] || set -- -e "$@"
     exec "$terminal" "$@" ;;
-  icewine-browser) exec firefox "$@" ;;
   icewine-editor)
     editor=nano
     editor_file=${XDG_CONFIG_HOME:-$HOME/.config}/icewine/editor

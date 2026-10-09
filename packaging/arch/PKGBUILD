@@ -25,7 +25,7 @@ package_icewine() {
     xdg-utils xdg-user-dirs hyprshot hyprpicker libnotify libcanberra brightnessctl ddcutil v4l-utils
     pam pambase polkit upower power-profiles-daemon pipewire wireplumber
     ttf-dejavu ttf-jetbrains-mono-nerd noto-fonts-emoji adwaita-icon-theme adwaita-cursors
-    papirus-icon-theme dconf gsettings-desktop-schemas firefox 'yazi>=26.5.6'
+    papirus-icon-theme dconf gsettings-desktop-schemas 'yazi>=26.5.6'
     ffmpegthumbnailer 7zip gvfs udisks2 steam gamescope)
   optdepends=('kitty: terminal emulator' 'alacritty: alternative terminal emulator' 'ghostty: alternative terminal emulator'
     'nano: text editor' 'neovim: text editor' 'vim: text editor' 'networkmanager: network controls' 'bluez: Bluetooth controls'
@@ -49,7 +49,7 @@ package_icewine() {
   cp scripts/theme scripts/wallpaper "$pkgdir/usr/lib/icewine/"
   install -m755 scripts/icewine "$pkgdir/usr/bin/icewine"
   install -m755 packaging/arch/command "$pkgdir/usr/lib/icewine/command"
-  for name in theme wallpaper terminal terminal-exec browser editor file-manager steam; do
+  for name in theme wallpaper terminal terminal-exec editor file-manager steam; do
     ln -s ../lib/icewine/command "$pkgdir/usr/bin/icewine-$name"
   done
   install -m755 packaging/arch/session "$pkgdir/usr/bin/icewine-session"

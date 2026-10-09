@@ -1122,7 +1122,8 @@ for handheld in (False, True):
                    ICEWINE_THEME_ASSETS=str(assets), ICEWINE_STEAM_MASK_FILE="",
                    ICEWINE_GTK_ENABLE="false", DBUS_SESSION_BUS_ADDRESS="", WAYLAND_DISPLAY="",
                    HYPRLAND_INSTANCE_SIGNATURE="", ICEWINE_SDDM_THEME_FILE="")
-        with mock.patch.dict(os.environ, env), mock.patch.object(module, "reload_session", return_value=False):
+        with mock.patch.dict(os.environ, env), mock.patch.object(module, "reload_session", return_value=False), \
+             mock.patch.object(module.shutil, "which", side_effect=lambda name: "/fake/ghostty" if name == "ghostty" else None):
             for app in ("hypr", "quickshell"):
                 assert module.dispatch(["init", app]) == 0
             assert module.dispatch(["init"]) == 0
@@ -1131,11 +1132,15 @@ for handheld in (False, True):
             if handheld:
                 continue  # Ownership/safety is shared; only this entrypoint differs.
             entry = config / "hypr/hyprland.lua"
+            populated = entry.read_bytes()
+            assert b'apps.terminal = "ghostty"' in populated and b"@file_manager@" not in populated
+            subprocess.run(["lua", str(source / "hyprland/tests/startup.lua"), str(entry), "desktop"], env=env, check=True)
+            subprocess.run(["lua", str(source / "hyprland/tests/startup.lua"), str(entry), "desktop", "empty-browser"], env=env, check=True)
             entry.write_text(entry.read_text() + "-- user overrides\n")
             assert module.dispatch(["init"]) == 0
             assert entry.read_text().endswith("-- user overrides\n")
             assert module.dispatch(["reset", "hypr"]) == 0
-            assert entry.read_bytes() == (defaults / "config/hypr/hyprland.lua").read_bytes()
+            assert entry.read_bytes() == populated
             # Idle is an optional sibling of the established Hyprland boundary.
             idle = defaults / "config/hypr/hypridle-icewine"
             for command in ("init", "reset"):

@@ -9,7 +9,6 @@ let
     terminal = cfg.applications.terminal;
     terminal-exec = cfg.applications.terminalExecute;
     editor = cfg.applications.editor;
-    browser = cfg.applications.browser;
     file-manager = cfg.applications.fileManager;
   } // lib.optionalAttrs (cfg.steam != "none") {
     steam = cfg.applications.steam;
@@ -18,14 +17,7 @@ let
     exec ${lib.escapeShellArgs argv} "$@"
   '') commands;
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
-  browserDefaults = pkgs.writeTextDir "share/applications/mimeapps.list" ''
-    [Default Applications]
-    x-scheme-handler/http=firefox.desktop;
-    x-scheme-handler/https=firefox.desktop;
-    text/html=firefox.desktop;
-    application/xhtml+xml=firefox.desktop;
-    application/pdf=firefox.desktop;
-  '';
+
 in {
   imports = [ ./home.nix ./desktop.nix ./shell.nix ./handheld.nix ./login.nix ];
 
@@ -37,7 +29,6 @@ in {
       description = "Existing user who receives Icewine configuration and services.";
     };
     handheld.enable = lib.mkEnableOption "handheld shell, controller routing and on-screen keyboard";
-    browser.enable = lib.mkEnableOption "Icewine's native Firefox browser" // { default = true; };
     steam = lib.mkOption {
       type = lib.types.enum [ "native" "flatpak" "none" ];
       default = "native";
@@ -75,7 +66,10 @@ in {
       starship.git.enable = lib.mkEnableOption "Starship's default Git prompt modules" // { default = true; };
     };
     applications = {
-      browser = command "Browser command; supplied by Firefox, or specified by the host." (lib.optional cfg.browser.enable "firefox");
+      browser = command "Host browser command; empty disables its binding." [
+        "${pkgs.runtimeShell}" "-c"
+        ''exec ${pkgs.gtk3}/bin/gtk-launch "$(${pkgs.xdg-utils}/bin/xdg-settings get default-web-browser)" "$@"'' "icewine-browser"
+      ];
       terminal = command "Terminal command; supplied by the preset, or installed and specified by the host." (lib.optional (cfg.terminal.preset == "kitty") "kitty");
       terminalExecute = command "Terminal command prefix for running an application." (cfg.applications.terminal ++ [ "-e" ]);
       editor = command "Editor command used by compositor bindings." [ "nano" ];
@@ -133,7 +127,6 @@ in {
       extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
       config.hyprland."org.freedesktop.impl.portal.Settings" = [ "gtk" ];
     };
-    programs.firefox.enable = lib.mkDefault cfg.browser.enable;
     security.pam.services.icewine = { };
     security.polkit.enable = true;
     services.pipewire = {
@@ -152,9 +145,8 @@ in {
       quickshell hyprshutdown hyprpolkitagent glib jq nano systemd
       hyprshot libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl
-      xdg-utils gamescope
+      xdg-utils gtk3 gamescope
     ]) ++ launchers ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
-    users.users.${cfg.user}.packages = lib.optional cfg.browser.enable browserDefaults
-      ++ lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty;
+    users.users.${cfg.user}.packages = lib.optional (cfg.terminal.preset == "kitty") pkgs.kitty;
   };
 }

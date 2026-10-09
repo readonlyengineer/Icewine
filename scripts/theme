@@ -529,9 +529,18 @@ def install_defaults(defaults, config, data, state, replace, app):
                 break
             if blocked:
                 continue
+            contents = None
+            if root_name == "config" and name == "hypr/hyprland.lua" and '"@terminal@"' in shipped.read_text():
+                contents = shipped.read_text()
+                terminal = next((name for name in ("kitty", "alacritty", "ghostty") if shutil.which(name)), "")
+                for key, value in {"terminal": terminal,
+                                   "file_manager": "icewine-file-manager",
+                                   "browser": 'gtk-launch "$(xdg-settings get default-web-browser)"'}.items():
+                    contents = contents.replace(json.dumps("@" + key + "@"), json.dumps(value, ensure_ascii=False))
+                contents = contents.encode()
             current = default_signature(path)
             expected = ("link:" + str(config / os.readlink(shipped)) if shipped.is_symlink()
-                        else default_signature(shipped))
+                        else ("sha256:" + hashlib.sha256(contents).hexdigest()) if contents is not None else default_signature(shipped))
             unchanged = current is not None and current == previous.get(name)
             if unchanged and current == expected:
                 continue
@@ -567,7 +576,10 @@ def install_defaults(defaults, config, data, state, replace, app):
                 fd, temporary = tempfile.mkstemp(prefix=".icewine-", dir=path.parent)
                 try:
                     with os.fdopen(fd, "wb") as stream, shipped.open("rb") as source_file:
-                        shutil.copyfileobj(source_file, stream)
+                        if contents is None:
+                            shutil.copyfileobj(source_file, stream)
+                        else:
+                            stream.write(contents)
                         stream.flush()
                         os.fsync(stream.fileno())
                     os.chmod(temporary, 0o644)

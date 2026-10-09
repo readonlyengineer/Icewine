@@ -1,8 +1,17 @@
+-- Applications
+local apps = require("icewine.modules.DefaultApps")
+apps.terminal = "@terminal@"
+apps.file_manager = "@file_manager@"
+apps.browser = "@browser@"
+
 require("icewine.icewine")
 
--- Monitor defaults: edit mode/scale here before opening applications.
--- Find output names and supported modes with: hyprctl monitors all
+-- Monitors: hyprctl monitors all
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
--- Example: hl.monitor({ output = "eDP-1", mode = "1920x1080@60", position = "0x0", scale = 1 })
 
--- Add your overrides below.
+-- Autolaunch
+-- hl.on("hyprland.start", function()
+--     hl.exec_cmd(apps.terminal)
+-- end)
+
+-- Your overrides

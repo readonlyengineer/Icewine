@@ -78,7 +78,7 @@ end
 hl.bind(mainMod .. " + RETURN", hl.dsp.exec_cmd(apps.terminal))
 hl.bind(mainMod .. " + SPACE",  topbar("launcher"))
 hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd(apps.file_manager))
-hl.bind(mainMod .. " + B",      hl.dsp.exec_cmd(apps.browser))
+if apps.browser ~= "" then hl.bind(mainMod .. " + B", hl.dsp.exec_cmd(apps.browser)) end
 hl.bind(mainMod .. " + L",      hl.dsp.exec_cmd(apps.lock))
 -- Lua global dispatchers need transparency so intervening clicks cannot shadow release.
 hl.bind(mainMod .. " + grave", hl.dsp.global("quickshell:topbarHold"), { transparent = true, dont_inhibit = true, submap_universal = true })

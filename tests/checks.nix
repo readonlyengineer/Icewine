@@ -27,7 +27,6 @@ let
   }).config;
   unmanaged = (desktopSystem.extendModules {
     modules = [ {
-      services.icewine.browser.enable = false;
       services.icewine.applications.browser = [ "custom-browser" ];
     } ];
   }).config;
@@ -65,10 +64,10 @@ let
     (package: lib.getName package == "icewine") desktop.users.users.demo.packages);
   handheldCli = builtins.head (lib.filter
     (package: lib.getName package == "icewine") handheld.users.users.demo.packages);
+  unmanagedCli = builtins.head (lib.filter
+    (package: lib.getName package == "icewine") unmanaged.users.users.demo.packages);
   steamEntryPackage = builtins.head (lib.filter
     (package: lib.getName package == "icewine-steam-desktop-entries") handheld.users.users.demo.packages);
-  mimePackage = builtins.head (lib.filter
-    (package: lib.getName package == "mimeapps.list") desktop.users.users.demo.packages);
   hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
   steamShortcuts = import ../quickshell/tools/steam-shortcuts.nix { inherit pkgs; };
 in {
@@ -148,11 +147,11 @@ in {
     assert map (package: package.appId) independent.services.flatpak.packages == [ "com.valvesoftware.Steam" "org.videolan.VLC" ];
     assert lib.all (method: lib.any (a: !a.assertion && lib.hasInfix "handheld integration requires" a.message)
       (incompatibleHandheld method).assertions) [ "flatpak" "none" ];
-    assert desktop.programs.firefox.enable;
+    assert !desktop.programs.firefox.enable;
     assert desktop.programs.firefox.nativeMessagingHosts.packages == [ ];
     assert unmanaged.programs.firefox.nativeMessagingHosts.packages == [ ];
     assert desktop.xdg.mime.defaultApplications == { };
-    assert hasPackage "mimeapps.list" desktop.users.users.demo.packages;
+    assert !(hasPackage "mimeapps.list" desktop.users.users.demo.packages);
     assert !(hasPackage "mimeapps.list" desktop.users.users.other.packages);
     assert !desktop.services.flatpak.enable;
     assert !unmanaged.programs.firefox.enable;
@@ -208,7 +207,7 @@ in {
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -f "$XDG_CONFIG_HOME/quickshell/icewine/Desktop.qml"
       test ! -e "$XDG_CONFIG_HOME/quickshell/modules"
-      cmp ${../hyprland/hyprland.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua"
+      ! grep -q '"@terminal@"' "$XDG_CONFIG_HOME/hypr/hyprland.lua"
       test ! -e "$XDG_CONFIG_HOME/hypr/modules/Theme.lua"
       test ! -e "$XDG_CONFIG_HOME/hypr/tests"
       implementation=$(dirname "$(readlink "$XDG_CONFIG_HOME/quickshell/icewine")")
@@ -232,7 +231,7 @@ in {
       grep -Fx '@import url("../icewine/current/gtk.css");' "$XDG_CONFIG_HOME/gtk-3.0/gtk.css"
       grep -Fx '@import url("../icewine/current/gtk4.css");' "$XDG_CONFIG_HOME/gtk-4.0/gtk.css"
       cmp ${../hyprland}/icewine.lua "$implementation/hyprland/icewine.lua"
-      for name in Baseline LookAndFeel WindowPolicy DefaultApps Docking Binds; do
+      for name in Baseline LookAndFeel WindowPolicy Docking Binds; do
         cmp ${../hyprland}/modules/"$name.lua" "$implementation/hyprland/modules/$name.lua"
       done
       cmp ${../hyprland}/deck/Deck.lua "$implementation/hyprland/modules/Deck.lua"
@@ -247,17 +246,20 @@ in {
       grep -Fx 'Hidden=true' "$XDG_DATA_HOME/applications/steam.desktop"
       grep -Fx 'Hidden=true' "$XDG_DATA_HOME/applications/com.valvesoftware.Steam.desktop"
       test ! -e ${steamEntryPackage}/share/applications/steam.desktop
-      grep -Fx 'application/pdf=firefox.desktop;' ${mimePackage}/share/applications/mimeapps.list
       test ! -e "$XDG_DATA_HOME/applications/steam-gamescope.desktop"
       test ! -e "$XDG_CONFIG_HOME/hypr/modules/Deck.lua"
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -f "$XDG_CONFIG_HOME/quickshell/icewine/Handheld.qml"
       test ! -e "$XDG_CONFIG_HOME/quickshell/modules"
-      cmp ${../hyprland/hyprland.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua"
+      ! grep -q '"@terminal@"' "$XDG_CONFIG_HOME/hypr/hyprland.lua"
       cmp ${../quickshell/deck/shell.qml} "$XDG_CONFIG_HOME/quickshell/shell.qml"
       cp -r "$(readlink "$XDG_CONFIG_HOME/hypr/icewine")" "$TMPDIR/portable-handheld-hyprland"
       ln -sfn "$TMPDIR/portable-handheld-hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" handheld
+      export HOME=$TMPDIR/legacy XDG_CONFIG_HOME=$TMPDIR/legacy/.config XDG_DATA_HOME=$TMPDIR/legacy/.local/share XDG_STATE_HOME=$TMPDIR/legacy/.local/state
+      ${unmanagedCli}/bin/icewine init
+      printf '%s\n' 'require("icewine.icewine")' > "$XDG_CONFIG_HOME/hypr/hyprland.lua"
+      lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" desktop custom-browser
       touch "$out"
     '';
 }

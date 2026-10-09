@@ -216,6 +216,10 @@ hl.monitor({ output = "eDP-1", mode = "2880x1800@120.00Hz", position = "0x0", sc
 hl.config({ general = { layout = "dwindle" } })
 ```
 
+Edit the template's Applications block to change hotkeys; external applications
+keep their installer/Nix defaults. Icewine uses the host browser and sets no web/PDF
+associations. An empty browser command disables its hotkey.
+
 Settings below the shared import override its defaults. An explicit workspace
 layout rule takes precedence over the default; for example:
 
@@ -277,12 +281,10 @@ flatpak install --user flathub io.github.kolunmi.Bazaar
 
 ### Alternative applications and opt-outs
 
-Set replacement commands and disable the corresponding preset together:
+Set first-use commands in Nix; disable managed presets when replacing them:
 
 ```nix
 services.icewine = {
-  browser.enable = false;
-  applications.browser = [ "librewolf" ];
   applications.editor = [ "nvim" ];
 };
 ```
@@ -311,7 +313,6 @@ These options belong under `services.icewine`:
 
 | Option | Stops Icewine providing |
 | --- | --- |
-| `browser.enable = false;` | Firefox and its web/PDF defaults |
 | `terminal.preset = null;` | Kitty installation and configuration; set `applications.terminal` and `applications.terminalExecute` |
 | `fileManager.preset = null;` | Yazi and its GVfs default; set `applications.fileManager` if needed |
 | `login.enable = false;` | SDDM; provide your own login method |
