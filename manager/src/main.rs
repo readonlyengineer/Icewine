@@ -22,7 +22,7 @@ fn choose(readonly: bool, selected: &mut [bool; 8]) -> io::Result<Option<bool>> 
                 let focused = Style::default().fg(Color::Black).bg(Color::Cyan).bold();
                 let [panel] = Layout::horizontal([Constraint::Max(90)])
                     .flex(Flex::Center).areas(frame.area());
-                let [panel] = Layout::vertical([Constraint::Max(21)])
+                let [panel] = Layout::vertical([Constraint::Max(23)])
                     .flex(Flex::Center).areas(panel);
                 let block = Block::bordered().border_type(BorderType::Rounded)
                     .border_style(muted).title(Line::from(" Icewine Installer ").style(accent))
@@ -30,7 +30,7 @@ fn choose(readonly: bool, selected: &mut [bool; 8]) -> io::Result<Option<bool>> 
                 let inner = block.inner(panel);
                 frame.render_widget(block, panel);
                 let [intro, utilities, reset, buttons, help] = Layout::vertical([
-                    Constraint::Length(3), Constraint::Length(9),
+                    Constraint::Length(4), Constraint::Length(10),
                     Constraint::Length(2), Constraint::Length(2), Constraint::Length(1),
                 ]).areas(inner);
                 frame.render_widget(Paragraph::new(vec![
