@@ -191,7 +191,7 @@ in {
         "ICEWINE_STEAM_ENABLED=${if cfg.steam != "none" then "true" else "false"}"
         "ICEWINE_GAMESCOPE_ENABLED=${if cfg.steam != "none" && cfg.gamescope.enable then "true" else "false"}"
         "ICEWINE_BATTERY_ENABLED=${if cfg.battery.enable then "true" else "false"}"
-        "PATH=/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness steamShortcuts ]}"
+        "PATH=/run/wrappers/bin:/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness steamShortcuts ]}"
         "QT_IM_MODULE=qtvirtualkeyboard"
       ];
       Restart = "on-failure";
