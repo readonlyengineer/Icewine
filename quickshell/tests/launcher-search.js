@@ -35,7 +35,7 @@ assert.deepEqual(search.launchOptions({
     runInTerminal: true,
     workingDirectory: "/work here"
 }, "/home/demo"), {
-    command: ["uwsm", "app", "--", "icewine-terminal-exec", "demo", "--flag", "an argument"],
+    command: ["uwsm", "app", "--", "xdg-terminal-exec", "demo", "--flag", "an argument"],
     workingDirectory: "/work here"
 })
 assert.deepEqual(search.launchOptions({command: ["demo"]}, "/home/demo"), {

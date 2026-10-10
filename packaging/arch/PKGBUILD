@@ -45,18 +45,17 @@ package_icewine() {
   install -m755 manager/target/release/icewine-manage "$pkgdir/usr/bin/icewine-manage"
   install -m755 scripts/icewine "$pkgdir/usr/bin/icewine"
   install -m755 packaging/arch/command "$pkgdir/usr/lib/icewine/command"
-  for name in theme wallpaper manage-backend editor steam; do
+  for name in theme wallpaper manage-backend steam; do
     ln -s ../lib/icewine/command "$pkgdir/usr/bin/icewine-$name"
   done
   install -m755 quickshell/tools/steam-shortcuts "$pkgdir/usr/bin/icewine-steam-shortcuts"
   install -m755 quickshell/tools/probe-monitor-capabilities "$pkgdir/usr/bin/icewine-monitor-capabilities"
   install -m755 quickshell/tools/monitor-brightness "$pkgdir/usr/bin/icewine-monitor-brightness"
-  for dir in hypr quickshell/config kitty nano uwsm gtk-3.0 gtk-4.0 yazi/plugins; do install -d "$defaults/$dir"; done
+  for dir in hypr quickshell/config kitty uwsm gtk-3.0 gtk-4.0 yazi/plugins; do install -d "$defaults/$dir"; done
   cp hyprland/hyprland.lua "$defaults/hypr/"
   cp quickshell/shell.qml "$defaults/quickshell/"
   cp quickshell/config/{Settings.qml,qmldir} "$defaults/quickshell/config/"
   cp kitty/kitty.conf "$defaults/kitty/"
-  printf 'include "/usr/share/nano/*.nanorc"\n' > "$defaults/nano/nanorc"
   cp -r "$srcdir/plugins-$_plugins/mount.yazi" "$defaults/yazi/plugins/"
   printf '%s\n' 'source = hypridle-icewine/defaults.conf' > "$defaults/hypr/hypridle.conf"
   for version in 3 4; do

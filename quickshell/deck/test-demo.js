@@ -81,11 +81,11 @@ check(Menu.neutral(held), "Release barrier clears")
 check(Menu.launchExpression({ action: "steam" }, 2).includes("focus_or_start_gamescope()"),
     "Steam uses the same focus-or-launch action as Guide and the topbar")
 const appExpression = Menu.launchExpression({ action: "application" }, 3, {
-    command: ["uwsm", "app", "--", "icewine-terminal-exec", "demo", "an argument"],
+    command: ["uwsm", "app", "--", "xdg-terminal-exec", "demo", "an argument"],
     workingDirectory: "/tmp/a directory"
 })
 check(appExpression.includes("cd -- '/tmp/a directory'"), "Preserve application working directory")
-check(appExpression.includes("'icewine-terminal-exec' 'demo' 'an argument'"),
+check(appExpression.includes("'xdg-terminal-exec' 'demo' 'an argument'"),
     "Preserve terminal wrapper and arguments")
 check(appExpression.includes('workspace = "3"'), "Pin applications to the opening workspace")
 check(Menu.shellQuote("a'b") === "'a'\\''b'", "Shell-quote command values")

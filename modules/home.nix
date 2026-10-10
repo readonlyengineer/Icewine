@@ -52,10 +52,6 @@ let
       ln -s ${steamMask} $out/data/applications/com.valvesoftware.Steam.desktop
     ''}
     install -Dm644 ${../theme/assets/flower-branch.png} $out/data/wallpapers/default.jpg
-    ${lib.optionalString cfg.texteditor.enable ''
-      mkdir -p $out/config/nano
-      printf 'include "${pkgs.nano}/share/nano/*.nanorc"\n' > $out/config/nano/nanorc
-    ''}
     cp ${../hyprland/hyprland.lua} $out/config/hypr/hyprland.lua
     printf '%s\n' '# Shared session defaults first; add your overrides below.' '. "''${XDG_CONFIG_HOME:-$HOME/.config}/uwsm/icewine/env"' > $out/config/uwsm/env
     ${lib.optionalString cfg.gtk.enable ''
@@ -138,7 +134,7 @@ let
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
       export ICEWINE_MANAGE_SELECTIONS=${lib.escapeShellArg (builtins.toJSON (lib.genAttrs
-        [ "desktop" "terminal" "texteditor" "filemanager" "gaming" "flatpak" "login" "shellExtras" ]
+        [ "desktop" "terminal" "filemanager" "gaming" "flatpak" "login" "shellExtras" ]
         (name: cfg.${name}.enable)))}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_NIXPKGS_LAST_MODIFIED=${toString icewineNixpkgsLastModified}
@@ -170,7 +166,6 @@ in {
   config = lib.mkIf cfg.enable {
     users.users.${cfg.user}.packages = [ icewineCli ];
     environment.sessionVariables = {
-      EDITOR = lib.mkDefault "icewine-editor";
       ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";
       ICEWINE_KITTY_PRESET = if cfg.terminal.enable then "true" else "false";
     };

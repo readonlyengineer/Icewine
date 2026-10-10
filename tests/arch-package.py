@@ -24,30 +24,34 @@ with tempfile.TemporaryDirectory() as directory:
 import json, os, sys
 with open(os.environ["ICEWINE_TEST_LOG"], "a") as log:
     log.write(json.dumps([os.path.basename(sys.argv[0]), *sys.argv[1:]]) + "\\n")
+with open(os.environ["ICEWINE_TEST_ENV"], "w") as log:
+    json.dump({name: os.environ.get(name) for name in ("EDITOR", "VISUAL")}, log)
 sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
 ''')
     fake.chmod(0o755)
-    for name in ("nano", "steam", "icewine", "uwsm"):
+    for name in ("steam", "icewine", "uwsm"):
         (commands / name).symlink_to(fake)
-    for name in ("editor", "steam"):
+    for name in ("steam",):
         (commands / ("icewine-" + name)).symlink_to(native / "command")
     env = dict(os.environ, PATH=str(commands) + ":" + os.environ["PATH"],
-               HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), ICEWINE_TEST_LOG=str(log))
+               HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), ICEWINE_TEST_LOG=str(log), ICEWINE_TEST_ENV=str(root / "editor-env"))
     env.pop("EDITOR", None)
     env.pop("VISUAL", None)
     def run(name, *args, **extra):
         return subprocess.run([str(commands / name), *args], env=dict(env, **extra),
                               capture_output=True, text=True)
     for name, expected in {
-        "editor": ["nano"],
         "steam": ["steam"],
     }.items():
         argument = "literal argument; $(must-not-run)"
         assert run("icewine-" + name, argument).returncode == 0
         assert json.loads(log.read_text().splitlines()[-1]) == expected + [argument]
-    for overrides, expected in (({}, ("icewine-editor", "icewine-editor")),
-                                 ({"EDITOR": "my-editor", "VISUAL": "my-visual"}, ("my-editor", "my-visual"))):
-        result = subprocess.run(["bash", "-c", 'source "$1"; printf "%s\\n%s\\n" "$EDITOR" "$VISUAL"',
+    for overrides in ({}, {"EDITOR": "my-editor --flag", "VISUAL": "my-visual"},
+                      {"EDITOR": ""}, {"VISUAL": "my-visual"}):
+        assert run("icewine-steam", **overrides).returncode == 0
+        assert json.loads((root / "editor-env").read_text()) == {name: overrides.get(name) for name in ("EDITOR", "VISUAL")}
+        expected = tuple(overrides.get(name, "unset") for name in ("EDITOR", "VISUAL"))
+        result = subprocess.run(["bash", "-c", 'source "$1"; printf "%s\\n%s\\n" "${EDITOR-unset}" "${VISUAL-unset}"',
                                  "session", str(source / "session/env")], env=dict(env, **overrides),
                                 capture_output=True, text=True)
         assert result.returncode == 0 and tuple(result.stdout.splitlines()) == expected
@@ -83,6 +87,9 @@ desktop, session, sddm = map(Path, sys.argv[2:5])
 payload = desktop / "usr/share/icewine"
 defaults = payload / "defaults"
 assert (desktop / "usr/bin/icewine-manage").is_file()
+assert not (desktop / "usr/bin/icewine-editor").exists()
+assert not (defaults / "config/nano").exists()
+assert not (defaults / "config/nvim").exists()
 assert not (desktop / "usr/share/wayland-sessions").exists()
 assert not (desktop / "usr/lib/systemd/user").exists()
 assert not (desktop / "etc/pam.d/icewine").exists()

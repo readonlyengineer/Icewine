@@ -35,7 +35,6 @@ APPS = {
     "wallpapers": (),
     "user-dirs": (),
     "nvim": (),
-    "nano": (),
     "kitty": (),
 }
 TEMPLATES = {

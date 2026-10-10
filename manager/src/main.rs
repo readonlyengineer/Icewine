@@ -4,7 +4,7 @@ use ratatui::{layout::Flex, prelude::*, widgets::{Block, BorderType, Cell, Paddi
 
 const ROWS: &[(&str, &str, &str)] = &[
     ("desktop", "Desktop session", "Hyprland + Icewine Quickshell"),
-    ("terminal", "Terminal", "Kitty"), ("texteditor", "Text editor", "Nano"),
+    ("terminal", "Terminal", "Kitty"),
     ("filemanager", "File manager", "Yazi"),
     ("gaming", "Gaming (allows unfree)", "Steam + Gamescope"),
     ("flatpak", "Flatpak Utility", "Prefer Flatpak Steam if Gaming + Bazaar"),

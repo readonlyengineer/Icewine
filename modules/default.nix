@@ -5,9 +5,7 @@ let
     type = lib.types.listOf lib.types.str;
     inherit description default;
   };
-  commands = {
-    editor = cfg.applications.editor;
-  } // lib.optionalAttrs (cfg.gaming.enable) {
+  commands = lib.optionalAttrs (cfg.gaming.enable) {
     steam = cfg.applications.steam;
   };
   launchers = lib.mapAttrsToList (name: argv: pkgs.writeShellScriptBin "icewine-${name}" ''
@@ -42,7 +40,6 @@ in {
     battery.enable = lib.mkEnableOption "Icewine Quickshell battery warnings and sleep" // { default = true; };
     desktop.enable = lib.mkEnableOption "Hyprland desktop session with Icewine";
     terminal.enable = lib.mkEnableOption "Kitty terminal and defaults";
-    texteditor.enable = lib.mkEnableOption "Nano text editor and defaults";
     filemanager.enable = lib.mkEnableOption "Yazi file manager and defaults";
     gaming.enable = lib.mkEnableOption "Steam and Gamescope (allows unfree)";
     flatpak.enable = lib.mkEnableOption "Flatpak support and Bazaar; prefer Flatpak Steam when gaming is enabled";
@@ -51,7 +48,6 @@ in {
       git.enable = lib.mkEnableOption "Starship Git prompt modules" // { default = true; };
     };
     applications = {
-      editor = command "Editor command used by compositor bindings." [ "nano" ];
       steam = command "Steam command used inside Gamescope."
         (if cfg.gaming.enable && cfg.flatpak.enable then [ "flatpak" "run" "com.valvesoftware.Steam" ]
          else if cfg.gaming.enable && !cfg.flatpak.enable then [ "steam" ] ++ lib.optional cfg.handheld.enable "-gamepadui"
@@ -129,7 +125,6 @@ in {
       ++ lib.optional cfg.flatpak.enable pkgs.bazaar
       ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
     users.users.${cfg.user}.packages = lib.optional cfg.terminal.enable pkgs.kitty
-      ++ lib.optional cfg.texteditor.enable pkgs.nano
       ++ lib.optionals cfg.shellExtras.enable [ pkgs.starship pkgs.fastfetch ];
   };
 }

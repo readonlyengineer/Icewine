@@ -64,10 +64,6 @@ hl.config({
 -- Per-device example (kept commented in case the epic-mouse comes back)
 -- hl.device({ name = "epic-mouse-v1", sensitivity = -0.5 })
 
-local editor = os.getenv("EDITOR") or require("icewine.modules.DefaultApps").editor
-hl.env("EDITOR", editor)
-hl.env("VISUAL", os.getenv("VISUAL") or editor)
-
 -- Global behaviour fixes (template carryover; kept as part of the baseline).
 
 -- Suppress client-driven maximize events globally so they don't fight the

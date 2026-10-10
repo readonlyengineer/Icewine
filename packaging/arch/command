@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 set -e
-export EDITOR=${EDITOR:-icewine-editor}
-export VISUAL=${VISUAL:-$EDITOR}
 case ${0##*/} in
   icewine-manage-backend)
     export ICEWINE_THEME_ASSETS=/usr/share/icewine/theme
@@ -20,7 +18,6 @@ case ${0##*/} in
   icewine-wallpaper)
     export ICEWINE_WALLPAPER_VALIDATOR=/usr/share/icewine/quickshell/modules/WallpaperValidator.qml
     exec bash /usr/lib/icewine/wallpaper "$@" ;;
-  icewine-editor) exec nano "$@" ;;
   icewine-steam)
     [[ ${ICEWINE_STEAM_ENABLED:-true} != false ]] || exit 1
     selections=${XDG_STATE_HOME:-$HOME/.local/state}/icewine/manage.json

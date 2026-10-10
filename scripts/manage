@@ -15,15 +15,15 @@ import types
 theme = types.ModuleType("icewine_theme")
 theme.__file__ = os.environ.get("ICEWINE_THEME_SCRIPT", str(Path(__file__).with_name("theme")))
 importlib.machinery.SourceFileLoader(theme.__name__, theme.__file__).exec_module(theme)
-FEATURES = ("desktop", "terminal", "texteditor", "filemanager", "gaming", "flatpak", "login", "shellExtras")
+FEATURES = ("desktop", "terminal", "filemanager", "gaming", "flatpak", "login", "shellExtras")
 APPS = {
     "desktop": ("hypr", "uwsm", "gtk", "user-dirs", "applications"),
-    "terminal": ("kitty",), "texteditor": ("nano", "nvim"), "filemanager": ("yazi",),
+    "terminal": ("kitty",), "filemanager": ("yazi",),
     "gaming": ("gaming",), "flatpak": (), "login": (),
     "shellExtras": ("starship", "fastfetch"),
 }
 PACKAGES = {
-    "desktop": ("icewine-session",), "terminal": ("kitty",), "texteditor": ("nano",),
+    "desktop": ("icewine-session",), "terminal": ("kitty",),
     "filemanager": ("yazi", "ffmpegthumbnailer", "7zip", "gvfs", "udisks2"),
     "gaming": ("gamescope",), "flatpak": ("flatpak", "bazaar"),
     "login": ("icewine-sddm",), "shellExtras": ("starship", "fastfetch"),
@@ -32,7 +32,9 @@ LOGIN_CONFIG = Path("/etc/sddm.conf.d/90-icewine.conf")
 LOGIN_CONTENTS = "[General]\nDisplayServer=x11\nInputMethod=qtvirtualkeyboard\n[Theme]\nCurrent=icewine\n"
 
 
-def validate(value):
+def validate(value, *, saved=False):
+    if saved and isinstance(value, dict) and set(value) == {*FEATURES, "texteditor"} and type(value["texteditor"]) is bool:
+        value = {name: value[name] for name in FEATURES}
     if not isinstance(value, dict) or set(value) != set(FEATURES) or any(type(bit) is not bool for bit in value.values()):
         raise ValueError("invalid manager selections")
     return value
@@ -47,7 +49,7 @@ def selections(state):
     path = state / "manage.json"
     if path.is_symlink():
         raise ValueError("refusing symlinked manager state")
-    return False, validate(json.loads(path.read_text())) if path.exists() else dict.fromkeys(FEATURES, False)
+    return False, validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, False)
 
 
 def run(argv):
@@ -141,7 +143,7 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
     applied_path = state / "applied.json"
     if applied_path.is_symlink():
         raise ValueError("refusing symlinked applied-selection record")
-    applied = validate(json.loads(applied_path.read_text())) if applied_path.exists() else previous
+    applied = validate(json.loads(applied_path.read_text()), saved=True) if applied_path.exists() else previous
     for feature in FEATURES:
         if applied[feature] and not selected[feature]:
             retire(config, data, state, feature)

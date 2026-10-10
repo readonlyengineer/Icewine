@@ -45,8 +45,8 @@ file:write('\n_G.user_override_loaded = package.loaded["icewine.modules.Binds"] 
 file:close()
 package.path = config .. "?.lua;" .. package.path
 dofile(entry)
-assert(environment.EDITOR == "user-editor --flag" and environment.VISUAL == "user-visual",
-       "Compositor replaced deliberate editor overrides")
+assert(environment.EDITOR == nil and environment.VISUAL == nil,
+       "Compositor assigned editor variables")
 local function command(key)
     local values = commands[key] or {}
     assert(#values <= 1, "Duplicate application binding: " .. key)
@@ -58,7 +58,7 @@ if legacyBrowser then
 else
     local apps = package.loaded["icewine.modules.DefaultApps"]
     assert(apps.terminal == "custom-terminal" and apps.file_manager == "custom-files"
-           and apps.editor == "icewine-editor", "Editable commands changed editor policy or missed shared defaults")
+           and apps.editor == nil, "Editable commands missed shared defaults or defined an editor")
     assert(command("SUPER + RETURN") == "custom-terminal" and command("SUPER + E") == "custom-files"
            and command("SUPER + B") == (not emptyBrowser and "custom-browser" or nil), "Shared application bindings missed editable commands")
     assert(#launches == 0)

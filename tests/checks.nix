@@ -24,7 +24,6 @@ let
   optIn = (desktopSystem.extendModules { modules = [{ services.icewine = {
     desktop.enable = true;
     terminal.enable = true;
-    texteditor.enable = true;
     filemanager.enable = true;
     gaming.enable = true;
     flatpak.enable = true;
@@ -95,7 +94,7 @@ in {
   '';
   modules =
     assert lib.all (name: !desktop.services.icewine.${name}.enable)
-      [ "desktop" "terminal" "texteditor" "filemanager" "gaming" "flatpak" "login" "shellExtras" ];
+      [ "desktop" "terminal" "filemanager" "gaming" "flatpak" "login" "shellExtras" ];
     assert !desktop.programs.hyprland.enable;
     assert !desktop.programs.steam.enable;
     assert !desktop.services.flatpak.enable;
@@ -121,7 +120,7 @@ in {
     assert !optIn.services.flatpak.uninstallUnmanaged;
     assert optIn.services.icewine.applications.steam == [ "flatpak" "run" "com.valvesoftware.Steam" ];
     assert hasPackage "kitty" optIn.users.users.demo.packages;
-    assert hasPackage "nano" optIn.users.users.demo.packages;
+    assert !(hasPackage "nano" optIn.users.users.demo.packages);
     assert hasPackage "yazi" optIn.users.users.demo.packages;
     assert hasPackage "fastfetch" optIn.users.users.demo.packages;
     assert hasPackage "starship" optIn.users.users.demo.packages;
@@ -168,7 +167,8 @@ in {
       for name in adapters/Hyprland.qml modules/Topbar.qml theme/qmldir theme/Palette.qml Desktop.qml Handheld.qml deck/DeckOverlay.qml deck/DeckMenu.js; do
         cmp ${../quickshell}/"$name" "$implementation/quickshell/$name"
       done
-      grep -Fx 'include "${pkgs.nano}/share/nano/*.nanorc"' "$XDG_CONFIG_HOME/nano/nanorc"
+      test ! -e "$XDG_CONFIG_HOME/nano/nanorc"
+      test ! -e "$XDG_CONFIG_HOME/nvim"
       cp -r "$(readlink "$XDG_CONFIG_HOME/hypr/icewine")" "$TMPDIR/portable-hyprland"
       ln -sfn "$TMPDIR/portable-hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" desktop

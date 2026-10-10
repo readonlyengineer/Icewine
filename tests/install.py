@@ -51,7 +51,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     # Invalid named requests fail before any filesystem or package operation.
     valid = [f"{name}=false" for name in manage.FEATURES] + ["overwrite=false"]
     with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), patch.object(manage, "apply", side_effect=AssertionError("invalid request applied")):
-        for request in (valid + ["terminal=true"], valid + ["unknown=false"],
+        for request in (valid + ["terminal=true"], valid + ["unknown=false"], valid + ["texteditor=true"],
                         valid[1:], valid[:-1], ["terminal=1", *valid[1:]]):
             try:
                 manage.main(["apply", *request])
@@ -173,7 +173,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     before = (state / "manage.json").read_bytes()
     with patch.object(manage.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["pacman"])):
         try:
-            apply(("texteditor",))
+            apply(("terminal",))
         except subprocess.CalledProcessError:
             pass
         else:
@@ -181,21 +181,73 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     assert (state / "manage.json").read_bytes() == before
     assert not (config / "nano/nanorc").exists()
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
-        apply(("texteditor", "filemanager", "shellExtras"), readonly=True)
+        apply(("filemanager", "shellExtras"), readonly=True)
         assert not commands.called
-        assert (config / "nano/nanorc").read_text() == "nano\n"
+        assert not (config / "nano/nanorc").exists()
         assert not (root / ".bashrc").exists()
         assert (config / "yazi/theme.toml").is_symlink()
-        # Package defaults change; repeated Apply preserves even untouched mutable files.
-        (defaults / "config/nano/nanorc").write_text("updated nano\n")
-        apply(("texteditor", "filemanager", "shellExtras"), readonly=True)
-        assert (config / "nano/nanorc").read_text() == "nano\n"
-        apply(("texteditor",), overwrite=True, readonly=True)
-        assert (config / "nano/nanorc").read_text() == "updated nano\n"
+        (defaults / "config/yazi/yazi.toml").write_text("updated yazi\n")
+        apply(("filemanager", "shellExtras"), readonly=True)
+        assert (config / "yazi/yazi.toml").read_text() == "yazi\n"
+        apply(("filemanager", "shellExtras"), overwrite=True, readonly=True)
+        assert (config / "yazi/yazi.toml").read_text() == "updated yazi\n"
+        apply(("shellExtras",), overwrite=True, readonly=True)
         assert not (config / "yazi/theme.toml").is_symlink()
         (root / ".bashrc").write_text("user shell\n")
         apply(("shellExtras",), overwrite=True, readonly=True)
         assert (root / ".bashrc").read_text() == "user shell\n"
+    # Only the exact previous saved schema is accepted, and its editor bit is
+    # discarded without changing the remaining utility identities or dotfiles.
+    nano = config / "nano/nanorc"
+    nano.parent.mkdir()
+    nano.write_text("user nano\n")
+    (root / ".nanorc").write_text("home nano\n")
+    nvim = config / "nvim/init.lua"
+    nvim.parent.mkdir()
+    nvim.symlink_to(target)
+    (defaults / "config/nvim").mkdir()
+    (defaults / "config/nvim/init.lua").write_text("obsolete default\n")
+    records = manage.theme.default_records(state)
+    for path in (nano, nvim):
+        records["config"]["files"][str(path.relative_to(config))] = manage.theme.default_signature(path)
+    manage.theme.atomic_text(state / "default-files.json", json.dumps(records))
+    selected = false | {"terminal": True, "gaming": True, "shellExtras": True}
+    for bit in (False, True):
+        legacy = selected | {"texteditor": bit}
+        for name in ("manage.json", "applied.json"):
+            (state / name).write_text(json.dumps(legacy))
+        with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), contextlib.redirect_stdout(io.StringIO()) as saved:
+            manage.main(["state"])
+            assert dict(field.split("=") for field in saved.getvalue().split()) == {"readonly": "false", **{name: str(value).lower() for name, value in selected.items()}}
+        assert json.loads((state / "manage.json").read_text()) == legacy
+        with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+            apply(tuple(name for name in manage.FEATURES if name != "login"), overwrite=True)
+            assert not any("nano" in call.args[0] for call in commands.call_args_list)
+        assert json.loads((state / "manage.json").read_text()) == {name: name != "login" for name in manage.FEATURES}
+        assert nano.read_text() == "user nano\n" and (root / ".nanorc").read_text() == "home nano\n"
+        assert nvim.is_symlink() and nvim.resolve() == target
+        assert target.read_text() == "keep me\n"
+    for invalid in (selected | {"texteditor": 1}, selected | {"unknown": False},
+                    selected | {"texteditor": True, "unknown": False},
+                    {name: value for name, value in selected.items() if name != "terminal"}):
+        (state / "manage.json").write_text(json.dumps(invalid))
+        with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}):
+            try:
+                manage.selections(state)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"Accepted malformed saved state: {invalid}")
+    # Legacy compatibility applies to persisted state only, never current requests.
+    with patch.dict(os.environ, dict(env, ICEWINE_MANAGE_SELECTIONS=json.dumps(selected | {"texteditor": True}))):
+        try:
+            manage.selections(state)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Accepted obsolete declared selections")
+    (state / "manage.json").write_text(json.dumps(false))
+    (state / "applied.json").write_text(json.dumps(false))
     with patch.dict(os.environ, dict(env, ICEWINE_MANAGE_SELECTIONS=json.dumps(false))):
         try:
             manage.main(["apply", *[f"{name}={str(name == 'desktop').lower()}" for name in manage.FEATURES], "overwrite=false"])

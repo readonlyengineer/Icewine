@@ -78,7 +78,7 @@ function launchOptions(entry, home) {
 
     return {
         command: ["uwsm", "app", "--"]
-            .concat(entry.runInTerminal ? ["icewine-terminal-exec"] : [])
+            .concat(entry.runInTerminal ? ["xdg-terminal-exec"] : [])
             .concat(Array.from(entry.command || [])),
         workingDirectory: entry.workingDirectory || home
     }

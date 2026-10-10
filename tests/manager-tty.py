@@ -59,7 +59,7 @@ if sys.argv[1:] == ["state"]: print(os.environ["TUI_STATE"])
         assert b"[ Apply ]" in rendered and b"[ Cancel ]" in rendered
         assert (b"NixOS: utility selections are read-only." in rendered) == ("readonly=true" in state.split())
         return [json.loads(line) for line in log.read_text().splitlines()]
-    ids = ("desktop", "terminal", "texteditor", "filemanager", "gaming", "flatpak", "login", "shellExtras")
+    ids = ("desktop", "terminal", "filemanager", "gaming", "flatpak", "login", "shellExtras")
     def state(readonly=False, **selected):
         # Deliberately shuffle fields: identity must not depend on wire order.
         return " ".join([f"{name}={str(selected.get(name, False)).lower()}" for name in reversed(ids)]

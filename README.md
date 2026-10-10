@@ -54,7 +54,6 @@ In your `flake.nix`:
             user = "YOUR_USERNAME";
             desktop.enable = true;
             terminal.enable = true;
-            texteditor.enable = true;
             filemanager.enable = true;
             gaming.enable = true;
             flatpak.enable = true;
@@ -187,7 +186,6 @@ This schema was chosen to allow Icewine to update with the package, but still gi
 | Hyprland | `hypr/hyprland.lua` |
 | Quickshell | `quickshell/shell.qml`; settings in `quickshell/config/Settings.qml` |
 | Kitty | `kitty/kitty.conf` |
-| Nano | `nano/nanorc` |
 | UWSM | `uwsm/env` |
 | Hypridle | `hypr/hypridle.conf` |
 | GTK CSS | `gtk-3.0/gtk.css`, `gtk-4.0/gtk.css` |
@@ -253,7 +251,7 @@ Manual and application fullscreen choices take precedence.
 
 ## Applications
 
-The manager/module offers Kitty, Nano, Yazi, Steam/Gamescope, Flatpak/Bazaar,
+The manager/module offers Kitty, Yazi, Steam/Gamescope, Flatpak/Bazaar,
 SDDM styling and Starship/Fastfetch alongside the optional desktop session.
 Browser profiles and themes belong to you; Icewine uses the host browser.
 
@@ -273,12 +271,6 @@ Hyprland opens terminals through `xdg-terminal-exec`, directories through
 `xdg-open`, and the browser through its XDG default. Set a preferred terminal in
 `~/.config/xdg-terminals.list`, or customise shortcuts in `hypr/hyprland.lua`.
 
-Nano is the default editor, with syntax colouring from its installed package.
-An existing `~/.nanorc` takes precedence over `nano/nanorc`; keep your settings
-and add its packaged syntax includes there if needed.
-
-`EDITOR` and `VISUAL` default to `icewine-editor`, while deliberate environment
-overrides remain available to Yazi.
 
 Install replacement applications and their configuration in your host. Neovim
 plugins and language servers are host-owned; Icewine generates the optional
@@ -290,7 +282,6 @@ These options belong under `services.icewine`:
 | --- | --- |
 | `desktop.enable = false;` | Hyprland session integration; explicit Apply removes its implementation link |
 | `terminal.enable = false;` | Kitty defaults |
-| `texteditor.enable = false;` | Nano defaults |
 | `filemanager.enable = false;` | Yazi and its GVfs default |
 | `gaming.enable = false;` | Steam/Gamescope integration |
 | `flatpak.enable = false;` | Flatpak/Bazaar integration; Gaming uses native Steam |

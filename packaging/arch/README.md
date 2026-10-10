@@ -36,7 +36,7 @@ target unchanged.
 Gaming uses native Steam, or Flatpak Steam when Flatpak Utility is selected.
 Flatpak Utility also supplies Bazaar. Shell Extras supplies Starship and Fastfetch
 with an editable Bash entry; it does not change the login shell. Icewine keeps
-existing `EDITOR`/`VISUAL` overrides and MIME defaults. Use your normal PATH to
+host `EDITOR`/`VISUAL` values and MIME defaults. Use your normal PATH to
 override application launchers.
 
 After selecting Desktop session and Login screen and applying, select **Icewine**
