@@ -74,8 +74,6 @@ package_icewine() {
   for name in steam.desktop com.valvesoftware.Steam.desktop; do
     printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Steam' 'NoDisplay=true' 'Hidden=true' > "$share/defaults/data/applications/$name"
   done
-  install -d "$share/defaults/home"
-  printf '%s\n' '# Icewine shell extras; add your overrides below.' '[[ $- == *i* ]] || return' 'fastfetch' 'eval "$(starship init bash)"' > "$share/defaults/home/.bashrc"
   install -Dm644 packaging/arch/steam-gamescope.desktop "$share/defaults/data/applications/steam-gamescope.desktop"
   install -Dm644 theme/assets/themes/CATPPUCCIN-LICENSE "$pkgdir/usr/share/licenses/icewine/CATPPUCCIN-LICENSE"
   install -Dm644 "$srcdir/plugins-$_plugins/mount.yazi/LICENSE" "$pkgdir/usr/share/licenses/icewine/YAZI-MOUNT-LICENSE"

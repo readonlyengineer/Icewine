@@ -37,7 +37,6 @@ APPS = {
     "nvim": (),
     "nano": (),
     "kitty": (),
-    "bash": (),
 }
 TEMPLATES = {
     "Palette.qml": "Palette.qml.in",

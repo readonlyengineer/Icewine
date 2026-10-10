@@ -184,7 +184,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         apply(("texteditor", "filemanager", "shellExtras"), readonly=True)
         assert not commands.called
         assert (config / "nano/nanorc").read_text() == "nano\n"
-        assert (root / ".bashrc").read_text() == "shell extras\n"
+        assert not (root / ".bashrc").exists()
         assert (config / "yazi/theme.toml").is_symlink()
         # Package defaults change; repeated Apply preserves even untouched mutable files.
         (defaults / "config/nano/nanorc").write_text("updated nano\n")
@@ -193,6 +193,9 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         apply(("texteditor",), overwrite=True, readonly=True)
         assert (config / "nano/nanorc").read_text() == "updated nano\n"
         assert not (config / "yazi/theme.toml").is_symlink()
+        (root / ".bashrc").write_text("user shell\n")
+        apply(("shellExtras",), overwrite=True, readonly=True)
+        assert (root / ".bashrc").read_text() == "user shell\n"
     with patch.dict(os.environ, dict(env, ICEWINE_MANAGE_SELECTIONS=json.dumps(false))):
         try:
             manage.main(["apply", *[f"{name}={str(name == 'desktop').lower()}" for name in manage.FEATURES], "overwrite=false"])

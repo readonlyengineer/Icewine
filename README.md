@@ -200,7 +200,7 @@ the complete config yourself.
 Fastfetch, Starship, Yazi theme/keymap and GTK settings normally link to generated
 files. To customise one, copy its contents, replace the link with a regular file
 at the same path, then edit it. That file is preserved by Apply unless overwrite is checked, and no longer
-follows generated theme changes. Shell Extras also offers an editable `~/.bashrc`.
+follows generated theme changes. Initialise Starship and Fastfetch in your own shell configuration.
 
 ### Hyprland example
 

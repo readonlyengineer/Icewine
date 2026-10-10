@@ -26,7 +26,7 @@ let
     lib.optionals (!enabledConsumers.${name}) (builtins.attrNames files)
   ) themeConsumers);
   implementation = pkgs.runCommand "icewine-implementation" { } ''
-    mkdir -p $out/quickshell/deck $out/hyprland/modules $out/kitty $out/bash $out/uwsm $out/hypridle $out/gtk
+    mkdir -p $out/quickshell/deck $out/hyprland/modules $out/kitty $out/uwsm $out/hypridle $out/gtk
     cp -r ${../quickshell}/adapters ${../quickshell}/modules ${../quickshell}/theme $out/quickshell/
     cp ${../quickshell}/deck/DeckOverlay.qml ${../quickshell}/deck/DeckMenu.js $out/quickshell/deck/
     cp ${../quickshell}/Desktop.qml ${../quickshell}/Handheld.qml $out/quickshell/
@@ -85,10 +85,6 @@ let
     ${lib.optionalString (cfg.filemanager.enable) ''
       mkdir -p $out/config/yazi/plugins/mount.yazi
       cp -r ${pkgs.yaziPlugins.mount}/. $out/config/yazi/plugins/mount.yazi/
-    ''}
-    ${lib.optionalString cfg.shellExtras.enable ''
-      mkdir -p $out/home
-      printf '%s\n' '# Icewine shell extras; add your overrides below.' '[[ $- == *i* ]] || return' 'fastfetch' 'eval "$(starship init bash)"' > $out/home/.bashrc
     ''}
     cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
     cp ${../quickshell/config/qmldir} $out/config/quickshell/config/qmldir

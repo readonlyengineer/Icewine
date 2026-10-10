@@ -20,7 +20,7 @@ APPS = {
     "desktop": ("hypr", "uwsm", "gtk", "user-dirs", "applications"),
     "terminal": ("kitty",), "texteditor": ("nano", "nvim"), "filemanager": ("yazi",),
     "gaming": ("gaming",), "flatpak": (), "login": (),
-    "shellExtras": ("shellExtras", "starship", "fastfetch"),
+    "shellExtras": ("starship", "fastfetch"),
 }
 PACKAGES = {
     "desktop": ("icewine-session",), "terminal": ("kitty",), "texteditor": ("nano",),
