@@ -7,7 +7,7 @@ const ROWS: &[(&str, &str, &str)] = &[
     ("terminal", "Terminal", "Kitty"),
     ("filemanager", "File manager", "Yazi"),
     ("steam", "Steam (unfree)", ""),
-    ("gamescope", " +- Gamescope", ""), ("handheld", " \u{005c}- Handheld", "Requires native Steam, desktop and Gamescope"),
+    ("gamescope", " +- Gamescope", ""), ("handheld", " \u{005c}- Handheld", "Requires Desktop Session, Steam native, and Gamescope"),
     ("login", "Login screen", "SDDM"), ("shellExtras", "Shell Extras", "Starship + Fastfetch"),
 ];
 
@@ -64,15 +64,16 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     Row::new(vec![
                         Cell::from(*purpose),
                         Cell::from(*defaults).style(muted),
-                        Cell::from(if *id == "steam" { format!("< {} >", STEAM[*steam]) }
-                            else { (if selected[id] { "[x]" } else { "[ ]" }).to_owned() })
+                        Cell::from(Line::from(if *id == "steam" { format!("< {} >", STEAM[*steam]) }
+                            else { (if selected[id] { "[x]" } else { "[ ]" }).to_owned() }).right_aligned())
                             .style(if readonly || !available { muted } else { accent }),
                     ]).style(if controls[focus] == (if *id == "steam" { Control::Steam } else { Control::Utility(id) }) { focused } else { Style::default() })
                 });
                 frame.render_widget(Table::new(rows, [
-                    Constraint::Length(23), Constraint::Min(20), Constraint::Length(11),
+                    Constraint::Length(18), Constraint::Min(20), Constraint::Length(11),
                 ]).column_spacing(2).header(Row::new([
-                    "Purpose", "Defaults", "Configure",
+                    Cell::from("Utility"), Cell::from("Contains"),
+                    Cell::from(Line::from("Configure").right_aligned()),
                 ]).style(accent)), utilities);
                 frame.render_widget(Paragraph::new(format!("[{}] Overwrite existing dotfiles",
                     if overwrite { "x" } else { " " }))
