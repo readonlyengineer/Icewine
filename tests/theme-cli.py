@@ -174,9 +174,9 @@ with tempfile.TemporaryDirectory() as temporary:
     kitty_entry.write_text("user Kitty theme edit\n")
     for theme_id, background, appearance in [
         ("tokyo-night", "13131a", "dark"), ("dracula", "1d1e27", "dark"),
-        ("nord", "282e38", "dark"), ("gruvbox-light", "cfc19d", "light"),
+        ("nord", "282e38", "dark"), ("gruvbox-light", "f2e5bc", "light"),
         ("gruvbox-dark", "232323", "dark"),
-        ("catppuccin-latte", "cacdd2", "light"),
+        ("catppuccin-latte", "eff1f5", "light"),
         ("catppuccin-frappe", "242735", "dark"),
         ("catppuccin-macchiato", "1a1c2a", "dark"),
         ("catppuccin-mocha", "151521", "dark"),

@@ -165,8 +165,8 @@ def render_theme(assets, palette_file, level="high"):
     except OSError:
         distro = ""
     values["osGlyph"] = {"nixos": "\uf313", "arch": "\uf303", "cachyos": "\uf385"}.get(distro, "\uf31a")
-    # Smoky glass: 88% dark base and 12% black; no added accent tint.
-    values["terminalBackground"] = "".join(
+    # Dark themes use smoky glass; light themes retain their normal background.
+    values["terminalBackground"] = values["background"] if values["appearance"] == "light" else "".join(
         f"{round(int(values['backgroundDark'][i:i + 2], 16) * 0.88):02x}"
         for i in (0, 2, 4)
     )
