@@ -143,7 +143,7 @@ Item {
                         text: Qt.formatTime(now, "HH:mm")
                         color: root.palette.foreground
                         font.family: "JetBrainsMono Nerd Font"
-                        font.pixelSize: 64 * root.scaleFactor
+                        font.pixelSize: 80 * root.scaleFactor
                         font.weight: Font.Light
                         Timer {
                             interval: 1000
@@ -157,7 +157,7 @@ Item {
                         text: Qt.formatDate(clock.now, "dddd, MMMM d")
                         color: root.palette.foregroundDark
                         font.family: "JetBrainsMono Nerd Font"
-                        font.pixelSize: Math.max(12, 14 * root.scaleFactor)
+                        font.pixelSize: Math.max(12, 18 * root.scaleFactor)
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -175,7 +175,7 @@ Item {
                         enabled: root.controller.userCount > 1 && !root.controller.busy
                         Accessible.name: "Select user"
                         text: root.controller.userLabel
-                        labelSize: 18 * root.scaleFactor
+                        labelSize: 24 * root.scaleFactor
                         onClicked: root.controller.nextUser()
                     }
                     Row {
