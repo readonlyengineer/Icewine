@@ -174,7 +174,7 @@ Scope {
     }
 
     // Explicit native reload order: restore the target before transferring the lock.
-    ReloadPropagator {
+    Scope {
         reloadableId: "sessionLockLifecycle"
         PersistentProperties {
             id: lockState

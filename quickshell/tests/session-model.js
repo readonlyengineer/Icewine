@@ -95,7 +95,7 @@ recovery.lockHint.value = false
 recovery.lockHint.running = false
 recovery.finishLockHint(0, 0)
 assert.equal(recovery.lockHint.command.at(-1), "true")
-assert.match(source, /ReloadPropagator\s*\{\s*reloadableId: "sessionLockLifecycle"\s*PersistentProperties[\s\S]*?WlSessionLock\s*\{\s*id: sessionLock\s*locked: lockState.acquired/,
+assert.match(source, /Scope\s*\{\s*reloadableId: "sessionLockLifecycle"\s*PersistentProperties[\s\S]*?WlSessionLock\s*\{\s*id: sessionLock\s*locked: lockState.acquired/,
     "native reload restores the persistent acquisition target before transferring the lock manager")
 const refresh = source.match(/        function refreshIcons\(\): void \{[\s\S]*?^        \}/m)[0].replace(": void", "")
 const reloads = []

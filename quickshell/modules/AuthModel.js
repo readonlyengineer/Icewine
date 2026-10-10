@@ -7,7 +7,7 @@ function keyboardInset(keyboardHost, screen, visible, height) {
 }
 
 function scaleFactor(width, height) {
-    return Math.min(width / 1920, height / 1080)
+    return Math.max(0.8, Math.min(1.25, width / 1920, height / 1080))
 }
 
 if (typeof module !== "undefined")

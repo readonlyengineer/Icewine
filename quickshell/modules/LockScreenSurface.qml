@@ -3,11 +3,16 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import qs.icewine.theme as Theme
+import "Wallpaper.js" as Wallpaper
 
 Item {
     id: root
 
     required property var session
+    readonly property string dataHome: Quickshell.env("XDG_DATA_HOME")
+        || (Quickshell.env("HOME") + "/.local/share")
+    property bool selectionAvailable: true
+    property string wallpaperRevision: String(Date.now())
 
     QtObject {
         id: controller
@@ -23,7 +28,7 @@ Item {
         readonly property bool failed: root.session.failed
         readonly property bool secretInput: true
         readonly property string prompt: "Password"
-        readonly property string message: failed ? "Incorrect password" : ""
+        readonly property string message: busy ? "Authenticating…" : failed ? "Incorrect password" : ""
         readonly property var keyboardHost: root.session.keyboardHost
         readonly property bool keyboardVisible: root.session.keyboardVisible
         readonly property real keyboardHeight: root.session.keyboardHeight
@@ -43,15 +48,23 @@ Item {
 
     Connections {
         target: root.session
+        function onLockedChanged() {
+            if (root.session.locked) {
+                root.selectionAvailable = true
+                root.wallpaperRevision = String(Date.now())
+            }
+        }
         function onPasswordChanged() {
             if (controller.password !== root.session.password)
                 controller.password = root.session.password
         }
     }
 
-    WinterScreen {
+    AuthScreen {
         anchors.fill: parent
         controller: controller
         palette: Theme.Palette
+        backdropSource: Wallpaper.source(root.dataHome, root.selectionAvailable, root.wallpaperRevision)
+        onBackdropFailed: if (root.selectionAvailable) root.selectionAvailable = false
     }
 }

@@ -121,7 +121,7 @@ package_icewine-sddm() {
   cd "$srcdir/icewine"
   install -d "$theme/modules" "$theme/theme"
   cp sddm/{Main.qml,metadata.desktop} "$theme/"
-  cp quickshell/modules/{WinterScreen.qml,WinterModel.js} "$theme/modules/"
+  cp quickshell/modules/{AuthScreen.qml,AuthModel.js} "$theme/modules/"
   cp "$srcdir/Palette.qml" "$theme/theme/Palette.qml"
   printf '%s\n' 'singleton Palette 1.0 Palette.qml' > "$theme/theme/qmldir"
 }

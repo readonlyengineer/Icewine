@@ -327,7 +327,7 @@ assert battery.index('id: keepAwake') < battery.index('visible: root.batteryPres
 assert battery.index('id: keepAwake') < battery.index('text: "Battery condition"')
 for action in ["Lock", "Sleep", "Reboot", "Shutdown"]:
     assert f'Accessible.name: "{action}"' in battery
-    assert f'Controls.ToolTip.text: "{action}"' in battery
+    assert re.search(r'text: "[^"\n]*\s+' + re.escape(action) + '"', battery)
 bluetooth = (source / "quickshell/modules/topbar/popouts/Bluetooth.qml").read_text()
 assert re.search(r'ActionButton\s*\{\s*id: forget', bluetooth)
 assert 'Accessible.name: "Forget "' in bluetooth and 'onClicked: deviceRow.forgotten()' in bluetooth

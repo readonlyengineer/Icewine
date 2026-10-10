@@ -32,8 +32,8 @@ runCommand "icewine-sddm-theme" { } ''
   mkdir -p "$theme"/{modules,theme}
   cp ${./Main.qml} "$theme/Main.qml"
   cp ${./metadata.desktop} "$theme/metadata.desktop"
-  cp ${../quickshell/modules/WinterScreen.qml} "$theme/modules/WinterScreen.qml"
-  cp ${../quickshell/modules/WinterModel.js} "$theme/modules/WinterModel.js"
+  cp ${../quickshell/modules/AuthScreen.qml} "$theme/modules/AuthScreen.qml"
+  cp ${../quickshell/modules/AuthModel.js} "$theme/modules/AuthModel.js"
   cp ${paletteQml} "$theme/theme/Palette.qml"
   printf 'singleton Palette 1.0 Palette.qml\n' > "$theme/theme/qmldir"
 ''

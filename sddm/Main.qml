@@ -3,12 +3,12 @@ import QtQuick.Controls as Controls
 import QtQuick.VirtualKeyboard
 import "modules" as Modules
 import "theme" as Theme
-import "modules/WinterModel.js" as WinterModel
+import "modules/AuthModel.js" as AuthModel
 
 Item {
     id: root
 
-    // Use Qt's model role lookup and selection; WinterScreen supplies the buttons.
+    // Use Qt's model role lookup and selection; AuthScreen supplies the buttons.
     Controls.ComboBox {
         id: users
         visible: false
@@ -46,13 +46,13 @@ Item {
         readonly property bool canShutdown: sddm.canPowerOff
 
         function nextUser() {
-            users.currentIndex = WinterModel.nextIndex(users.currentIndex, users.count)
+            users.currentIndex = AuthModel.nextIndex(users.currentIndex, users.count)
             password = ""
             message = ""
             failed = false
         }
         function nextSession() {
-            sessions.currentIndex = WinterModel.nextIndex(sessions.currentIndex, sessions.count)
+            sessions.currentIndex = AuthModel.nextIndex(sessions.currentIndex, sessions.count)
         }
         function submit() {
             if (busy || !users.currentValue || sessions.currentIndex < 0)
@@ -85,7 +85,7 @@ Item {
         }
     }
 
-    Modules.WinterScreen {
+    Modules.AuthScreen {
         id: screen
         anchors.fill: parent
         controller: controller
