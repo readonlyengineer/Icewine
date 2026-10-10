@@ -111,6 +111,9 @@ in {
 
     programs.hyprland = lib.mkIf cfg.desktop.enable { enable = true; withUWSM = true; };
     programs.dconf.enable = lib.mkIf cfg.gtk.enable (lib.mkDefault true);
+    environment.sessionVariables.XDG_DATA_DIRS = lib.mkIf cfg.gtk.enable [
+      "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}"
+    ];
     xdg.portal = lib.mkIf cfg.gtk.enable {
       extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
       config.hyprland."org.freedesktop.impl.portal.Settings" = [ "gtk" ];
