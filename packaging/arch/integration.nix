@@ -23,7 +23,7 @@ in pkgs.stdenv.mkDerivation {
   dontInstall = true;
   dontWrapQtApps = true;
   nativeBuildInputs = [ pkgs.pacman pkgs.libarchive pkgs.fakeroot
-    (pkgs.python3.withPackages (python: [ python.vdf ])) pkgs.fish pkgs.lua pkgs.zstd
+    (pkgs.python3.withPackages (python: [ python.vdf ])) pkgs.lua pkgs.zstd
     pkgs.meson pkgs.ninja pkgs.pkg-config pkgs.glib pkgs.wayland-scanner pkgs.gettext
     pkgs.qt6.qtdeclarative pkgs.cargo pkgs.rustc pkgs.rustPlatform.cargoSetupHook ];
   buildInputs = [ pkgs.gtk3 pkgs.gnome-desktop pkgs.wayland pkgs.wayland-protocols

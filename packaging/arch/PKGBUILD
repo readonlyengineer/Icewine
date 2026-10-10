@@ -30,6 +30,7 @@ package_icewine() {
   local share="$pkgdir/usr/share/icewine" defaults="$pkgdir/usr/share/icewine/defaults/config"
   install -d "$share" "$defaults" "$share/defaults/data" "$pkgdir/usr/bin" "$pkgdir/usr/lib/icewine"
   install -d "$share/defaults/data/applications"
+  install -Dm644 packaging/arch/icewine-yazi.desktop "$pkgdir/usr/share/applications/icewine-yazi.desktop"
   printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=uuctl' 'NoDisplay=true' 'Hidden=true' > "$share/defaults/data/applications/uuctl.desktop"
   cp -r theme/assets "$share/theme"
   install -Dm644 theme/assets/flower-branch.png "$share/defaults/data/wallpapers/default.jpg"

@@ -43,6 +43,8 @@ let
     (package: lib.getName package == "icewine") optIn.users.users.demo.packages);
   handheldCli = builtins.head (lib.filter
     (package: lib.getName package == "icewine") handheld.users.users.demo.packages);
+  directoryDefault = builtins.head (lib.filter
+    (package: lib.getName package == "mimeapps.list") optIn.users.users.demo.packages);
   hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
 in {
   brightness = pkgs.runCommand "icewine-brightness-checks" {
@@ -67,6 +69,14 @@ in {
     nativeBuildInputs = [ pkgs.python3 quickshell ];
   } ''
     python3 ${./theme-live.py} ${self}
+    touch "$out"
+  '';
+  mime = pkgs.runCommand "icewine-mime-checks" {
+    nativeBuildInputs = [ pkgs.python3 pkgs.xdg-utils pkgs.xdg-terminal-exec ];
+  } ''
+    python3 ${./mime.py} ${self} ${pkgs.xdg-utils}/bin/xdg-mime \
+      ${pkgs.xdg-utils}/bin/xdg-open ${pkgs.xdg-terminal-exec}/bin/xdg-terminal-exec \
+      ${directoryDefault}/share/applications/mimeapps.list
     touch "$out"
   '';
   native = import ../packaging/arch/integration.nix { inherit pkgs; src = self; };
@@ -102,6 +112,9 @@ in {
     assert !desktop.programs.firefox.enable;
     assert desktop.programs.firefox.nativeMessagingHosts.packages == [ ];
     assert desktop.xdg.mime.defaultApplications == { };
+    assert !(hasPackage "mimeapps.list" desktop.users.users.demo.packages);
+    assert hasPackage "mimeapps.list" optIn.users.users.demo.packages;
+    assert !(hasPackage "mimeapps.list" optIn.users.users.other.packages);
     assert !desktop.networking.networkmanager.enable;
     assert !desktop.services.openssh.enable;
     assert !(desktop.systemd.services ? icewine-init);
@@ -166,11 +179,14 @@ in {
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -L "$XDG_CONFIG_HOME/hypr/icewine"
+      test "$(readlink "$XDG_CONFIG_HOME/quickshell/icewine")" = /etc/icewine/implementation/quickshell
+      implementation=${optIn.environment.etc."icewine/implementation".source}
+      ln -sfn "$implementation/quickshell" "$XDG_CONFIG_HOME/quickshell/icewine"
+      ln -sfn "$implementation/hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
       test -f "$XDG_CONFIG_HOME/quickshell/icewine/Desktop.qml"
       test ! -e "$XDG_CONFIG_HOME/quickshell/modules"
       test ! -e "$XDG_CONFIG_HOME/hypr/modules/Theme.lua"
       grep -Fx 'Hidden=true' "$XDG_DATA_HOME/applications/steam.desktop"
-      implementation=$(dirname "$(readlink "$XDG_CONFIG_HOME/quickshell/icewine")")
       for name in adapters/Hyprland.qml modules/Topbar.qml theme/qmldir theme/Palette.qml Desktop.qml Handheld.qml deck/DeckOverlay.qml deck/DeckMenu.js; do
         cmp ${../quickshell}/"$name" "$implementation/quickshell/$name"
       done
@@ -193,7 +209,7 @@ in {
       done
       ${handheldCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       cmp ${../quickshell/deck/shell.qml} "$XDG_CONFIG_HOME/quickshell/shell.qml"
-      cp -r "$(readlink "$XDG_CONFIG_HOME/hypr/icewine")" "$TMPDIR/portable-handheld-hyprland"
+      cp -r ${handheld.environment.etc."icewine/implementation".source}/hyprland "$TMPDIR/portable-handheld-hyprland"
       ln -sfn "$TMPDIR/portable-handheld-hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" handheld
       touch "$out"

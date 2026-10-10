@@ -80,15 +80,15 @@ let
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source:
       "mkdir -p $out/data/${lib.escapeShellArg (builtins.dirOf name)}; cp ${lib.escapeShellArg "${source}"} $out/data/${lib.escapeShellArg name}"
     ) cfg.defaultFiles.data)}
-    ln -s ${implementation}/quickshell $out/config/quickshell/icewine
-    ln -s ${implementation}/hyprland $out/config/hypr/icewine
-    ${lib.optionalString cfg.idle.enable "ln -s ${implementation}/hypridle $out/config/hypr/hypridle-icewine"}
-    ln -s ${implementation}/uwsm $out/config/uwsm/icewine
+    ln -s /etc/icewine/implementation/quickshell $out/config/quickshell/icewine
+    ln -s /etc/icewine/implementation/hyprland $out/config/hypr/icewine
+    ${lib.optionalString cfg.idle.enable "ln -s /etc/icewine/implementation/hypridle $out/config/hypr/hypridle-icewine"}
+    ln -s /etc/icewine/implementation/uwsm $out/config/uwsm/icewine
     ${lib.optionalString cfg.gtk.enable ''
-      ln -s ${implementation}/gtk $out/config/gtk-3.0/icewine
-      ln -s ${implementation}/gtk $out/config/gtk-4.0/icewine
+      ln -s /etc/icewine/implementation/gtk $out/config/gtk-3.0/icewine
+      ln -s /etc/icewine/implementation/gtk $out/config/gtk-4.0/icewine
     ''}
-    ${lib.optionalString (cfg.terminal.enable) "ln -s ${implementation}/kitty $out/config/kitty/icewine"}
+    ${lib.optionalString (cfg.terminal.enable) "ln -s /etc/icewine/implementation/kitty $out/config/kitty/icewine"}
   '';
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
   wallpaperSelector = pkgs.writeShellApplication {
@@ -168,6 +168,7 @@ let
 in {
   config = lib.mkIf cfg.enable {
     users.users.${cfg.user}.packages = [ icewineCli ];
+    environment.etc."icewine/implementation".source = implementation;
     environment.sessionVariables = {
       ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";
       ICEWINE_KITTY_PRESET = if cfg.terminal.enable then "true" else "false";
@@ -215,7 +216,7 @@ in {
     unitConfig.ConditionUser = cfg.user;
     serviceConfig = {
       Type = "oneshot";
-      ExecStart = "${pkgs.systemd}/bin/systemctl --user try-restart icewine.service";
+      ExecStart = "${quickshell}/bin/qs ipc call session refreshIcons";
     };
   };
   systemd.user.services.hyprpolkitagent = lib.mkIf cfg.desktop.enable {

@@ -292,11 +292,14 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     assert not (config / "nano/nanorc").exists()
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
         apply(("filemanager",))
-        assert commands.call_args_list[-1].args[0] == ["xdg-mime", "default", "yazi.desktop", "inode/directory"]
+        assert commands.call_args_list[-1].args[0] == ["xdg-mime", "default", "icewine-yazi.desktop", "inode/directory"]
+    mime_source = root / "home-manager-mimeapps.list"
+    mime_source.write_text("[Default Applications]\nimage/png=imv.desktop;\n")
+    mime = config / "mimeapps.list"
+    mime.symlink_to(mime_source)
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
         apply(("filemanager", "shellExtras"), readonly=True)
-        assert [call.args[0] for call in commands.call_args_list] == [
-            ["xdg-mime", "default", "yazi.desktop", "inode/directory"]]
+        assert not commands.called
         assert not (config / "nano/nanorc").exists()
         assert not (root / ".bashrc").exists()
         assert (config / "yazi/theme.toml").is_symlink()
@@ -305,6 +308,8 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         assert (config / "yazi/yazi.toml").read_text() == "yazi\n"
         apply(("filemanager", "shellExtras"), overwrite=True, readonly=True)
         assert (config / "yazi/yazi.toml").read_text() == "updated yazi\n"
+        assert mime.is_symlink() and mime.resolve() == mime_source
+        assert mime_source.read_text() == "[Default Applications]\nimage/png=imv.desktop;\n"
         commands.reset_mock()
         apply(("shellExtras",), overwrite=True, readonly=True)
         assert not commands.called
@@ -312,6 +317,24 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         (root / ".bashrc").write_text("user shell\n")
         apply(("shellExtras",), overwrite=True, readonly=True)
         assert (root / ".bashrc").read_text() == "user shell\n"
+    stable = root / "installed-implementation"
+    old, new = root / "old-implementation", root / "new-implementation"
+    for directory, text in ((old, "old implementation"), (new, "new implementation")):
+        (directory / "hyprland").mkdir(parents=True)
+        (directory / "hyprland/icewine.lua").write_text(text)
+    stable.symlink_to(old, target_is_directory=True)
+    shipped = defaults / "config/hypr/icewine"
+    shipped.unlink()
+    shipped.symlink_to(stable / "hyprland")
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+        apply(("desktop",), readonly=True)
+    entry = config / "hypr/hyprland.lua"
+    entry.write_text("user entry\n")
+    stable.unlink()
+    stable.symlink_to(new, target_is_directory=True)
+    assert (config / "hypr/icewine/icewine.lua").read_text() == "new implementation"
+    assert entry.read_text() == "user entry\n"
+
     # Only the exact previous saved schema is accepted, and its editor bit is
     # discarded without changing the remaining utility identities or dotfiles.
     nano = config / "nano/nanorc"

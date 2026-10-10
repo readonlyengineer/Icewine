@@ -14,6 +14,7 @@ Scope {
     required property bool authenticationRequired
 
     property alias locked: sessionLock.locked
+    property alias lockRequested: lockState.requested
     property string password: ""
     property bool authenticating: false
     property bool failed: false
@@ -35,16 +36,51 @@ Scope {
     }
 
     function lockFromLogind() {
-        if (sessionLock.locked)
+        if (lockRequested || sessionLock.locked)
             return
+        lockRequested = true
         password = ""
         failed = false
-        sessionLock.locked = true
+        // Record intent before acquisition so a later client can recover it.
+        if (logindSessionPath !== "")
+            writeLockHint()
+        else
+            lockState.acquired = true
+    }
+
+    function writeLockHint() {
+        if (logindSessionPath === "" || lockHint.running)
+            return
+        lockHint.value = lockRequested
+        lockHint.command = ["gdbus", "call", "--system", "--dest", "org.freedesktop.login1",
+            "--object-path", logindSessionPath,
+            "--method", "org.freedesktop.login1.Session.SetLockedHint", String(lockHint.value)]
+        lockHint.running = true
+    }
+
+    function restoreLock(output) {
+        if (String(output).trim() === "(<true>,)") {
+            lockRequested = true
+            lockState.acquired = true
+        }
+        // A false or malformed hint never unlocks an acquired lock or bypasses PAM.
+        if (lockRequested)
+            writeLockHint()
     }
 
     function requestLock() {
         lockFromLogind()
         Quickshell.execDetached(["loginctl", "lock-session", logindSessionId])
+    }
+
+    function finishLockHint(exitCode, exitStatus) {
+        if (exitCode !== 0 || exitStatus !== 0)
+            console.warn("Cannot record lock intent in logind; client restart recovery is unavailable")
+        if (lockRequested && lockHint.value)
+            lockState.acquired = true
+        // Serialise requests arriving during the previous D-Bus call.
+        if (lockHint.value !== lockRequested)
+            writeLockHint()
     }
 
     function requestSleep() {
@@ -76,7 +112,9 @@ Scope {
             return
         password = ""
         failed = false
-        sessionLock.locked = false
+        lockRequested = false
+        lockState.acquired = false
+        writeLockHint()
         wakeDisplay()
         if (notifyLogind)
             Quickshell.execDetached(["loginctl", "unlock-session", logindSessionId])
@@ -135,15 +173,29 @@ Scope {
         }
     }
 
-    WlSessionLock {
-        id: sessionLock
+    // Explicit native reload order: restore the target before transferring the lock.
+    ReloadPropagator {
+        reloadableId: "sessionLockLifecycle"
+        PersistentProperties {
+            id: lockState
+            property bool requested: false
+            property bool acquired: false
+        }
 
-        WlSessionLockSurface {
-            color: "#000000"
+        WlSessionLock {
+            id: sessionLock
+            locked: lockState.acquired
 
-            LockScreenSurface {
-                anchors.fill: parent
-                session: root
+            // secure confirms compositor acquisition, not authentication UI readiness.
+            onSecureChanged: if (locked && !secure) console.warn("Session lock is awaiting compositor acquisition")
+
+            WlSessionLockSurface {
+                color: "#000000"
+
+                LockScreenSurface {
+                    anchors.fill: parent
+                    session: root
+                }
             }
         }
     }
@@ -164,7 +216,11 @@ Scope {
             "--method", "org.freedesktop.login1.Manager.GetSession", root.logindSessionId]
         running: true
         stdout: StdioCollector {
-            onStreamFinished: root.logindSessionPath = SessionModel.sessionPath(this.text)
+            onStreamFinished: {
+                root.logindSessionPath = SessionModel.sessionPath(this.text)
+                if (root.logindSessionPath !== "")
+                    lockedHint.running = true
+            }
         }
         onExited: {
             if (root.logindSessionPath === "") {
@@ -172,6 +228,24 @@ Scope {
                 logindReconnect.restart()
             }
         }
+    }
+
+    Process {
+        id: lockedHint
+        command: ["gdbus", "call", "--system", "--dest", "org.freedesktop.login1",
+            "--object-path", root.logindSessionPath, "--method", "org.freedesktop.DBus.Properties.Get",
+            "org.freedesktop.login1.Session", "LockedHint"]
+        stdout: StdioCollector { onStreamFinished: root.restoreLock(this.text) }
+        onExited: (exitCode, exitStatus) => {
+            if (exitCode !== 0 || exitStatus !== 0)
+                console.warn("Cannot read lock intent from logind; client restart recovery is unavailable")
+        }
+    }
+
+    Process {
+        id: lockHint
+        property bool value: false
+        onExited: (exitCode, exitStatus) => root.finishLockHint(exitCode, exitStatus)
     }
 
     Process {
@@ -196,9 +270,13 @@ Scope {
 
     IpcHandler {
         target: "session"
-        function lock(): string { root.requestLock(); return "locked" }
+        function lock(): string { root.requestLock(); return "requested" }
+        function refreshIcons(): void {
+            if (!root.lockRequested && !root.locked)
+                Quickshell.reload(false)
+        }
         function status(): string {
-            return JSON.stringify({ locked: root.locked, secure: sessionLock.secure,
+            return JSON.stringify({ requested: root.lockRequested, locked: root.locked, secure: sessionLock.secure,
                 authenticationRequired: root.authenticationRequired })
         }
     }

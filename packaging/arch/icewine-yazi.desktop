@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Yazi (Icewine)
+Exec=xdg-terminal-exec yazi %f
+Icon=yazi
+Terminal=false
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;
+NoDisplay=true

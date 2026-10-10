@@ -135,8 +135,9 @@ icewine manage
 Use Tab or arrows to navigate, Space to select, and Enter on Apply or Cancel.
 NixOS utility selections reflect the module options and are read-only. Apply
 creates missing dotfiles; **Overwrite existing dotfiles** replaces selected defaults
-without backups. It starts unchecked each time. Existing files are otherwise
-preserved, including on rebuild, login and reboot. Host persistence remains host policy.
+without backups. It starts unchecked each time. Existing editable files are otherwise
+preserved, including on rebuild, login and reboot. Explicitly host-managed files
+are reclaimed by the host on activation. Host persistence remains host policy.
 
 ## Basic hotkeys
 
@@ -165,19 +166,21 @@ Monocle arrows cycle its stack; directional swapping and resizing have no effect
 
 Each application uses its native configuration entry. That entry loads Icewine's
 shared defaults, then your overrides. The shared implementation is reached through
-a managed symlink into the Nix store; generated theme files are kept separately.
+a stable package-managed path; generated theme files are kept separately.
 
 ```text
 ~/.config/hypr/
 ├── hyprland.lua                 ← Edit this: shared import, then your settings
-└── icewine → /nix/store/…-icewine-implementation/hyprland/
+└── icewine → /etc/icewine/implementation/hyprland/
     ├── icewine.lua              ← Loads shared behaviour and generated Theme.lua
     └── modules/                ← Shared bindings, window policy, docking, etc.
 
 ~/.config/icewine/current/        ← Generated appearance; do not edit
 ```
 
-This schema was chosen to allow Icewine to update with the package, but still give the user freedom.
+Shared implementation follows NixOS rebuilds and Arch package updates. After
+upgrading from direct Nix-store links, run Apply once to adopt the stable paths;
+edited entry points remain yours.
 
 | Application | Editable entry under `~/.config` |
 | --- | --- |
@@ -265,7 +268,9 @@ supplies its required runtime and Flathub support. Bazaar is not installed.
 ### Alternative applications and opt-outs
 
 Optional utility switches install and configure Icewine's defaults. They do not
-select replacement applications or change your MIME defaults.
+select replacement applications. Enabling Yazi sets the directory default on Arch
+Apply; NixOS supplies a per-user package default without writing user MIME files.
+Existing explicit user or host associations take precedence on NixOS.
 
 Hyprland opens terminals through `xdg-terminal-exec`, directories through
 `xdg-open`, and the browser through its XDG default. Set a preferred terminal in

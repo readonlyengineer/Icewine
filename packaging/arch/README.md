@@ -38,7 +38,9 @@ Steam uses a none/native/Flatpak selector (left/right). Its Gamescope child
 starts checked; disabling it retains ordinary Steam without a splash or launcher
 masks. Handheld requires native Steam, Desktop and Gamescope. Flatpak Steam does
 not install Bazaar. Shell Extras supplies themed Starship and Fastfetch.
-Icewine keeps host `EDITOR`/`VISUAL` values and MIME defaults.
+Icewine keeps host `EDITOR`/`VISUAL` values. Selecting Yazi makes it the directory
+default on Apply, using the host terminal through `xdg-terminal-exec`. Other MIME
+defaults are preserved; disabling Yazi leaves the current association alone.
 
 For Handheld, build the optional private keyboard and controller-idle packages
 as your normal user before Apply:

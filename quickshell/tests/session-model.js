@@ -56,4 +56,58 @@ context.handleLogind(signal("Manager.PrepareForSleep (true,)", "/org/freedesktop
 context.handleLogind(signal("Manager.PrepareForSleep (false,)", "/org/freedesktop/login1"))
 assert.deepEqual(events, ["lock", "lock", "wake"])
 
-console.log("session model and lock control checks passed")
+// Execute persistence/acquisition handlers from the QML implementation.
+const handlers = ["writeLockHint", "restoreLock", "lockFromLogind", "finishLockHint", "releaseLock"]
+    .map(name => source.match(new RegExp("    function " + name + "\\([^)]*\\) \\{[\\s\\S]*?^    \\}", "m"))[0]).join("\n")
+const recovery = vm.createContext({
+    lockState: { acquired: false }, lockRequested: false,
+    lockHint: { running: false, value: false }, logindSessionPath: path, logindSessionId: "2",
+    password: "secret", failed: true, console: { warn: () => {} },
+    wakeDisplay: () => {}, Quickshell: { execDetached: () => {} }
+})
+recovery.sessionLock = { get locked() { return recovery.lockState.acquired } }
+vm.runInContext(handlers, recovery)
+recovery.lockFromLogind()
+assert.equal(recovery.lockHint.running, true)
+assert.equal(recovery.lockHint.command.at(-1), "true")
+assert.equal(recovery.sessionLock.locked, false, "persist intent before acquisition")
+recovery.lockHint.running = false
+recovery.finishLockHint(0, 0)
+assert.equal(recovery.sessionLock.locked, true)
+assert.equal(recovery.password, "")
+recovery.restoreLock("(<false>,)")
+assert.equal(recovery.sessionLock.locked, true, "a false hint cannot release a lock")
+recovery.lockHint.running = false
+recovery.releaseLock(true)
+assert.equal(recovery.lockRequested, false)
+assert.equal(recovery.lockHint.command.at(-1), "false")
+// A fresh client reacquires a remembered lock, but never from malformed output.
+recovery.lockHint.running = false
+recovery.restoreLock("(<true>,)")
+assert.equal(recovery.lockRequested, true)
+assert.equal(recovery.sessionLock.locked, true)
+recovery.restoreLock("unexpected")
+assert.equal(recovery.sessionLock.locked, true)
+// A new request while an unlock hint is pending is serialised before acquisition.
+recovery.lockState.acquired = false
+recovery.lockRequested = true
+recovery.lockHint.value = false
+recovery.lockHint.running = false
+recovery.finishLockHint(0, 0)
+assert.equal(recovery.lockHint.command.at(-1), "true")
+assert.match(source, /ReloadPropagator\s*\{\s*reloadableId: "sessionLockLifecycle"\s*PersistentProperties[\s\S]*?WlSessionLock\s*\{\s*id: sessionLock\s*locked: lockState.acquired/,
+    "native reload restores the persistent acquisition target before transferring the lock manager")
+const refresh = source.match(/        function refreshIcons\(\): void \{[\s\S]*?^        \}/m)[0].replace(": void", "")
+const reloads = []
+const refreshContext = vm.createContext({ root: { lockRequested: true, locked: false },
+    Quickshell: { reload: hard => reloads.push(hard) } })
+vm.runInContext(refresh, refreshContext)
+refreshContext.refreshIcons()
+refreshContext.root.lockRequested = false
+refreshContext.root.locked = true
+refreshContext.refreshIcons()
+assert.deepEqual(reloads, [], "icon refresh cannot reload a pending or acquired lock")
+refreshContext.root.locked = false
+refreshContext.refreshIcons()
+assert.deepEqual(reloads, [false])
+console.log("session model, persistent lock intent and acquisition checks passed")

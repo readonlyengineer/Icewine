@@ -27,6 +27,7 @@ hl.config({
 	dwindle = { force_split = 2 }, -- Native right/down placement, independent of cursor.
 
 	misc = {
+		allow_session_lock_restore = true, -- Reacquire after the lock client dies; compositor stays covered.
 		focus_on_activate       = true,
 		force_default_wallpaper = -1,
 		disable_hyprland_logo   = true,

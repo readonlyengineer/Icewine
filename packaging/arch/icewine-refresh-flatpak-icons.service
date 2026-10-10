@@ -4,4 +4,4 @@ After=icewine.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/systemctl --user try-restart icewine.service
+ExecStart=/usr/bin/qs ipc call session refreshIcons

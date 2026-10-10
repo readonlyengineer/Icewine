@@ -25,7 +25,7 @@ APPS = {
 }
 PACKAGES = {
     "desktop": ("icewine-session",), "terminal": ("kitty",),
-    "filemanager": ("yazi", "ffmpegthumbnailer", "7zip", "gvfs", "udisks2"),
+    "filemanager": ("yazi", "xdg-terminal-exec", "ffmpegthumbnailer", "7zip", "gvfs", "udisks2"),
     "steam": (), "gamescope": ("gamescope",), "handheld": ("icewine-handheld", "icewine-keyboard", "icewine-controller-idle", "inputplumber"),
     "login": ("icewine-sddm",), "shellExtras": ("starship", "fastfetch"),
 }
@@ -218,8 +218,8 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
                 theme.install_defaults(defaults, config, data, state, overwrite, app)
                 if app in theme.APPS and theme.APPS[app]:
                     theme.install_links(config, state, overwrite, app)
-        if selected["filemanager"]:
-            run(["xdg-mime", "default", "yazi.desktop", "inode/directory"])
+        if selected["filemanager"] and not readonly:
+            run(["xdg-mime", "default", "icewine-yazi.desktop", "inode/directory"])
         if selected["desktop"] and os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false":
             theme.install_gtk_theme(config, theme_id)
         if not readonly and changed:
