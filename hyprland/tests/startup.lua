@@ -30,6 +30,9 @@ assert(not io.open(config .. "modules/Binds.lua"), "Shared aliases leaked into u
 local file = assert(io.open(entry))
 local contents = file:read("*a"); file:close()
 assert(not contents:find('"@[%w_]+@"'), "Unpopulated template")
+local defaults = dofile(config .. "icewine/modules/DefaultApps.lua")
+assert(defaults.terminal == "xdg-terminal-exec" and defaults.file_manager == 'xdg-open "$HOME"',
+       "Shared shortcuts bypass XDG defaults")
 if not legacyBrowser then
     for name, value in pairs({terminal = "custom-terminal", file_manager = "custom-files", browser = emptyBrowser and "" or "custom-browser"}) do
         contents = contents:gsub('apps%.' .. name .. ' = [^\n]+', 'apps.' .. name .. ' = "' .. value .. '"', 1)
@@ -50,7 +53,7 @@ local function command(key)
     return values[1]
 end
 if legacyBrowser then
-    assert(command("SUPER + RETURN") == "icewine-terminal" and command("SUPER + E") == "icewine-file-manager"
+    assert(command("SUPER + RETURN") == "xdg-terminal-exec" and command("SUPER + E") == 'xdg-open "$HOME"'
            and command("SUPER + B") == legacyBrowser, "Legacy entry lost application hotkeys")
 else
     local apps = package.loaded["icewine.modules.DefaultApps"]

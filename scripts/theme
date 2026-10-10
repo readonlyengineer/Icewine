@@ -402,11 +402,6 @@ def install_defaults(defaults, config, data, state, replace, app):
                 atomic_link(path, target, root=root, signature=signature)
             else:
                 contents = shipped.read_bytes()
-                if root_name == "config" and relative.as_posix() == "hypr/hyprland.lua":
-                    contents = contents.decode("utf-8")
-                    for key, value in {"terminal": "icewine-terminal", "file_manager": "icewine-file-manager",
-                                       "browser": 'gtk-launch "$(xdg-settings get default-web-browser)"'}.items():
-                        contents = contents.replace(json.dumps("@" + key + "@"), json.dumps(value))
                 atomic_text(path, contents, 0o644, root=root, signature=signature)
             entry["files"][relative.as_posix()] = default_signature(path)
             atomic_text(state / "default-files.json", json.dumps(records, sort_keys=True) + "\n")

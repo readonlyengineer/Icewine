@@ -266,14 +266,12 @@ On NixOS use `gaming.enable` and `flatpak.enable` under `services.icewine`.
 
 ### Alternative applications and opt-outs
 
-Set application commands in Nix; disable the corresponding optional integration
-when the host supplies its replacement:
+Optional utility switches install and configure Icewine's defaults. They do not
+select replacement applications or change your MIME defaults.
 
-```nix
-services.icewine = {
-  applications.editor = [ "nvim" ];
-};
-```
+Hyprland opens terminals through `xdg-terminal-exec`, directories through
+`xdg-open`, and the browser through its XDG default. Set a preferred terminal in
+`~/.config/xdg-terminals.list`, or customise shortcuts in `hypr/hyprland.lua`.
 
 Nano is the default editor, with syntax colouring from its installed package.
 An existing `~/.nanorc` takes precedence over `nano/nanorc`; keep your settings
@@ -291,9 +289,9 @@ These options belong under `services.icewine`:
 | Option | Stops Icewine providing |
 | --- | --- |
 | `desktop.enable = false;` | Hyprland session integration; explicit Apply removes its implementation link |
-| `terminal.enable = false;` | Kitty defaults; set `applications.terminal` and `applications.terminalExecute` |
+| `terminal.enable = false;` | Kitty defaults |
 | `texteditor.enable = false;` | Nano defaults |
-| `filemanager.enable = false;` | Yazi and its GVfs default; set `applications.fileManager` if needed |
+| `filemanager.enable = false;` | Yazi and its GVfs default |
 | `gaming.enable = false;` | Steam/Gamescope integration |
 | `flatpak.enable = false;` | Flatpak/Bazaar integration; Gaming uses native Steam |
 | `login.enable = false;` | Icewine SDDM styling; host SDDM enablement is retained |

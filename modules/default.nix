@@ -6,10 +6,7 @@ let
     inherit description default;
   };
   commands = {
-    terminal = cfg.applications.terminal;
-    terminal-exec = cfg.applications.terminalExecute;
     editor = cfg.applications.editor;
-    file-manager = cfg.applications.fileManager;
   } // lib.optionalAttrs (cfg.gaming.enable) {
     steam = cfg.applications.steam;
   };
@@ -54,14 +51,7 @@ in {
       git.enable = lib.mkEnableOption "Starship Git prompt modules" // { default = true; };
     };
     applications = {
-      browser = command "Host browser command; empty disables its binding." [
-        "${pkgs.runtimeShell}" "-c"
-        ''exec ${pkgs.gtk3}/bin/gtk-launch "$(${pkgs.xdg-utils}/bin/xdg-settings get default-web-browser)" "$@"'' "icewine-browser"
-      ];
-      terminal = command "Terminal command; the terminal selection installs Kitty, or the host supplies an alternative." [ "kitty" ];
-      terminalExecute = command "Terminal command prefix for running an application." (cfg.applications.terminal ++ [ "-e" ]);
       editor = command "Editor command used by compositor bindings." [ "nano" ];
-      fileManager = command "File manager command." [ "icewine-terminal-exec" "yazi" ];
       steam = command "Steam command used inside Gamescope."
         (if cfg.gaming.enable && cfg.flatpak.enable then [ "flatpak" "run" "com.valvesoftware.Steam" ]
          else if cfg.gaming.enable && !cfg.flatpak.enable then [ "steam" ] ++ lib.optional cfg.handheld.enable "-gamepadui"
@@ -134,7 +124,7 @@ in {
     fonts.packages = with pkgs; [ dejavu_fonts nerd-fonts.jetbrains-mono noto-fonts-color-emoji ];
     environment.systemPackages = (with pkgs; [ quickshell glib jq systemd libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl xdg-utils gtk3 ]) ++ launchers
-      ++ lib.optionals cfg.desktop.enable (with pkgs; [ hyprshutdown hyprpolkitagent hyprshot hypridle ])
+      ++ lib.optionals cfg.desktop.enable (with pkgs; [ hyprshutdown hyprpolkitagent hyprshot hypridle xdg-terminal-exec ])
       ++ lib.optional cfg.gaming.enable pkgs.gamescope
       ++ lib.optional cfg.flatpak.enable pkgs.bazaar
       ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;

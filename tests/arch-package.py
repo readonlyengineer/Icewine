@@ -27,9 +27,9 @@ with open(os.environ["ICEWINE_TEST_LOG"], "a") as log:
 sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
 ''')
     fake.chmod(0o755)
-    for name in ("kitty", "alacritty", "nano", "nvim", "vim", "ghostty", "steam", "icewine", "uwsm"):
+    for name in ("nano", "steam", "icewine", "uwsm"):
         (commands / name).symlink_to(fake)
-    for name in ("terminal", "terminal-exec", "editor", "file-manager", "steam"):
+    for name in ("editor", "steam"):
         (commands / ("icewine-" + name)).symlink_to(native / "command")
     env = dict(os.environ, PATH=str(commands) + ":" + os.environ["PATH"],
                HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), ICEWINE_TEST_LOG=str(log))
@@ -39,9 +39,8 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
         return subprocess.run([str(commands / name), *args], env=dict(env, **extra),
                               capture_output=True, text=True)
     for name, expected in {
-        "terminal": ["kitty"], "terminal-exec": ["kitty", "-e"],
         "editor": ["nano"],
-        "file-manager": ["kitty", "-e", "yazi"], "steam": ["steam"],
+        "steam": ["steam"],
     }.items():
         argument = "literal argument; $(must-not-run)"
         assert run("icewine-" + name, argument).returncode == 0
@@ -52,28 +51,6 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
                                  "session", str(source / "session/env")], env=dict(env, **overrides),
                                 capture_output=True, text=True)
         assert result.returncode == 0 and tuple(result.stdout.splitlines()) == expected
-    (commands / "kitty").unlink()
-    env["PATH"] = str(commands)
-    for name, expected in {
-        "terminal": ["alacritty"], "terminal-exec": ["alacritty", "-e"],
-        "file-manager": ["alacritty", "-e", "yazi"],
-    }.items():
-        argument = "literal argument; $(must-not-run)"
-        assert run("icewine-" + name, argument).returncode == 0
-        assert json.loads(log.read_text().splitlines()[-1]) == expected + [argument]
-    (commands / "alacritty").unlink()
-    for name, expected in {
-        "terminal": ["ghostty"], "terminal-exec": ["ghostty", "-e"],
-        "file-manager": ["ghostty", "-e", "yazi"],
-    }.items():
-        assert run("icewine-" + name, argument).returncode == 0
-        assert json.loads(log.read_text().splitlines()[-1]) == expected + [argument]
-    (commands / "ghostty").unlink()
-    before = log.read_text()
-    assert run("icewine-terminal").returncode != 0
-    assert run("icewine-terminal-exec", "icewine-editor", argument).returncode != 0
-    assert log.read_text() == before
-    env["PATH"] = str(commands) + ":" + os.environ["PATH"]
     before = log.read_text()
     assert run("icewine-steam", ICEWINE_STEAM_ENABLED="false").returncode != 0
     assert log.read_text() == before

@@ -1,8 +1,8 @@
 -- Applications
 local apps = require("icewine.modules.DefaultApps")
-apps.terminal = "@terminal@"
-apps.file_manager = "@file_manager@"
-apps.browser = "@browser@"
+apps.terminal = "xdg-terminal-exec"
+apps.file_manager = 'xdg-open "$HOME"'
+apps.browser = 'gtk-launch "$(xdg-settings get default-web-browser)"'
 
 require("icewine.icewine")
 

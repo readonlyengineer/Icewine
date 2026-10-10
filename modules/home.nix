@@ -43,19 +43,7 @@ let
       "cp ${../hyprland}/modules/${name}.lua $out/hyprland/modules/"
     ) [ "Baseline" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" "Binds" ]}
     cp ${../hyprland}/deck/Deck.lua $out/hyprland/modules/
-    substituteInPlace $out/hyprland/modules/DefaultApps.lua --replace-fail \
-      ${lib.escapeShellArg ''browser = 'gtk-launch "$(xdg-settings get default-web-browser)"',''} \
-      ${lib.escapeShellArg "browser = ${lib.generators.toLua {} (lib.escapeShellArgs cfg.applications.browser)},"}
   '';
-  templateApps = {
-    terminal = lib.escapeShellArgs cfg.applications.terminal;
-    file_manager = lib.escapeShellArgs cfg.applications.fileManager;
-    browser = lib.escapeShellArgs cfg.applications.browser;
-  };
-  hyprlandTemplate = pkgs.writeText "icewine-hyprland.lua" (builtins.replaceStrings
-    (map (name: "\"@${name}@\"") (builtins.attrNames templateApps))
-    (map (name: lib.generators.toLua {} templateApps.${name}) (builtins.attrNames templateApps))
-    (builtins.readFile ../hyprland/hyprland.lua));
   defaults = pkgs.runCommand "icewine-default-files" { } ''
     mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/data
     ${lib.optionalString cfg.gaming.enable ''
@@ -68,7 +56,7 @@ let
       mkdir -p $out/config/nano
       printf 'include "${pkgs.nano}/share/nano/*.nanorc"\n' > $out/config/nano/nanorc
     ''}
-    cp ${hyprlandTemplate} $out/config/hypr/hyprland.lua
+    cp ${../hyprland/hyprland.lua} $out/config/hypr/hyprland.lua
     printf '%s\n' '# Shared session defaults first; add your overrides below.' '. "''${XDG_CONFIG_HOME:-$HOME/.config}/uwsm/icewine/env"' > $out/config/uwsm/env
     ${lib.optionalString cfg.gtk.enable ''
       for version in 3 4; do

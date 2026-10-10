@@ -110,6 +110,7 @@ in {
     assert !(optIn.systemd.user.services.icewine.serviceConfig ? ExecStartPre);
     assert !(optIn.system.userActivationScripts ? icewine);
     assert !(hasPackage "kitty" desktop.users.users.demo.packages);
+    assert hasPackage "xdg-terminal-exec" optIn.environment.systemPackages;
     assert !(hasPackage "nano" desktop.users.users.demo.packages);
     assert !(hasPackage "yazi" desktop.users.users.demo.packages);
     assert !(hasPackage "gamescope" desktop.environment.systemPackages);

@@ -45,7 +45,7 @@ package_icewine() {
   install -m755 manager/target/release/icewine-manage "$pkgdir/usr/bin/icewine-manage"
   install -m755 scripts/icewine "$pkgdir/usr/bin/icewine"
   install -m755 packaging/arch/command "$pkgdir/usr/lib/icewine/command"
-  for name in theme wallpaper manage-backend terminal terminal-exec editor file-manager steam; do
+  for name in theme wallpaper manage-backend editor steam; do
     ln -s ../lib/icewine/command "$pkgdir/usr/bin/icewine-$name"
   done
   install -m755 quickshell/tools/steam-shortcuts "$pkgdir/usr/bin/icewine-steam-shortcuts"
@@ -81,7 +81,7 @@ package_icewine() {
 
 package_icewine-session() {
   pkgdesc='Optional Icewine Hyprland session integration'
-  depends=(icewine hyprland uwsm hyprshutdown hyprpolkitagent hypridle hyprshot hyprpicker
+  depends=(icewine hyprland uwsm xdg-terminal-exec hyprshutdown hyprpolkitagent hypridle hyprshot hyprpicker
     xdg-desktop-portal-hyprland xdg-desktop-portal-gtk pam pambase polkit
     power-profiles-daemon pipewire wireplumber xdg-user-dirs)
   backup=(etc/pam.d/icewine)

@@ -1,7 +1,7 @@
 return {
     editor = "icewine-editor",
-    terminal = "icewine-terminal",
+    terminal = "xdg-terminal-exec",
     browser = 'gtk-launch "$(xdg-settings get default-web-browser)"',
-    file_manager = "icewine-file-manager",
+    file_manager = 'xdg-open "$HOME"',
     lock = "qs ipc call session lock",
 }
