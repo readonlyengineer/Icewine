@@ -218,6 +218,8 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
                 theme.install_defaults(defaults, config, data, state, overwrite, app)
                 if app in theme.APPS and theme.APPS[app]:
                     theme.install_links(config, state, overwrite, app)
+        if selected["filemanager"]:
+            run(["xdg-mime", "default", "yazi.desktop", "inode/directory"])
         if selected["desktop"] and os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false":
             theme.install_gtk_theme(config, theme_id)
         if not readonly and changed:

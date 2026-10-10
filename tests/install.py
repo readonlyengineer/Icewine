@@ -291,8 +291,12 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     assert (state / "manage.json").read_bytes() == before
     assert not (config / "nano/nanorc").exists()
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+        apply(("filemanager",))
+        assert commands.call_args_list[-1].args[0] == ["xdg-mime", "default", "yazi.desktop", "inode/directory"]
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
         apply(("filemanager", "shellExtras"), readonly=True)
-        assert not commands.called
+        assert [call.args[0] for call in commands.call_args_list] == [
+            ["xdg-mime", "default", "yazi.desktop", "inode/directory"]]
         assert not (config / "nano/nanorc").exists()
         assert not (root / ".bashrc").exists()
         assert (config / "yazi/theme.toml").is_symlink()
@@ -301,7 +305,9 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         assert (config / "yazi/yazi.toml").read_text() == "yazi\n"
         apply(("filemanager", "shellExtras"), overwrite=True, readonly=True)
         assert (config / "yazi/yazi.toml").read_text() == "updated yazi\n"
+        commands.reset_mock()
         apply(("shellExtras",), overwrite=True, readonly=True)
+        assert not commands.called
         assert not (config / "yazi/theme.toml").is_symlink()
         (root / ".bashrc").write_text("user shell\n")
         apply(("shellExtras",), overwrite=True, readonly=True)

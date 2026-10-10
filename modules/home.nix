@@ -126,7 +126,7 @@ let
   manager = pkgs.callPackage ../manager/package.nix { };
   managerBackend = pkgs.writeShellApplication {
     name = "icewine-manage-backend";
-    runtimeInputs = [ pkgs.python3 ];
+    runtimeInputs = [ pkgs.python3 pkgs.xdg-utils ];
     text = ''
       export ICEWINE_THEME_SCRIPT=${../scripts/theme}
       export ICEWINE_THEME_ASSETS=${../theme/assets}
