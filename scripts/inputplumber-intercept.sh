@@ -1,6 +1,8 @@
 # Used only inside the Hyprland session. Never select an unrelated controller.
 # shellcheck shell=bash
+set -eu
 export LC_ALL=C
+profile_dir=${ICEWINE_INPUTPLUMBER_PROFILE_DIR:-/etc/inputplumber/profiles}
 case "${1:-}" in
   device|events|desktop|game|overlay) action="$1" ;;
   *) echo 'usage: icewine-inputplumber-intercept {device|events|desktop|game|overlay}' >&2; exit 2 ;;
@@ -66,16 +68,16 @@ case "$action" in
     ;;
   desktop)
     set_mode 3
-    load_profile 'Icewine Desktop' /etc/inputplumber/profiles/icewine-desktop.yaml
+    load_profile 'Icewine Desktop' "$profile_dir/icewine-desktop.yaml"
     ;;
   overlay)
     set_mode 3
-    load_profile 'Icewine Hyprland' /etc/inputplumber/profiles/icewine-hyprland.yaml
+    load_profile 'Icewine Hyprland' "$profile_dir/icewine-hyprland.yaml"
     ;;
   game)
     # Profile changes happen while raw gamepad output is still intercepted.
     set_mode 3
-    load_profile 'Icewine Hyprland' /etc/inputplumber/profiles/icewine-hyprland.yaml
+    load_profile 'Icewine Hyprland' "$profile_dir/icewine-hyprland.yaml"
     set_mode 0
     ;;
 esac

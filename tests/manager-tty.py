@@ -59,10 +59,11 @@ if sys.argv[1:] == ["state"]: print(os.environ["TUI_STATE"])
         assert b"[ Apply ]" in rendered and b"[ Cancel ]" in rendered
         assert (b"NixOS: utility selections are read-only." in rendered) == ("readonly=true" in state.split())
         return [json.loads(line) for line in log.read_text().splitlines()]
-    ids = ("desktop", "terminal", "filemanager", "gaming", "flatpak", "login", "shellExtras")
+    ids = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras")
+    visible = 6 # Steam none hides its two children.
     def state(readonly=False, **selected):
         # Deliberately shuffle fields: identity must not depend on wire order.
-        return " ".join([f"{name}={str(selected.get(name, False)).lower()}" for name in reversed(ids)]
+        return " ".join([f"{name}={str(selected.get(name, "none" if name == "steam" else False)).lower()}" for name in reversed(ids)]
                         + [f"readonly={str(readonly).lower()}"])
     def applied(calls):
         assert calls[0] == ["state"] and calls[1][0] == "apply" and len(calls) == 2
@@ -70,19 +71,32 @@ if sys.argv[1:] == ["state"]: print(os.environ["TUI_STATE"])
         assert len(fields) == len(ids) + 1 and set(fields) == {*ids, "overwrite"}
         return fields
     assert run(b" \x1b", state()) == [["state"]]
-    assert run(b"\t"*(len(ids)+2)+b"\r", state()) == [["state"]]
-    expected = dict.fromkeys(ids, "false") | {"desktop": "true", "overwrite": "false"}
-    assert applied(run(b" "+b"\t"*(len(ids)+1)+b"\r", state())) == expected
+    assert run(b"\t"*(visible+2)+b"\r", state()) == [["state"]]
+    expected = dict.fromkeys(ids, "false") | {"steam": "none", "desktop": "true", "overwrite": "false"}
+    assert applied(run(b" "+b"\t"*(visible+1)+b"\r", state())) == expected
     # A second row toggles its own ID, not the backend's second field.
     expected["desktop"], expected["terminal"] = "false", "true"
-    assert applied(run(b"\t "+b"\t"*len(ids)+b"\r", state())) == expected
+    assert applied(run(b"\t "+b"\t"*visible+b"\r", state())) == expected
+    # Right selects native, defaults Gamescope on and leaves Handheld off.
+    chosen = applied(run(b"\t"*3+b"\x1b[C"+b"\t"*5+b"\r", state()))
+    assert chosen["steam"] == "native" and chosen["gamescope"] == "true" and chosen["handheld"] == "false"
+    # Flatpak skips unsupported Handheld; Gamescope may be turned off.
+    chosen = applied(run(b"\t"*3+b"\x1b[C\x1b[C\t "+b"\t"*4+b"\r", state()))
+    assert chosen["steam"] == "flatpak" and chosen["gamescope"] == "false" and chosen["handheld"] == "false"
+    # Native+desktop allows Handheld; turning desktop off clears it.
+    chosen = applied(run(b" \t\t\t\x1b[C\t\t "+b"\t"*4+b"\r", state()))
+    assert chosen["handheld"] == "true"
+    chosen = applied(run(b" "+b"\t"*8+b"\r", state(desktop=True, steam="native", gamescope=True, handheld=True)))
+    assert chosen["desktop"] == "false" and chosen["handheld"] == "false"
     # Reverse navigation from the first control reaches Cancel.
     assert run(b"\x1b[Z\r", state()) == [["state"]]
     # NixOS focus skips utility rows; Space only checks overwrite.
-    expected = dict.fromkeys(ids, "false") | {"desktop": "true", "overwrite": "true"}
+    expected = dict.fromkeys(ids, "false") | {"steam": "none", "desktop": "true", "overwrite": "true"}
     assert applied(run(b" \t\r", state(readonly=True, desktop=True))) == expected
     assert applied(run(b"\t\r", state(readonly=True, desktop=True)))["overwrite"] == "false"
     for invalid in (state() + " terminal=true", state().replace("terminal=false", "unknown=false"),
-                    state().replace("terminal=false", ""), state().replace("terminal=false", "terminal=1")):
+                    state().replace("terminal=false", ""), state().replace("terminal=false", "terminal=1"),
+                    state(steam="invalid"), state(handheld=True), state(gamescope=True),
+                    state(steam="flatpak", desktop=True, gamescope=True, handheld=True)):
         assert run(b"", invalid, valid=False) == [["state"]]
 print("PASS: real TTY cancel, editable/read-only navigation, named selections, invalid state and fresh overwrite default")

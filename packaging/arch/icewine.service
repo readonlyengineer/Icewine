@@ -6,4 +6,5 @@ Conflicts=mako.service
 
 [Service]
 ExecStart=/usr/bin/qs
+ExecStopPost=-/usr/bin/icewine-inputplumber-intercept overlay
 Restart=on-failure

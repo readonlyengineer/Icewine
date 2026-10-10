@@ -23,7 +23,7 @@ in {
       '';
     };
     users.users.${cfg.user}.packages = lib.optionals (cfg.filemanager.enable)
-      [ pkgs.yazi pkgs.ffmpegthumbnailer pkgs._7zz ] ++ lib.optional (cfg.gaming.enable) steamEntries;
+      [ pkgs.yazi pkgs.ffmpegthumbnailer pkgs._7zz ] ++ lib.optional (cfg.steam != "none" && cfg.gamescope.enable) steamEntries;
     services.icewine.defaultFiles.config = lib.mkIf (cfg.desktop.enable && cfg.idle.enable) {
       "hypr/hypridle.conf" = pkgs.writeText "icewine-hypridle.conf" ''
         # Shared idle defaults first; add your general settings below.

@@ -67,6 +67,7 @@ const steamCommands = []
 const steamRoot = {
     handheld: true,
     steamEnabled: true,
+    gamescopeEnabled: true,
     steamLaunching: false,
     steamSplashVisible: false,
     steamSplashScreen: "",
@@ -230,6 +231,14 @@ assert.match(source, /RenderReady[\s\S]*onReady: root\.startSteamProcess\(\)/,
     "The host splash renders before Gamescope starts")
 assert.doesNotMatch(source, /GAMESCOPE_FOCUSED_APP_GFX|icewine-steam-session/,
     "Steam readiness no longer waits for an inner X11 property")
+
+steamRoot.gamescopeEnabled = false
+steamRoot.steamSplashVisible = false
+const ordinaryBefore = steamCommands.length
+assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).ok, true)
+assert.deepEqual(steamCommands[ordinaryBefore], ["uwsm", "app", "--", "icewine-steam"])
+assert.equal(steamRoot.steamSplashVisible, false, "Ordinary Steam has no Gamescope splash")
+steamRoot.gamescopeEnabled = true
 
 steamRoot.steamEnabled = false
 assert.equal(JSON.parse(steamContext.launchSteamGamescope()).ok, false,

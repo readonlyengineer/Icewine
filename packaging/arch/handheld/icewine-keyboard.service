@@ -1,0 +1,14 @@
+[Unit]
+Description=Icewine on-screen keyboard
+PartOf=icewine-session.target graphical-session.target
+After=graphical-session.target
+ConditionEnvironment=ICEWINE_HANDHELD_ENABLED=true
+
+[Service]
+Type=dbus
+BusName=sm.puri.OSK0
+ExecStart=/usr/lib/icewine/squeekboard
+Restart=on-failure
+
+[Install]
+WantedBy=icewine-session.target

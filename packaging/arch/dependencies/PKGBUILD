@@ -1,0 +1,46 @@
+# Optional private binaries; distro Squeekboard and wljoywake may coexist.
+pkgbase=icewine-handheld-dependencies
+pkgname=(icewine-keyboard icewine-controller-idle)
+pkgver=1.43.1
+pkgrel=1
+arch=(x86_64)
+license=(GPL-3.0-or-later GPL-2.0-only)
+makedepends=(cargo rust meson ninja pkgconf glib2-devel gtk3 gnome-desktop
+  feedbackd libbsd libxml2 libxkbcommon wayland wayland-protocols gettext)
+source=("squeekboard-v1.43.1.tar.gz::https://gitlab.gnome.org/World/Phosh/squeekboard/-/archive/v1.43.1/squeekboard-v1.43.1.tar.gz"
+  "wljoywake-0.3.tar.gz::https://github.com/nowrep/wljoywake/archive/refs/tags/v0.3.tar.gz"
+  squeekboard-overlay.patch squeekboard-rust.patch)
+sha256sums=(64c73636f6d8a6ffe9f1094c4084b184db3f60ac4e02bf8bff860060308c61ab
+  d02d0d20c6b7712a17c4891b0c28e562d6f9021de28225979453242292be8230
+  55db8283b48b769e89d81248369d2a2c2a55a2c58a4751cfcd806b6321ab527b 8c40869bc8e78d6cd8f63d80640b83d32ce008f97dbbe60ee0888827adbf2910)
+
+prepare() {
+  cd "$srcdir/squeekboard-v1.43.1"
+  patch -p1 < "$srcdir/squeekboard-overlay.patch"
+  patch -p1 < "$srcdir/squeekboard-rust.patch"
+  if [[ -n ${ICEWINE_CARGO_VENDOR:-} ]]; then
+    cmp Cargo.lock "$ICEWINE_CARGO_VENDOR/Cargo.lock"
+    mkdir -p .cargo
+    sed "s|@vendor@|$ICEWINE_CARGO_VENDOR|g" "$ICEWINE_CARGO_VENDOR/.cargo/config.toml" > .cargo/config.toml
+  fi
+  cargo fetch --locked
+}
+
+build() {
+  meson setup --prefix=/usr --buildtype=release "$srcdir/squeekboard-v1.43.1" "$srcdir/keyboard-build"
+  meson compile -C "$srcdir/keyboard-build"
+  meson setup --prefix=/usr --buildtype=release "$srcdir/wljoywake-0.3" "$srcdir/idle-build"
+  meson compile -C "$srcdir/idle-build"
+}
+
+package_icewine-keyboard() {
+  pkgdesc='Private fullscreen overlay keyboard for Icewine Handheld'
+  depends=(squeekboard)
+  install -Dm755 "$srcdir/keyboard-build/src/squeekboard" "$pkgdir/usr/lib/icewine/squeekboard"
+}
+
+package_icewine-controller-idle() {
+  pkgdesc='Private controller idle inhibitor for Icewine Handheld'
+  depends=(wayland systemd-libs glibc)
+  install -Dm755 "$srcdir/idle-build/wljoywake" "$pkgdir/usr/lib/icewine/wljoywake"
+}

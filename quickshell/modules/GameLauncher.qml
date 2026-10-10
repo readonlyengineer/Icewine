@@ -11,6 +11,7 @@ Scope {
 
     required property var compositor
     property bool handheld: false
+    readonly property bool gamescopeEnabled: Quickshell.env("ICEWINE_GAMESCOPE_ENABLED") !== "false"
     readonly property bool steamEnabled: Quickshell.env("ICEWINE_STEAM_ENABLED") !== "false"
 
     readonly property var monitors: compositor.getMonitors().map(monitor => monitorRecord(monitor))
@@ -110,6 +111,8 @@ Scope {
     }
 
     function launchGamescope(appCommand, steamIntegration) {
+        if (!root.gamescopeEnabled)
+            return JSON.stringify({ok: false, error: "Gamescope integration is disabled"})
         var plan = gamescopePlan(appCommand, steamIntegration)
         if (plan.ok) {
             // Assumes the child opens on the workspace focused at launch; add
@@ -146,6 +149,10 @@ Scope {
     function launchSteamGamescope() {
         if (!root.steamEnabled)
             return JSON.stringify({ok: false, error: "Steam integration is disabled"}, null, 2)
+        if (!root.gamescopeEnabled) {
+            Quickshell.execDetached(["uwsm", "app", "--", "icewine-steam"])
+            return JSON.stringify({ok: true})
+        }
         var decision = Launcher.steamLaunchAction(compositor.toplevels, root.steamLaunching)
         if (decision.action === "focus") {
             root.finishSteamLaunch()

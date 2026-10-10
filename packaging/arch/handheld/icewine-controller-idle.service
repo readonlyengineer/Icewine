@@ -1,0 +1,13 @@
+[Unit]
+Description=Keep Icewine awake during controller activity
+PartOf=icewine-session.target graphical-session.target
+After=graphical-session.target
+ConditionEnvironment=ICEWINE_HANDHELD_ENABLED=true
+
+[Service]
+ExecStart=/usr/lib/icewine/wljoywake -t 5
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=icewine-session.target

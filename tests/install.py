@@ -41,15 +41,15 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     env = dict(HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_DATA_HOME=str(data),
                XDG_STATE_HOME=str(state.parent), ICEWINE_DEFAULT_FILES=str(defaults),
                ICEWINE_THEME_ASSETS=str(source / "theme/assets"), ICEWINE_THEME_POLICY="")
-    false = dict.fromkeys(manage.FEATURES, False)
-    def apply(features=(), overwrite=False, readonly=False):
-        selected = {name: name in features for name in manage.FEATURES}
+    false = dict.fromkeys(manage.FEATURES, False) | {"steam": "none"}
+    def apply(features=(), overwrite=False, readonly=False, steam="none"):
+        selected = {name: name in features for name in manage.FEATURES} | {"steam": steam}
         extra = {"ICEWINE_MANAGE_SELECTIONS": json.dumps(selected)} if readonly else {}
         with patch.dict(os.environ, dict(env, **extra)), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}):
             manage.main(["apply", *[f"{name}={str(bit).lower()}" for name, bit in reversed(list(selected.items()))], f"overwrite={str(overwrite).lower()}"])
         return selected
     # Invalid named requests fail before any filesystem or package operation.
-    valid = [f"{name}=false" for name in manage.FEATURES] + ["overwrite=false"]
+    valid = [f"{name}={"none" if name == "steam" else "false"}" for name in manage.FEATURES] + ["overwrite=false"]
     with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), patch.object(manage, "apply", side_effect=AssertionError("invalid request applied")):
         for request in (valid + ["terminal=true"], valid + ["unknown=false"], valid + ["texteditor=true"],
                         valid[1:], valid[:-1], ["terminal=1", *valid[1:]]):
@@ -105,7 +105,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), contextlib.redirect_stdout(io.StringIO()) as saved:
         manage.main(["state"])
         assert dict(field.split("=") for field in saved.getvalue().split()) == (
-            dict.fromkeys(manage.FEATURES, "false") | {"readonly": "false", "terminal": "true"})
+            dict.fromkeys(manage.FEATURES, "false") | {"steam": "none", "readonly": "false", "terminal": "true"})
     kitty = config / "kitty/kitty.conf"
     kitty.write_text("my edits\n")
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
@@ -134,16 +134,126 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         assert (config / "hypr/hyprland.lua").read_text() == "hypr\n"
     with patch.dict(os.environ, ICEWINE_GTK_ENABLE="false"), patch.object(manage.theme, "install_gtk_theme", side_effect=AssertionError("disabled GTK installed")):
         apply(("desktop",), readonly=True)
-    for features, steam, flatpak in [(("gaming",), True, False), (("gaming", "flatpak"), False, True), (("flatpak",), False, False)]:
+    for client, gamescope in [("none", False), ("native", False), ("native", True), ("flatpak", True)]:
         with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
-            apply(features)
+            apply(("gamescope",) if gamescope else (), steam=client)
         calls = [call.args[0] for call in commands.call_args_list]
-        packages = next(call for call in calls if call[:2] == ["sudo", "pacman"])[4:]
-        assert ("steam" in packages) == steam
-        assert any(call[:2] == ["flatpak", "install"] for call in calls) == flatpak
-        assert ("gamescope" in packages) == ("gaming" in features)
-        assert ("bazaar" in packages) == ("flatpak" in features)
+        packages = [package for call in calls if call[:4] == ["sudo", "pacman", "-S", "--needed"] for package in call[4:]]
+        assert ("steam" in packages) == (client == "native")
+        assert any(call[:2] == ["flatpak", "install"] for call in calls) == (client == "flatpak")
+        assert ("gamescope" in packages) == gamescope
+        assert "bazaar" not in packages
+        assert (data / "applications/steam-gamescope.desktop").exists() == gamescope
         assert not any("-R" in call or "uninstall" in call for call in calls)
+    # Handheld transitions stop the live shell, idle/OSK/routing before policy
+    # removal. Failure cannot persist a successful new selection.
+    handheld = false | {"desktop": True, "steam": "native", "gamescope": True, "handheld": True}
+    (state / "manage.json").write_text(json.dumps(handheld))
+    (state / "applied.json").write_text(json.dumps(handheld))
+    events = []
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
+         patch.object(manage, "run", side_effect=lambda argv: events.append(argv)), \
+         patch.object(manage, "handheld_policy", side_effect=lambda *args: events.append(["policy", args[-1]])):
+        apply()
+    assert events.index(["systemctl", "--user", "stop", "icewine.service"]) < events.index(["systemctl", "--user", "disable", "--now", *manage.HANDHELD_UNITS]) < events.index(["policy", False])
+    before = (state / "manage.json").read_bytes()
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
+         patch.object(manage, "run", side_effect=lambda argv: (_ for _ in ()).throw(subprocess.CalledProcessError(1, argv)) if "daemon-reload" in argv else None):
+        try:
+            apply(steam="native")
+        except subprocess.CalledProcessError:
+            pass
+        else:
+            raise AssertionError("Failed runtime transition reported success")
+    assert (state / "manage.json").read_bytes() == before
+    # Exercise the real native Steam wrapper during shell restart, while the
+    # successful selection on disk still intentionally describes the old client.
+    original_run = subprocess.run
+    wrapper_bin = root / "restart-bin"
+    wrapper_bin.mkdir()
+    (wrapper_bin / "icewine-steam").symlink_to(source / "packaging/arch/command")
+    client_log = root / "restart-client.json"
+    fake_client = wrapper_bin / "steam"
+    fake_client.write_text("#!" + sys.executable + "\nimport json,sys; open(" + repr(str(client_log)) + ", 'w').write(json.dumps(sys.argv[1:]))\n")
+    fake_client.chmod(0o755)
+    backend = wrapper_bin / "icewine-manage-backend"
+    backend.write_text("#!" + sys.executable + "\nimport json; print(' '.join(k+'='+str(v).lower() for k,v in json.load(open(" + repr(str(state / "manage.json")) + ")).items()))\n")
+    backend.chmod(0o755)
+    session = {}
+    def restart(argv):
+        if argv[:3] == ["systemctl", "--user", "set-environment"]:
+            session.update(field.split("=", 1) for field in argv[3:])
+        if argv == ["systemctl", "--user", "start", "icewine.service"]:
+            assert json.loads((state / "manage.json").read_text())["steam"] == "none"
+            result = original_run([str(wrapper_bin / "icewine-steam"), "literal argument"],
+                                  env=os.environ | session | {"PATH": str(wrapper_bin) + ":" + os.environ["PATH"]}, capture_output=True, text=True)
+            assert result.returncode == 0, result.stderr
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), patch.object(manage, "run", side_effect=restart):
+        apply(steam="native")
+    assert json.loads(client_log.read_text()) == ["literal argument"]
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+        apply()
+    # A real policy install is simulated in a private path. The keyboard failure
+    # leaves no enabled/running helpers or owned policy; a following none Apply
+    # retains those actual clean outcomes rather than merely preserving JSON.
+    rules = root / "failure-handheld.rules"
+    enabled, running = set(), set()
+    session.clear()
+    def fail_keyboard(argv):
+        if argv[:3] == ["sudo", "install", "-Dm644"]:
+            shutil.copyfile(argv[3], argv[4])
+        elif argv[:2] == ["sudo", "unlink"]:
+            Path(argv[2]).unlink()
+        elif argv[:3] == ["systemctl", "--user", "set-environment"]:
+            session.update(field.split("=", 1) for field in argv[3:])
+        elif argv[:3] == ["systemctl", "--user", "enable"]:
+            enabled.update(argv[3:])
+        elif argv[:4] == ["systemctl", "--user", "disable", "--now"]:
+            enabled.difference_update(argv[4:]); running.difference_update(argv[4:])
+        elif argv[:3] == ["systemctl", "--user", "start"] and "icewine-keyboard.service" in argv:
+            running.add("icewine-inputplumber-hyprland.service")
+            raise subprocess.CalledProcessError(1, argv)
+    with patch.object(manage, "HANDHELD_RULES", rules), \
+         patch.dict(os.environ, ICEWINE_INPUTPLUMBER_ASSETS=str(source / "inputplumber"), ICEWINE_HANDHELD_DEFAULT_FILES=str(defaults)), \
+         patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
+         patch.object(manage, "run", side_effect=fail_keyboard):
+        try:
+            apply(("desktop", "gamescope", "handheld"), steam="native")
+        except subprocess.CalledProcessError:
+            pass
+        else:
+            raise AssertionError("Failed keyboard start reported success")
+        assert not enabled and not running and not rules.exists()
+        assert not (state / "handheld-rules.sha256").exists()
+        assert session["ICEWINE_STEAM_CLIENT"] == "none"
+        assert session["ICEWINE_HANDHELD_ENABLED"] == "false"
+        assert session["ICEWINE_GAMESCOPE_ENABLED"] == "false"
+        assert json.loads((state / "manage.json").read_text()) == false
+        apply()
+        assert not enabled and not running and not rules.exists()
+    # If systemd cannot stop the helpers, retain their permission for restore;
+    # the ownership record makes a later none Apply retry actual teardown.
+    fail_stop = True
+    def interrupted_teardown(argv):
+        if fail_stop and argv[:4] == ["systemctl", "--user", "disable", "--now"]:
+            raise subprocess.CalledProcessError(1, argv)
+        fail_keyboard(argv)
+    with patch.object(manage, "HANDHELD_RULES", rules), \
+         patch.dict(os.environ, ICEWINE_INPUTPLUMBER_ASSETS=str(source / "inputplumber"), ICEWINE_HANDHELD_DEFAULT_FILES=str(defaults)), \
+         patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
+         patch.object(manage, "run", side_effect=interrupted_teardown):
+        try:
+            apply(("desktop", "gamescope", "handheld"), steam="native")
+        except subprocess.CalledProcessError:
+            pass
+        else:
+            raise AssertionError("Failed helper transition reported success")
+        assert enabled and running and rules.exists()
+        assert (state / "handheld-rules.sha256").exists()
+        fail_stop = False
+        apply()
+        assert not enabled and not running and not rules.exists()
+        assert not (state / "handheld-rules.sha256").exists()
     # Host persistence may bind-mount a single file; overwrite must not rely
     # on rename succeeding, and a leaf symlink must never reach its target.
     locale = config / "user-dirs.locale"
@@ -211,19 +321,20 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     for path in (nano, nvim):
         records["config"]["files"][str(path.relative_to(config))] = manage.theme.default_signature(path)
     manage.theme.atomic_text(state / "default-files.json", json.dumps(records))
-    selected = false | {"terminal": True, "gaming": True, "shellExtras": True}
+    selected = dict.fromkeys(("desktop", "terminal", "filemanager", "gaming", "flatpak", "login", "shellExtras"), False) | {"terminal": True, "gaming": True, "shellExtras": True}
+    migrated = false | {"terminal": True, "steam": "native", "gamescope": True, "shellExtras": True}
     for bit in (False, True):
         legacy = selected | {"texteditor": bit}
         for name in ("manage.json", "applied.json"):
             (state / name).write_text(json.dumps(legacy))
         with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), contextlib.redirect_stdout(io.StringIO()) as saved:
             manage.main(["state"])
-            assert dict(field.split("=") for field in saved.getvalue().split()) == {"readonly": "false", **{name: str(value).lower() for name, value in selected.items()}}
+            assert dict(field.split("=") for field in saved.getvalue().split()) == {"readonly": "false", **{name: str(value).lower() for name, value in migrated.items()}}
         assert json.loads((state / "manage.json").read_text()) == legacy
         with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
-            apply(tuple(name for name in manage.FEATURES if name != "login"), overwrite=True)
+            apply(("desktop", "terminal", "filemanager", "gamescope", "shellExtras"), overwrite=True, steam="native")
             assert not any("nano" in call.args[0] for call in commands.call_args_list)
-        assert json.loads((state / "manage.json").read_text()) == {name: name != "login" for name in manage.FEATURES}
+        assert json.loads((state / "manage.json").read_text()) == false | {"desktop": True, "terminal": True, "filemanager": True, "steam": "native", "gamescope": True, "shellExtras": True}
         assert nano.read_text() == "user nano\n" and (root / ".nanorc").read_text() == "home nano\n"
         assert nvim.is_symlink() and nvim.resolve() == target
         assert target.read_text() == "keep me\n"
@@ -250,7 +361,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     (state / "applied.json").write_text(json.dumps(false))
     with patch.dict(os.environ, dict(env, ICEWINE_MANAGE_SELECTIONS=json.dumps(false))):
         try:
-            manage.main(["apply", *[f"{name}={str(name == 'desktop').lower()}" for name in manage.FEATURES], "overwrite=false"])
+            manage.main(["apply", *[f"{name}={"none" if name == "steam" else str(name == 'desktop').lower()}" for name in manage.FEATURES], "overwrite=false"])
         except ValueError as error:
             assert "read-only" in str(error)
         else:
@@ -264,6 +375,27 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
         apply(("terminal",), overwrite=True)
     assert (unrelated / "kitty.conf").read_text() == "outside\n"
+    rules = root / "handheld.rules"
+    with patch.object(manage, "HANDHELD_RULES", rules), patch.object(manage, "run") as host, patch.dict(os.environ, ICEWINE_INPUTPLUMBER_ASSETS=str(source / "inputplumber")):
+        rules.write_text("unrelated policy\n")
+        try:
+            manage.handheld_policy(state, True)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Unrelated handheld policy was overwritten")
+        assert not host.called
+        rules.unlink()
+        manage.handheld_policy(state, True)
+        assert host.call_args.args[0][:3] == ["sudo", "install", "-Dm644"]
+        rules.write_text("edited user policy\n")
+        host.reset_mock()
+        manage.handheld_policy(state, False)
+        assert not host.called and rules.read_text() == "edited user policy\n"
+        rules.write_text("owned policy\n")
+        (state / "handheld-rules.sha256").write_text(manage.theme.default_signature(rules))
+        manage.handheld_policy(state, False)
+        host.assert_called_once_with(["sudo", "unlink", str(rules)])
     login_config = root / "sddm.conf"
     with patch.object(manage, "LOGIN_CONFIG", login_config), patch.object(manage, "run") as host:
         login_config.write_text("unrelated login policy\n")
@@ -288,7 +420,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (outside / ".bashrc").write_text("external shell config\n")
     home = root / "home link"
     home.symlink_to(outside)
-    declared = dict.fromkeys(manage.FEATURES, False)
+    declared = dict.fromkeys(manage.FEATURES, False) | {"steam": "none"}
     declared["shellExtras"] = True
     env = dict(HOME=str(home), XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"),
                XDG_STATE_HOME=str(root / "state"), ICEWINE_MANAGE_SELECTIONS=json.dumps(declared))
@@ -316,5 +448,5 @@ print("PASS: explicit Apply, selections, ownership, overwrite, failures and read
 
 module_options = (source / "modules/default.nix").read_text() + (source / "modules/login.nix").read_text()
 for name in manage.FEATURES:
-    assert name + ".enable = lib.mkEnableOption" in module_options or name + " = {" in module_options
+    assert name == "steam" or name + ".enable = lib.mkEnableOption" in module_options or name + " = {" in module_options
 print("PASS: utility option parity and local split-package bootstrap")

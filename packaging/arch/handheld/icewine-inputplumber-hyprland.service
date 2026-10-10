@@ -1,0 +1,17 @@
+[Unit]
+Description=Steam Deck InputPlumber profile for Hyprland
+PartOf=icewine-session.target graphical-session.target
+After=graphical-session.target
+Before=icewine.service
+ConditionEnvironment=ICEWINE_HANDHELD_ENABLED=true
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/usr/bin/icewine-inputplumber-hyprland
+ExecStopPost=/usr/bin/icewine-inputplumber-restore
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=icewine-session.target

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import pwd
 import subprocess
 import sys
 import tempfile
@@ -15,17 +16,17 @@ import types
 theme = types.ModuleType("icewine_theme")
 theme.__file__ = os.environ.get("ICEWINE_THEME_SCRIPT", str(Path(__file__).with_name("theme")))
 importlib.machinery.SourceFileLoader(theme.__name__, theme.__file__).exec_module(theme)
-FEATURES = ("desktop", "terminal", "filemanager", "gaming", "flatpak", "login", "shellExtras")
+FEATURES = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras")
 APPS = {
     "desktop": ("hypr", "uwsm", "gtk", "user-dirs", "applications"),
     "terminal": ("kitty",), "filemanager": ("yazi",),
-    "gaming": ("gaming",), "flatpak": (), "login": (),
+    "steam": (), "gamescope": ("gamescope",), "handheld": (), "login": (),
     "shellExtras": ("starship", "fastfetch"),
 }
 PACKAGES = {
     "desktop": ("icewine-session",), "terminal": ("kitty",),
     "filemanager": ("yazi", "ffmpegthumbnailer", "7zip", "gvfs", "udisks2"),
-    "gaming": ("gamescope",), "flatpak": ("flatpak", "bazaar"),
+    "steam": (), "gamescope": ("gamescope",), "handheld": ("icewine-handheld", "icewine-keyboard", "icewine-controller-idle", "inputplumber"),
     "login": ("icewine-sddm",), "shellExtras": ("starship", "fastfetch"),
 }
 LOGIN_CONFIG = Path("/etc/sddm.conf.d/90-icewine.conf")
@@ -33,10 +34,20 @@ LOGIN_CONTENTS = "[General]\nDisplayServer=x11\nInputMethod=qtvirtualkeyboard\n[
 
 
 def validate(value, *, saved=False):
-    if saved and isinstance(value, dict) and set(value) == {*FEATURES, "texteditor"} and type(value["texteditor"]) is bool:
-        value = {name: value[name] for name in FEATURES}
-    if not isinstance(value, dict) or set(value) != set(FEATURES) or any(type(bit) is not bool for bit in value.values()):
+    legacy = {"desktop", "terminal", "filemanager", "gaming", "flatpak", "login", "shellExtras"}
+    if saved and isinstance(value, dict) and set(value) in (legacy, legacy | {"texteditor"}) and all(type(bit) is bool for bit in value.values()):
+        value = {name: value[name] for name in legacy - {"gaming", "flatpak"}} | {
+            "steam": ("flatpak" if value["flatpak"] else "native") if value["gaming"] else "none",
+            "gamescope": value["gaming"], "handheld": False,
+        }
+    if (not isinstance(value, dict) or set(value) != set(FEATURES)
+            or value["steam"] not in ("none", "native", "flatpak")
+            or any(type(bit) is not bool for name, bit in value.items() if name != "steam")):
         raise ValueError("invalid manager selections")
+    if value["steam"] == "none" and (value["gamescope"] or value["handheld"]):
+        raise ValueError("Gamescope and Handheld require Steam")
+    if value["handheld"] and not (value["desktop"] and value["steam"] == "native" and value["gamescope"]):
+        raise ValueError("Handheld requires desktop, native Steam and Gamescope")
     return value
 
 
@@ -49,7 +60,7 @@ def selections(state):
     path = state / "manage.json"
     if path.is_symlink():
         raise ValueError("refusing symlinked manager state")
-    return False, validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, False)
+    return False, validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, False) | {"steam": "none"}
 
 
 def run(argv):
@@ -100,16 +111,56 @@ def login(state, enabled):
         record.unlink()
 
 
+HANDHELD_RULES = Path("/etc/polkit-1/rules.d/90-icewine-handheld.rules")
+HANDHELD_UNITS = ["icewine-controller-idle.service", "icewine-keyboard.service", "icewine-inputplumber-hyprland.service"]
+
+
+def handheld_policy(state, enabled):
+    record = state / "handheld-rules.sha256"
+    if record.is_symlink():
+        raise ValueError("refusing symlinked handheld ownership record")
+    signature = theme.default_signature(HANDHELD_RULES)
+    previous = record.read_text().strip() if record.exists() else None
+    if enabled:
+        if signature is not None and signature != previous:
+            raise ValueError(f"preserved unrelated handheld policy: {HANDHELD_RULES}")
+        source = Path(os.environ.get("ICEWINE_INPUTPLUMBER_ASSETS", "/usr/share/icewine/inputplumber")) / "polkit.rules.in"
+        contents = source.read_text().replace("@user@", json.dumps(pwd.getpwuid(os.getuid()).pw_name))
+        with tempfile.TemporaryDirectory(prefix="icewine-handheld-") as temporary:
+            rules = Path(temporary) / "rules"
+            rules.write_text(contents)
+            run(["sudo", "install", "-Dm644", str(rules), str(HANDHELD_RULES)])
+            theme.atomic_text(record, theme.default_signature(rules) + "\n")
+    elif previous:
+        if signature == previous and not HANDHELD_RULES.is_symlink():
+            run(["sudo", "unlink", str(HANDHELD_RULES)])
+        record.unlink()
+
+
+def session_environment(selected):
+    run(["systemctl", "--user", "set-environment", f"ICEWINE_STEAM_CLIENT={selected['steam']}",
+         f"ICEWINE_STEAM_ENABLED={str(selected['steam'] != 'none').lower()}",
+         f"ICEWINE_GAMESCOPE_ENABLED={str(selected['gamescope']).lower()}",
+         f"ICEWINE_HANDHELD_ENABLED={str(selected['handheld']).lower()}"])
+
+
 def apply(selected, overwrite, readonly, previous, config, data, state):
     if readonly and selected != previous:
         raise ValueError("NixOS utility selections are read-only")
+    # Read the previous explicit Apply on NixOS too: rebuilds never touch dotfiles.
+    applied_path = state / "applied.json"
+    if applied_path.is_symlink():
+        raise ValueError("refusing symlinked applied-selection record")
+    applied = validate(json.loads(applied_path.read_text()), saved=True) if applied_path.exists() else previous
     if not readonly:
-        packages = [package for feature in FEATURES if selected[feature] for package in PACKAGES[feature]]
-        if selected["gaming"] and not selected["flatpak"]:
+        packages = [package for feature in FEATURES if selected[feature] and feature != "steam" for package in PACKAGES[feature]]
+        if selected["steam"] == "native":
             packages.append("steam")
+        if selected["steam"] == "flatpak":
+            packages.append("flatpak")
         local = []
         package_dir = os.environ.get("ICEWINE_PACKAGE_DIR")
-        for package in ("icewine-session", "icewine-sddm"):
+        for package in ("icewine-session", "icewine-sddm", "icewine-handheld", "icewine-keyboard", "icewine-controller-idle"):
             if package not in packages:
                 continue
             installed = subprocess.run(["pacman", "-Qq", package], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -125,39 +176,80 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
             run(["sudo", "pacman", "-S", "--needed", *packages])
         if local:
             run(["sudo", "pacman", "-U", "--needed", *local])
-        if selected["flatpak"]:
+        if selected["steam"] == "flatpak":
             run(["flatpak", "remote-add", "--user", "--if-not-exists", "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"])
-            if selected["gaming"]:
-                run(["flatpak", "install", "--user", "--noninteractive", "flathub", "com.valvesoftware.Steam"])
+            run(["flatpak", "install", "--user", "--noninteractive", "flathub", "com.valvesoftware.Steam"])
         # Host prerequisites finish before any per-user configuration is deployed.
         if selected["login"] or previous["login"]:
             login(state, selected["login"])
-    defaults = os.environ.get("ICEWINE_DEFAULT_FILES", "/usr/share/icewine/defaults")
-    if not (Path(defaults) / "config").is_dir() or not (Path(defaults) / "data").is_dir():
-        raise ValueError(f"Icewine default files are unavailable: {defaults}")
-    assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine/theme"))
-    themes = theme.installed(assets)
-    theme_id, _ = theme.effective(state, themes)
-    theme.publish(config, theme.render_theme(assets, themes[theme_id], theme.transparency_level(state)))
-    # Read the previous explicit Apply on NixOS too: rebuilds never touch dotfiles.
-    applied_path = state / "applied.json"
-    if applied_path.is_symlink():
-        raise ValueError("refusing symlinked applied-selection record")
-    applied = validate(json.loads(applied_path.read_text()), saved=True) if applied_path.exists() else previous
-    for feature in FEATURES:
-        if applied[feature] and not selected[feature]:
-            retire(config, data, state, feature)
-    for app in ("quickshell", "wallpapers"):
-        theme.install_defaults(defaults, config, data, state, overwrite, app)
-    for feature in FEATURES:
-        if not selected[feature]:
-            continue
-        for app in APPS[feature]:
+    shell_running = False
+    changed = any(applied[name] != selected[name] for name in ("steam", "gamescope", "handheld")) or selected["handheld"] or (state / "handheld-rules.sha256").exists()
+    try:
+        if not readonly and changed:
+            shell_running = subprocess.run(["systemctl", "--user", "is-active", "--quiet", "icewine.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+            if shell_running:
+                run(["systemctl", "--user", "stop", "icewine.service"])
+            if applied["handheld"] or (state / "handheld-rules.sha256").exists():
+                # Stop routing before removing its permission; ExecStopPost restores
+                # controller defaults even after a failed oneshot start.
+                run(["systemctl", "--user", "disable", "--now", *HANDHELD_UNITS])
+            if applied["gamescope"] and changed and subprocess.run(["systemctl", "--user", "is-active", "--quiet", "icewine-steam-gamescope.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                run(["systemctl", "--user", "stop", "icewine-steam-gamescope.service"])
+        if not readonly and (selected["handheld"] or applied["handheld"] or (state / "handheld-rules.sha256").exists()):
+            handheld_policy(state, selected["handheld"])
+        defaults = os.environ.get("ICEWINE_DEFAULT_FILES", "/usr/share/icewine/defaults")
+        if not readonly and selected["handheld"]:
+            defaults = os.environ.get("ICEWINE_HANDHELD_DEFAULT_FILES", "/usr/share/icewine/defaults-handheld")
+        if not (Path(defaults) / "config").is_dir() or not (Path(defaults) / "data").is_dir():
+            raise ValueError(f"Icewine default files are unavailable: {defaults}")
+        assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine/theme"))
+        themes = theme.installed(assets)
+        theme_id, _ = theme.effective(state, themes)
+        theme.publish(config, theme.render_theme(assets, themes[theme_id], theme.transparency_level(state)))
+        for feature in FEATURES:
+            if applied[feature] and not selected[feature]:
+                retire(config, data, state, feature)
+        for app in ("quickshell", "wallpapers"):
             theme.install_defaults(defaults, config, data, state, overwrite, app)
-            if app in theme.APPS and theme.APPS[app]:
-                theme.install_links(config, state, overwrite, app)
-    if selected["desktop"] and os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false":
-        theme.install_gtk_theme(config, theme_id)
+        for feature in FEATURES:
+            if not selected[feature]:
+                continue
+            for app in APPS[feature]:
+                theme.install_defaults(defaults, config, data, state, overwrite, app)
+                if app in theme.APPS and theme.APPS[app]:
+                    theme.install_links(config, state, overwrite, app)
+        if selected["desktop"] and os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false":
+            theme.install_gtk_theme(config, theme_id)
+        if not readonly and changed:
+            session_environment(selected)
+            run(["systemctl", "--user", "daemon-reload"])
+            if selected["handheld"]:
+                run(["sudo", "systemctl", "start", "inputplumber.service"])
+                run(["systemctl", "--user", "enable", *HANDHELD_UNITS])
+                if shell_running:
+                    run(["systemctl", "--user", "start", *reversed(HANDHELD_UNITS)])
+            if shell_running:
+                run(["systemctl", "--user", "start", "icewine.service"])
+    except Exception:
+        if not readonly and changed:
+            # Leave the shell stopped and routes restored on a failed transition.
+            # A retained ownership record makes a later Apply retry teardown.
+            if shell_running:
+                try:
+                    run(["systemctl", "--user", "stop", "icewine.service"])
+                except subprocess.CalledProcessError as error:
+                    print(f"Failed to stop Icewine shell: {error}", file=sys.stderr)
+            if selected["handheld"] or applied["handheld"] or (state / "handheld-rules.sha256").exists():
+                try:
+                    run(["systemctl", "--user", "disable", "--now", *HANDHELD_UNITS])
+                    handheld_policy(state, False)
+                except (subprocess.CalledProcessError, OSError, ValueError) as error:
+                    print(f"Failed Handheld teardown; retry Apply: {error}", file=sys.stderr)
+            try:
+                session_environment(applied | {"handheld": False})
+            except subprocess.CalledProcessError as error:
+                print(f"Failed to restore session flags: {error}", file=sys.stderr)
+        raise
     theme.atomic_text(applied_path, json.dumps(selected, sort_keys=True) + "\n")
     if not readonly:
         theme.atomic_text(state / "manage.json", json.dumps(selected, sort_keys=True) + "\n")
@@ -176,9 +268,9 @@ def main(argv):
     fields = {}
     for field in argv[1:]:
         name, separator, value = field.partition("=")
-        if not separator or name in fields or value not in {"true", "false"}:
+        if not separator or name in fields or value not in ({"none", "native", "flatpak"} if name == "steam" else {"true", "false"}):
             raise ValueError("invalid manager request")
-        fields[name] = value == "true"
+        fields[name] = value if name == "steam" else value == "true"
     if "overwrite" not in fields:
         raise ValueError("missing overwrite choice")
     overwrite = fields.pop("overwrite")

@@ -5,6 +5,14 @@ let
     url = "https://codeload.github.com/yazi-rs/plugins/tar.gz/4dc7f1b6458c2578f4494f10d468c68c1082214f";
     sha256 = "0e65f2858d06c0889a652be1c400c2df02f0cbda782dc452da52dd0cd6e27867";
   };
+  keyboardSource = pkgs.fetchurl {
+    url = "https://gitlab.gnome.org/World/Phosh/squeekboard/-/archive/v1.43.1/squeekboard-v1.43.1.tar.gz";
+    sha256 = "64c73636f6d8a6ffe9f1094c4084b184db3f60ac4e02bf8bff860060308c61ab";
+  };
+  idleSource = pkgs.fetchurl {
+    url = "https://github.com/nowrep/wljoywake/archive/refs/tags/v0.3.tar.gz";
+    sha256 = "d02d0d20c6b7712a17c4891b0c28e562d6f9021de28225979453242292be8230";
+  };
 in pkgs.stdenv.mkDerivation {
   pname = "icewine-native-packages";
   version = "0.1";
@@ -16,7 +24,10 @@ in pkgs.stdenv.mkDerivation {
   dontWrapQtApps = true;
   nativeBuildInputs = [ pkgs.pacman pkgs.libarchive pkgs.fakeroot
     (pkgs.python3.withPackages (python: [ python.vdf ])) pkgs.fish pkgs.lua pkgs.zstd
+    pkgs.meson pkgs.ninja pkgs.pkg-config pkgs.glib pkgs.wayland-scanner pkgs.gettext
     pkgs.qt6.qtdeclarative pkgs.cargo pkgs.rustc pkgs.rustPlatform.cargoSetupHook ];
+  buildInputs = [ pkgs.gtk3 pkgs.gnome-desktop pkgs.wayland pkgs.wayland-protocols
+    pkgs.libbsd pkgs.libxml2 pkgs.libxkbcommon pkgs.feedbackd pkgs.udev ];
   buildPhase = ''
   export HOME="$TMPDIR/home"
   export CARGO_NET_OFFLINE=true
@@ -50,14 +61,21 @@ in pkgs.stdenv.mkDerivation {
   cd work
   # --nodeps verifies package production only; target pacman transactions are separate.
   makepkg --nodeps --nosign --config "$PWD/makepkg.conf"
-  for archive in *.pkg.tar.zst; do
-    bsdtar -tf "$archive" > "$out/$archive.files"
-    bsdtar -xOf "$archive" .PKGINFO > "$out/$archive.PKGINFO"
+  mkdir dependencies
+  cp icewine/packaging/arch/dependencies/* dependencies/
+  cp ${keyboardSource} dependencies/squeekboard-v1.43.1.tar.gz
+  cp ${idleSource} dependencies/wljoywake-0.3.tar.gz
+  export ICEWINE_CARGO_VENDOR=${pkgs.squeekboard.cargoDeps}
+  (cd dependencies; makepkg --nodeps --nosign --config "$PWD/../makepkg.conf")
+  for archive in *.pkg.tar.zst dependencies/*.pkg.tar.zst; do
+    bsdtar -tf "$archive" > "$out/$(basename "$archive").files"
+    bsdtar -xOf "$archive" .PKGINFO > "$out/$(basename "$archive").PKGINFO"
     cp "$archive" "$out/"
   done
   # These copies are test inputs; leave the native /usr/bin/env shebangs in archives.
   patchShebangs icewine/packaging/arch/command icewine/packaging/arch/session
-  python icewine/tests/arch-package.py "$PWD/icewine" "$PWD/pkg/icewine" "$PWD/pkg/icewine-session" "$PWD/pkg/icewine-sddm"
+  python icewine/tests/handheld.py "$PWD/icewine"
+  python icewine/tests/arch-package.py "$PWD/icewine" "$PWD/pkg/icewine" "$PWD/pkg/icewine-session" "$PWD/pkg/icewine-sddm" "$PWD/pkg/icewine-handheld" "$PWD/dependencies/pkg/icewine-keyboard" "$PWD/dependencies/pkg/icewine-controller-idle"
   python icewine/tests/sddm-palette.py "$PWD/pkg/icewine-sddm/usr/share/sddm/themes/icewine/theme/Palette.qml" \
     ${pkgs.qt6.qtdeclarative}/bin/qml ${pkgs.qt6.qtdeclarative}/lib/qt-6/qml
 '';

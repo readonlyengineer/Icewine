@@ -55,8 +55,7 @@ In your `flake.nix`:
             desktop.enable = true;
             terminal.enable = true;
             filemanager.enable = true;
-            gaming.enable = true;
-            flatpak.enable = true;
+            steam = "flatpak";
             login.enable = true;
             shellExtras.enable = true;
           };
@@ -81,8 +80,7 @@ Enable the handheld interface and its native Steam and InputPlumber dependencies
 services.icewine = {
   handheld.enable = true;
   desktop.enable = true;
-  gaming.enable = true;
-  flatpak.enable = false; # Handheld Steam uses the native client.
+  steam = "native";
 };
 ```
 
@@ -251,16 +249,18 @@ Manual and application fullscreen choices take precedence.
 
 ## Applications
 
-The manager/module offers Kitty, Yazi, Steam/Gamescope, Flatpak/Bazaar,
+The manager/module offers Kitty, Yazi, Steam with optional Gamescope/Handheld,
 SDDM styling and Starship/Fastfetch alongside the optional desktop session.
 Browser profiles and themes belong to you; Icewine uses the host browser.
 
 ### Steam and Flatpak
 
-Gaming is opt-in and allows proprietary Steam. Gaming alone selects native
-Steam; selecting Flatpak Utility as well selects Flatpak Steam instead.
-Flatpak Utility supplies Bazaar and Flathub support independently of Gaming.
-On NixOS use `gaming.enable` and `flatpak.enable` under `services.icewine`.
+Steam defaults to none. Choose native or Flatpak with left/right in the manager,
+or set `steam = "native";` / `steam = "flatpak";` under `services.icewine`.
+Gamescope defaults on for a selected client and can be disabled independently
+with `gamescope.enable = false;`; Steam then launches normally. Handheld defaults
+off and requires native Steam, the desktop session and Gamescope. Flatpak Steam
+supplies its required runtime and Flathub support. Bazaar is not installed.
 
 ### Alternative applications and opt-outs
 
@@ -283,8 +283,8 @@ These options belong under `services.icewine`:
 | `desktop.enable = false;` | Hyprland session integration; explicit Apply removes its implementation link |
 | `terminal.enable = false;` | Kitty defaults |
 | `filemanager.enable = false;` | Yazi and its GVfs default |
-| `gaming.enable = false;` | Steam/Gamescope integration |
-| `flatpak.enable = false;` | Flatpak/Bazaar integration; Gaming uses native Steam |
+| `steam = "none";` | Steam integration and dependent Gamescope/Handheld |
+| `gamescope.enable = false;` | Gamescope launch integration; ordinary Steam remains available |
 | `login.enable = false;` | Icewine SDDM styling; host SDDM enablement is retained |
 | `shellExtras.enable = false;` | Starship/Fastfetch defaults |
 | `shellExtras.git.enable = false;` | Git information in the prompt |

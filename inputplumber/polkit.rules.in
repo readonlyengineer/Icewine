@@ -1,0 +1,12 @@
+    polkit.addRule(function(action, subject) {
+      var allowed = [
+        "org.shadowblip.InputPlumber.SetManageAllDevices",
+        "org.shadowblip.Input.CompositeDevice.LoadProfilePath",
+        "org.shadowblip.Input.CompositeDevice.SetInterceptMode",
+        "org.shadowblip.Input.CompositeDevice.SetTargetDevices"
+      ];
+
+      if (subject.user == @user@ && allowed.indexOf(action.id) >= 0) {
+        return polkit.Result.YES;
+      }
+    });

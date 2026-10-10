@@ -5,7 +5,7 @@ let
     type = lib.types.listOf lib.types.str;
     inherit description default;
   };
-  commands = lib.optionalAttrs (cfg.gaming.enable) {
+  commands = lib.optionalAttrs (cfg.steam != "none") {
     steam = cfg.applications.steam;
   };
   launchers = lib.mapAttrsToList (name: argv: pkgs.writeShellScriptBin "icewine-${name}" ''
@@ -41,16 +41,20 @@ in {
     desktop.enable = lib.mkEnableOption "Hyprland desktop session with Icewine";
     terminal.enable = lib.mkEnableOption "Kitty terminal and defaults";
     filemanager.enable = lib.mkEnableOption "Yazi file manager and defaults";
-    gaming.enable = lib.mkEnableOption "Steam and Gamescope (allows unfree)";
-    flatpak.enable = lib.mkEnableOption "Flatpak support and Bazaar; prefer Flatpak Steam when gaming is enabled";
+    steam = lib.mkOption {
+      type = lib.types.enum [ "none" "native" "flatpak" ];
+      default = "none";
+      description = "Steam client installation (allows unfree).";
+    };
+    gamescope.enable = lib.mkEnableOption "Gamescope Steam launch integration" // { default = true; };
     shellExtras = {
       enable = lib.mkEnableOption "Starship and Fastfetch shell extras";
       git.enable = lib.mkEnableOption "Starship Git prompt modules" // { default = true; };
     };
     applications = {
       steam = command "Steam command used inside Gamescope."
-        (if cfg.gaming.enable && cfg.flatpak.enable then [ "flatpak" "run" "com.valvesoftware.Steam" ]
-         else if cfg.gaming.enable && !cfg.flatpak.enable then [ "steam" ] ++ lib.optional cfg.handheld.enable "-gamepadui"
+        (if cfg.steam == "flatpak" then [ "flatpak" "run" "com.valvesoftware.Steam" ]
+         else if cfg.steam == "native" then [ "steam" ] ++ lib.optional cfg.handheld.enable "-gamepadui"
          else [ ]);
     };
     defaultFiles = {
@@ -86,13 +90,13 @@ in {
         message = "Icewine implementation is packaged; use Settings.qml or native entry-point overrides for customization."; }
     ];
 
-    programs.steam.enable = lib.mkIf (cfg.gaming.enable && !cfg.flatpak.enable) true;
-    nixpkgs.config.allowUnfreePackages = lib.optionals (cfg.gaming.enable && !cfg.flatpak.enable)
+    programs.steam.enable = lib.mkIf (cfg.steam == "native") true;
+    nixpkgs.config.allowUnfreePackages = lib.optionals (cfg.steam == "native")
       [ "steam" "steam-unwrapped" ];
-    services.flatpak = lib.mkIf cfg.flatpak.enable {
+    services.flatpak = lib.mkIf (cfg.steam == "flatpak") {
       enable = true;
       remotes = [ { name = "flathub"; location = "https://dl.flathub.org/repo/flathub.flatpakrepo"; } ];
-      packages = lib.optional cfg.gaming.enable "com.valvesoftware.Steam";
+      packages = [ "com.valvesoftware.Steam" ];
     };
 
     programs.hyprland = lib.mkIf cfg.desktop.enable { enable = true; withUWSM = true; };
@@ -121,8 +125,7 @@ in {
     environment.systemPackages = (with pkgs; [ quickshell glib jq systemd libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl xdg-utils gtk3 ]) ++ launchers
       ++ lib.optionals cfg.desktop.enable (with pkgs; [ hyprshutdown hyprpolkitagent hyprshot hypridle xdg-terminal-exec ])
-      ++ lib.optional cfg.gaming.enable pkgs.gamescope
-      ++ lib.optional cfg.flatpak.enable pkgs.bazaar
+      ++ lib.optional (cfg.steam != "none" && cfg.gamescope.enable) pkgs.gamescope
       ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
     users.users.${cfg.user}.packages = lib.optional cfg.terminal.enable pkgs.kitty
       ++ lib.optionals cfg.shellExtras.enable [ pkgs.starship pkgs.fastfetch ];

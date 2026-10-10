@@ -6,23 +6,33 @@ const ROWS: &[(&str, &str, &str)] = &[
     ("desktop", "Desktop session", "Hyprland + Icewine Quickshell"),
     ("terminal", "Terminal", "Kitty"),
     ("filemanager", "File manager", "Yazi"),
-    ("gaming", "Gaming (allows unfree)", "Steam + Gamescope"),
-    ("flatpak", "Flatpak Utility", "Prefer Flatpak Steam if Gaming + Bazaar"),
+    ("steam", "Steam (unfree)", ""),
+    ("gamescope", " +- Gamescope", ""), ("handheld", " \u{005c}- Handheld", "Requires native Steam, desktop and Gamescope"),
     ("login", "Login screen", "SDDM"), ("shellExtras", "Shell Extras", "Starship + Fastfetch"),
 ];
 
 #[derive(Clone, Copy, PartialEq)]
-enum Control { Utility(&'static str), Overwrite, Apply, Cancel }
+enum Control { Utility(&'static str), Steam, Overwrite, Apply, Cancel }
 
-fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>) -> io::Result<Option<bool>> {
-    let controls: Vec<_> = ROWS.iter().filter(|_| !readonly)
-        .map(|(id, _, _)| Control::Utility(*id))
-        .chain([Control::Overwrite, Control::Apply, Control::Cancel]).collect();
+const STEAM: &[&str] = &["none", "native", "flatpak"];
+
+fn handheld_available(steam: usize, selected: &BTreeMap<&str, bool>) -> bool {
+    steam == 1 && selected["desktop"] && selected["gamescope"]
+}
+
+fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize) -> io::Result<Option<bool>> {
     let mut terminal = ratatui::init();
     let result = (|| {
         let mut focus = 0;
         let mut overwrite = false;
         loop {
+            let rows: Vec<_> = ROWS.iter().filter(|(id, _, _)|
+                *steam != 0 || !matches!(*id, "gamescope" | "handheld")).collect();
+            let controls: Vec<_> = rows.iter().filter(|(id, _, _)| !readonly
+                && (*id != "handheld" || handheld_available(*steam, selected)))
+                .map(|(id, _, _)| if *id == "steam" { Control::Steam } else { Control::Utility(*id) })
+                .chain([Control::Overwrite, Control::Apply, Control::Cancel]).collect();
+            focus = focus.min(controls.len() - 1);
             terminal.draw(|frame| {
                 let accent = Style::default().fg(Color::Cyan).bold();
                 let muted = Style::default().fg(Color::DarkGray);
@@ -49,16 +59,18 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>) -> io::Result<Opt
                         "Deselecting removes Icewine configuration; packages stay installed."
                     }).style(muted),
                 ]), intro);
-                let rows = ROWS.iter().map(|(id, purpose, defaults)| {
+                let rows = rows.iter().map(|(id, purpose, defaults)| {
+                    let available = *id != "handheld" || handheld_available(*steam, selected);
                     Row::new(vec![
                         Cell::from(*purpose),
                         Cell::from(*defaults).style(muted),
-                        Cell::from(if selected[id] { "[x]" } else { "[ ]" })
-                            .style(if readonly { muted } else { accent }),
-                    ]).style(if controls[focus] == Control::Utility(id) { focused } else { Style::default() })
+                        Cell::from(if *id == "steam" { format!("< {} >", STEAM[*steam]) }
+                            else { (if selected[id] { "[x]" } else { "[ ]" }).to_owned() })
+                            .style(if readonly || !available { muted } else { accent }),
+                    ]).style(if controls[focus] == (if *id == "steam" { Control::Steam } else { Control::Utility(id) }) { focused } else { Style::default() })
                 });
                 frame.render_widget(Table::new(rows, [
-                    Constraint::Length(23), Constraint::Min(20), Constraint::Length(9),
+                    Constraint::Length(23), Constraint::Min(20), Constraint::Length(11),
                 ]).column_spacing(2).header(Row::new([
                     "Purpose", "Defaults", "Configure",
                 ]).style(accent)), utilities);
@@ -71,7 +83,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>) -> io::Result<Opt
                     Span::styled("[ Cancel ]", if controls[focus] == Control::Cancel { focused } else { muted }),
                 ])), buttons);
                 frame.render_widget(Paragraph::new(
-                    "Tab / arrows: navigate   Space: select   Enter: act   Esc: cancel"
+                    "Tab / up/down: move   Left/right: Steam   Space: select   Enter: act   Esc: cancel"
                 ).style(muted), help);
             })?;
             let Event::Key(key) = event::read()? else { continue };
@@ -79,6 +91,13 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>) -> io::Result<Opt
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => return Ok(None),
                 KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(None),
+                KeyCode::Left | KeyCode::Right if controls[focus] == Control::Steam => {
+                    let previous = *steam;
+                    *steam = (*steam + if key.code == KeyCode::Right { 1 } else { STEAM.len() - 1 }) % STEAM.len();
+                    if previous == 0 { selected.insert("gamescope", true); }
+                    if *steam == 0 { selected.insert("gamescope", false); }
+                    if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
+                }
                 KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
                     focus = (focus + 1) % controls.len();
                 }
@@ -86,7 +105,17 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>) -> io::Result<Opt
                     focus = (focus + controls.len() - 1) % controls.len();
                 }
                 KeyCode::Char(' ') | KeyCode::Enter => match controls[focus] {
-                    Control::Utility(id) => *selected.get_mut(id).unwrap() ^= true,
+                    Control::Utility(id) => {
+                        *selected.get_mut(id).unwrap() ^= true;
+                        if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
+                    }
+                    Control::Steam => {
+                        let previous = *steam;
+                        *steam = (*steam + 1) % STEAM.len();
+                        if previous == 0 { selected.insert("gamescope", true); }
+                        if *steam == 0 { selected.insert("gamescope", false); }
+                        if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
+                    }
                     Control::Overwrite => overwrite = !overwrite,
                     Control::Apply => return Ok(Some(overwrite)),
                     Control::Cancel => return Ok(None),
@@ -109,18 +138,27 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut fields = BTreeMap::new();
     for field in state.split_whitespace() {
         let (id, value) = field.split_once('=').ok_or("Invalid manager state")?;
-        let value = match value {
-            "true" => true, "false" => false, _ => return Err("Invalid manager state".into()),
-        };
         if fields.insert(id, value).is_some() { return Err("Duplicate manager field".into()); }
     }
-    let readonly = fields.remove("readonly").ok_or("Missing read-only state")?;
-    if fields.len() != ROWS.len() || ROWS.iter().any(|(id, _, _)| !fields.contains_key(id)) {
+    let mut steam = STEAM.iter().position(|value| fields.get("steam") == Some(value))
+        .ok_or("Invalid Steam choice")?;
+    fields.remove("steam");
+    let mut selected = BTreeMap::new();
+    for (id, value) in fields {
+        selected.insert(id, match value {
+            "true" => true, "false" => false, _ => return Err("Invalid manager state".into()),
+        });
+    }
+    let readonly = selected.remove("readonly").ok_or("Missing read-only state")?;
+    if selected.len() + 1 != ROWS.len() || ROWS.iter().any(|(id, _, _)| *id != "steam" && !selected.contains_key(id))
+        || (steam == 0 && (selected["gamescope"] || selected["handheld"]))
+        || (selected["handheld"] && !handheld_available(steam, &selected)) {
         return Err("Invalid manager selections".into());
     }
-    if let Some(overwrite) = choose(readonly, &mut fields)? {
+    if let Some(overwrite) = choose(readonly, &mut selected, &mut steam)? {
         let status = Command::new("icewine-manage-backend").arg("apply")
-            .args(fields.iter().map(|(id, value)| format!("{id}={value}")))
+            .args(selected.iter().map(|(id, value)| format!("{id}={value}")))
+            .arg(format!("steam={}", STEAM[steam]))
             .arg(format!("overwrite={overwrite}")).status()?;
         return Ok(if status.success() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
     }

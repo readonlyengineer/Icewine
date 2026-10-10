@@ -1,6 +1,6 @@
 # Build from an Icewine source archive; see README.md in this directory.
 pkgbase=icewine
-pkgname=(icewine icewine-session icewine-sddm)
+pkgname=(icewine icewine-session icewine-sddm icewine-handheld)
 pkgver=0.1
 pkgrel=1
 arch=(x86_64)
@@ -35,17 +35,26 @@ package_icewine() {
   install -Dm644 theme/assets/flower-branch.png "$share/defaults/data/wallpapers/default.jpg"
   install -d "$share/quickshell"
   cp -r quickshell/{modules,adapters,theme} "$share/quickshell/"
-  cp quickshell/Desktop.qml "$share/quickshell/"
+  cp quickshell/{Desktop,Handheld}.qml "$share/quickshell/"
+  cp -r quickshell/deck "$share/quickshell/"
   install -d "$share/hyprland"
   cp hyprland/icewine.lua "$share/hyprland/"
   cp -r hyprland/modules "$share/hyprland/"
+  cp hyprland/deck/Deck.lua "$share/hyprland/modules/"
+  cp -r "$share/hyprland" "$share/hyprland-handheld"
+  printf '\nrequire("icewine.modules.Deck")\n' >> "$share/hyprland-handheld/icewine.lua"
   cp -r kitty gtk hypridle session "$share/"
   # Native implementation contains no Bash preset or Nix-generated wrappers.
-  cp scripts/theme scripts/manage scripts/wallpaper "$pkgdir/usr/lib/icewine/"
+  cp scripts/theme scripts/manage scripts/wallpaper scripts/inputplumber-*.sh scripts/keyboard-toggle.sh "$pkgdir/usr/lib/icewine/"
+  install -d "$share/inputplumber"
+  cp inputplumber/polkit.rules.in "$share/inputplumber/"
+  for name in hyprland desktop; do
+    cp "inputplumber/inputplumber-$name.yaml" "$share/inputplumber/icewine-$name.yaml"
+  done
   install -m755 manager/target/release/icewine-manage "$pkgdir/usr/bin/icewine-manage"
   install -m755 scripts/icewine "$pkgdir/usr/bin/icewine"
   install -m755 packaging/arch/command "$pkgdir/usr/lib/icewine/command"
-  for name in theme wallpaper manage-backend steam; do
+  for name in theme wallpaper manage-backend steam inputplumber-intercept inputplumber-hyprland inputplumber-restore keyboard-toggle; do
     ln -s ../lib/icewine/command "$pkgdir/usr/bin/icewine-$name"
   done
   install -m755 quickshell/tools/steam-shortcuts "$pkgdir/usr/bin/icewine-steam-shortcuts"
@@ -74,6 +83,9 @@ package_icewine() {
     printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Steam' 'NoDisplay=true' 'Hidden=true' > "$share/defaults/data/applications/$name"
   done
   install -Dm644 packaging/arch/steam-gamescope.desktop "$share/defaults/data/applications/steam-gamescope.desktop"
+  cp -r "$share/defaults" "$share/defaults-handheld"
+  cp quickshell/deck/shell.qml "$share/defaults-handheld/config/quickshell/shell.qml"
+  ln -sfn /usr/share/icewine/hyprland-handheld "$share/defaults-handheld/config/hypr/icewine"
   install -Dm644 theme/assets/themes/CATPPUCCIN-LICENSE "$pkgdir/usr/share/licenses/icewine/CATPPUCCIN-LICENSE"
   install -Dm644 "$srcdir/plugins-$_plugins/mount.yazi/LICENSE" "$pkgdir/usr/share/licenses/icewine/YAZI-MOUNT-LICENSE"
 }
@@ -111,4 +123,13 @@ package_icewine-sddm() {
   cp quickshell/modules/{WinterScreen.qml,WinterModel.js} "$theme/modules/"
   cp "$srcdir/Palette.qml" "$theme/theme/Palette.qml"
   printf '%s\n' 'singleton Palette 1.0 Palette.qml' > "$theme/theme/qmldir"
+}
+
+package_icewine-handheld() {
+  pkgdesc='Optional Icewine userspace Steam Deck interface'
+  depends=(icewine-session inputplumber icewine-keyboard icewine-controller-idle)
+  cd "$srcdir/icewine"
+  for unit in packaging/arch/handheld/*.service; do
+    install -Dm644 "$unit" "$pkgdir/usr/lib/systemd/user/${unit##*/}"
+  done
 }

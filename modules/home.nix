@@ -46,7 +46,7 @@ let
   '';
   defaults = pkgs.runCommand "icewine-default-files" { } ''
     mkdir -p $out/config/hypr/modules $out/config/quickshell/config $out/config/uwsm $out/data
-    ${lib.optionalString cfg.gaming.enable ''
+    ${lib.optionalString (cfg.steam != "none" && cfg.gamescope.enable) ''
       mkdir -p $out/data/applications
       ln -s ${steamMask} $out/data/applications/steam.desktop
       ln -s ${steamMask} $out/data/applications/com.valvesoftware.Steam.desktop
@@ -133,9 +133,12 @@ let
       export ICEWINE_DEFAULT_FILES=${defaults}
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
-      export ICEWINE_MANAGE_SELECTIONS=${lib.escapeShellArg (builtins.toJSON (lib.genAttrs
-        [ "desktop" "terminal" "filemanager" "gaming" "flatpak" "login" "shellExtras" ]
-        (name: cfg.${name}.enable)))}
+      export ICEWINE_MANAGE_SELECTIONS=${lib.escapeShellArg (builtins.toJSON ((lib.genAttrs
+        [ "desktop" "terminal" "filemanager" "handheld" "login" "shellExtras" ]
+        (name: cfg.${name}.enable)) // {
+          steam = cfg.steam;
+          gamescope = cfg.steam != "none" && cfg.gamescope.enable;
+        }))}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_NIXPKGS_LAST_MODIFIED=${toString icewineNixpkgsLastModified}
       export ICEWINE_THEME_GIT_ENABLE=${if cfg.shellExtras.git.enable then "true" else "false"}
@@ -185,7 +188,8 @@ in {
         "ICEWINE_THEME_IDS=${lib.concatStringsSep ":" themeIds}"
         "ICEWINE_THEME_POLICY=${if cfg.theme == null then "" else cfg.theme}"
         "ICEWINE_AUTHENTICATION_REQUIRED=${if cfg.authenticationRequired then "true" else "false"}"
-        "ICEWINE_STEAM_ENABLED=${if cfg.gaming.enable then "true" else "false"}"
+        "ICEWINE_STEAM_ENABLED=${if cfg.steam != "none" then "true" else "false"}"
+        "ICEWINE_GAMESCOPE_ENABLED=${if cfg.steam != "none" && cfg.gamescope.enable then "true" else "false"}"
         "ICEWINE_BATTERY_ENABLED=${if cfg.battery.enable then "true" else "false"}"
         "PATH=/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness steamShortcuts ]}"
         "QT_IM_MODULE=qtvirtualkeyboard"
@@ -194,7 +198,7 @@ in {
     };
     wantedBy = [ "graphical-session.target" ];
   };
-  systemd.user.paths.icewine-refresh-flatpak-icons = lib.mkIf (cfg.desktop.enable && cfg.flatpak.enable) {
+  systemd.user.paths.icewine-refresh-flatpak-icons = lib.mkIf (cfg.desktop.enable && (cfg.steam == "flatpak")) {
     description = "Refresh Icewine when Flatpak's icon cache changes";
     partOf = [ "graphical-session.target" ];
     after = [ "graphical-session.target" ];
@@ -205,7 +209,7 @@ in {
     ];
     wantedBy = [ "graphical-session.target" ];
   };
-  systemd.user.services.icewine-refresh-flatpak-icons = lib.mkIf (cfg.desktop.enable && cfg.flatpak.enable) {
+  systemd.user.services.icewine-refresh-flatpak-icons = lib.mkIf (cfg.desktop.enable && (cfg.steam == "flatpak")) {
     description = "Refresh Icewine's Flatpak icon cache";
     after = [ "icewine.service" ];
     unitConfig.ConditionUser = cfg.user;

@@ -12,7 +12,7 @@ let
         user = "demo";
         handheld.enable = handheld;
         desktop.enable = lib.mkDefault handheld;
-        gaming.enable = lib.mkDefault handheld;
+        steam = lib.mkDefault (if handheld then "native" else "none");
       };
       system.stateVersion = "26.05";
     } ];
@@ -25,13 +25,12 @@ let
     desktop.enable = true;
     terminal.enable = true;
     filemanager.enable = true;
-    gaming.enable = true;
-    flatpak.enable = true;
+    steam = "flatpak";
     login.enable = true;
     shellExtras.enable = true;
   }; services.displayManager.sddm.enable = true; }]; }).config;
-  nativeGaming = (desktopSystem.extendModules { modules = [{ services.icewine.gaming.enable = true; }]; }).config;
-  flatpakOnly = (desktopSystem.extendModules { modules = [{ services.icewine.flatpak.enable = true; }]; }).config;
+  nativeGaming = (desktopSystem.extendModules { modules = [{ services.icewine.steam = "native"; }]; }).config;
+  flatpakOnly = (desktopSystem.extendModules { modules = [{ services.icewine = { steam = "flatpak"; gamescope.enable = false; }; }]; }).config;
   loginOnly = (desktopSystem.extendModules { modules = [{
     boot.isContainer = true; # Evaluation fixture has no disk/bootloader configuration.
     services.icewine.login.enable = true;
@@ -94,7 +93,8 @@ in {
   '';
   modules =
     assert lib.all (name: !desktop.services.icewine.${name}.enable)
-      [ "desktop" "terminal" "filemanager" "gaming" "flatpak" "login" "shellExtras" ];
+      [ "desktop" "terminal" "filemanager" "login" "shellExtras" ];
+    assert desktop.services.icewine.steam == "none";
     assert !desktop.programs.hyprland.enable;
     assert !desktop.programs.steam.enable;
     assert !desktop.services.flatpak.enable;
@@ -125,7 +125,7 @@ in {
     assert hasPackage "fastfetch" optIn.users.users.demo.packages;
     assert hasPackage "starship" optIn.users.users.demo.packages;
     assert hasPackage "gamescope" optIn.environment.systemPackages;
-    assert hasPackage "bazaar" optIn.environment.systemPackages;
+    assert !(hasPackage "bazaar" optIn.environment.systemPackages);
     assert optIn.services.displayManager.sddm.theme == "icewine";
     assert loginOnly.services.displayManager.sddm.enable;
     assert loginOnly.services.displayManager.sddm.theme == "icewine";
@@ -138,13 +138,18 @@ in {
     assert !nativeGaming.services.flatpak.enable;
     assert nativeGaming.nixpkgs.config.allowUnfreePackages == [ "steam" "steam-unwrapped" ];
     assert flatpakOnly.services.flatpak.enable;
-    assert flatpakOnly.services.flatpak.packages == [ ];
+    assert map (package: package.appId) flatpakOnly.services.flatpak.packages == [ "com.valvesoftware.Steam" ];
     assert !(hasPackage "gamescope" flatpakOnly.environment.systemPackages);
+    assert builtins.elem "icewine.service" handheld.systemd.user.services.icewine-inputplumber-hyprland.before;
     assert handheld.services.inputplumber.enable && handheld.programs.steam.enable;
     assert handheld.services.icewine.applications.steam == [ "steam" "-gamepadui" ];
     pkgs.runCommand "icewine-module-checks" { nativeBuildInputs = [ pkgs.lua pkgs.python3 ]; } ''
       export HOME=$TMPDIR/home XDG_CONFIG_HOME=$TMPDIR/home/.config XDG_DATA_HOME=$TMPDIR/home/.local/share XDG_STATE_HOME=$TMPDIR/home/.local/state
       mkdir -p "$HOME"
+      grep -F 'Before=icewine.service' ${handheld.systemd.user.units."icewine-inputplumber-hyprland.service".unit}/icewine-inputplumber-hyprland.service
+      grep -F 'ExecStart=' ${handheld.systemd.user.units."icewine-keyboard.service".unit}/icewine-keyboard.service
+      grep -F 'ExecStart=' ${handheld.systemd.user.units."icewine-controller-idle.service".unit}/icewine-controller-idle.service
+      grep -F 'ExecStopPost=' ${handheld.systemd.user.units."icewine-inputplumber-hyprland.service".unit}/icewine-inputplumber-hyprland.service
       grep -F 'ExecStart=' ${optIn.systemd.user.units."icewine.service".unit}/icewine.service
       ! grep -q 'icewine init' ${optIn.systemd.user.units."icewine.service".unit}/icewine.service
       grep -F 'ExecStart=' ${optIn.systemd.user.units."hypridle.service".unit}/hypridle.service
@@ -154,7 +159,9 @@ in {
         if [[ "$field" != readonly=* ]]; then selections+=("$field"); fi
       done
       [[ " ''${fields[*]} " = *" readonly=true "* ]]
-      for selection in "''${selections[@]}"; do [[ "$selection" = *=true ]]; done
+      for selection in "''${selections[@]}"; do
+        [[ "$selection" = *=true || "$selection" = steam=flatpak || "$selection" = handheld=false ]]
+      done
       test ! -e "$XDG_CONFIG_HOME"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"

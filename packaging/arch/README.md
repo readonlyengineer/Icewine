@@ -19,10 +19,11 @@ ICEWINE_PACKAGE_DIR="$PWD" icewine manage
 
 The base package supplies Quickshell, the manager and necessary runtime tools.
 Apply installs and configures checked utilities; new selections start unchecked.
-The package directory supplies optional session/login archives for the first Apply.
+The package directory supplies optional session/login/Handheld archives for the first Apply.
 Keep it available when selecting an integration later, or install those optional
 packages from your package repository. Enable Multilib for native Steam.
-Pacman and sudo request approval for host operations; no session is restarted.
+Pacman and sudo request approval for host operations. Changing Steam, Gamescope
+or Handheld restarts a running Icewine shell after stopping its affected helpers.
 
 Use Tab/arrows to navigate and Space to select. Apply creates missing dotfiles;
 **Overwrite existing dotfiles** replaces selected defaults without backups.
@@ -33,11 +34,32 @@ Desktop deselection removes only the Hyprland implementation link. Login
 deselection removes the owned SDDM snippet, leaving SDDM enabled and the boot
 target unchanged.
 
-Gaming uses native Steam, or Flatpak Steam when Flatpak Utility is selected.
-Flatpak Utility also supplies Bazaar. Shell Extras supplies Starship and Fastfetch
-with an editable Bash entry; it does not change the login shell. Icewine keeps
-host `EDITOR`/`VISUAL` values and MIME defaults. Use your normal PATH to
-override application launchers.
+Steam uses a none/native/Flatpak selector (left/right). Its Gamescope child
+starts checked; disabling it retains ordinary Steam without a splash or launcher
+masks. Handheld requires native Steam, Desktop and Gamescope. Flatpak Steam does
+not install Bazaar. Shell Extras supplies themed Starship and Fastfetch.
+Icewine keeps host `EDITOR`/`VISUAL` values and MIME defaults.
+
+For Handheld, build the optional private keyboard and controller-idle packages
+as your normal user before Apply:
+
+```sh
+mkdir -p dependencies
+cp ../packaging/arch/dependencies/* dependencies/
+(cd dependencies && makepkg -s)
+cp dependencies/*.pkg.tar.zst .
+ICEWINE_PACKAGE_DIR="$PWD" icewine manage
+```
+
+The private keyboard applies the fullscreen overlay patch and uses the distro
+Squeekboard resources; it does not replace the distro executable or data.
+InputPlumber, controller device access and its normal host service must be
+available. Apply installs only a named-user InputPlumber permission rule and
+Icewine's helpers; it adds no kernel, driver or hardware permission policy.
+Use **Overwrite existing dotfiles** to adopt the Handheld entry point when a
+preserved desktop entry already exists. Deselection stops Icewine's controller
+idle, keyboard and routing units before removing its own permission rule; it
+leaves InputPlumber and unrelated services installed.
 
 After selecting Desktop session and Login screen and applying, select **Icewine**
 in SDDM; from a logged-in TTY run `icewine-session`. Keep PipeWire/WirePlumber,

@@ -18,12 +18,40 @@ case ${0##*/} in
   icewine-wallpaper)
     export ICEWINE_WALLPAPER_VALIDATOR=/usr/share/icewine/quickshell/modules/WallpaperValidator.qml
     exec bash /usr/lib/icewine/wallpaper "$@" ;;
+  icewine-inputplumber-intercept)
+    if [[ ${1:-} != device ]]; then
+      if [[ -n ${ICEWINE_HANDHELD_ENABLED+x} ]]; then
+        [[ $ICEWINE_HANDHELD_ENABLED == true ]] || exit 1
+      else
+        selections=$(icewine-manage-backend state)
+        [[ " $selections " == *" handheld=true "* ]] || exit 1
+      fi
+    fi
+    export ICEWINE_INPUTPLUMBER_PROFILE_DIR=/usr/share/icewine/inputplumber
+    exec bash /usr/lib/icewine/inputplumber-intercept.sh "$@" ;;
+  icewine-inputplumber-hyprland|icewine-inputplumber-restore|icewine-keyboard-toggle)
+    export ICEWINE_INPUTPLUMBER_PROFILE_DIR=/usr/share/icewine/inputplumber
+    script=${0##*/}; script=${script#icewine-}
+    exec bash "/usr/lib/icewine/$script.sh" "$@" ;;
   icewine-steam)
     [[ ${ICEWINE_STEAM_ENABLED:-true} != false ]] || exit 1
-    selections=${XDG_STATE_HOME:-$HOME/.local/state}/icewine/manage.json
-    if [[ -f $selections ]] && python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); sys.exit(not (s["gaming"] and s["flatpak"]))' "$selections"; then
-      exec flatpak run com.valvesoftware.Steam "$@"
+    if [[ -n ${ICEWINE_STEAM_CLIENT+x} ]]; then
+      client=$ICEWINE_STEAM_CLIENT
+      handheld=${ICEWINE_HANDHELD_ENABLED:-false}
+    else
+      selections=$(icewine-manage-backend state)
+      client=none; handheld=false
+      case " $selections " in *" steam=native "*) client=native ;; *" steam=flatpak "*) client=flatpak ;; esac
+      case " $selections " in *" handheld=true "*) handheld=true ;; esac
     fi
-    exec steam "$@" ;;
+    [[ $handheld == true || $handheld == false ]] || exit 1
+    [[ $handheld != true || $client == native ]] || exit 1
+    case "$client" in
+      flatpak) exec flatpak run com.valvesoftware.Steam "$@" ;;
+      native)
+        [[ $handheld != true ]] || set -- -gamepadui "$@"
+        exec steam "$@" ;;
+      *) exit 1 ;;
+    esac ;;
   *) exit 2 ;;
 esac
