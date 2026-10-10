@@ -17,7 +17,7 @@ Item {
         root, controller.keyboardVisible, controller.keyboardHeight)
 
     function revealItem(item) {
-        const top = item.mapToItem(content, 0, 0).y
+        const top = item.mapToItem(scroll.contentItem, 0, 0).y
         const bottom = top + item.height + 16
         if (top < scroll.contentY || bottom > scroll.contentY + scroll.height)
             scroll.contentY = Math.max(0, Math.min(bottom - scroll.height,
@@ -109,7 +109,7 @@ Item {
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: Math.max(12, button.labelSize)
             }
-            onActiveFocusChanged: if (activeFocus && parent !== footer)
+            onActiveFocusChanged: if (activeFocus && parent !== footer && parent.parent !== footer)
                 Qt.callLater(() => root.revealItem(button))
             Keys.onReturnPressed: click()
             Keys.onEnterPressed: click()
@@ -130,14 +130,13 @@ Item {
                 id: scroll
                 clip: true
                 contentWidth: body.availableWidth
-                contentHeight: content.height
+                contentHeight: Math.max(height, content.y + content.height)
                 boundsBehavior: Flickable.StopAtBounds
                 Column {
-                    id: content
+                    id: clockGroup
                     width: scroll.width
+                    y: Math.max(0, root.height * 0.12 - 32 * root.scaleFactor)
                     spacing: 14 * root.scaleFactor
-
-                    Item { width: 1; height: Math.max(0, root.height * 0.12 - 32 * root.scaleFactor) }
                     Text {
                         id: clock
                         property date now: new Date()
@@ -161,7 +160,15 @@ Item {
                         font.pixelSize: Math.max(12, 14 * root.scaleFactor)
                         wrapMode: Text.WordWrap
                     }
-                    Item { width: 1; height: 24 * root.scaleFactor }
+                }
+                Column {
+                    id: content
+                    objectName: "authForm"
+                    width: scroll.width
+                    y: Math.max(clockGroup.y + clockGroup.height + 24 * root.scaleFactor,
+                        root.height / 2 - body.y - height / 2)
+                    spacing: 24 * root.scaleFactor
+
                     TextButton {
                         width: parent.width
                         visible: root.controller.userCount > 0
@@ -251,24 +258,6 @@ Item {
                         text: "Unlock"
                         onClicked: root.controller.submit()
                     }
-                    Row {
-                        spacing: 24 * root.scaleFactor
-                        TextButton {
-                            width: 80 * root.scaleFactor
-                            visible: root.controller.canReboot
-                            Accessible.name: "Reboot"
-                            text: "Reboot"
-                            onClicked: root.controller.requestReboot()
-                        }
-                        TextButton {
-                            width: 96 * root.scaleFactor
-                            visible: root.controller.canShutdown
-                            Accessible.name: "Shutdown"
-                            text: "Shutdown"
-                            hoverColor: root.palette.error
-                            onClicked: root.controller.requestShutdown()
-                        }
-                    }
                 }
             }
         }
@@ -289,6 +278,24 @@ Item {
                 onClicked: {
                     password.forceActiveFocus()
                     root.controller.toggleKeyboard(root)
+                }
+            }
+            Row {
+                spacing: 24 * root.scaleFactor
+                TextButton {
+                    width: 80 * root.scaleFactor
+                    visible: root.controller.canReboot
+                    Accessible.name: "Reboot"
+                    text: "Reboot"
+                    onClicked: root.controller.requestReboot()
+                }
+                TextButton {
+                    width: 96 * root.scaleFactor
+                    visible: root.controller.canShutdown
+                    Accessible.name: "Shutdown"
+                    text: "Shutdown"
+                    hoverColor: root.palette.error
+                    onClicked: root.controller.requestShutdown()
                 }
             }
             TextButton {

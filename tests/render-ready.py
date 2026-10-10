@@ -117,6 +117,10 @@ ShellRoot {
         const body = findItem(screen, "authBody")
         const footer = findItem(screen, "authFooter")
         const field = findItem(screen, "authPassword")
+        const form = findItem(screen, "authForm")
+        if (screen.height >= 800 && inset === 0
+                && Math.abs(form.mapToItem(screen, 0, 0).y + form.height / 2 - screen.height / 2) > 1)
+            throw new Error("Login details must be vertically centred")
         if (panel.width > screen.width || panel.height !== screen.height
                 || panel.width < Math.min(screen.width, 288)
                 || body.height <= 0 || footer.y + footer.height > screen.height - inset)
@@ -130,8 +134,10 @@ ShellRoot {
             throw new Error("Authentication status obscured by keyboard")
         const keyboardButton = findItem(screen, "Keyboard")
         const sessionButton = findItem(screen, "Select session")
-        if (sessionButton.visible && keyboardButton.y + keyboardButton.height > sessionButton.y)
-            throw new Error("Keyboard must sit directly above session")
+        const powerRow = findItem(screen, "Reboot").parent
+        if (powerRow.parent !== footer || powerRow.y !== keyboardButton.y + keyboardButton.height
+                || (sessionButton.visible && powerRow.y + powerRow.height > sessionButton.y))
+            throw new Error("Power controls must sit between keyboard and session")
     }
     property int captures: 0
     function capture(item, name) {
