@@ -17,7 +17,7 @@ theme.__file__ = os.environ.get("ICEWINE_THEME_SCRIPT", str(Path(__file__).with_
 importlib.machinery.SourceFileLoader(theme.__name__, theme.__file__).exec_module(theme)
 FEATURES = ("desktop", "terminal", "texteditor", "filemanager", "gaming", "flatpak", "login", "shellExtras")
 APPS = {
-    "desktop": ("hypr", "uwsm", "gtk", "btop", "user-dirs", "applications"),
+    "desktop": ("hypr", "uwsm", "gtk", "user-dirs", "applications"),
     "terminal": ("kitty",), "texteditor": ("nano", "nvim"), "filemanager": ("yazi",),
     "gaming": ("gaming",), "flatpak": (), "login": (),
     "shellExtras": ("shellExtras", "starship", "fastfetch"),

@@ -32,7 +32,6 @@ APPS = {
     **{name: tuple(files) for name, files in CONSUMERS.items()},
     "hypr": (),
     "uwsm": (),
-    "btop": (),
     "wallpapers": (),
     "user-dirs": (),
     "nvim": (),
@@ -330,7 +329,7 @@ def static_app(root_name, relative):
     return {"hypr": "hypr", "uwsm": "uwsm", "quickshell": "quickshell",
             "kitty": "kitty",
             "gtk-3.0": "gtk", "gtk-4.0": "gtk",
-            "btop": "btop", "user-dirs.locale": "user-dirs"}.get(relative.parts[0], relative.parts[0])
+            "user-dirs.locale": "user-dirs"}.get(relative.parts[0], relative.parts[0])
 
 
 def default_signature(path):
