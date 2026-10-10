@@ -46,8 +46,20 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         selected = {name: name in features for name in manage.FEATURES}
         extra = {"ICEWINE_MANAGE_SELECTIONS": json.dumps(selected)} if readonly else {}
         with patch.dict(os.environ, dict(env, **extra)), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}):
-            manage.main(["apply", *[str(int(selected[name])) for name in manage.FEATURES], str(int(overwrite))])
+            manage.main(["apply", *[f"{name}={str(bit).lower()}" for name, bit in reversed(list(selected.items()))], f"overwrite={str(overwrite).lower()}"])
         return selected
+    # Invalid named requests fail before any filesystem or package operation.
+    valid = [f"{name}=false" for name in manage.FEATURES] + ["overwrite=false"]
+    with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), patch.object(manage, "apply", side_effect=AssertionError("invalid request applied")):
+        for request in (valid + ["terminal=true"], valid + ["unknown=false"],
+                        valid[1:], valid[:-1], ["terminal=1", *valid[1:]]):
+            try:
+                manage.main(["apply", *request])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"Accepted invalid request: {request}")
+        assert not state.exists()
     # Merely querying state does not even create the state directory.
     with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
         manage.main(["state"])
@@ -92,7 +104,8 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         assert commands.call_args_list[0].args[0] == ["sudo", "pacman", "-S", "--needed", "kitty"]
     with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), contextlib.redirect_stdout(io.StringIO()) as saved:
         manage.main(["state"])
-        assert saved.getvalue().strip() == "0 0 1 0 0 0 0 0 0"
+        assert dict(field.split("=") for field in saved.getvalue().split()) == (
+            dict.fromkeys(manage.FEATURES, "false") | {"readonly": "false", "terminal": "true"})
     kitty = config / "kitty/kitty.conf"
     kitty.write_text("my edits\n")
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
@@ -182,7 +195,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         assert not (config / "yazi/theme.toml").is_symlink()
     with patch.dict(os.environ, dict(env, ICEWINE_MANAGE_SELECTIONS=json.dumps(false))):
         try:
-            manage.main(["apply", "1", *("0" for _ in range(8))])
+            manage.main(["apply", *[f"{name}={str(name == 'desktop').lower()}" for name in manage.FEATURES], "overwrite=false"])
         except ValueError as error:
             assert "read-only" in str(error)
         else:
@@ -226,7 +239,7 @@ with tempfile.TemporaryDirectory() as temporary:
                XDG_STATE_HOME=str(root / "state"), ICEWINE_MANAGE_SELECTIONS=json.dumps(declared))
     with patch.dict(os.environ, env), patch.object(manage.subprocess, "run", side_effect=AssertionError("host operation before root validation")):
         try:
-            manage.main(["apply", "0", "0", "0", "0", "0", "0", "0", "1", "1"])
+            manage.main(["apply", *[f"{name}={str(bit).lower()}" for name, bit in declared.items()], "overwrite=true"])
         except ValueError as error:
             assert "symlinked deployment root" in str(error)
         else:
@@ -249,6 +262,4 @@ print("PASS: explicit Apply, selections, ownership, overwrite, failures and read
 module_options = (source / "modules/default.nix").read_text() + (source / "modules/login.nix").read_text()
 for name in manage.FEATURES:
     assert name + ".enable = lib.mkEnableOption" in module_options or name + " = {" in module_options
-assert len(manage.FEATURES) == 8
-assert "[(&str, &str); 8]" in (source / "manager/src/main.rs").read_text()
 print("PASS: utility option parity and local split-package bootstrap")

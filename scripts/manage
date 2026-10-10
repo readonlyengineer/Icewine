@@ -167,10 +167,20 @@ def main(argv):
     state = theme.xdg("XDG_STATE_HOME", ".local/state") / "icewine"
     readonly, previous = selections(state)
     if argv == ["state"]:
-        print(" ".join("1" if bit else "0" for bit in (readonly, *(previous[name] for name in FEATURES))))
+        print(" ".join(f"{name}={str(bit).lower()}" for name, bit in {"readonly": readonly, **previous}.items()))
         return
-    if len(argv) != 10 or argv[0] != "apply" or any(bit not in {"0", "1"} for bit in argv[1:]):
+    if not argv or argv[0] != "apply":
         raise ValueError("invalid manager request")
+    fields = {}
+    for field in argv[1:]:
+        name, separator, value = field.partition("=")
+        if not separator or name in fields or value not in {"true", "false"}:
+            raise ValueError("invalid manager request")
+        fields[name] = value == "true"
+    if "overwrite" not in fields:
+        raise ValueError("missing overwrite choice")
+    overwrite = fields.pop("overwrite")
+    selected = validate(fields)
     if os.getuid() == 0:
         raise ValueError("run icewine manage as your desktop user")
     # Never follow symlinked manager/configuration roots into someone else's files.
@@ -183,8 +193,7 @@ def main(argv):
         # Ponytail: one lock serialises explicit Apply; split by root if contention matters.
         fcntl.flock(lock, fcntl.LOCK_EX)
         readonly, previous = selections(state)
-        selected = dict(zip(FEATURES, (bit == "1" for bit in argv[1:9])))
-        apply(selected, argv[9] == "1", readonly, previous, config, data, state)
+        apply(selected, overwrite, readonly, previous, config, data, state)
 
 
 if __name__ == "__main__":

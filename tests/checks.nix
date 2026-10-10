@@ -148,9 +148,15 @@ in {
       grep -F 'ExecStart=' ${optIn.systemd.user.units."icewine.service".unit}/icewine.service
       ! grep -q 'icewine init' ${optIn.systemd.user.units."icewine.service".unit}/icewine.service
       grep -F 'ExecStart=' ${optIn.systemd.user.units."hypridle.service".unit}/hypridle.service
-      test "$(${icewineCli}/bin/icewine-manage-backend state)" = '1 1 1 1 1 1 1 1 1'
+      read -ra fields <<< "$(${icewineCli}/bin/icewine-manage-backend state)"
+      selections=()
+      for field in "''${fields[@]}"; do
+        if [[ "$field" != readonly=* ]]; then selections+=("$field"); fi
+      done
+      [[ " ''${fields[*]} " = *" readonly=true "* ]]
+      for selection in "''${selections[@]}"; do [[ "$selection" = *=true ]]; done
       test ! -e "$XDG_CONFIG_HOME"
-      ${icewineCli}/bin/icewine-manage-backend apply 1 1 1 1 1 1 1 1 0
+      ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -L "$XDG_CONFIG_HOME/hypr/icewine"
       test -f "$XDG_CONFIG_HOME/quickshell/icewine/Desktop.qml"
@@ -166,13 +172,18 @@ in {
       ln -sfn "$TMPDIR/portable-hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" desktop
       printf '# user changes\n' >> "$XDG_CONFIG_HOME/kitty/kitty.conf"
-      ${icewineCli}/bin/icewine-manage-backend apply 1 1 1 1 1 1 1 1 0
+      ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       grep -Fx '# user changes' "$XDG_CONFIG_HOME/kitty/kitty.conf"
-      ${icewineCli}/bin/icewine-manage-backend apply 1 1 1 1 1 1 1 1 1
+      ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=true
       ! grep -q '# user changes' "$XDG_CONFIG_HOME/kitty/kitty.conf"
       export HOME=$TMPDIR/handheld XDG_CONFIG_HOME=$TMPDIR/handheld/.config XDG_DATA_HOME=$TMPDIR/handheld/.local/share XDG_STATE_HOME=$TMPDIR/handheld/.local/state
       mkdir -p "$HOME"
-      ${handheldCli}/bin/icewine-manage-backend apply 1 0 0 0 1 0 0 0 0
+      read -ra fields <<< "$(${handheldCli}/bin/icewine-manage-backend state)"
+      selections=()
+      for field in "''${fields[@]}"; do
+        if [[ "$field" != readonly=* ]]; then selections+=("$field"); fi
+      done
+      ${handheldCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       cmp ${../quickshell/deck/shell.qml} "$XDG_CONFIG_HOME/quickshell/shell.qml"
       cp -r "$(readlink "$XDG_CONFIG_HOME/hypr/icewine")" "$TMPDIR/portable-handheld-hyprland"
       ln -sfn "$TMPDIR/portable-handheld-hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
