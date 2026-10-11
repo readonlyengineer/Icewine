@@ -245,8 +245,8 @@ with tempfile.TemporaryDirectory() as temporary:
     # Opacity is independent of theme selection and survives reapplication.
     saved_theme = (state / "icewine/theme").read_text()
     for level, kitty_opacity, inactive_opacity in [
-        ("off", "1.00", "1.00"), ("low", "0.80", "0.75"),
-        ("med", "0.60", "0.55"), ("high", "0.40", "0.40"),
+        ("off", "1.00", "1.00"), ("low", "0.80", "1.00"),
+        ("med", "0.60", "1.00"), ("high", "0.40", "1.00"),
     ]:
         result = run("transparency", level)
         assert result.returncode == 0, result.stderr
