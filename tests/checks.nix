@@ -60,6 +60,8 @@ in {
   } ''
     python3 ${./controls.py} ${self}
     python3 ${./render-ready.py} ${self}
+    python3 ${./render-ready.py} ${self} --native-osk=lock
+    python3 ${./render-ready.py} ${self} --native-osk=sddm
     python3 ${./theme-live.py} ${self}
     python3 ${./sddm-palette.py} ${sddmTheme}/share/sddm/themes/icewine/theme/Palette.qml \
       ${pkgs.qt6.qtdeclarative}/bin/qml ${pkgs.qt6.qtdeclarative}/lib/qt-6/qml

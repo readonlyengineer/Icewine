@@ -273,11 +273,12 @@ Item {
             TextButton {
                 width: parent.width
                 Accessible.name: "Keyboard"
+                focusPolicy: Qt.TabFocus
                 text: root.controller.keyboardVisible && root.controller.keyboardHost === root
                     ? "Hide keyboard" : "Keyboard"
                 onClicked: {
-                    password.forceActiveFocus()
                     root.controller.toggleKeyboard(root)
+                    password.forceActiveFocus()
                 }
             }
             Row {

@@ -7,6 +7,7 @@ import Quickshell.Io
 import Quickshell.Services.Pam
 import Quickshell.Wayland
 import "SessionModel.js" as SessionModel
+import "AuthModel.js" as AuthModel
 
 Scope {
     id: root
@@ -23,16 +24,15 @@ Scope {
     readonly property string logindSessionId: Quickshell.env("XDG_SESSION_ID") || "auto"
     property string logindSessionPath: ""
     property var keyboardHost: null
-    readonly property bool keyboardVisible: Qt.inputMethod.visible
+    property bool keyboardEnabled: false
+    readonly property bool keyboardVisible: keyboard.visible
     property real keyboardHeight: keyboard.height
 
     function toggleKeyboard(host) {
-        if (keyboardVisible && keyboardHost === host) {
-            Qt.inputMethod.hide()
-        } else {
-            keyboardHost = host
-            Qt.inputMethod.show()
-        }
+        keyboardEnabled = !(keyboardEnabled && keyboardHost === host)
+        keyboardHost = host
+        if (keyboardEnabled) Qt.inputMethod.show()
+        else Qt.inputMethod.hide()
     }
 
     function lockFromLogind() {
@@ -203,10 +203,12 @@ Scope {
     InputPanel {
         id: keyboard
         parent: root.keyboardHost
-        width: parent?.width ?? 0
+        width: AuthModel.keyboardWidth(parent?.width ?? 0, parent?.height ?? 0)
+        x: ((parent?.width ?? 0) - width) / 2
         y: (parent?.height ?? 0) - height
         z: 100
-        visible: active && parent !== null
+        visible: active && root.keyboardEnabled && parent !== null
+        onActiveChanged: if (!active) root.keyboardEnabled = false
     }
 
     Process {

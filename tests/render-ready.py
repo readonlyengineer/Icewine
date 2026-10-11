@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise Steam launch and real authentication adapters with offscreen mocks.
-Run: python3 tests/render-ready.py . [preview-directory] (requires qs on PATH).
+Run: python3 tests/render-ready.py . [preview-directory] [--native-osk=lock|sddm].
+Requires qs on PATH; native modes exercise one real InputPanel per process.
 """
 import os
 import json
@@ -12,7 +13,10 @@ import sys
 import tempfile
 
 source = Path(sys.argv[1]).resolve()
-preview_dir = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else None
+native_adapter = next((arg.split("=", 1)[1] for arg in sys.argv[2:] if arg.startswith("--native-osk=")), None)
+assert native_adapter in (None, "lock", "sddm")
+preview_arg = next((arg for arg in sys.argv[2:] if not arg.startswith("--")), None)
+preview_dir = Path(preview_arg).resolve() if preview_arg else None
 if preview_dir:
     preview_dir.mkdir(parents=True, exist_ok=True)
 qml = """import QtQuick
@@ -253,7 +257,8 @@ ShellRoot {
                 const keyboard = root.authChild(item => !root.authChildren.includes(item))
                 if (auth.scaleFactor !== 0.8)
                     throw new Error("Small-screen type scaling failed")
-                if (!keyboard || keyboard.width !== auth.width
+                if (!keyboard || keyboard.width !== Math.min(auth.width, 900, auth.height * 1.5)
+                        || keyboard.x !== (auth.width - keyboard.width) / 2
                         || keyboard.y !== auth.height - keyboard.height
                         || session.keyboardHeight !== keyboard.height)
                     throw new Error("SessionControl keyboard host bindings failed")
@@ -296,6 +301,94 @@ ShellRoot {
                 launcher.launchSteamGamescope()
                 renderTimer.start()
             }
+        }
+    }
+}
+"""
+
+if native_adapter:
+    # Qt permits one native InputPanel per process; reuse this fixture's adapters,
+    # SDDM model mocks, layout assertions, palette generation and command sandbox.
+    models = qml[qml.index("    ListModel {"):qml.index("    Window {")]
+    helpers = qml[qml.index("    function findItem"):qml.index("    function authChild")]
+    adapter = ("""Item {
+        anchors.fill: parent
+        property alias nativeController: session
+        Modules.SessionControl { id: session; authenticationRequired: true }
+        Modules.LockScreenSurface { anchors.fill: parent; session: session }
+    }""" if native_adapter == "lock" else "Sddm.Main { anchors.fill: parent }")
+    qml = """import QtQuick
+import QtQuick.Window
+import QtTest
+import Quickshell
+import "icewine/modules" as Modules
+import "sddm" as Sddm
+import "theme" as Theme
+ShellRoot {
+    id: root
+""" + models + helpers + """
+    Window {
+        id: win; visible: true; width: 1920; height: 1080
+        Loader { id: surface; anchors.fill: parent; sourceComponent: Component {
+""" + adapter + """
+        } }
+        TestCase { id: keys; when: false }
+    }
+    Timer {
+        interval: 100; running: true
+        onTriggered: {
+            try {
+                win.requestActivate()
+                keys.tryCompare(win, "active", true)
+                const auth = root.findItem(surface.item, "authPanel").parent
+                const field = root.findItem(auth, "authPassword")
+                const button = root.findItem(auth, "Keyboard")
+                const owner = surface.item.nativeController ?? auth.controller
+                field.forceActiveFocus()
+                let keyboard
+                if (owner.keyboardEnabled || owner.keyboardVisible)
+                    throw new Error("Native keyboard must start explicitly disabled")
+                for (const size of [[1920,1080], [1280,800], [800,600], [320,480]]) {
+                    win.width = size[0]; win.height = size[1]
+                    keys.wait(50)
+                    keys.mouseClick(button)
+                    keyboard = Array.from(surface.item.children).concat(Array.from(auth.children))
+                        .find(item => item.active !== undefined)
+                    keys.tryCompare(keyboard, "visible", true, 2000, "Explicit native show")
+                    keys.tryCompare(field, "activeFocus", true)
+                    keys.wait(50)
+                    if (keyboard.width !== Math.min(win.width, 900, win.height * 1.5)
+                            || keyboard.x !== (win.width - keyboard.width) / 2
+                            || keyboard.height <= 0 || keyboard.y + keyboard.height > win.height)
+                        throw new Error("Native keyboard bounds failed")
+                    keys.wait(50)
+                    root.checkLayout(auth, keyboard.height)
+                    if (size[0] === 1280) {
+                        root.capture(win.contentItem, "native-" + Quickshell.env("ICEWINE_NATIVE_ADAPTER"))
+                        keys.tryCompare(root, "captures", 0, 2000)
+                    }
+                    keys.keyClick(Qt.Key_A)
+                    if (!field.text.endsWith("a")) throw new Error("Password input lost focus")
+                    keys.mouseClick(button)
+                    keys.tryCompare(keyboard, "visible", false, 2000, "Explicit native hide")
+                    win.contentItem.forceActiveFocus()
+                    field.forceActiveFocus()
+                    keys.wait(100)
+                    if (owner.keyboardEnabled || owner.keyboardVisible || keyboard.visible)
+                        throw new Error("Password refocus reopened dismissed native keyboard")
+                    keys.mouseClick(button)
+                    keys.tryCompare(keyboard, "visible", true)
+                    Qt.inputMethod.hide() // Native HideKeyboardKey uses this same hide path.
+                    keys.tryCompare(owner, "keyboardEnabled", false, 2000, "Native hide clears intent")
+                    win.contentItem.forceActiveFocus()
+                    field.forceActiveFocus()
+                    keys.wait(100)
+                    if (keyboard.visible) throw new Error("Native dismissal was not retained")
+                    field.text = ""
+                }
+                console.log("RENDER_READY_PASSED")
+                Qt.quit()
+            } catch (error) { console.error(error); Qt.exit(1) }
         }
     }
 }
@@ -350,6 +443,9 @@ fi
                XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(runtime),
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"],
                TEST_LAUNCHES=str(root / "launches"), XDG_DATA_HOME=str(root / "data"))
+    if native_adapter:
+        env.update(QT_IM_MODULE="qtvirtualkeyboard", QT_VIRTUALKEYBOARD_DESKTOP_DISABLE="1",
+                   ICEWINE_NATIVE_ADAPTER=native_adapter)
     if preview_dir:
         env["ICEWINE_PREVIEW_DIR"] = str(preview_dir)
     try:
@@ -361,11 +457,12 @@ fi
     assert result.returncode == 0 and "RENDER_READY_PASSED" in output, output
     assert "Failed to load configuration" not in output, output
     assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
-    launches = (root / "launches").read_text().splitlines()
-    assert len(launches) == 2 and all(
+    launches = [] if native_adapter else (root / "launches").read_text().splitlines()
+    assert native_adapter or len(launches) == 2 and all(
         line.startswith("app -t service -u icewine-steam-gamescope.service "
                         "-p ExitType=main -p KillMode=control-group "
                         "-- gamescope ")
         for line in launches
     ), launches
-    print("Steam launch, auth visuals, locker and SDDM adapter checks passed")
+    print(f"Native {native_adapter} OSK input, bounds, dismissal/refocus checks passed" if native_adapter
+          else "Steam launch, auth visuals, locker and SDDM adapter checks passed")

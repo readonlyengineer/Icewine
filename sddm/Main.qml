@@ -93,9 +93,10 @@ Item {
     }
     InputPanel {
         id: keyboard
-        width: Math.min(parent.width, 900, parent.height * 1.5)
+        width: AuthModel.keyboardWidth(parent.width, parent.height)
         anchors.horizontalCenter: parent.horizontalCenter
         y: parent.height - height
         visible: active && controller.keyboardEnabled
+        onActiveChanged: if (!active) controller.keyboardEnabled = false
     }
 }
