@@ -14,7 +14,7 @@ Item {
 
         anchors.centerIn: parent
         text: Qt.formatDateTime(root.now, "ddd d  HH:mm")
-        color: Theme.Palette.tertiary
+        color: Theme.Palette.primary
         font.family: "JetBrainsMono Nerd Font"
         font.pixelSize: 14
         font.bold: true
