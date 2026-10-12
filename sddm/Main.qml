@@ -1,14 +1,16 @@
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.VirtualKeyboard
+import QtQuick.VirtualKeyboard.Settings
 import "modules" as Modules
-import "theme" as Theme
+import IcewineTheme as Theme
 import "modules/AuthModel.js" as AuthModel
 
 Item {
     id: root
     property bool publicationAvailable: true
     property url wallpaperSource: "file:///var/lib/icewine/sddm/wallpaper.img"
+    Component.onCompleted: VirtualKeyboardSettings.styleName = "icewine"
 
     // Use Qt's model role lookup and selection; AuthScreen supplies the buttons.
     Controls.ComboBox {

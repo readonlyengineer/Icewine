@@ -1,4 +1,4 @@
-{ lib, runCommand, writeText }:
+{ lib, runCommand, writeText, qt6 }:
 let
   themeFiles = builtins.filter (name: lib.hasSuffix ".json" name)
     (builtins.attrNames (builtins.readDir ../theme/assets/themes));
@@ -32,9 +32,15 @@ runCommand "icewine-sddm-theme" { } ''
   mkdir -p "$theme"/{modules,theme}
   cp ${./Main.qml} "$theme/Main.qml"
   ln -s ${../theme/assets/flower-branch.png} "$theme/wallpaper.png"
+  cp -r ${../quickshell/QtQuick} "$theme/QtQuick"
+  chmod -R u+w "$theme/QtQuick"
+  substituteInPlace "$theme/QtQuick/VirtualKeyboard/Styles/icewine/style.qml" \
+    --replace-fail 'import qs.icewine.theme as Theme' 'import IcewineTheme as Theme'
   cp ${./metadata.desktop} "$theme/metadata.desktop"
   cp ${../quickshell/modules/AuthScreen.qml} "$theme/modules/AuthScreen.qml"
   cp ${../quickshell/modules/AuthModel.js} "$theme/modules/AuthModel.js"
   cp ${paletteQml} "$theme/theme/Palette.qml"
-  printf 'singleton Palette 1.0 Palette.qml\n' > "$theme/theme/qmldir"
+  mkdir -p "$theme/IcewineTheme" "$out/${qt6.qtbase.qtQmlPrefix}"
+  printf 'module IcewineTheme\nsingleton Palette 1.0 ../theme/Palette.qml\n' > "$theme/IcewineTheme/qmldir"
+  ln -s "$theme/QtQuick" "$theme/IcewineTheme" "$out/${qt6.qtbase.qtQmlPrefix}/"
 ''

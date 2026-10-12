@@ -27,7 +27,7 @@ let
   ) themeConsumers);
   implementation = pkgs.runCommand "icewine-implementation" { } ''
     mkdir -p $out/quickshell/deck $out/hyprland/modules $out/kitty $out/uwsm $out/hypridle $out/gtk
-    cp -r ${../quickshell}/adapters ${../quickshell}/modules ${../quickshell}/theme $out/quickshell/
+    cp -r ${../quickshell}/adapters ${../quickshell}/modules ${../quickshell}/theme ${../quickshell}/QtQuick $out/quickshell/
     cp ${../quickshell}/deck/DeckOverlay.qml ${../quickshell}/deck/DeckMenu.js $out/quickshell/deck/
     cp ${../quickshell}/Desktop.qml ${../quickshell}/Handheld.qml $out/quickshell/
     cp ${../hyprland}/icewine.lua $out/hyprland/
@@ -194,6 +194,7 @@ in {
         "ICEWINE_GAMESCOPE_ENABLED=${if cfg.steam != "none" && cfg.gamescope.enable then "true" else "false"}"
         "ICEWINE_BATTERY_ENABLED=${if cfg.battery.enable then "true" else "false"}"
         "PATH=/run/wrappers/bin:/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd monitorCapabilities monitorBrightness steamShortcuts ]}"
+        "QML_IMPORT_PATH=${implementation}/quickshell"
         "QT_IM_MODULE=qtvirtualkeyboard"
       ];
       Restart = "on-failure";

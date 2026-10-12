@@ -35,6 +35,7 @@ let
     boot.isContainer = true; # Evaluation fixture has no disk/bootloader configuration.
     services.icewine.login.enable = true;
     services.displayManager.sddm.enable = true;
+    services.displayManager.sddm.settings.General.GreeterEnvironment = "HOST_GREETER_SETTING=retained";
   }]; }).config;
   loginOff = (desktopSystem.extendModules { modules = [{ services.displayManager.sddm.enable = true; }]; }).config;
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
@@ -144,6 +145,8 @@ in {
     assert optIn.services.displayManager.sddm.theme == "icewine";
     assert loginOnly.services.displayManager.sddm.enable;
     assert loginOnly.services.displayManager.sddm.theme == "icewine";
+    assert loginOnly.services.displayManager.sddm.settings.General.GreeterEnvironment == "HOST_GREETER_SETTING=retained";
+    assert hasPackage "icewine-sddm-theme" loginOnly.services.displayManager.sddm.extraPackages;
     assert !loginOnly.programs.hyprland.enable;
     assert loginOnly.services.displayManager.defaultSession == null;
     assert lib.all (assertion: assertion.assertion) loginOnly.assertions;

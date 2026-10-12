@@ -35,7 +35,7 @@ package_icewine() {
   cp -r theme/assets "$share/theme"
   install -Dm644 theme/assets/flower-branch.png "$share/defaults/data/wallpapers/default.jpg"
   install -d "$share/quickshell"
-  cp -r quickshell/{modules,adapters,theme} "$share/quickshell/"
+  cp -r quickshell/{modules,adapters,theme,QtQuick} "$share/quickshell/"
   cp quickshell/{Desktop,Handheld}.qml "$share/quickshell/"
   cp -r quickshell/deck "$share/quickshell/"
   install -d "$share/hyprland"
@@ -122,9 +122,16 @@ package_icewine-sddm() {
   install -d "$theme/modules" "$theme/theme"
   cp sddm/{Main.qml,metadata.desktop} "$theme/"
   ln -s /usr/share/icewine/defaults/data/wallpapers/default.jpg "$theme/wallpaper.png"
+  cp -r quickshell/QtQuick "$theme/"
+  sed -i 's#import qs.icewine.theme as Theme#import IcewineTheme as Theme#' "$theme/QtQuick/VirtualKeyboard/Styles/icewine/style.qml"
   cp quickshell/modules/{AuthScreen.qml,AuthModel.js} "$theme/modules/"
   cp "$srcdir/Palette.qml" "$theme/theme/Palette.qml"
-  printf '%s\n' 'singleton Palette 1.0 Palette.qml' > "$theme/theme/qmldir"
+  mkdir -p "$theme/IcewineTheme"
+  printf '%s\n' 'module IcewineTheme' 'singleton Palette 1.0 ../theme/Palette.qml' > "$theme/IcewineTheme/qmldir"
+  local qml="$pkgdir/usr/lib/qt6/qml"
+  install -d "$qml/QtQuick/VirtualKeyboard/Styles"
+  ln -s /usr/share/sddm/themes/icewine/QtQuick/VirtualKeyboard/Styles/icewine "$qml/QtQuick/VirtualKeyboard/Styles/icewine"
+  ln -s /usr/share/sddm/themes/icewine/IcewineTheme "$qml/IcewineTheme"
 }
 
 package_icewine-handheld() {

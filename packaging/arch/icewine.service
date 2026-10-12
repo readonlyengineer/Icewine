@@ -5,6 +5,7 @@ After=graphical-session.target
 Conflicts=mako.service
 
 [Service]
+Environment=QML_IMPORT_PATH=/usr/share/icewine/quickshell
 ExecStart=/usr/bin/qs
 ExecStopPost=-/usr/bin/icewine-inputplumber-intercept overlay
 Restart=on-failure

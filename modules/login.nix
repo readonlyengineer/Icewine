@@ -1,6 +1,7 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.icewine;
+  sddmTheme = pkgs.callPackage ../sddm { };
 in
 {
   options.services.icewine.login.enable = lib.mkEnableOption "Icewine's SDDM login screen";
@@ -21,10 +22,10 @@ in
       logToJournal = true;
       sddm = {
         theme = "icewine";
-        extraPackages = [ pkgs.qt6.qtvirtualkeyboard ];
+        extraPackages = [ pkgs.qt6.qtvirtualkeyboard sddmTheme ];
         settings.General.InputMethod = "qtvirtualkeyboard";
       };
     };
-    environment.systemPackages = [ (pkgs.callPackage ../sddm { }) ];
+    environment.systemPackages = [ sddmTheme ];
   };
 }

@@ -409,12 +409,19 @@ ShellRoot {
                 const button = root.findItem(auth, "Keyboard")
                 const owner = surface.item.nativeController ?? auth.controller
                 field.forceActiveFocus()
+                // Keep the adapter palette identity shared with its native style.
+                const livePalette = auth.palette
+                const paletteRoles = ["background", "backgroundDark", "surface", "selection", "border", "foreground", "foregroundDark", "muted", "primary", "primaryDark", "secondary", "tertiary", "success", "warning", "caution", "error", "info"]
+                const darkPalette = {}
+                // QML colour values retain property references; snapshot their values.
+                for (const role of paletteRoles) darkPalette[role] = String(livePalette[role])
                 let keyboard
                 if (owner.keyboardEnabled || owner.keyboardVisible)
                     throw new Error("Native keyboard must start explicitly disabled")
                 for (const size of [[1920,1080], [1280,800], [800,600], [320,480]]) {
                     win.width = size[0]; win.height = size[1]
-                    auth.palette = size[0] < 1000 ? Theme.LightPalette : Theme.Palette
+                    const sizePalette = size[0] < 1000 ? Theme.LightPalette : darkPalette
+                    for (const role of paletteRoles) livePalette[role] = sizePalette[role]
                     keys.wait(50)
                     if (size[0] === 1280) {
                         root.capture(win.contentItem, "motion-" + Quickshell.env("ICEWINE_NATIVE_ADAPTER") + "-0")
@@ -436,6 +443,38 @@ ShellRoot {
                         root.capture(win.contentItem, "motion-" + Quickshell.env("ICEWINE_NATIVE_ADAPTER") + "-2")
                         keys.tryCompare(root, "captures", 0, 2000)
                     }
+                    const backdrop = root.findItem(keyboard, "icewineKeyboardBackground")
+                    if (!backdrop || backdrop.color !== livePalette.backgroundDark)
+                        throw new Error("Native keyboard did not load the Icewine palette style")
+                    keys.tryCompare(field, "activeFocus", true)
+                    function nativeKey(item, label) {
+                        if (item.objectName === "icewineKeyboardKey" && item.label === label) return item
+                        for (const child of item.children ?? []) {
+                            const found = nativeKey(child, label)
+                            if (found) return found
+                        }
+                        return null
+                    }
+                    const letter = nativeKey(keyboard, "a")
+                    const backspace = nativeKey(keyboard, "⌫")
+                    if (!letter || !backspace) throw new Error("Native key labels missing")
+                    keys.wait(100)
+                    const beforeClick = "theme-secret"
+                    field.text = beforeClick
+                    keys.mouseClick(letter)
+                    if (field.text !== beforeClick + "a") throw new Error("Styled native key did not input once")
+                    keys.mouseClick(backspace)
+                    keys.wait(100)
+                    if (field.text !== beforeClick) throw new Error("Styled native backspace did not delete once at " + size + " beforeLength=" + beforeClick.length + " afterLength=" + field.text.length)
+                    const previousText = field.text
+                    const previousColour = String(backdrop.color)
+                    const changedPalette = size[0] < 1000 ? darkPalette : Theme.LightPalette
+                    for (const role of ["backgroundDark", "surface", "selection", "border", "foreground", "primary"])
+                        livePalette[role] = changedPalette[role]
+                    keys.wait(10)
+                    if (auth.palette !== livePalette || String(backdrop.color) === previousColour
+                            || backdrop.color !== livePalette.backgroundDark || field.text !== previousText || !field.activeFocus)
+                        throw new Error("Native live palette change: size=" + size + " identity=" + (auth.palette === livePalette) + " changed=" + (String(backdrop.color) !== previousColour) + " colour=" + (backdrop.color === livePalette.backgroundDark) + " text=" + (field.text === previousText) + " focus=" + field.activeFocus)
                     keys.tryCompare(field, "activeFocus", true)
                     keys.wait(50)
                     if (keyboard.width !== Math.min(win.width, 900, win.height * 1.5)
@@ -589,21 +628,33 @@ ShellRoot {
 
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
+    style_root = root / "sddm" if native_adapter == "sddm" else root
+    shutil.copytree(source / "quickshell/QtQuick", style_root / "QtQuick")
+    if native_adapter == "sddm":
+        style = style_root / "QtQuick/VirtualKeyboard/Styles/icewine/style.qml"
+        style.chmod(style.stat().st_mode | 0o200)
+        style.write_text(style.read_text().replace("import qs.icewine.theme as Theme", 'import IcewineTheme as Theme'))
     (root / "icewine").mkdir()
     (root / "icewine/modules").symlink_to(source / "quickshell/modules")
     (root / "icewine/theme").symlink_to(root / "theme")
     (root / "theme").mkdir()
     palette = (source / "theme/assets/templates/Palette.qml.in").read_text()
+    # Mutable fixture tokens exercise native style updates without changing input state.
     for name, theme in [("Palette", workspace_theme or "tokyo-night"), ("LightPalette", "gruvbox-light")]:
         colours = json.loads((source / "theme/assets/themes" / (theme + ".json")).read_text())
         (root / "theme" / (name + ".qml")).write_text(
-            re.sub(r"@(\w+)@", lambda match: colours[match[1]], palette))
+            re.sub(r"@(\w+)@", lambda match: colours[match[1]], palette)
+                .replace("readonly property color", "property color"))
     (root / "theme/qmldir").write_text(
         "singleton Palette 1.0 Palette.qml\nsingleton LightPalette 1.0 LightPalette.qml\n")
-    (root / "sddm").mkdir()
-    (root / "sddm/Main.qml").symlink_to(source / "sddm/Main.qml")
+    (root / "sddm").mkdir(exist_ok=True)
+    shutil.copyfile(source / "sddm/Main.qml", root / "sddm/Main.qml")
     (root / "sddm/modules").symlink_to(source / "quickshell/modules")
-    (root / "sddm/theme").symlink_to(root / "theme")
+    shutil.copytree(root / "theme", root / "sddm/theme")
+    (style_root / "IcewineTheme").mkdir()
+    palette_path = "../theme/Palette.qml" if native_adapter == "sddm" else "../sddm/theme/Palette.qml"
+    (style_root / "IcewineTheme/qmldir").write_text(
+        "module IcewineTheme\nsingleton Palette 1.0 " + palette_path + "\n")
     (root / "config").mkdir()
     (root / "config/qmldir").write_text("singleton Settings 1.0 Settings.qml\n")
     (root / "config/Settings.qml").write_text("""pragma Singleton
@@ -643,6 +694,7 @@ fi
     runtime.mkdir(mode=0o700)
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen",
                XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(runtime),
+               QML_IMPORT_PATH=str(style_root),
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"],
                TEST_LAUNCHES=str(root / "launches"), XDG_DATA_HOME=str(root / "data"))
     if workspace_theme:

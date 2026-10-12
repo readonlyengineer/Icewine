@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.VirtualKeyboard
+import QtQuick.VirtualKeyboard.Settings
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Pam
@@ -11,6 +12,7 @@ import "AuthModel.js" as AuthModel
 
 Scope {
     id: root
+    Component.onCompleted: VirtualKeyboardSettings.styleName = "icewine"
 
     required property bool authenticationRequired
 
