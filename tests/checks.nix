@@ -29,6 +29,7 @@ let
     login.enable = true;
     shellExtras.enable = true;
   }; services.displayManager.sddm.enable = true; }]; }).config;
+  monitorsOnly = (desktopSystem.extendModules { modules = [{ services.icewine.monitors = { enable = true; package = pkgs.hello; }; }]; }).config;
   nativeGaming = (desktopSystem.extendModules { modules = [{ services.icewine.steam = "native"; }]; }).config;
   flatpakOnly = (desktopSystem.extendModules { modules = [{ services.icewine = { steam = "flatpak"; gamescope.enable = false; }; }]; }).config;
   loginOnly = (desktopSystem.extendModules { modules = [{
@@ -142,6 +143,8 @@ in {
     assert hasPackage "starship" optIn.users.users.demo.packages;
     assert hasPackage "gamescope" optIn.environment.systemPackages;
     assert !(hasPackage "bazaar" optIn.environment.systemPackages);
+    assert !(hasPackage "hyprmon" desktop.users.users.demo.packages);
+    assert hasPackage "hello" monitorsOnly.users.users.demo.packages;
     assert optIn.services.displayManager.sddm.theme == "icewine";
     assert loginOnly.services.displayManager.sddm.enable;
     assert loginOnly.services.displayManager.sddm.theme == "icewine";

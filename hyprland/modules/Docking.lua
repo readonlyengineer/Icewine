@@ -16,9 +16,34 @@ return function(panel, lid_paths)
 			end
 		end
 	end
-	local function internal_monitor(enabled)
-		-- A disabled panel is absent from queries; its host identity still restores it.
-		return enabled and internal or nil
+	local function saved_rules()
+		local path = package.searchpath("hyprmon", package.path)
+		if not path then return {} end
+		local rules = {}
+		-- Ponytail: capture only generated hl.monitor calls; custom Lua needs a native rule API.
+		local chunk = loadfile(path, "t", { hl = { monitor = function(spec)
+			assert(type(spec) == "table" and type(spec.output) == "string")
+			rules[spec.output] = spec
+		end } })
+		return chunk and pcall(chunk) and rules or {}
+	end
+	local function saved_for(rules, monitor)
+		return rules[monitor.name] or monitor.description and rules["desc:" .. monitor.description]
+	end
+	local description
+	local function panel_rule(rules)
+		local rule = {}
+		for key, value in pairs(panel) do rule[key] = value end
+		local saved = saved_for(rules, {name=internal, description=description})
+		if saved and not saved.disabled and type(saved.mode) == "string"
+			and saved.mode:match("^%d+x%d+@%d+%.?%d*$")
+			and type(saved.position) == "string" and saved.position:match("^%-?%d+x%-?%d+$")
+			and type(saved.scale) == "number"
+			and saved.scale > 0 and saved.scale < math.huge then
+			for key, value in pairs(saved) do rule[key] = value end
+		end
+		rule.output, rule.disabled = internal, false
+		return rule
 	end
 	local function manage_workspaces(panel, externals)
 		table.sort(externals, function(a, b)
@@ -44,20 +69,23 @@ return function(panel, lid_paths)
 	end
 	local panel_enabled -- Requested state; monitor refresh is deferred.
 	local function reconcile()
-		local enabled = read_lid() ~= "closed"
-		local desired_panel = internal_monitor(enabled)
+		local saved = saved_rules()
 		local externals = {}
 		for _, monitor in ipairs(hl.get_monitors()) do
-			if monitor.name ~= internal and monitor.name ~= "FALLBACK" then
+			if monitor.name == internal then description = monitor.description end
+			local preference = saved_for(saved, monitor)
+			if monitor.name ~= internal and monitor.name ~= "FALLBACK"
+				and monitor.dpms_status ~= false and not (preference and preference.disabled) then
 				externals[#externals + 1] = monitor
 			end
 		end
+		local enabled = read_lid() ~= "closed" or #externals == 0
 		if internal and panel_enabled ~= enabled then
+			-- Native monitor application tests available/preferred modes; Lua has no success return.
+			hl.monitor(enabled and panel_rule(saved) or { output = internal, disabled = true })
 			panel_enabled = enabled
-			if enabled then panel.disabled = false end
-			hl.monitor(enabled and panel or { output = internal, disabled = true })
 		end
-		manage_workspaces(desired_panel, externals)
+		manage_workspaces(internal and enabled and internal or nil, externals)
 	end
 
 	hl.on("monitor.added", reconcile)

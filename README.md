@@ -312,6 +312,7 @@ These options belong under `services.icewine`:
 | `filemanager.enable = false;` | Yazi and its GVfs default |
 | `steam = "none";` | Steam integration and dependent Gamescope/Handheld |
 | `gamescope.enable = false;` | Gamescope launch integration; ordinary Steam remains available |
+| `monitors.enable = false;` | Optional HyprMon; locked default needs a Lua-compatible `monitors.package` override |
 | `login.enable = false;` | Icewine SDDM styling; host SDDM enablement is retained |
 | `shellExtras.enable = false;` | Starship/Fastfetch defaults and btop styling |
 | `shellExtras.git.enable = false;` | Git information in the prompt |

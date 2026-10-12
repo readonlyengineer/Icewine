@@ -70,30 +70,30 @@ end
 hl.workspace_rule = function(rule) rules[rule.workspace] = rule; workspace_writes = workspace_writes + 1 end
 local calibrated = {output="eDP-1", mode="native", position="0x0", scale=1.5, transform=3}
 setup(calibrated, {"/lid"})
-assert(#writes == 1 and writes[1].disabled and workspace_writes == 0) -- Closed, no externals.
+assert(#writes == 1 and not writes[1].disabled and rules["1"].monitor == panel.name) -- Closed, undocked: retain usable panel.
 monitors = {panel, dock, tv} -- Stale panel remains visible after disable request.
 events["monitor.added"]()
 assert(rules["5"].monitor == tv.name and rules["6"].monitor == dock.name)
 lid(); events["monitor.removed"]()
-assert(#writes == 1) -- Repeated/deferred events do not reapply the monitor rule.
+assert(#writes == 2) -- Repeated/deferred events do not reapply the monitor rule.
 state = "open"
 monitors = {tv} -- Disabled panel absent: configured identity must still restore.
 lid()
-assert(#writes == 2 and writes[2] == calibrated and not writes[2].disabled)
-assert(writes[2].position == "0x0" and writes[2].transform == 3)
+assert(#writes == 3 and writes[3].mode == calibrated.mode and not writes[3].disabled)
+assert(writes[3].position == "0x0" and writes[3].transform == 3)
 assert(rules["8"].monitor == tv.name and rules["9"].monitor == panel.name)
 -- The native monitor rule schedules refresh after the current callback.
 monitors = {tv, dock}
 events["monitor.added"](); lid()
-assert(#writes == 2 and rules["5"].monitor == dock.name and rules["9"].monitor == panel.name)
+assert(#writes == 3 and rules["5"].monitor == dock.name and rules["9"].monitor == panel.name)
 state = "closed"; lid()
-assert(#writes == 3 and writes[3].disabled)
+assert(#writes == 4 and writes[4].disabled)
 readable = false; lid() -- Established source disappears: reopen calibrated panel.
-assert(#writes == 4 and not writes[4].disabled and rules["9"].monitor == panel.name)
+assert(#writes == 5 and not writes[5].disabled and rules["9"].monitor == panel.name)
 state, readable = "closed", true; lid()
 io.open = function() return {read=function() return nil end, close=function() end} end
 lid() -- Established source becomes unreadable: open.
-assert(#writes == 6 and not writes[6].disabled)
+assert(#writes == 7 and not writes[7].disabled)
 -- No internal identity: only externals, no monitor rule or lid binding.
 io.open = function() error("no internal panel should probe no lid") end
 hl.bind = function() error("no internal panel should bind no lid") end
@@ -106,3 +106,45 @@ events["monitor.removed"]()
 assert(workspace_writes == count)
 io.open = real_open
 print("reconcile: closed/no-display, desired/deferred state, repeated/deferred events, source loss and no-panel checks pass")
+
+-- Capture real generated native monitor calls without executing external rules.
+hl.bind = function(_, callback) lid = callback end
+local path, original_path = os.tmpname(), package.path
+package.path = path .. ";" .. package.path
+local function sidecar(contents)
+ local file = assert(real_open(path, "w")); file:write(contents); file:close()
+end
+io.open = function() return {read=function() return "state: " .. state end, close=function() end} end
+monitors = {{name="eDP-1", description="Internal Panel"}, tv}
+state = "open"
+sidecar('hl.monitor({output="desc:Internal Panel", mode="1920x1080@120", position="2560x0", scale=1.25})\n' ..
+ 'hl.monitor({output="HDMI-A-1", mode="3840x2160@60", position="0x0", scale=2})\n')
+local count = #writes
+setup(calibrated, {"/lid"})
+local saved = writes[#writes]
+assert(#writes == count + 1 and saved.output == "eDP-1" and saved.mode == "1920x1080@120")
+assert(saved.position == "2560x0" and saved.scale == 1.25 and saved.transform == 3)
+assert(calibrated.mode == "native" and calibrated.scale == 1.5)
+state = "closed"; lid(); state = "open"; lid()
+assert(writes[#writes].mode == saved.mode and writes[#writes].scale == saved.scale)
+state = "closed"; lid(); monitors = {}; events["monitor.removed"]()
+assert(not writes[#writes].disabled and rules["10"].monitor == "eDP-1")
+for _, contents in ipairs({
+ 'not valid Lua', 'hl.monitor({output="eDP-1", disabled=true})',
+ 'hl.monitor({output="eDP-1", mode="x", position="auto", scale=-1})',
+ 'hl.monitor({output="eDP-1", mode="x", position="auto", scale=1}); os.execute("must not execute")',
+}) do
+ sidecar(contents); setup(calibrated, {"/lid"})
+ assert(writes[#writes].mode == calibrated.mode and writes[#writes].scale == calibrated.scale)
+end
+-- Pending saved external disable is already unusable before the deferred query refresh.
+monitors, state = {panel, tv}, "closed"
+sidecar('hl.monitor({output="HDMI-A-1",disabled=true})')
+setup(calibrated, {"/lid"})
+assert(not writes[#writes].disabled and rules["10"].monitor == "eDP-1")
+state = "open"
+sidecar('hl.monitor({output="eDP-1",mode="stale",position="0x0",scale=1})')
+setup(calibrated, {"/lid"})
+assert(writes[#writes].mode == calibrated.mode) -- Reject malformed generated-mode syntax ourselves.
+os.remove(path); package.path = original_path; io.open = real_open
+print("HyprMon: native saved mode/scale/position, description identity, host preservation, malformed/disabled fallback and closed unplug checks pass")

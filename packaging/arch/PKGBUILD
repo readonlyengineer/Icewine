@@ -25,7 +25,7 @@ package_icewine() {
     brightnessctl ddcutil v4l-utils upower ttf-dejavu ttf-jetbrains-mono-nerd
     noto-fonts-emoji adwaita-icon-theme adwaita-cursors papirus-icon-theme dconf
     gsettings-desktop-schemas)
-  optdepends=('networkmanager: network controls' 'bluez: Bluetooth controls')
+  optdepends=('networkmanager: network controls' 'bluez: Bluetooth controls' 'hyprmon: optional monitor configuration (requires Lua live IPC support)')
   cd "$srcdir/icewine"
   local share="$pkgdir/usr/share/icewine" defaults="$pkgdir/usr/share/icewine/defaults/config"
   install -d "$share" "$defaults" "$share/defaults/data" "$pkgdir/usr/bin" "$pkgdir/usr/lib/icewine"

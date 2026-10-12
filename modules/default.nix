@@ -39,6 +39,10 @@ in {
     idle.enable = lib.mkEnableOption "Icewine idle locking and suspend" // { default = true; };
     battery.enable = lib.mkEnableOption "Icewine Quickshell battery warnings and sleep" // { default = true; };
     desktop.enable = lib.mkEnableOption "Hyprland desktop session with Icewine";
+    monitors = {
+      enable = lib.mkEnableOption "optional compatible HyprMon monitor tool";
+      package = lib.mkPackageOption pkgs "hyprmon" { };
+    };
     terminal.enable = lib.mkEnableOption "Kitty terminal and defaults";
     filemanager.enable = lib.mkEnableOption "Yazi file manager and defaults";
     steam = lib.mkOption {
@@ -128,6 +132,7 @@ in {
       ++ lib.optional (cfg.steam != "none" && cfg.gamescope.enable) pkgs.gamescope
       ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
     users.users.${cfg.user}.packages = lib.optional cfg.terminal.enable pkgs.kitty
-      ++ lib.optionals cfg.shellExtras.enable [ pkgs.starship pkgs.fastfetch ];
+      ++ lib.optionals cfg.shellExtras.enable [ pkgs.starship pkgs.fastfetch ]
+      ++ lib.optional cfg.monitors.enable cfg.monitors.package;
   };
 }
