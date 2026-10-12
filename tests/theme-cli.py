@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Theme rendering and runtime changes never deploy user dotfiles."""
 import errno
+import fcntl
+import pty
+import select
+import struct
+import termios
+import time
 import io
 import re
 import signal
@@ -27,6 +33,13 @@ for theme_id, palette in theme.installed(assets).items():
     for level in theme.TRANSPARENCY:
         rendered = theme.render_theme(assets, palette, level)
         assert json.loads(rendered["palette.json"])["themeId"] == theme_id
+        btop = dict(re.findall(r'^theme\[(\w+)\]="(#[0-9a-fA-F]{6})"$', rendered["btop.theme"], re.M))
+        colours = json.loads(palette.read_text())
+        assert len(btop) == 48 and btop["main_bg"] == "#" + colours["background"]
+        assert btop["main_fg"] == "#" + colours["foreground"]
+        assert btop["cpu_box"] == "#" + colours["highlight"]
+        assert btop["selected_bg"] == "#" + colours["selection"]
+        assert btop["temp_end"] == "#" + colours["error"]
         assert json.loads(rendered["fastfetch.jsonc"])["modules"]
         assert "git_branch" in tomllib.loads(rendered["starship.toml"])
         assert tomllib.loads(rendered["yazi-theme.toml"])
@@ -48,6 +61,43 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (state / "icewine/theme").read_text() == "dracula\n"
     assert json.loads((config / "icewine/current/palette.json").read_text())["themeId"] == "dracula"
     assert not (config / "yazi").exists() and not (config / "gtk-3.0").exists()
+    assert not (config / "btop").exists()  # Optional app is never deployed implicitly.
+    btop_theme = config / "icewine/current/btop.theme"
+    dark_theme = btop_theme.read_bytes()
+    btop_dir = config / "btop"
+    (btop_dir / "themes").mkdir(parents=True)
+    # Configured application fixture; explicit deployment is covered by install.py.
+    btop_config = btop_dir / "btop.conf"
+    preferences = 'color_theme = "icewine"\nupdate_ms = 500\nvim_keys = true\n'
+    btop_config.write_text(preferences)
+    selected_theme = btop_dir / "themes/icewine.theme"
+    selected_theme.symlink_to(btop_theme)
+    assert run("theme", "gruvbox-light").returncode == 0
+    assert selected_theme.read_bytes() != dark_theme
+    assert 'theme[main_bg]="#f2e5bc"' in selected_theme.read_text()
+    assert btop_config.read_text() == preferences
+    previous = (config / "icewine/current").resolve()
+    with patch.object(Path, "write_text", side_effect=PermissionError(errno.EACCES, "btop publish denied")):
+        try:
+            theme.publish(config, {"btop.theme": "changed"})
+        except PermissionError:
+            pass
+        else:
+            raise AssertionError("failed btop publication reported success")
+    assert (config / "icewine/current").resolve() == previous
+    assert selected_theme.is_file() and btop_config.read_text() == preferences
+    bad_assets = root / "bad-assets"
+    shutil.copytree(assets, bad_assets)
+    (bad_assets / "templates/btop.theme.in").write_text('theme[main_bg]="@missingBtopColour@"\n')
+    bad = subprocess.run([sys.executable, str(script), "apply"],
+                         env=dict(env, ICEWINE_THEME_ASSETS=str(bad_assets)), capture_output=True, text=True)
+    assert bad.returncode != 0 and "unknown template value: missingBtopColour" in bad.stderr
+    assert (config / "icewine/current").resolve() == previous
+    assert btop_config.read_text() == preferences
+    opt_out = preferences.replace('"icewine"', '"Default"')
+    btop_config.write_text(opt_out)
+    assert run("theme", "dracula").returncode == 0
+    assert btop_config.read_text() == opt_out and selected_theme.read_bytes() == dark_theme
     assert not (state / "icewine/default-files.json").exists()
     assert run("transparency", "off").returncode == 0
     assert "off" in run("transparency").stdout
@@ -384,3 +434,50 @@ with tempfile.TemporaryDirectory() as temporary:
 
 
 print("PASS: retained contrast, opacity, concurrent publication, reload failure and pidfd ownership coverage")
+
+# Optional native smoke check; btop remains outside mandatory test dependencies.
+# Run: python3 tests/theme-cli.py scripts/theme scripts/icewine theme/assets /path/to/btop
+if len(sys.argv) > 4:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        config = root / "config"
+        (config / "btop/themes").mkdir(parents=True)
+        selected = config / "btop/themes/icewine.theme"
+        selected.symlink_to(config / "icewine/current/btop.theme")
+        env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(config),
+                   XDG_STATE_HOME=str(root / "state"), XDG_DATA_HOME=str(root / "data"),
+                   TERM="xterm-256color", LANG="C.UTF-8")
+        for theme_id, background in [("dracula", b"48;2;40;42;54m"),
+                                     ("gruvbox-light", b"48;2;242;229;188m")]:
+            theme.publish(config, theme.render_theme(assets, assets / "themes" / (theme_id + ".json")))
+            (config / "btop/btop.conf").write_text('color_theme = "icewine"\nupdate_ms = 500\n')
+            master, slave = pty.openpty()
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 35, 120, 0, 0))
+            process = subprocess.Popen([sys.argv[4], "--debug", "--no-tty"],
+                                       stdin=slave, stdout=slave, stderr=slave, env=env,
+                                       start_new_session=True)
+            os.close(slave)
+            output = b""
+            try:
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and process.poll() is None:
+                    if select.select([master], [], [], 0.1)[0]:
+                        try:
+                            output += os.read(master, 65536)
+                        except OSError:
+                            break
+                    if background in output:
+                        break
+                os.write(master, b"q")
+                assert process.wait(timeout=5) == 0
+                assert background in output, "btop did not render the generated background: " + theme_id
+                log = (root / "state/btop.log").read_text()
+                assert "Loading theme file:" in log and "icewine.theme" in log
+                assert not any(message in log for message in (
+                    "Missing color value", "Invalid RGB", "Invalid size of hex", "Hex value missing"))
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                os.close(master)
+    print("PASS: native btop theme discovery, palette rendering and reopen after change")

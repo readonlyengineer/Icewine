@@ -8,7 +8,7 @@ const ROWS: &[(&str, &str, &str)] = &[
     ("filemanager", "File manager", "Yazi"),
     ("steam", "Steam (unfree)", ""),
     ("gamescope", " +- Gamescope", ""), ("handheld", " \u{005c}- Handheld", "Requires Desktop Session, Steam native, and Gamescope"),
-    ("login", "Login screen", "SDDM"), ("shellExtras", "Shell Extras", "Starship + Fastfetch"),
+    ("login", "Login screen", "SDDM"), ("shellExtras", "Shell Extras", "Starship + Fastfetch + btop theme"),
 ];
 
 #[derive(Clone, Copy, PartialEq)]

@@ -48,7 +48,7 @@ in {
     };
     gamescope.enable = lib.mkEnableOption "Gamescope Steam launch integration" // { default = true; };
     shellExtras = {
-      enable = lib.mkEnableOption "Starship and Fastfetch shell extras";
+      enable = lib.mkEnableOption "Starship/Fastfetch defaults and btop styling";
       git.enable = lib.mkEnableOption "Starship Git prompt modules" // { default = true; };
     };
     applications = {

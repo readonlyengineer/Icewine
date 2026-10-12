@@ -33,6 +33,9 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         path = defaults / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
+    btop_default = defaults / "config/btop/btop.conf"
+    btop_default.parent.mkdir(parents=True)
+    btop_default.write_bytes((source / "theme/assets/templates/btop.conf").read_bytes())
     (defaults / "config/hypr/icewine").symlink_to(source / "hyprland")
     (defaults / "config/quickshell/icewine").symlink_to(source / "quickshell")
     (defaults / "data/wallpapers").mkdir()
@@ -69,6 +72,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         assert not commands.called
     assert (config / "quickshell/icewine").is_symlink()
     assert not (config / "hypr").exists() and not (config / "kitty").exists()
+    assert not (config / "btop").exists()
     # Local split packages bootstrap from archives with literal spaced paths;
     # signatures are not mistaken for a second archive.
     archives = root / "package archives"
@@ -317,6 +321,24 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         (root / ".bashrc").write_text("user shell\n")
         apply(("shellExtras",), overwrite=True, readonly=True)
         assert (root / ".bashrc").read_text() == "user shell\n"
+    # Shell Extras uses the same editable-default/link/retirement ownership path.
+    btop = config / "btop/btop.conf"
+    btop_link = config / "btop/themes/icewine.theme"
+    assert btop.read_bytes() == btop_default.read_bytes()
+    assert btop_link.is_symlink() and btop_link.resolve() == (config / "icewine/current/btop.theme").resolve()
+    preferences = btop.read_text() + "update_ms = 500\nvim_keys = true\n"
+    btop.write_text(preferences)
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+        apply(("shellExtras",), readonly=True)
+        assert btop.read_text() == preferences
+        apply(("shellExtras",), overwrite=True, readonly=True)
+        assert btop.read_bytes() == btop_default.read_bytes()
+        btop.write_text(preferences)
+        apply((), readonly=True)
+        assert btop.read_text() == preferences and not btop_link.exists() and not btop_link.is_symlink()
+        apply(("shellExtras",), readonly=True)
+        assert btop.read_text() == preferences and btop_link.is_symlink()
+    assert not list((config / "btop").rglob("*.bak*"))
     stable = root / "installed-implementation"
     old, new = root / "old-implementation", root / "new-implementation"
     for directory, text in ((old, "old implementation"), (new, "new implementation")):

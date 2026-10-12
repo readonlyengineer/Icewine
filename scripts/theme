@@ -39,6 +39,7 @@ APPS = {
 }
 TEMPLATES = {
     "Palette.qml": "Palette.qml.in",
+    "btop.theme": "btop.theme.in",
     "Theme.lua": "Theme.lua.in",
     "kitty.conf": "kitty.conf.in",
     "nvim-theme.lua": "nvim-theme.lua.in",

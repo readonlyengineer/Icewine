@@ -21,6 +21,7 @@ let
     yazi = cfg.filemanager.enable;
     fastfetch = cfg.shellExtras.enable;
     starship = cfg.shellExtras.enable;
+    btop = cfg.shellExtras.enable;
   };
   skippedThemeFiles = lib.concatLists (lib.mapAttrsToList (name: files:
     lib.optionals (!enabledConsumers.${name}) (builtins.attrNames files)
@@ -70,6 +71,7 @@ let
       mkdir -p $out/config/yazi/plugins/mount.yazi
       cp -r ${pkgs.yaziPlugins.mount}/. $out/config/yazi/plugins/mount.yazi/
     ''}
+    ${lib.optionalString cfg.shellExtras.enable "install -Dm644 ${../theme/assets/templates/btop.conf} $out/config/btop/btop.conf"}
     cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
     cp ${../quickshell/config/qmldir} $out/config/quickshell/config/qmldir
     cp ${../quickshell/config/Settings.qml} $out/config/quickshell/config/Settings.qml

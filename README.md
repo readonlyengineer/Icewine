@@ -138,6 +138,11 @@ updated.
 Selections survive login and theme changes. An explicit `services.icewine.theme`
 setting overrides the CLI theme choice; leave it unset to choose themes yourself.
 
+Shell Extras also deploys editable btop defaults selecting the generated Icewine
+theme. Apply preserves existing preferences unless Overwrite is selected; theme
+changes update colours only. Install btop through your host package configuration
+and reopen it after changing themes.
+
 ### Manage integrations and dotfiles
 
 ```sh
@@ -208,7 +213,7 @@ Quickshell's entry selects `Icewine.Desktop {}` or `Icewine.Handheld {}`; keep
 blocks append: to replace its timers, remove the shared source line and maintain
 the complete config yourself.
 
-Fastfetch, Starship, Yazi theme/keymap and GTK settings normally link to generated
+Fastfetch, Starship, btop themes, Yazi theme/keymap and GTK settings normally link to generated
 files. To customise one, copy its contents, replace the link with a regular file
 at the same path, then edit it. That file is preserved by Apply unless overwrite is checked, and no longer
 follows generated theme changes. Initialise Starship and Fastfetch in your own shell configuration.
@@ -303,7 +308,7 @@ These options belong under `services.icewine`:
 | `steam = "none";` | Steam integration and dependent Gamescope/Handheld |
 | `gamescope.enable = false;` | Gamescope launch integration; ordinary Steam remains available |
 | `login.enable = false;` | Icewine SDDM styling; host SDDM enablement is retained |
-| `shellExtras.enable = false;` | Starship/Fastfetch defaults |
+| `shellExtras.enable = false;` | Starship/Fastfetch defaults and btop styling |
 | `shellExtras.git.enable = false;` | Git information in the prompt |
 | `gtk.enable = false;` | GTK styling |
 | `idle.enable = false;` | Automatic idle locking and sleep; manual locking remains |

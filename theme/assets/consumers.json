@@ -9,6 +9,7 @@
     "yazi/theme.toml": "yazi-theme.toml",
     "yazi/keymap.toml": "yazi-keymap.toml"
   },
+  "btop": { "btop/themes/icewine.theme": "btop.theme" },
   "fastfetch": { "fastfetch/config.jsonc": "fastfetch.jsonc" },
   "starship": { "starship.toml": "starship.toml" }
 }

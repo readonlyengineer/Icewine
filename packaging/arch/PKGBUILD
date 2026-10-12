@@ -66,6 +66,7 @@ package_icewine() {
   cp quickshell/shell.qml "$defaults/quickshell/"
   cp quickshell/config/{Settings.qml,qmldir} "$defaults/quickshell/config/"
   cp kitty/kitty.conf "$defaults/kitty/"
+  install -Dm644 theme/assets/templates/btop.conf "$defaults/btop/btop.conf"
   cp -r "$srcdir/plugins-$_plugins/mount.yazi" "$defaults/yazi/plugins/"
   printf '%s\n' 'source = hypridle-icewine/defaults.conf' > "$defaults/hypr/hypridle.conf"
   for version in 3 4; do
