@@ -330,6 +330,59 @@ ShellRoot {
                 const lockField = root.findItem(lockScreen, "authPassword")
                 lockWindow.requestActivate()
                 keys.tryCompare(lockWindow, "active", true)
+                lockField.text = ""
+                lockField.focus = false
+                locker.forceActiveFocus()
+                keys.wait(1)
+                keys.keyClick(Qt.Key_A)
+                if (!lockField.activeFocus || lockField.text !== "a" || lockSession.password !== "a")
+                    throw new Error("First printable lock key must restore focus and arrive once")
+                lockField.focus = false
+                locker.forceActiveFocus()
+                keys.wait(1)
+                keys.keyClick(Qt.Key_Return)
+                if (!lockField.activeFocus || lockSession.submissions !== 0 || lockField.text !== "a")
+                    throw new Error("Neutral Enter must focus without submitting")
+                lockField.focus = false
+                locker.forceActiveFocus()
+                keys.wait(1)
+                keys.keyClick(Qt.Key_A, Qt.ControlModifier)
+                if (!lockField.activeFocus || lockField.text !== "a" || lockField.selectedText !== "a")
+                    throw new Error("Modified lock input must retain native text shortcuts")
+                lockField.text = ""
+                lockField.focus = false
+                locker.forceActiveFocus()
+                keys.wait(1)
+                keys.keyPress(Qt.Key_Shift); keys.keyRelease(Qt.Key_Shift)
+                if (!lockField.activeFocus || lockField.text || lockSession.submissions)
+                    throw new Error("Modifier-only lock input must focus without text/submission")
+                keys.keyClick(Qt.Key_Tab)
+                if (!root.findItem(lockScreen, "Continue").activeFocus)
+                    throw new Error("Lock password Tab must reach Continue")
+                keys.keyClick(Qt.Key_Tab, Qt.ShiftModifier)
+                if (!lockField.activeFocus) throw new Error("Lock Backtab must return to password")
+                const lockKeyboardButton = root.findItem(lockScreen, "Keyboard")
+                lockKeyboardButton.forceActiveFocus()
+                keys.keyClick(Qt.Key_Tab)
+                if (!root.findItem(lockScreen, "Reboot").activeFocus || lockField.activeFocus)
+                    throw new Error("Footer Tab must retain explicit navigation")
+                keys.keyClick(Qt.Key_Left)
+                if (lockField.activeFocus) throw new Error("Footer navigation stole password focus")
+                lockKeyboardButton.forceActiveFocus()
+                keys.keyClick(Qt.Key_Space)
+                if (!lockSession.keyboardVisible || !lockField.activeFocus)
+                    throw new Error("Explicit footer keyboard activation was intercepted")
+                lockKeyboardButton.forceActiveFocus()
+                keys.keyClick(Qt.Key_Space)
+                if (lockSession.keyboardVisible) throw new Error("Footer keyboard hide failed")
+                lockSession.authenticating = true
+                lockField.focus = false
+                locker.forceActiveFocus()
+                keys.wait(1)
+                keys.keyClick(Qt.Key_C)
+                if (lockField.text || lockSession.password || lockSession.submissions)
+                    throw new Error("Busy lock surface must ignore password input")
+                lockSession.authenticating = false
                 lockField.forceActiveFocus()
                 lockField.text = "mock-lock-secret"
                 keys.keyClick(Qt.Key_Return)
@@ -492,7 +545,15 @@ ShellRoot {
                     keys.mouseClick(button)
                     keys.tryCompare(keyboard, "visible", false, 2000, "Explicit native hide")
                     win.contentItem.forceActiveFocus()
-                    field.forceActiveFocus()
+                    if (Quickshell.env("ICEWINE_NATIVE_ADAPTER") === "lock") {
+                        field.focus = false
+                        auth.parent.forceActiveFocus()
+                        keys.wait(1)
+                        const before = field.text
+                        keys.keyClick(Qt.Key_B)
+                        if (!field.activeFocus || field.text !== before + "b" || owner.password !== field.text)
+                            throw new Error("Native lock first printable key lost/doubled input")
+                    } else field.forceActiveFocus()
                     keys.wait(100)
                     if (owner.keyboardEnabled || owner.keyboardVisible || keyboard.visible)
                         throw new Error("Password refocus reopened dismissed native keyboard")

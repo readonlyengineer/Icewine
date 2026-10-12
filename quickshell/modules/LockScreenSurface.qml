@@ -5,8 +5,12 @@ import Quickshell
 import qs.icewine.theme as Theme
 import "Wallpaper.js" as Wallpaper
 
-Item {
+FocusScope {
     id: root
+    focus: true
+    Keys.forwardTo: !controller.busy && controller.authenticationRequired
+        && (root.Window.window?.activeFocusItem === root || screen.neutralFocus)
+        ? [screen.passwordInput] : []
 
     required property var session
     readonly property string dataHome: Quickshell.env("XDG_DATA_HOME")
@@ -71,6 +75,7 @@ Item {
         id: screen
         anchors.fill: parent
         controller: controller
+        restorePasswordFocus: true
         palette: Theme.Palette
         backdropSource: Wallpaper.authSource(root.dataHome, root.overrideAvailable,
             root.selectionAvailable, root.wallpaperRevision)

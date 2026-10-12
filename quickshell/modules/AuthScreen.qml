@@ -12,6 +12,10 @@ Item {
     required property var palette
     property url backdropSource: ""
     property bool animationsEnabled: palette.animate !== false
+    property bool restorePasswordFocus: false
+    readonly property Item passwordInput: password
+    readonly property bool neutralFocus: root.Window.window?.activeFocusItem === body
+        || root.Window.window?.activeFocusItem === scroll
     signal backdropFailed(url source)
     readonly property real scaleFactor: AuthModel.scaleFactor(width, height)
     readonly property real keyboardInset: AuthModel.keyboardInset(controller.keyboardHost,
@@ -120,6 +124,8 @@ Item {
         Controls.ScrollView {
             id: body
             objectName: "authBody"
+            Keys.forwardTo: root.restorePasswordFocus && root.neutralFocus
+                && !root.controller.busy && root.controller.authenticationRequired ? [password] : []
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
@@ -192,6 +198,13 @@ Item {
                             enabled: !root.controller.busy
                             focus: true
                             KeyNavigation.tab: submit
+                            Keys.onPressed: event => {
+                                if (root.restorePasswordFocus && !password.activeFocus) {
+                                    password.forceActiveFocus()
+                                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                                        event.accepted = true
+                                }
+                            }
                             echoMode: root.controller.secretInput ? TextInput.Password : TextInput.Normal
                             inputMethodHints: root.controller.secretInput
                                 ? Qt.ImhSensitiveData | Qt.ImhNoPredictiveText : Qt.ImhNone
