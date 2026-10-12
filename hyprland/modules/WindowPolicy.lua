@@ -441,6 +441,9 @@ hl.on("window.fullscreen", function(win)
 		if expected == fullscreen then return end
 	end
 
+	-- Mapping another tiled window can clear the compositor's fullscreen
+	-- owner before window.open. Keep a matching automatic target automatic.
+	if state.fullscreen == nil and fullscreen == select(2, window_target(win)) then return end
 	state.fullscreen = fullscreen
 	if not fullscreen then apply_window(win) end
 end)

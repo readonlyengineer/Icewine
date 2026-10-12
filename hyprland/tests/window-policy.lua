@@ -218,6 +218,14 @@ local function tiled(ws, fullscreen)
 	local win = window(normal, 1, fullscreen or false)
 	win.workspace = ws
 	ws.windows[#ws.windows + 1] = win
+	-- Hyprland maps the newcomer, clears the old fullscreen owner, then
+	-- emits openLate (Lua window.open). This is not a manual off request.
+	for _, existing in ipairs(ws.windows) do
+		if existing ~= win and existing.fullscreen then
+			existing.fullscreen = false
+			events["window.fullscreen"](existing)
+		end
+	end
 	ws.last_window = win
 	events["window.open"](win)
 	return win
@@ -230,6 +238,11 @@ for _, layout in ipairs({ "dwindle", "master" }) do
 	assert(first.fullscreen, layout .. ": lone window did not fullscreen")
 	local second = tiled(ws)
 	assert(not first.fullscreen and not second.fullscreen, layout .. ": pair did not tile")
+	events["window.close"](second) -- Native close precedes unmapping/refocus.
+	second.mapped, active = false, first
+	assert(first.fullscreen, layout .. ": native fullscreen exit poisoned singleton restoration")
+	second = tiled(ws)
+	assert(not first.fullscreen and not second.fullscreen, layout .. ": reopened pair did not tile")
 	policy.toggle_floating()
 	assert(first.fullscreen and not second.fullscreen, "floating window counted")
 	policy.toggle_floating()
@@ -263,6 +276,28 @@ for _, layout in ipairs({ "dwindle", "master" }) do
 	setting = "on\n"
 	policy.refresh_autofullscreen()
 end
+-- Deliberate policy off while a pair is tiled must outlast singleton recovery.
+workspaces, windows = {}, {}
+policy = dofile(arg[1])
+local manual_ws = workspace("dwindle")
+local manual_first, manual_second = tiled(manual_ws), tiled(manual_ws)
+active = manual_first
+policy.toggle_fullscreen()
+policy.toggle_fullscreen()
+events["window.close"](manual_second)
+manual_second.mapped = false
+assert(not manual_first.fullscreen, "close erased explicit off set while multiple windows were tiled")
+-- Genuine client/user fullscreen events still override the automatic default.
+manual_first.fullscreen = true
+events["window.fullscreen"](manual_first)
+setting = "off\n"
+policy.refresh_autofullscreen()
+assert(manual_first.fullscreen, "off erased external fullscreen intent")
+manual_first.fullscreen = false
+events["window.fullscreen"](manual_first)
+setting = "on\n"
+policy.refresh_autofullscreen()
+assert(not manual_first.fullscreen, "on erased external fullscreen-off intent")
 workspaces, windows = {}, {}
 policy = dofile(arg[1])
 local source, destination = workspace("dwindle"), workspace("master")
