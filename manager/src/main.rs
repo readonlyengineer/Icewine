@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, io, process::{Command, ExitCode}};
+use std::{collections::BTreeMap, fs::{self, OpenOptions}, io, os::unix::fs::OpenOptionsExt, path::PathBuf, process::{Command, ExitCode}};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{layout::Flex, prelude::*, widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table}};
 
@@ -12,15 +12,88 @@ const ROWS: &[(&str, &str, &str)] = &[
 ];
 
 #[derive(Clone, Copy, PartialEq)]
-enum Control { Utility(&'static str), Steam, Overwrite, Apply, Cancel }
+enum Control { Theme, Transparency, Wallpaper, Inherit, AuthWallpaper, Monitors, Utility(&'static str), Steam, Overwrite, Apply, Cancel }
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
+
+const TRANSPARENCY: &[&str] = &["off", "low", "med", "high"];
+
+fn appearance_command(args: &[&str]) -> io::Result<String> {
+    let output = Command::new("icewine").args(args).output()?;
+    let text = String::from_utf8_lossy(&output.stdout).to_string()
+        + &String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        return Err(io::Error::other(text));
+    }
+    Ok(text)
+}
+
+struct Appearance {
+    themes: Vec<String>, theme: usize, policy: bool, transparency: usize,
+    wallpaper: PathBuf, auth: Option<PathBuf>,
+}
+
+impl Appearance {
+    fn load() -> io::Result<Self> {
+        let theme = appearance_command(&["theme"])?;
+        let themes: Vec<String> = theme.lines().find_map(|line| line.strip_prefix("Installed: "))
+            .ok_or_else(|| io::Error::other("Missing installed themes"))?
+            .split(", ").map(str::to_owned).collect();
+        let effective = theme.lines().find_map(|line| line.strip_prefix("Effective: "))
+            .ok_or_else(|| io::Error::other("Missing effective theme"))?;
+        let policy = effective.ends_with(" (Nix policy)");
+        let selected = effective.trim_end_matches(" (Nix policy)");
+        let theme = themes.iter().position(|value| value == selected)
+            .ok_or_else(|| io::Error::other("Invalid effective theme"))?;
+        let level = appearance_command(&["transparency"])?;
+        let selected = level.strip_prefix("Transparency: ").and_then(|text| text.split_whitespace().next())
+            .ok_or_else(|| io::Error::other("Missing transparency"))?;
+        let transparency = TRANSPARENCY.iter().position(|value| *value == selected)
+            .ok_or_else(|| io::Error::other("Invalid transparency"))?;
+        let data = std::env::var_os("ICEWINE_WALLPAPER_DATA_HOME")
+            .or_else(|| std::env::var_os("XDG_DATA_HOME")).map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share"));
+        let directory = data.join("icewine/wallpapers");
+        let wallpaper = if directory.join("selection.img").is_file() { directory.join("selection.img") }
+            else { data.join("wallpapers/default.jpg") };
+        let auth = directory.join("auth.img");
+        Ok(Self { themes, theme, policy, transparency, wallpaper, auth: auth.is_file().then_some(auth) })
+    }
+}
+
+fn filename(path: &std::path::Path) -> String {
+    path.file_name().unwrap_or_default().to_string_lossy().chars()
+        .map(|c| if c.is_control() { '?' } else { c }).collect()
+}
+
+fn picker(terminal: &mut ratatui::DefaultTerminal) -> io::Result<Option<PathBuf>> {
+    // Exclusive creation protects the chooser handoff from pre-existing paths.
+    let file = std::env::temp_dir().join(format!("icewine-picker-{}", std::process::id()));
+    OpenOptions::new().write(true).create_new(true).mode(0o600).open(&file)?;
+    let result = (|| {
+        ratatui::restore();
+        let result = Command::new("yazi").arg("--chooser-file").arg(&file).status();
+        *terminal = ratatui::init();
+        if !result.map_err(|error| io::Error::other(format!("Yazi unavailable: {error}")))?.success() {
+            return Err(io::Error::other("Yazi exited unsuccessfully"));
+        }
+        let selected = fs::read_to_string(&file)?;
+        let selected = selected.trim_end_matches('\n');
+        Ok((!selected.is_empty()).then(|| PathBuf::from(selected)))
+    })();
+    fs::remove_file(file)?;
+    result
+}
 
 fn handheld_available(steam: usize, selected: &BTreeMap<&str, bool>) -> bool {
     steam == 1 && selected["desktop"] && selected["gamescope"]
 }
 
 fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize) -> io::Result<Option<bool>> {
+    let mut appearance = Appearance::load()?;
+    let mut message = String::new();
+    let mut page = 0;
+    let mut focuses = [0, 0];
     let mut terminal = ratatui::init();
     let result = (|| {
         let mut focus = 0;
@@ -28,10 +101,17 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
         loop {
             let rows: Vec<_> = ROWS.iter().filter(|(id, _, _)|
                 *steam != 0 || !matches!(*id, "gamescope" | "handheld")).collect();
-            let controls: Vec<_> = rows.iter().filter(|(id, _, _)| !readonly
+            let controls: Vec<_> = if page == 1 {
+                let mut controls = Vec::new();
+                if !appearance.policy { controls.push(Control::Theme); }
+                controls.extend([Control::Transparency, Control::Wallpaper, Control::Inherit]);
+                if appearance.auth.is_some() { controls.push(Control::AuthWallpaper); }
+                controls.extend([Control::Monitors, Control::Apply, Control::Cancel]);
+                controls
+            } else { rows.iter().filter(|(id, _, _)| !readonly
                 && (*id != "handheld" || handheld_available(*steam, selected)))
                 .map(|(id, _, _)| if *id == "steam" { Control::Steam } else { Control::Utility(*id) })
-                .chain([Control::Overwrite, Control::Apply, Control::Cancel]).collect();
+                .chain([Control::Overwrite, Control::Apply, Control::Cancel]).collect() };
             focus = focus.min(controls.len() - 1);
             terminal.draw(|frame| {
                 let accent = Style::default().fg(Color::Cyan).bold();
@@ -42,7 +122,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 let [panel] = Layout::vertical([Constraint::Max(ROWS.len() as u16 + 15)])
                     .flex(Flex::Center).areas(panel);
                 let block = Block::bordered().border_type(BorderType::Rounded)
-                    .border_style(muted).title(Line::from(" Icewine Installer ").style(accent))
+                    .border_style(muted).title(Line::from(if page == 0 { " Icewine Installer " } else { " Icewine Appearance " }).style(accent))
                     .padding(Padding::uniform(1));
                 let inner = block.inner(panel);
                 frame.render_widget(block, panel);
@@ -59,6 +139,27 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         "Deselecting removes Icewine configuration; packages stay installed."
                     }).style(muted),
                 ]), intro);
+                if page == 1 {
+                    frame.render_widget(Paragraph::new(vec![
+                        Line::from("Appearance updates immediately."),
+                        Line::from("Apply/Cancel control utility choices only.").style(muted),
+                        Line::from("HyprMon live/save changes remain after Cancel.").style(muted),
+                    ]), intro);
+                    let settings = vec![
+                        (Control::Theme, "Theme", format!("< {} >{}", appearance.themes[appearance.theme], if appearance.policy { " (Nix policy)" } else { "" })),
+                        (Control::Transparency, "Transparency", format!("< {} >", TRANSPARENCY[appearance.transparency])),
+                        (Control::Wallpaper, "Wallpaper", format!("[ {} ]", filename(&appearance.wallpaper))),
+                        (Control::Inherit, "Lockscreen Wallpaper", (if appearance.auth.is_none() { "Wallpaper [x]" } else { "Wallpaper [ ]" }).to_owned()),
+                        (Control::AuthWallpaper, "Separate image", appearance.auth.as_ref().map(|path| format!("[ {} ]", filename(path))).unwrap_or_default()),
+                        (Control::Monitors, "Monitors", "[ Configure monitors… ]".to_owned()),
+                    ];
+                    frame.render_widget(Table::new(settings.into_iter().filter(|(control, _, _)|
+                        *control != Control::AuthWallpaper || appearance.auth.is_some()).map(|(control, label, value)|
+                        Row::new([Cell::from(label), Cell::from(value)]).style(if controls[focus] == control { focused }
+                            else if control == Control::Theme && appearance.policy { muted } else { Style::default() })),
+                        [Constraint::Length(23), Constraint::Min(20)]).column_spacing(2), utilities);
+                    frame.render_widget(Paragraph::new(message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent), reset);
+                } else {
                 let rows = rows.iter().map(|(id, purpose, defaults)| {
                     let available = *id != "handheld" || handheld_available(*steam, selected);
                     Row::new(vec![
@@ -78,20 +179,43 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 frame.render_widget(Paragraph::new(format!("[{}] Overwrite existing dotfiles",
                     if overwrite { "x" } else { " " }))
                     .style(if controls[focus] == Control::Overwrite { focused } else { Style::default() }), reset);
+                }
                 frame.render_widget(Paragraph::new(Line::from(vec![
                     Span::styled("[ Apply ]", if controls[focus] == Control::Apply { focused } else { accent }),
                     Span::raw("   "),
                     Span::styled("[ Cancel ]", if controls[focus] == Control::Cancel { focused } else { muted }),
                 ])), buttons);
                 frame.render_widget(Paragraph::new(
-                    "Tab / up/down: move   Left/right: Steam   Space: select   Enter: act   Esc: cancel"
+                    if page == 0 { "Tab: page   Up/down: move   Left/right: Steam   Space/Enter: act   Esc: cancel" }
+                    else { "Tab: page   Up/down: move   Left/right: cycle   Space/Enter: act   Esc: cancel" }
                 ).style(muted), help);
             })?;
             let Event::Key(key) = event::read()? else { continue };
             if key.kind != KeyEventKind::Press { continue; }
             match key.code {
+                KeyCode::Tab => { focuses[page] = focus; page = 1 - page; focus = focuses[page]; }
                 KeyCode::Esc | KeyCode::Char('q') => return Ok(None),
                 KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(None),
+                KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Theme | Control::Transparency) => {
+                    let (values, current, command) = if controls[focus] == Control::Theme {
+                        (appearance.themes.iter().map(String::as_str).collect::<Vec<_>>(), appearance.theme, "theme")
+                    } else { (TRANSPARENCY.to_vec(), appearance.transparency, "transparency") };
+                    let next = (current + if key.code == KeyCode::Right { 1 } else { values.len() - 1 }) % values.len();
+                    message = match appearance_command(&[command, values[next]]) {
+                        Ok(text) => text, Err(error) => error.to_string(),
+                    };
+                    // Selection can commit before live delivery fails. Read the
+                    // effective backend values even when the action returned an error.
+                    match Appearance::load() {
+                        Ok(updated) => {
+                            appearance.themes = updated.themes;
+                            appearance.theme = updated.theme;
+                            appearance.policy = updated.policy;
+                            appearance.transparency = updated.transparency;
+                        }
+                        Err(error) => message.push_str(&format!("\nCould not refresh appearance state: {error}")),
+                    }
+                }
                 KeyCode::Left | KeyCode::Right if controls[focus] == Control::Steam => {
                     let previous = *steam;
                     *steam = (*steam + if key.code == KeyCode::Right { 1 } else { STEAM.len() - 1 }) % STEAM.len();
@@ -99,7 +223,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     if *steam == 0 { selected.insert("gamescope", false); }
                     if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
                 }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
+                KeyCode::Down | KeyCode::Right => {
                     focus = (focus + 1) % controls.len();
                 }
                 KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
@@ -116,6 +240,33 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         if previous == 0 { selected.insert("gamescope", true); }
                         if *steam == 0 { selected.insert("gamescope", false); }
                         if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
+                    }
+                    Control::Theme | Control::Transparency => (),
+                    Control::Wallpaper | Control::AuthWallpaper | Control::Inherit => {
+                        let result = (|| -> io::Result<String> {
+                            if controls[focus] == Control::Inherit && appearance.auth.is_some() {
+                                let text = appearance_command(&["wallpaper", "--auth-reset"])?;
+                                appearance.auth = None;
+                                return Ok(text);
+                            }
+                            let Some(path) = picker(&mut terminal)? else { return Ok("Picker cancelled.".into()); };
+                            let path_text = path.to_str().ok_or_else(|| io::Error::other("Image path is not UTF-8"))?;
+                            let auth = controls[focus] != Control::Wallpaper;
+                            let text = if auth { appearance_command(&["wallpaper", "--auth", path_text]) } else { appearance_command(&["wallpaper", path_text]) }?;
+                            if auth { appearance.auth = Some(path); } else { appearance.wallpaper = path; }
+                            Ok(if text.is_empty() { "Wallpaper saved.".into() } else { text })
+                        })();
+                        message = match result { Ok(text) => text, Err(error) => error.to_string() };
+                    }
+                    Control::Monitors => {
+                        ratatui::restore();
+                        let result = Command::new("hyprmon").status();
+                        terminal = ratatui::init();
+                        message = match result {
+                            Ok(status) if status.success() => "Returned from HyprMon; live/save actions have their own effect.".into(),
+                            Ok(status) => format!("HyprMon exited with {status}"),
+                            Err(error) => format!("HyprMon unavailable: {error}"),
+                        };
                     }
                     Control::Overwrite => overwrite = !overwrite,
                     Control::Apply => return Ok(Some(overwrite)),

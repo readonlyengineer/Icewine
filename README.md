@@ -149,7 +149,12 @@ and reopen it after changing themes.
 icewine manage
 ```
 
-Use Tab or arrows to navigate, Space to select, and Enter on Apply or Cancel.
+Tab switches between Icewine Installer and Icewine Appearance. Use Up/Down or
+Shift-Tab to navigate rows, Space to select, and Enter on Apply or Cancel.
+Left/right cycles Steam, Theme or Transparency. Theme/transparency changes and
+wallpaper selections apply immediately; Apply/Cancel affect utility choices only.
+Wallpaper pickers use optional Yazi; Configure monitors opens optional HyprMon.
+HyprMon owns its live/save actions, which Cancel does not undo.
 NixOS utility selections reflect the module options and are read-only. Apply
 creates missing dotfiles; **Overwrite existing dotfiles** replaces selected defaults
 without backups. It starts unchecked each time. Existing editable files are otherwise
