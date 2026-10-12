@@ -34,6 +34,8 @@ Widget {
         const page = pageLoader.item
         if (!page) return
         const command = ["hyprshot", "--freeze", "--mode", mode]
+        if (mode === "output" && Quickshell.screens.length === 1)
+            command.push("--mode", Quickshell.screens[0].name)
         if (page.clipboardOnly) command.push("--clipboard-only")
         if (page.delayCapture)
             command.unshift("sh", "-c", 'sleep 3 && exec "$@"', "icewine-screenshot")
