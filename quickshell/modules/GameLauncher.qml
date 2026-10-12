@@ -133,6 +133,17 @@ Scope {
         steamLaunchTimeout.stop()
     }
 
+    function reuseSteamWindow(window) {
+        root.finishSteamLaunch()
+        compositor.activateWindow(window.address)
+        var outsideGamescope = !!Launcher.steamWindow([window])
+        if (outsideGamescope)
+            Quickshell.execDetached(["notify-send", "--app-name=Icewine", "--app-icon=steam",
+                "Steam is already running outside Gamescope",
+                "Using the existing session. Quit Steam manually before launching inside Gamescope."])
+        return JSON.stringify({ok: true, reused: true, outsideGamescope: outsideGamescope}, null, 2)
+    }
+
     function startSteamProcess() {
         if (!root.steamLaunching || root.pendingSteamCommand === null)
             return
@@ -153,12 +164,11 @@ Scope {
             Quickshell.execDetached(["uwsm", "app", "--", "icewine-steam"])
             return JSON.stringify({ok: true})
         }
-        var decision = Launcher.steamLaunchAction(compositor.toplevels, root.steamLaunching)
-        if (decision.action === "focus") {
-            root.finishSteamLaunch()
-            compositor.activateWindow(decision.window.address)
-            return JSON.stringify({ok: true, reused: true}, null, 2)
-        }
+        var visiblePid = Launcher.gamescopeWindow(compositor.toplevels, root.steamGamescopePid)
+            ? root.steamGamescopePid : 0
+        var decision = Launcher.steamLaunchAction(compositor.toplevels, root.steamLaunching, visiblePid)
+        if (decision.action === "focus")
+            return root.reuseSteamWindow(decision.window)
         if (decision.action === "wait" || root.steamRequestPending || steamSessionProbe.running)
             return JSON.stringify({ok: true, pending: true}, null, 2)
 
@@ -199,8 +209,7 @@ Scope {
         }
         var decision = Launcher.steamLaunchAction(compositor.toplevels, root.steamLaunching, pid)
         if (decision.action === "focus") {
-            root.finishSteamLaunch()
-            compositor.activateWindow(decision.window.address)
+            root.reuseSteamWindow(decision.window)
             return
         }
         if (decision.action === "wait")
@@ -226,9 +235,9 @@ Scope {
 
     function handoffSteam() {
         var existing = Launcher.existingSteamWindow(compositor.toplevels, root.steamGamescopePid)
-        if (root.steamRequestPending && existing) {
-            root.finishSteamLaunch()
-            compositor.activateWindow(existing.address)
+        if (existing && (root.steamRequestPending
+                || (root.steamLaunching && Launcher.steamWindow([existing])))) {
+            root.reuseSteamWindow(existing)
             return
         }
         if (root.steamLaunching && root.steamGamescopePid > 0)

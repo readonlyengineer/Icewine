@@ -94,7 +94,8 @@ Controller input passes through while Gamescope is focused. On the desktop or
 overlay it is mapped to keyboard and mouse controls.
 
 Icewine's Steam launcher starts Steam inside Gamescope, or focuses an existing
-Steam session. Non-Steam games and emulators added to Steam can use the same
+Steam session. If Steam is running outside Gamescope, Icewine reuses it without
+restarting it; quit Steam manually before retrying a Gamescope launch. Non-Steam games and emulators added to Steam can use the same
 controller passthrough.
 
 To reach the Steam desktop interface, open Icewine's launcher while Steam is

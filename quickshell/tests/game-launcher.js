@@ -95,10 +95,10 @@ const steamContext = vm.createContext({
     console,
     JSON
 })
-for (const name of ["gamescopePlan", "finishSteamLaunch", "startSteamProcess",
+for (const name of ["gamescopePlan", "finishSteamLaunch", "reuseSteamWindow", "startSteamProcess",
         "launchSteamGamescope", "probeSteamSession", "resolveSteamRequest", "handoffSteam", "autostartSteamGamescope"])
     vm.runInContext(qmlFunction(name), steamContext)
-for (const name of ["gamescopePlan", "finishSteamLaunch", "startSteamProcess",
+for (const name of ["gamescopePlan", "finishSteamLaunch", "reuseSteamWindow", "startSteamProcess",
         "launchSteamGamescope", "probeSteamSession", "resolveSteamRequest", "handoffSteam", "autostartSteamGamescope"])
     steamRoot[name] = steamContext[name].bind(steamRoot)
 
@@ -239,6 +239,72 @@ assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).ok, true)
 assert.deepEqual(steamCommands[ordinaryBefore], ["uwsm", "app", "--", "icewine-steam"])
 assert.equal(steamRoot.steamSplashVisible, false, "Ordinary Steam has no Gamescope splash")
 steamRoot.gamescopeEnabled = true
+
+// An outside singleton may reveal its ordinary window only after Gamescope starts.
+// Exercise the shared QML completion path with both Flatpak and native identities.
+for (const identity of ["com.valvesoftware.Steam", "steam"]) {
+    steamRoot.finishSteamLaunch()
+    steamRoot.steamGamescopePid = 0
+    steamCompositor.toplevels = []
+    const before = steamCommands.length
+    steamRoot.launchSteamGamescope()
+    steamContext.steamSessionProbe.running = false
+    steamRoot.resolveSteamRequest("LoadState=not-found\nMainPID=0")
+    steamRoot.startSteamProcess()
+    assert.equal(steamCommands.length, before + 1)
+    const outer = {address: "0xouter", lastIpcObject: {class: identity}}
+    steamCompositor.toplevels = [outer]
+    steamRoot.handoffSteam()
+    assert.equal(steamCompositor.activated, outer.address)
+    assert.equal(steamRoot.steamSplashVisible, false, "Outside Steam must dismiss the splash")
+    assert.equal(steamRoot.steamLaunching, false)
+    assert.equal(steamRoot.steamRequestPending, false)
+    assert.equal(steamContext.steamLaunchTimeout.running, false)
+    assert.equal(steamRoot.pendingSteamCommand, null)
+    assert.equal(steamCommands.length, before + 2, "Reuse only sends feedback; it never stops Steam")
+    assert.deepEqual(steamCommands.at(-1), ["notify-send", "--app-name=Icewine", "--app-icon=steam",
+        "Steam is already running outside Gamescope",
+        "Using the existing session. Quit Steam manually before launching inside Gamescope."])
+    steamRoot.handoffSteam()
+    assert.equal(steamCommands.length, before + 2, "Completed handoff does not repeat feedback")
+    const reused = JSON.parse(steamRoot.launchSteamGamescope())
+    assert.equal(reused.reused, true)
+    assert.equal(reused.outsideGamescope, true, "Visible reuse must identify the actual session")
+    assert.equal(steamCommands.length, before + 3, "Repeated launches only focus and explain reuse")
+}
+steamCompositor.toplevels = []
+steamRoot.steamLaunching = true
+steamRoot.pendingSteamCommand = ["must-not-run"]
+steamRoot.steamSplashVisible = true
+steamCompositor.toplevels = [{address: "0xearly", wayland: {appId: "steam"}}]
+steamRoot.handoffSteam()
+steamRoot.startSteamProcess()
+assert.equal(steamRoot.pendingSteamCommand, null, "Early outer mapping cancels unstarted launch work")
+assert.equal(steamCommands.at(-1)[0], "notify-send")
+steamCompositor.toplevels = [existing, {lastIpcObject: {class: "steam"}}]
+steamRoot.steamGamescopePid = 481
+steamRoot.steamRequestPending = true
+const nestedBefore = steamCommands.length
+steamRoot.handoffSteam()
+assert.equal(steamCompositor.activated, existing.address, "Managed nested session takes precedence")
+assert.equal(steamCommands.length, nestedBefore, "Nested reuse has no outside-session warning")
+
+const nestedReuse = JSON.parse(steamRoot.launchSteamGamescope())
+assert.equal(steamCompositor.activated, existing.address,
+    "Shared entry must prefer the visible managed session over outside Steam")
+assert.equal(nestedReuse.reused, true)
+assert.equal(nestedReuse.outsideGamescope, false)
+assert.equal(steamCommands.length, nestedBefore, "Shared nested reuse must not warn about outside Steam")
+steamCompositor.toplevels = []
+const beforeStaleProbe = steamQueries.length
+assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).pending, true)
+assert.equal(steamQueries.length, beforeStaleProbe + 1,
+    "A stale PID without its window must not suppress a fresh service probe")
+assert.equal(steamRoot.steamGamescopePid, 0)
+steamContext.steamSessionProbe.running = false
+steamRoot.resolveSteamRequest("LoadState=not-found\nMainPID=0")
+assert.equal(steamRoot.steamLaunching, true, "An exited cached session must allow a new launch")
+steamRoot.finishSteamLaunch()
 
 steamRoot.steamEnabled = false
 assert.equal(JSON.parse(steamContext.launchSteamGamescope()).ok, false,

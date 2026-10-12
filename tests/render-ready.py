@@ -36,13 +36,14 @@ ShellRoot {
     property var authChildren: []
     QtObject {
         id: compositor
-        readonly property var toplevels: []
+        property var toplevels: []
+        property string activated: ""
         signal monitorsChanged()
         function getMonitors() {
             return [{name: Quickshell.screens[0].name,
                 width: 640, height: 480, focused: true}]
         }
-        function activateWindow(address) { throw new Error("Unexpected focus request") }
+        function activateWindow(address) { activated = address }
     }
     Modules.GameLauncher { id: launcher; compositor: compositor }
     Process {
@@ -308,7 +309,35 @@ ShellRoot {
                 throw new Error("Missing launch state after the placeholder's first frame")
             if (!JSON.parse(launcher.launchSteamGamescope()).pending)
                 throw new Error("Repeated request was not guarded")
-            launcher.finishSteamLaunch()
+            if (root.launches === 0) {
+                // The running Flatpak singleton opens an outer window after splash startup.
+                compositor.toplevels = [{address: "0xouter", lastIpcObject: {class: "com.valvesoftware.Steam"}}]
+                keys.tryCompare(launcher, "steamSplashVisible", false)
+                if (launcher.steamLaunching || launcher.steamRequestPending
+                        || launcher.pendingSteamCommand !== null || compositor.activated !== "0xouter")
+                    throw new Error("Outside singleton did not complete the shared launch")
+                const reused = JSON.parse(launcher.launchSteamGamescope())
+                if (!reused.reused || !reused.outsideGamescope || launcher.steamSplashVisible)
+                    throw new Error("Visible outside session was not identified/reused")
+                launcher.steamRequestPending = true
+                launcher.steamGamescopePid = 481
+                compositor.toplevels = [{address: "0xnested", wayland: {appId: "gamescope"},
+                    lastIpcObject: {pid: 481}}, ...compositor.toplevels]
+                keys.tryCompare(compositor, "activated", "0xnested")
+                if (launcher.steamRequestPending)
+                    throw new Error("Managed nested reuse left a pending request")
+                const nestedReuse = JSON.parse(launcher.launchSteamGamescope())
+                if (!nestedReuse.reused || nestedReuse.outsideGamescope
+                        || compositor.activated !== "0xnested")
+                    throw new Error("Shared entry did not prefer the managed nested session")
+                compositor.toplevels = []
+                launcher.steamRequestPending = true
+                launcher.resolveSteamRequest("unavailable")
+                if (launcher.steamRequestPending || launcher.steamLaunching || launcher.steamSplashVisible)
+                    throw new Error("Detection error retained launch state")
+            } else {
+                launcher.finishSteamLaunch()
+            }
             if (launcher.steamLaunching || launcher.steamSplashVisible)
                 throw new Error("Teardown did not clear launch state")
             if (++root.launches === 2) {
@@ -738,6 +767,7 @@ QtObject {
     (root / "bin").mkdir()
     for name, body in {
         "uwsm": 'printf "%s\\n" "$*" >> "$TEST_LAUNCHES"\n',
+        "notify-send": 'printf "%s\\n" "$*" >> "$TEST_NOTIFICATIONS"\n',
         "icewine-monitor-capabilities": "exit 0\n",
         "systemctl": 'printf "LoadState=not-found\\nMainPID=0\\n"\n',
         "gdbus": '''if [[ "$1" == "call" ]]; then
@@ -757,7 +787,7 @@ fi
                XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(runtime),
                QML_IMPORT_PATH=str(style_root),
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"],
-               TEST_LAUNCHES=str(root / "launches"), XDG_DATA_HOME=str(root / "data"))
+               TEST_LAUNCHES=str(root / "launches"), TEST_NOTIFICATIONS=str(root / "notifications"), XDG_DATA_HOME=str(root / "data"))
     if workspace_theme:
         env["XDG_DATA_DIRS"] = str(root / "data")
     if native_adapter:
@@ -784,5 +814,10 @@ fi
                         "-- gamescope ")
         for line in launches
     ), launches
+    if not native_adapter:
+        notifications = (root / "notifications").read_text().splitlines()
+        assert len(notifications) == 2 and all(
+            "Steam is already running outside Gamescope" in line
+            and "Quit Steam manually" in line for line in notifications), notifications
     print(f"Native {native_adapter} OSK input, bounds, dismissal/refocus checks passed" if native_adapter
           else "Steam launch, auth visuals, locker and SDDM adapter checks passed")
