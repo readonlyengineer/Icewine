@@ -49,7 +49,8 @@ Rectangle {
         implicitWidth: contents.implicitWidth + 9
         implicitHeight: 22
         radius: height / 2
-        color: active ? Theme.Palette.primary : hover.hovered ? Theme.Palette.selection : "transparent"
+        color: active ? Theme.Palette.alpha(Theme.Palette.primary, 0.22)
+            : hover.hovered ? Theme.Palette.selection : "transparent"
 
         Row {
             id: contents
@@ -59,8 +60,8 @@ Rectangle {
 
             Text {
                 text: workspaceButton.workspaceId
-                color: workspaceButton.active ? Theme.Palette.backgroundDark
-                    : workspaceButton.occupied ? Theme.Palette.foreground : Theme.Palette.muted
+                color: workspaceButton.active || workspaceButton.occupied
+                    ? Theme.Palette.foreground : Theme.Palette.muted
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 11
                 font.bold: true
@@ -73,7 +74,6 @@ Rectangle {
 
                 ApplicationIcon {
                     anchors.verticalCenter: parent.verticalCenter
-                    workspaceActive: workspaceButton.active
                 }
             }
         }
@@ -100,7 +100,6 @@ Rectangle {
         id: applicationIcon
 
         required property var modelData
-        required property bool workspaceActive
 
         readonly property string appId: String(
             modelData.wayland?.appId ?? modelData.lastIpcObject?.class ?? "")
@@ -115,7 +114,7 @@ Rectangle {
             anchors.fill: parent
             anchors.margins: -2
             radius: 4
-            color: applicationIcon.focused ? Theme.Palette.secondary : "transparent"
+            color: applicationIcon.focused ? Theme.Palette.primary : "transparent"
         }
 
         Image {
@@ -133,7 +132,7 @@ Rectangle {
             anchors.centerIn: parent
             visible: applicationIcon.source === "" || appImage.status === Image.Error
             text: ""
-            color: applicationIcon.workspaceActive ? Theme.Palette.backgroundDark : Theme.Palette.foregroundDark
+            color: applicationIcon.focused ? Theme.Palette.background : Theme.Palette.foreground
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 9
         }
