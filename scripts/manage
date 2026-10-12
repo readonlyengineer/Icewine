@@ -218,6 +218,8 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
                 theme.install_defaults(defaults, config, data, state, overwrite, app)
                 if app in theme.APPS and theme.APPS[app]:
                     theme.install_links(config, state, overwrite, app)
+        if selected["login"]:
+            run(["icewine-wallpaper", "--publish-auth"])
         if selected["filemanager"] and not readonly:
             run(["xdg-mime", "default", "icewine-yazi.desktop", "inode/directory"])
         if selected["desktop"] and os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false":

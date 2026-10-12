@@ -2,7 +2,7 @@
 
 usage() {
     cat >&2 <<'EOF'
-Usage: icewine {manage|theme [THEME_ID|status]|transparency [off|low|med|high]|autofullscreen [on|off]|wallpaper IMAGE}
+Usage: icewine {manage|theme [THEME_ID|status]|transparency [off|low|med|high]|autofullscreen [on|off]|wallpaper [--auth] IMAGE|wallpaper --auth-reset}
 EOF
 }
 

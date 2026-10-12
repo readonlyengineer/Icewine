@@ -1,49 +1,109 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
+"""Select a wallpaper and publish only the effective authentication image."""
+import fcntl
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
 
-usage() {
-    cat >&2 <<'EOF'
-Usage: icewine wallpaper IMAGE
 
-Select a local PNG, JPEG, GIF, or BMP wallpaper. Icewine stores a private copy
-under XDG_DATA_HOME and updates the running desktop and handheld shell.
-EOF
-}
+def validate(path):
+    result = subprocess.run(["qs", "--path", os.environ["ICEWINE_WALLPAPER_VALIDATOR"]],
+        env=dict(os.environ, ICEWINE_WALLPAPER_VALIDATE=str(path), QT_QPA_PLATFORM="offscreen"),
+        capture_output=True, text=True, timeout=20)
+    if result.returncode or "ICEWINE_WALLPAPER_VALID" not in result.stdout + result.stderr:
+        raise ValueError("Qt could not decode the image; saved wallpapers were left unchanged")
 
-fail() {
-    printf 'icewine wallpaper: %s\n' "$1" >&2
-    exit 1
-}
 
-data_home=${ICEWINE_WALLPAPER_DATA_HOME:-${XDG_DATA_HOME:-"${HOME:?HOME is not set}/.local/share"}}
-[[ $# == 1 ]] || { usage; exit 2; }
-source_path=$1
-[[ $data_home == /* ]] || fail 'XDG_DATA_HOME must be an absolute path'
+def select(args):
+    if len(args) == 1 and not args[0].startswith("--"):
+        action, image = "desktop", args[0]
+    elif len(args) == 2 and args[0] == "--auth":
+        action, image = "auth", args[1]
+    elif args in (["--auth-reset"], ["--publish-auth"]):
+        action, image = args[0][2:], None
+    else:
+        raise ValueError("Usage: icewine wallpaper {IMAGE|--auth IMAGE|--auth-reset|--publish-auth}")
+    data = Path(os.environ.get("ICEWINE_WALLPAPER_DATA_HOME")
+        or os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local/share"))
+    if not data.is_absolute():
+        raise ValueError("XDG_DATA_HOME must be an absolute path")
+    directory = data / "icewine/wallpapers"
+    directory.mkdir(parents=True, exist_ok=True)
+    desktop, override = directory / "selection.img", directory / "auth.img"
+    public_value = os.environ.get("ICEWINE_SDDM_WALLPAPER_FILE")
+    public = Path(public_value) if public_value else None
+    if public and (not public.is_absolute() or public.is_symlink()):
+        raise ValueError("SDDM wallpaper must be an absolute non-symlink path")
+    temporary = []
 
-[[ -f $source_path && -r $source_path ]] || fail 'image path is not a readable regular file'
-source_path=$(realpath -- "$source_path") || fail 'could not resolve image path'
+    def stage(source, destination, mode):
+        if not source.is_file():
+            raise ValueError("image path is not a readable regular file")
+        fd, name = tempfile.mkstemp(prefix=".wallpaper-", dir=destination.parent)
+        os.close(fd)
+        path = Path(name)
+        temporary.append(path)
+        shutil.copyfile(source, path)
+        path.chmod(mode)
+        return path
 
-directory="$data_home/icewine/wallpapers"
-selection="$directory/selection.img"
-mkdir -p -- "$directory" || fail 'could not create the wallpaper data directory'
+    # Serialise desktop/override/publication updates from this user's selectors.
+    with (directory / ".selection.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            destination = desktop if action == "desktop" else override
+            new = stage(Path(image).resolve(strict=True), destination, 0o600) if image else None
+            if new:
+                validate(new)
+            inherited = desktop if desktop.is_file() else data / "wallpapers/default.jpg"
+            effective = new if action == "auth" else (
+                override if action != "auth-reset" and override.is_file()
+                else new if action == "desktop" else inherited)
+            public_new = public_previous = None
+            if public:
+                public_new = stage(effective, public, 0o644)
+                if effective != new:
+                    validate(public_new)
+                if public.exists():
+                    public_previous = stage(public, public, 0o644)
+                # Publication failure must not commit a private selection/reset.
+                os.replace(public_new, public)
+            try:
+                if new:
+                    os.replace(new, destination)
+                elif action == "auth-reset":
+                    override.unlink(missing_ok=True)
+            except OSError:
+                if public:
+                    if public_previous:
+                        os.replace(public_previous, public)
+                    else:
+                        public.unlink(missing_ok=True)
+                raise
+        finally:
+            for path in temporary:
+                path.unlink(missing_ok=True)
+    if action != "publish-auth":
+        revision = str(time.time_ns())
+        refreshed = True
+        for target, method in [("wallpaper", "refresh"), ("session", "refreshWallpaper")]:
+            try:
+                result = subprocess.run(["qs", "ipc", "call", target, method, revision],
+                                        capture_output=True, text=True, timeout=10)
+                refreshed = refreshed and result.returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                refreshed = False
+        if not refreshed:
+            print("icewine wallpaper: saved; the running shell will use it next launch", file=sys.stderr)
 
-temporary=$(mktemp "$directory/selection.XXXXXXXX") || fail 'could not create a temporary wallpaper file'
-cleanup() { rm -f -- "$temporary"; }
-trap cleanup EXIT
 
-cp -- "$source_path" "$temporary" || fail 'could not copy the wallpaper'
-
-validation=$(ICEWINE_WALLPAPER_VALIDATE="$temporary" QT_QPA_PLATFORM=offscreen \
-    timeout 20s qs --path "$ICEWINE_WALLPAPER_VALIDATOR" 2>&1) \
-    || fail 'Qt could not decode the image; the saved wallpaper was left unchanged'
-case $validation in
-    *ICEWINE_WALLPAPER_VALID*) ;;
-    *) fail 'Qt does not support this image; the saved wallpaper was left unchanged' ;;
-esac
-
-mv -fT -- "$temporary" "$selection" || fail 'could not save the wallpaper'
-trap - EXIT
-
-revision="$(date +%s%N)-$BASHPID"
-if ! qs ipc call wallpaper refresh "$revision"; then
-    printf 'icewine wallpaper: saved; the running Quickshell session did not refresh and will use it next launch\n' >&2
-fi
+if __name__ == "__main__":
+    try:
+        select(sys.argv[1:])
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        print(f"icewine wallpaper: {error}", file=sys.stderr)
+        sys.exit(1)

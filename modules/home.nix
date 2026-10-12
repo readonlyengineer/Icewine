@@ -93,11 +93,12 @@ let
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
   wallpaperSelector = pkgs.writeShellApplication {
     name = "icewine-wallpaper";
-    runtimeInputs = [ pkgs.coreutils quickshell ];
+    runtimeInputs = [ pkgs.python3 quickshell ];
     text = ''
       export ICEWINE_WALLPAPER_VALIDATOR=${../quickshell/modules}/WallpaperValidator.qml
       export ICEWINE_WALLPAPER_DATA_HOME=''${ICEWINE_WALLPAPER_DATA_HOME:-''${XDG_DATA_HOME:-${dataHome}}}
-      ${builtins.readFile ../scripts/wallpaper}
+      ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_WALLPAPER_FILE=\"\${ICEWINE_SDDM_WALLPAPER_FILE:-/var/lib/icewine/sddm/wallpaper.img}\""}
+      exec python3 ${../scripts/wallpaper} "$@"
     '';
   };
   themeCli = pkgs.writeShellApplication {
@@ -126,7 +127,7 @@ let
   manager = pkgs.callPackage ../manager/package.nix { };
   managerBackend = pkgs.writeShellApplication {
     name = "icewine-manage-backend";
-    runtimeInputs = [ pkgs.python3 pkgs.xdg-utils ];
+    runtimeInputs = [ pkgs.python3 pkgs.xdg-utils wallpaperSelector ];
     text = ''
       export ICEWINE_THEME_SCRIPT=${../scripts/theme}
       export ICEWINE_THEME_ASSETS=${../theme/assets}

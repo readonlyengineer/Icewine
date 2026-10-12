@@ -17,7 +17,10 @@ case ${0##*/} in
     exec python3 /usr/lib/icewine/theme "$@" ;;
   icewine-wallpaper)
     export ICEWINE_WALLPAPER_VALIDATOR=/usr/share/icewine/quickshell/modules/WallpaperValidator.qml
-    exec bash /usr/lib/icewine/wallpaper "$@" ;;
+    if [[ -w /var/lib/icewine/sddm ]]; then
+      export ICEWINE_SDDM_WALLPAPER_FILE=/var/lib/icewine/sddm/wallpaper.img
+    fi
+    exec python3 /usr/lib/icewine/wallpaper "$@" ;;
   icewine-inputplumber-intercept)
     if [[ ${1:-} != device ]]; then
       if [[ -n ${ICEWINE_HANDHELD_ENABLED+x} ]]; then

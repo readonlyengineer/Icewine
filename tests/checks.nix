@@ -96,7 +96,7 @@ in {
     touch "$out"
   '';
   wallpaper = pkgs.runCommand "icewine-wallpaper-checks" {
-    nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.nodejs quickshell icewineCli ];
+    nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.nodejs pkgs.python3 quickshell icewineCli ];
   } ''
     cd ${self}
     node quickshell/tests/wallpaper.js
@@ -160,6 +160,8 @@ in {
     assert handheld.services.icewine.applications.steam == [ "steam" "-gamepadui" ];
     pkgs.runCommand "icewine-module-checks" { nativeBuildInputs = [ pkgs.lua pkgs.python3 ]; } ''
       export HOME=$TMPDIR/home XDG_CONFIG_HOME=$TMPDIR/home/.config XDG_DATA_HOME=$TMPDIR/home/.local/share XDG_STATE_HOME=$TMPDIR/home/.local/state
+      export XDG_RUNTIME_DIR=$TMPDIR/runtime XDG_CACHE_HOME=$TMPDIR/cache
+      mkdir -m700 -p "$XDG_RUNTIME_DIR"
       mkdir -p "$HOME"
       grep -F 'Before=icewine.service' ${handheld.systemd.user.units."icewine-inputplumber-hyprland.service".unit}/icewine-inputplumber-hyprland.service
       grep -F 'ExecStart=' ${handheld.systemd.user.units."icewine-keyboard.service".unit}/icewine-keyboard.service
@@ -178,7 +180,10 @@ in {
         [[ "$selection" = *=true || "$selection" = steam=flatpak || "$selection" = handheld=false ]]
       done
       test ! -e "$XDG_CONFIG_HOME"
+      mkdir -p "$TMPDIR/public"
+      export ICEWINE_SDDM_WALLPAPER_FILE="$TMPDIR/public/wallpaper.img"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
+      cmp "$XDG_DATA_HOME/wallpapers/default.jpg" "$ICEWINE_SDDM_WALLPAPER_FILE"
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -L "$XDG_CONFIG_HOME/hypr/icewine"
       test "$(readlink "$XDG_CONFIG_HOME/quickshell/icewine")" = /etc/icewine/implementation/quickshell
@@ -198,8 +203,12 @@ in {
       ln -sfn "$TMPDIR/portable-hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" desktop
       printf '# user changes\n' >> "$XDG_CONFIG_HOME/kitty/kitty.conf"
+      mkdir -p "$TMPDIR/public"
+      export ICEWINE_SDDM_WALLPAPER_FILE="$TMPDIR/public/wallpaper.img"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       grep -Fx '# user changes' "$XDG_CONFIG_HOME/kitty/kitty.conf"
+      mkdir -p "$TMPDIR/public"
+      export ICEWINE_SDDM_WALLPAPER_FILE="$TMPDIR/public/wallpaper.img"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=true
       ! grep -q '# user changes' "$XDG_CONFIG_HOME/kitty/kitty.conf"
       export HOME=$TMPDIR/handheld XDG_CONFIG_HOME=$TMPDIR/handheld/.config XDG_DATA_HOME=$TMPDIR/handheld/.local/share XDG_STATE_HOME=$TMPDIR/handheld/.local/state

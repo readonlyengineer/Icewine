@@ -12,7 +12,7 @@ Item {
     required property var palette
     property url backdropSource: ""
     property bool animationsEnabled: palette.animate !== false
-    signal backdropFailed()
+    signal backdropFailed(url source)
     readonly property real scaleFactor: AuthModel.scaleFactor(width, height)
     readonly property real keyboardInset: AuthModel.keyboardInset(controller.keyboardHost,
         root, controller.keyboardVisible, controller.keyboardHeight)
@@ -46,7 +46,7 @@ Item {
             source: root.backdropSource
             cache: false
             fillMode: Image.PreserveAspectCrop
-            onStatusChanged: if (status === Image.Error) root.backdropFailed()
+            onStatusChanged: if (status === Image.Error) root.backdropFailed(source)
         }
     }
 

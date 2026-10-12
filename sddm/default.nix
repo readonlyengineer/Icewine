@@ -31,6 +31,7 @@ runCommand "icewine-sddm-theme" { } ''
   theme="$out/share/sddm/themes/icewine"
   mkdir -p "$theme"/{modules,theme}
   cp ${./Main.qml} "$theme/Main.qml"
+  ln -s ${../theme/assets/flower-branch.png} "$theme/wallpaper.png"
   cp ${./metadata.desktop} "$theme/metadata.desktop"
   cp ${../quickshell/modules/AuthScreen.qml} "$theme/modules/AuthScreen.qml"
   cp ${../quickshell/modules/AuthModel.js} "$theme/modules/AuthModel.js"

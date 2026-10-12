@@ -425,6 +425,10 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         (state / "handheld-rules.sha256").write_text(manage.theme.default_signature(rules))
         manage.handheld_policy(state, False)
         host.assert_called_once_with(["sudo", "unlink", str(rules)])
+    with patch.object(manage, "run") as host, patch.object(manage, "login"):
+        apply(("login",), readonly=True)
+        host.assert_any_call(["icewine-wallpaper", "--publish-auth"])
+        assert (data / "wallpapers/default.jpg").exists()
     login_config = root / "sddm.conf"
     with patch.object(manage, "LOGIN_CONFIG", login_config), patch.object(manage, "run") as host:
         login_config.write_text("unrelated login policy\n")

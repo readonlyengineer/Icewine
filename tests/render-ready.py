@@ -26,6 +26,7 @@ qml = """import QtQuick
 import QtQuick.Window
 import QtTest
 import Quickshell
+import Quickshell.Io
 import "icewine/modules" as Modules
 import "sddm" as Sddm
 import "theme" as Theme
@@ -44,6 +45,15 @@ ShellRoot {
         function activateWindow(address) { throw new Error("Unexpected focus request") }
     }
     Modules.GameLauncher { id: launcher; compositor: compositor }
+    Process {
+        id: resetOverride
+        command: ["rm", "--", Quickshell.env("XDG_DATA_HOME") + "/icewine/wallpapers/auth.img"]
+    }
+    Process {
+        id: selectDesktop
+        command: ["ln", "-s", Quickshell.env("XDG_DATA_HOME") + "/wallpapers/default.jpg",
+            Quickshell.env("XDG_DATA_HOME") + "/icewine/wallpapers/selection.img"]
+    }
     ListModel {
         id: userModel
         property int lastIndex: 0
@@ -73,7 +83,7 @@ ShellRoot {
         id: loginWindow
         visible: true
         width: 1920; height: 1080
-        Sddm.Main { id: login; anchors.fill: parent }
+        Sddm.Main { id: login; anchors.fill: parent; wallpaperSource: Qt.resolvedUrl("public-auth.img") }
         TestCase { id: keys; when: false }
     }
     property var auth: Array.from(login.children).find(child => child.controller !== undefined)
@@ -81,6 +91,7 @@ ShellRoot {
     QtObject {
         id: lockSession
         property bool locked: true
+        property string wallpaperRevision: "initial"
         property string password: ""
         property bool authenticationRequired: true
         property bool authenticating: false
@@ -183,7 +194,6 @@ ShellRoot {
         }
         return null
     }
-    Component.onCompleted: launcher.launchSteamGamescope()
     Timer {
         id: renderTimer
         interval: 100
@@ -261,13 +271,37 @@ ShellRoot {
                 root.checkFeedbackMotion(auth, message => { controller.message = message })
                 root.checkLayout(auth, 0)
                 root.capture(auth, "login-dark-desktop")
-                keys.tryCompare(root.findItem(lockScreen, "authBackdrop"), "status", Image.Ready, 2000)
+                const lockBackdrop = root.findItem(lockScreen, "authBackdrop")
+                keys.tryCompare(lockBackdrop, "status", Image.Ready, 2000)
+                keys.tryCompare(root.findItem(auth, "authBackdrop"), "status", Image.Ready, 2000)
+                if (!String(lockBackdrop.source).includes("/icewine/wallpapers/auth.img"))
+                    throw new Error("Lock override was not selected")
+                resetOverride.running = true
+                keys.tryCompare(resetOverride, "running", false)
+                lockSession.wallpaperRevision = "reset"
+                keys.tryCompare(lockBackdrop, "status", Image.Ready, 2000)
+                keys.tryCompare(locker, "selectionAvailable", false)
+                if (!String(lockBackdrop.source).endsWith("/wallpapers/default.jpg"))
+                    throw new Error("Missing override/selection did not inherit default")
+                selectDesktop.running = true
+                keys.tryCompare(selectDesktop, "running", false)
+                lockSession.wallpaperRevision = "desktop-change"
+                keys.tryVerify(() => String(lockBackdrop.source).includes("/icewine/wallpapers/selection.img"), 2000)
+                keys.tryCompare(lockBackdrop, "status", Image.Ready, 2000)
+                login.wallpaperSource = Qt.resolvedUrl("missing-public.img")
+                keys.tryCompare(login, "publicationAvailable", false, 2000)
+                keys.tryCompare(root.findItem(auth, "authBackdrop"), "status", Image.Ready, 2000)
+                if (!String(root.findItem(auth, "authBackdrop").source).endsWith("/wallpaper.png"))
+                    throw new Error("SDDM did not fall back to its public default image")
                 root.capture(lockWindow.contentItem, "lock-dark-deck")
                 keys.tryCompare(root, "captures", 0, 2000)
                 root.authChildren = Array.from(auth.children)
                 session.keyboardHost = auth
                 loginWindow.width = 800
                 loginWindow.height = 600
+                launcher.launchSteamGamescope()
+                renderTimer.start()
+                return
             }
             if (launcher.pendingSteamCommand !== null) { renderTimer.start(); return }
             if (!launcher.steamLaunching || !launcher.steamSplashVisible)
@@ -585,6 +619,10 @@ QtObject {
             "[Desktop Entry]\nType=Application\nName=Workspace fixture\nExec=true\nIcon=" + str(root / "data/window.svg") + "\n")
     (root / "data/wallpapers").mkdir(parents=True)
     (root / "data/wallpapers/default.jpg").symlink_to(source / "theme/assets/flower-branch.png")
+    (root / "sddm/wallpaper.png").symlink_to(source / "theme/assets/flower-branch.png")
+    (root / "public-auth.img").symlink_to(source / "theme/assets/flower-branch.png")
+    (root / "data/icewine/wallpapers").mkdir(parents=True)
+    (root / "data/icewine/wallpapers/auth.img").symlink_to(source / "theme/assets/flower-branch.png")
     (root / "bin").mkdir()
     for name, body in {
         "uwsm": 'printf "%s\\n" "$*" >> "$TEST_LAUNCHES"\n',

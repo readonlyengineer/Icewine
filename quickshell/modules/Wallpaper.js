@@ -9,4 +9,10 @@ function source(dataHome, selected, revision) {
     return fileUrl(path) + (selected ? "?revision=" + encodeURIComponent(revision) : "")
 }
 
-if (typeof module !== "undefined") module.exports = { fileUrl, source }
+function authSource(dataHome, overrideAvailable, selected, revision) {
+    return overrideAvailable
+        ? fileUrl(dataHome + "/icewine/wallpapers/auth.img") + "?revision=" + encodeURIComponent(revision)
+        : source(dataHome, selected, revision)
+}
+
+if (typeof module !== "undefined") module.exports = { fileUrl, source, authSource }

@@ -16,6 +16,7 @@ Scope {
 
     property alias locked: sessionLock.locked
     property alias lockRequested: lockState.requested
+    property string wallpaperRevision: String(Date.now())
     property string password: ""
     property bool authenticating: false
     property bool failed: false
@@ -277,6 +278,7 @@ Scope {
     IpcHandler {
         target: "session"
         function lock(): string { root.requestLock(); return "requested" }
+        function refreshWallpaper(revision: string): void { root.wallpaperRevision = revision }
         function refreshIcons(): void {
             if (!root.lockRequested && !root.locked)
                 Quickshell.reload(false)

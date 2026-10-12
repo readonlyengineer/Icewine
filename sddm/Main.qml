@@ -7,6 +7,8 @@ import "modules/AuthModel.js" as AuthModel
 
 Item {
     id: root
+    property bool publicationAvailable: true
+    property url wallpaperSource: "file:///var/lib/icewine/sddm/wallpaper.img"
 
     // Use Qt's model role lookup and selection; AuthScreen supplies the buttons.
     Controls.ComboBox {
@@ -91,6 +93,10 @@ Item {
         controller: controller
         palette: Theme.Palette
         animationsEnabled: typeof config === "undefined" || config.stringValue("animations") !== "off"
+        backdropSource: root.publicationAvailable ? root.wallpaperSource : Qt.resolvedUrl("wallpaper.png")
+        onBackdropFailed: source => Qt.callLater(() => {
+            if (String(source) === String(root.wallpaperSource)) root.publicationAvailable = false
+        })
     }
     InputPanel {
         id: keyboard

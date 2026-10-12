@@ -105,10 +105,18 @@ Add games using Steam's **Add a Non-Steam Game** action.
 
 ```sh
 icewine wallpaper "/path/to/image.png"
+icewine wallpaper --auth "/path/to/auth-image.png"
+icewine wallpaper --auth-reset
 ```
 
 Icewine copies PNG, JPEG, GIF or BMP images to
 `$XDG_DATA_HOME/icewine/wallpapers/selection.img` and refreshes the wallpaper.
+Lock and login inherit it unless `--auth` selects a shared authentication override;
+`--auth-reset` restores inheritance. The desktop image stays unchanged by either.
+Login Apply publishes only the effective image, readable before authentication,
+under `/var/lib/icewine/sddm`. Its source is `services.icewine.user` on NixOS or
+the user who enabled Login on Arch/CachyOS; that user's wallpaper changes refresh
+it. Other private files and directory permissions are unchanged.
 Your original file can then be moved or deleted.
 
 Lock/login use brief focus and feedback transitions. Set

@@ -11,6 +11,7 @@ Item {
     required property var session
     readonly property string dataHome: Quickshell.env("XDG_DATA_HOME")
         || (Quickshell.env("HOME") + "/.local/share")
+    property bool overrideAvailable: true
     property bool selectionAvailable: true
     property string wallpaperRevision: String(Date.now())
 
@@ -50,9 +51,15 @@ Item {
         target: root.session
         function onLockedChanged() {
             if (root.session.locked) {
+                root.overrideAvailable = true
                 root.selectionAvailable = true
                 root.wallpaperRevision = String(Date.now())
             }
+        }
+        function onWallpaperRevisionChanged() {
+            root.overrideAvailable = true
+            root.selectionAvailable = true
+            root.wallpaperRevision = root.session.wallpaperRevision
         }
         function onPasswordChanged() {
             if (controller.password !== root.session.password)
@@ -61,10 +68,16 @@ Item {
     }
 
     AuthScreen {
+        id: screen
         anchors.fill: parent
         controller: controller
         palette: Theme.Palette
-        backdropSource: Wallpaper.source(root.dataHome, root.selectionAvailable, root.wallpaperRevision)
-        onBackdropFailed: if (root.selectionAvailable) root.selectionAvailable = false
+        backdropSource: Wallpaper.authSource(root.dataHome, root.overrideAvailable,
+            root.selectionAvailable, root.wallpaperRevision)
+        onBackdropFailed: source => Qt.callLater(() => {
+            if (String(source) !== String(screen.backdropSource)) return
+            if (root.overrideAvailable) root.overrideAvailable = false
+            else if (root.selectionAvailable) root.selectionAvailable = false
+        })
     }
 }
