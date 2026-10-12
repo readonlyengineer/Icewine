@@ -101,10 +101,8 @@ Icewine's flake pins nixpkgs revision
 `20b1ddd1aa5ace70c9468305030aa4f9ef79671b`, but it declares no portable
 per-package version floor. Record an RPM lock matrix from the first working
 deployment rather than treating that Nix revision as a Fedora specification.
-Two known hard constraints are Hyprland's Lua API and the local Gamescope patch:
-`patches/gamescope/README.md` targets Gamescope 3.16.28 and says its declaration
-hunk also applies to 3.16.29. A Fedora/Bazzite package at the same version is not
-automatically equivalent; its source and patch stack must be checked.
+Hyprland's Lua API remains a compatibility requirement; validate the chosen
+Fedora/Bazzite package against Icewine's configuration.
 
 ## Desktop and handheld are separate products
 
@@ -124,9 +122,7 @@ Handheld mode additionally assumes all of these Icewine-specific behaviours:
 - rear buttons mapped to F13-F17, with R5 controlling the radial and L5 the
   patched Squeekboard overlay;
 - Steam launched in a **nested** Gamescope using focused-monitor dimensions,
-  while Icewine owns the outer Hyprland session; and
-- three Gamescope patches: Icewine's keyboard-focus patch everywhere and two
-  upstream touch patches in handheld mode.
+  while Icewine owns the outer Hyprland session.
 
 Bazzite Deck already enables its own InputPlumber service and Gaming Mode
 session and ships its own Gamescope/Steam integration. Its current image source
