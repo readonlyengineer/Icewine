@@ -25,6 +25,7 @@ hl.config({
 	},
 
 	dwindle = { force_split = 2 }, -- Native right/down placement, independent of cursor.
+	master = { mfact = 0.8 }, -- Native master/stack split when the master layout is used.
 
 	misc = {
 		allow_session_lock_restore = true, -- Reacquire after the lock client dies; compositor stays covered.
