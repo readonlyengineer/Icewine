@@ -209,6 +209,10 @@ Scope {
         z: 100
         visible: active && root.keyboardEnabled && parent !== null
         onActiveChanged: if (!active) root.keyboardEnabled = false
+        opacity: visible ? 1 : 0
+        Behavior on opacity {
+            NumberAnimation { duration: root.keyboardHost?.animationsEnabled === false ? 0 : 140 }
+        }
     }
 
     Process {

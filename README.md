@@ -111,6 +111,10 @@ Icewine copies PNG, JPEG, GIF or BMP images to
 `$XDG_DATA_HOME/icewine/wallpapers/selection.img` and refreshes the wallpaper.
 Your original file can then be moved or deleted.
 
+Lock/login use brief focus and feedback transitions. Set
+`ICEWINE_THEME_TRANSITION=off` for the shell or `animations=off` in SDDM
+theme configuration to disable them.
+
 ### Theme and transparency
 
 ```sh

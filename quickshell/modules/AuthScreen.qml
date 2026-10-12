@@ -11,6 +11,7 @@ Item {
     required property var controller
     required property var palette
     property url backdropSource: ""
+    property bool animationsEnabled: palette.animate !== false
     signal backdropFailed()
     readonly property real scaleFactor: AuthModel.scaleFactor(width, height)
     readonly property real keyboardInset: AuthModel.keyboardInset(controller.keyboardHost,
@@ -106,6 +107,7 @@ Item {
                 verticalAlignment: Text.AlignVCenter
                 color: button.down || button.hovered || button.activeFocus
                     ? button.hoverColor : button.normalColor
+                Behavior on color { ColorAnimation { duration: root.animationsEnabled ? 120 : 0 } }
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: Math.max(12, button.labelSize)
             }
@@ -207,6 +209,7 @@ Item {
                                 border.width: password.activeFocus ? 2 : 1
                                 border.color: root.controller.failed ? root.palette.error
                                     : password.activeFocus ? root.palette.primary : root.palette.border
+                                Behavior on border.color { ColorAnimation { duration: root.animationsEnabled ? 120 : 0 } }
                             }
                             onActiveFocusChanged: if (activeFocus) Qt.callLater(root.revealPassword)
                             onTextChanged: {
@@ -244,6 +247,9 @@ Item {
                         text: root.controller.busy ? (root.controller.message || "Authenticating…")
                             : root.controller.message
                         color: root.controller.failed ? root.palette.error : root.palette.foregroundDark
+                        opacity: text.length ? 1 : 0
+                        Behavior on color { ColorAnimation { duration: root.animationsEnabled ? 120 : 0 } }
+                        Behavior on opacity { NumberAnimation { duration: root.animationsEnabled ? 140 : 0 } }
                         font.family: "JetBrainsMono Nerd Font"
                         font.pixelSize: 12
                         wrapMode: Text.WordWrap

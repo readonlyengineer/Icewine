@@ -146,6 +146,26 @@ ShellRoot {
                 || (sessionButton.visible && powerRow.y + powerRow.height > sessionButton.y))
             throw new Error("Power controls must sit between keyboard and session")
     }
+    function checkFeedbackMotion(screen, setMessage) {
+        const status = root.findItem(screen, "authStatus")
+        const field = root.findItem(screen, "authPassword")
+        screen.animationsEnabled = true
+        setMessage("Retry")
+        keys.tryCompare(status, "opacity", 1, 400)
+        setMessage("")
+        keys.wait(30)
+        if (!(status.opacity > 0 && status.opacity < 1))
+            throw new Error("Feedback did not animate")
+        setMessage("Retry") // Interrupt disappearance without delaying input.
+        keys.tryCompare(status, "opacity", 1, 400)
+        screen.animationsEnabled = false
+        setMessage("")
+        if (status.opacity !== 0) throw new Error("Disabled motion was not immediate")
+        setMessage("Retry")
+        if (status.opacity !== 1 || !field.activeFocus)
+            throw new Error("Interrupted/reduced motion lost feedback or focus")
+        screen.animationsEnabled = true
+    }
     property int captures: 0
     function capture(item, name) {
         const directory = Quickshell.env("ICEWINE_PREVIEW_DIR")
@@ -238,6 +258,7 @@ ShellRoot {
                 keys.tryCompare(field, "activeFocus", true)
                 if (field.text !== "" || !controller.failed)
                     throw new Error("Failure must clear and refocus password")
+                root.checkFeedbackMotion(auth, message => { controller.message = message })
                 root.checkLayout(auth, 0)
                 root.capture(auth, "login-dark-desktop")
                 keys.tryCompare(root.findItem(lockScreen, "authBackdrop"), "status", Image.Ready, 2000)
@@ -284,6 +305,7 @@ ShellRoot {
                 lockSession.failed = true
                 lockSession.authenticating = false
                 keys.tryCompare(lockField, "activeFocus", true)
+                root.checkFeedbackMotion(lockScreen, message => { lockSession.failed = Boolean(message) })
                 root.findItem(lockScreen, "Keyboard").click()
                 keys.wait(50)
                 root.checkLayout(lockScreen, 280)
@@ -330,6 +352,11 @@ import "theme" as Theme
 ShellRoot {
     id: root
 """ + models + helpers + """
+    QtObject {
+        id: config
+        property string animations: ""
+        function stringValue(key) { return animations }
+    }
     Window {
         id: win; visible: true; width: 1920; height: 1080
         Loader { id: surface; anchors.fill: parent; sourceComponent: Component {
@@ -353,11 +380,28 @@ ShellRoot {
                     throw new Error("Native keyboard must start explicitly disabled")
                 for (const size of [[1920,1080], [1280,800], [800,600], [320,480]]) {
                     win.width = size[0]; win.height = size[1]
+                    auth.palette = size[0] < 1000 ? Theme.LightPalette : Theme.Palette
                     keys.wait(50)
+                    if (size[0] === 1280) {
+                        root.capture(win.contentItem, "motion-" + Quickshell.env("ICEWINE_NATIVE_ADAPTER") + "-0")
+                        keys.tryCompare(root, "captures", 0, 2000)
+                    }
                     keys.mouseClick(button)
                     keyboard = Array.from(surface.item.children).concat(Array.from(auth.children))
                         .find(item => item.active !== undefined)
                     keys.tryCompare(keyboard, "visible", true, 2000, "Explicit native show")
+                    keys.wait(30)
+                    if (!(keyboard.opacity > 0 && keyboard.opacity < 1))
+                        throw new Error("Native keyboard appearance did not animate")
+                    if (size[0] === 1280) {
+                        root.capture(win.contentItem, "motion-" + Quickshell.env("ICEWINE_NATIVE_ADAPTER") + "-1")
+                        keys.tryCompare(root, "captures", 0, 2000)
+                    }
+                    keys.tryCompare(keyboard, "opacity", 1, 400)
+                    if (size[0] === 1280) {
+                        root.capture(win.contentItem, "motion-" + Quickshell.env("ICEWINE_NATIVE_ADAPTER") + "-2")
+                        keys.tryCompare(root, "captures", 0, 2000)
+                    }
                     keys.tryCompare(field, "activeFocus", true)
                     keys.wait(50)
                     if (keyboard.width !== Math.min(win.width, 900, win.height * 1.5)
@@ -389,6 +433,15 @@ ShellRoot {
                     if (keyboard.visible) throw new Error("Native dismissal was not retained")
                     field.text = ""
                 }
+                if (surface.item.nativeController) auth.animationsEnabled = false
+                else config.animations = "off"
+                if (auth.animationsEnabled) throw new Error("Reduced motion was ignored")
+                keys.mouseClick(button)
+                keys.tryCompare(keyboard, "visible", true)
+                if (keyboard.opacity !== 1) throw new Error("Disabled keyboard motion was not immediate")
+                keys.mouseClick(button)
+                if (keyboard.visible || keyboard.opacity !== 0)
+                    throw new Error("Disabled keyboard dismissal was not immediate")
                 console.log("RENDER_READY_PASSED")
                 Qt.quit()
             } catch (error) { console.error(error); Qt.exit(1) }

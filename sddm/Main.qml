@@ -90,6 +90,7 @@ Item {
         anchors.fill: parent
         controller: controller
         palette: Theme.Palette
+        animationsEnabled: typeof config === "undefined" || config.stringValue("animations") !== "off"
     }
     InputPanel {
         id: keyboard
@@ -98,5 +99,7 @@ Item {
         y: parent.height - height
         visible: active && controller.keyboardEnabled
         onActiveChanged: if (!active) controller.keyboardEnabled = false
+        opacity: visible ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: screen.animationsEnabled ? 140 : 0 } }
     }
 }
