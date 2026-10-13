@@ -81,7 +81,7 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100)):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None):
         global last_output, last_frames
         log.unlink(missing_ok=True)
         tool_log.unlink(missing_ok=True)
@@ -93,7 +93,7 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
         if auth: (data / "auth.img").write_bytes(b"fixture")
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
-        env = dict(os.environ, TERM="xterm", PATH=str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
+        env = dict(os.environ, TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
                    TUI_TOOLS=str(tool_log), TUI_POLICY=str(int(policy)),
                    TUI_PICK=pick, TUI_PICK_EXIT=str(pick_exit), TUI_HYPRMON_EXIT=str(hyprmon_exit),
                    TUI_COMMAND_FAIL=str(int(command_fail)), TUI_DELIVERY_FAIL=str(int(delivery_fail)),
@@ -239,6 +239,13 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
     (root / "hyprmon").chmod(0o600)
     try:
         assert run(tab+b"\x1b[B"*4+b"\r\x1b", state()) == [["state"]]
-        assert b"HyprMon unavailable:" in last_output
+        assert b"HyprMon unavailable: could not run hyprmon:" in last_output
     finally: (root / "hyprmon").chmod(0o755)
+    (root / "hyprmon").rename(root / "hyprmon-hidden")
+    try:
+        assert run(tab+b"\x1b[B"*4+b"\r\x1b", state(readonly=True), size=(24, 80), path=str(root)) == [["state"]]
+        assert b"hyprmon on PATH" in last_output
+        assert b"Lua-compatible" in last_output
+        assert b"services.icewine.monitors" in last_output
+    finally: (root / "hyprmon-hidden").rename(root / "hyprmon")
 print("PASS: real TTY cancel, editable/read-only navigation, named selections, invalid state, Tab pages, appearance handoffs and fresh overwrite default")

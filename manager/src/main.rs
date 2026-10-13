@@ -265,7 +265,9 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         message = match result {
                             Ok(status) if status.success() => "Returned from HyprMon; live/save actions have their own effect.".into(),
                             Ok(status) => format!("HyprMon exited with {status}"),
-                            Err(error) => format!("HyprMon unavailable: {error}"),
+                            Err(error) if error.kind() == io::ErrorKind::NotFound =>
+                                "HyprMon unavailable: install Lua-compatible hyprmon on PATH.\nNixOS: enable services.icewine.monitors with a compatible package.".into(),
+                            Err(error) => format!("HyprMon unavailable: could not run hyprmon: {error}"),
                         };
                     }
                     Control::Overwrite => overwrite = !overwrite,
