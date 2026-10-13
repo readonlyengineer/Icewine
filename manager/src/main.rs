@@ -122,7 +122,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 let [panel] = Layout::vertical([Constraint::Max(ROWS.len() as u16 + 15)])
                     .flex(Flex::Center).areas(panel);
                 let block = Block::bordered().border_type(BorderType::Rounded)
-                    .border_style(muted).title(Line::from(if page == 0 { " Icewine Installer " } else { " Icewine Appearance " }).style(accent))
+                    .border_style(muted).title(Line::from(if page == 0 { " Icewine Installer (1/2) | Tab: Appearance (2/2) " } else { " Icewine Appearance (2/2) | Tab: Installer (1/2) " }).style(accent))
                     .padding(Padding::uniform(1));
                 let inner = block.inner(panel);
                 frame.render_widget(block, panel);

@@ -14,6 +14,32 @@ import tempfile
 import termios
 import time
 
+def rendered_frames(output, size):
+    # Ratatui emits positioned cell deltas, not complete text on page changes.
+    # Replay its cursor/clear commands; retain completed draws for assertions.
+    rows, columns = size
+    screen = [[" "] * columns for _ in range(rows)]
+    x = y = 0
+    frames = []
+    for token in re.split(r"(\x1b\[[0-?]*[ -/]*[@-~])", output.decode(errors="replace")):
+        if token.startswith("\x1b["):
+            command, args = token[-1], token[2:-1]
+            if command in ("H", "f"):
+                position = [int(value or 1) for value in args.split(";")]
+                y, x = position[0] - 1, (position[1] if len(position) > 1 else 1) - 1
+            elif command == "J" and args == "2":
+                screen = [[" "] * columns for _ in range(rows)]
+            elif token == "\x1b[?25l":
+                frames.append("\n".join("".join(row) for row in screen).encode())
+        else:
+            for char in token:
+                if char == "\r": x = 0
+                elif char == "\n": y += 1
+                elif char >= " ":
+                    if 0 <= y < rows and 0 <= x < columns: screen[y][x] = char
+                    x += 1
+    return frames
+
 binary = Path(sys.argv[1]).resolve()
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
@@ -55,8 +81,8 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False):
-        global last_output
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100)):
+        global last_output, last_frames
         log.unlink(missing_ok=True)
         tool_log.unlink(missing_ok=True)
         appearance_state = root / "appearance-state"
@@ -66,7 +92,7 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
         (data / "auth.img").unlink(missing_ok=True)
         if auth: (data / "auth.img").write_bytes(b"fixture")
         master, slave = pty.openpty()
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 100, 0, 0))
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         env = dict(os.environ, TERM="xterm", PATH=str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
                    TUI_TOOLS=str(tool_log), TUI_POLICY=str(int(policy)),
                    TUI_PICK=pick, TUI_PICK_EXIT=str(pick_exit), TUI_HYPRMON_EXIT=str(hyprmon_exit),
@@ -84,9 +110,10 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
                     output.extend(os.read(master, 65536))
                 except OSError:
                     break
-            # Ratatui can render spaces between words with cursor positioning.
-            rendered = re.sub(rb"\x1b\[\d+;\d+H", b" ", output)
-            if not sent and b"Esc: cancel" in rendered:
+            frames = rendered_frames(output, size)
+            rendered = b"\n".join(frames)
+            if not sent and frames:
+                assert b"Icewine Installer (1/2) | Tab: Appearance (2/2)" in rendered
                 os.write(master, keys)
                 sent = True
         if process.poll() is None:
@@ -95,7 +122,8 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
         while select.select([master], [], [], 0)[0]:
             try: output.extend(os.read(master, 65536))
             except OSError: break
-        rendered = re.sub(rb"\x1b\[\d+;\d+H", b" ", output)
+        last_frames = rendered_frames(output, size)
+        rendered = b"\n".join(last_frames)
         if sent:
             assert termios.tcgetattr(master)[3] & termios.ICANON, "terminal raw mode was not restored"
         os.close(master)
@@ -105,6 +133,7 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
             assert not sent
             return [json.loads(line) for line in log.read_text().splitlines()]
         assert sent, output.decode(errors="replace")
+        assert (b"Esc: cancel" if size[1] == 100 else b"Esc: canc") in rendered
         assert b"Icewine Installer" in rendered
         assert b"Overwrite existing dotfiles" in rendered
         assert b"[ Apply ]" in rendered and b"[ Cancel ]" in rendered
@@ -162,6 +191,14 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
     assert ["icewine", "transparency", "off"] in tools(), "appearance focus was not preserved"
     assert b"Tab: page" in last_output
     assert b"Up/down: move" in last_output
+    assert b"Appearance updates immediately." in last_output
+    # The navigation affordance and controls fit a conventional 80-column TTY
+    # as well as the wider default; exercise a round trip at both sizes.
+    for size in ((24, 80), (24, 100)):
+        assert run(tab + tab + b"\x1b", state(), size=size) == [["state"]]
+        assert b"Appearance updates immediately." in last_output
+        assert any(b"Icewine Appearance (2/2) | Tab: Installer (1/2)" in frame for frame in last_frames)
+        assert b"Icewine Installer (1/2) | Tab: Appearance (2/2)" in last_frames[-1]
     # Overwrite survives page switches and Apply works from either page.
     for finish in (tab + down + b"\r", down*5 + b"\r"):
         assert applied(run(down*visible + b" " + tab + finish, state()))["overwrite"] == "true"
