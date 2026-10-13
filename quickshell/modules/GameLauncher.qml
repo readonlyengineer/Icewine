@@ -140,7 +140,7 @@ Scope {
         if (outsideGamescope)
             Quickshell.execDetached(["notify-send", "--app-name=Icewine", "--app-icon=steam",
                 "Steam is already running outside Gamescope",
-                "Using the existing session. Quit Steam manually before launching inside Gamescope."])
+                "Quit Steam to launch it in Gamescope."])
         return JSON.stringify({ok: true, reused: true, outsideGamescope: outsideGamescope}, null, 2)
     }
 

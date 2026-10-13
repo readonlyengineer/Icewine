@@ -818,6 +818,6 @@ fi
         notifications = (root / "notifications").read_text().splitlines()
         assert len(notifications) == 2 and all(
             "Steam is already running outside Gamescope" in line
-            and "Quit Steam manually" in line for line in notifications), notifications
+            and "Quit Steam to launch it in Gamescope." in line for line in notifications), notifications
     print(f"Native {native_adapter} OSK input, bounds, dismissal/refocus checks passed" if native_adapter
           else "Steam launch, auth visuals, locker and SDDM adapter checks passed")

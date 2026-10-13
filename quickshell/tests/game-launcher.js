@@ -264,7 +264,7 @@ for (const identity of ["com.valvesoftware.Steam", "steam"]) {
     assert.equal(steamCommands.length, before + 2, "Reuse only sends feedback; it never stops Steam")
     assert.deepEqual(steamCommands.at(-1), ["notify-send", "--app-name=Icewine", "--app-icon=steam",
         "Steam is already running outside Gamescope",
-        "Using the existing session. Quit Steam manually before launching inside Gamescope."])
+        "Quit Steam to launch it in Gamescope."])
     steamRoot.handoffSteam()
     assert.equal(steamCommands.length, before + 2, "Completed handoff does not repeat feedback")
     const reused = JSON.parse(steamRoot.launchSteamGamescope())
