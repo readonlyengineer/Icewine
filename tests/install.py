@@ -329,6 +329,33 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     preferences = btop.read_text() + "update_ms = 500\nvim_keys = true\n"
     btop.write_text(preferences)
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+        # An existing default/custom selection must change on explicit Apply only.
+        for existing, expected in (
+            ('# color_theme = "Default"\ncolor_theme = "Default"\n',
+             '# color_theme = "Default"\ncolor_theme = "icewine"\nupdate_ms = 500\nvim_keys = true'),
+            ('color_theme="custom"\ncolor_theme = "Default"\n',
+             'color_theme="icewine"\ncolor_theme = "icewine"\nupdate_ms = 500\nvim_keys = true'),
+            ('', 'update_ms = 500\nvim_keys = true\ncolor_theme = "icewine"\n'),
+        ):
+            personal = existing + "update_ms = 500\nvim_keys = true"  # No final newline.
+            btop.write_text(personal)
+            btop.chmod(0o600)
+            apply(("shellExtras",), readonly=True)
+            selected = btop.read_text()
+            assert selected == expected
+            assert btop.stat().st_mode & 0o777 == 0o600
+            apply(("shellExtras",), readonly=True)
+            assert btop.read_text() == selected  # Repeated Apply is stable.
+            apply((), readonly=True)
+            assert btop.read_text() == selected  # Personal config is never retired.
+        personal_config = root / "personal-btop.conf"
+        personal_config.write_text('color_theme = "Default"\nupdate_ms = 500\n')
+        btop.unlink()
+        btop.symlink_to(personal_config)
+        apply(("shellExtras",), readonly=True)
+        assert btop.is_symlink() and personal_config.read_text() == 'color_theme = "Default"\nupdate_ms = 500\n'
+        btop.unlink()
+        btop.write_text(preferences)
         apply(("shellExtras",), readonly=True)
         assert btop.read_text() == preferences
         apply(("shellExtras",), overwrite=True, readonly=True)

@@ -209,10 +209,13 @@ in {
       ln -sfn "$TMPDIR/portable-hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" desktop
       printf '# user changes\n' >> "$XDG_CONFIG_HOME/kitty/kitty.conf"
+      printf 'color_theme = "Default"\nupdate_ms = 500\n' > "$XDG_CONFIG_HOME/btop/btop.conf"
       mkdir -p "$TMPDIR/public"
       export ICEWINE_SDDM_WALLPAPER_FILE="$TMPDIR/public/wallpaper.img"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       grep -Fx '# user changes' "$XDG_CONFIG_HOME/kitty/kitty.conf"
+      grep -Fx 'color_theme = "icewine"' "$XDG_CONFIG_HOME/btop/btop.conf"
+      grep -Fx 'update_ms = 500' "$XDG_CONFIG_HOME/btop/btop.conf"
       mkdir -p "$TMPDIR/public"
       export ICEWINE_SDDM_WALLPAPER_FILE="$TMPDIR/public/wallpaper.img"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=true

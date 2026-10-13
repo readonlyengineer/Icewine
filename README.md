@@ -139,10 +139,11 @@ updated.
 Selections survive login and theme changes. An explicit `services.icewine.theme`
 setting overrides the CLI theme choice; leave it unset to choose themes yourself.
 
-Shell Extras also deploys editable btop defaults selecting the generated Icewine
-theme. Apply preserves existing preferences unless Overwrite is selected; theme
-changes update colours only. Install btop through your host package configuration
-and reopen it after changing themes.
+Shell Extras Apply selects the generated Icewine theme in a regular btop config,
+preserving other preferences unless Overwrite is selected. Symlinked configs are
+preserved; set `color_theme = "icewine"` in their source yourself. Theme changes
+update colours only. Install btop through your host package configuration and
+reopen it after Apply or changing themes.
 
 ### Manage integrations and dotfiles
 

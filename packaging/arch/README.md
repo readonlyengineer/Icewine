@@ -27,7 +27,8 @@ or Handheld restarts a running Icewine shell after stopping its affected helpers
 
 Use Tab/arrows to navigate and Space to select. Apply creates missing dotfiles;
 **Overwrite existing dotfiles** replaces selected defaults without backups.
-Existing files are otherwise preserved. Cancel changes nothing. Reopen with
+Shell Extras Apply selects Icewine in regular btop configs while preserving other
+preferences. Other existing files are preserved. Cancel changes nothing. Reopen with
 `icewine manage`; previous successful selections are retained. On deselection,
 only recorded Icewine configuration is removed and edited user files are preserved.
 Desktop deselection removes only the Hyprland implementation link. Login

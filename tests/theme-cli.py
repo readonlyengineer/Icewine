@@ -441,16 +441,23 @@ if len(sys.argv) > 4:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         config = root / "config"
-        (config / "btop/themes").mkdir(parents=True)
+        defaults = root / "defaults"
+        (defaults / "config/btop").mkdir(parents=True)
+        (defaults / "config/btop/btop.conf").write_bytes((assets / "templates/btop.conf").read_bytes())
+        (config / "btop").mkdir(parents=True)
         selected = config / "btop/themes/icewine.theme"
-        selected.symlink_to(config / "icewine/current/btop.theme")
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(config),
                    XDG_STATE_HOME=str(root / "state"), XDG_DATA_HOME=str(root / "data"),
                    TERM="xterm-256color", LANG="C.UTF-8")
         for theme_id, background in [("dracula", b"48;2;40;42;54m"),
                                      ("gruvbox-light", b"48;2;242;229;188m")]:
             theme.publish(config, theme.render_theme(assets, assets / "themes" / (theme_id + ".json")))
-            (config / "btop/btop.conf").write_text('color_theme = "icewine"\nupdate_ms = 500\n')
+            (config / "btop/btop.conf").write_text('color_theme = "Default"\nupdate_ms = 500\n')
+            with patch.dict(os.environ, dict(env, ICEWINE_DEFAULT_FILES=str(defaults), ICEWINE_THEME_SKIP="")):
+                theme.install_defaults(defaults, config, root / "data", root / "state/icewine", False, "btop")
+                theme.install_links(config, root / "state/icewine", False, "btop")
+            assert (config / "btop/btop.conf").read_text() == 'color_theme = "icewine"\nupdate_ms = 500\n'
+            assert selected.is_symlink() and selected.resolve() == (config / "icewine/current/btop.theme").resolve()
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 35, 120, 0, 0))
             process = subprocess.Popen([sys.argv[4], "--debug", "--no-tty"],
