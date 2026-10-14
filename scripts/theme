@@ -607,7 +607,6 @@ def dispatch(argv):
     command, *args = argv
     if len(args) > (0 if command == "apply" else 1):
         raise ValueError("unexpected arguments")
-    app = None
     config = xdg("XDG_CONFIG_HOME", ".config")
     state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
     if command == "autofullscreen":
@@ -690,15 +689,13 @@ def dispatch(argv):
             atomic_text(Path(sddm_file), f"[General]\ntheme={theme_id}\n", 0o644)
         except OSError as error:
             print(f"Pending: SDDM colours will not update: {error}", file=sys.stderr)
-    if gtk_enabled and app in (None, "gtk"):
+    if gtk_enabled:
         install_gtk_theme(config, theme_id)
         install_flatpak_theme(state, theme_id, files)
         appearance = json.loads(themes[theme_id].read_text(encoding="utf-8"))["appearance"]
         gtk_complete = sync_gtk_settings(theme_id, appearance, state)
     print(f"Theme: {theme_id}" + (" (Nix policy overrides CLI selection)" if policy else "") + f" · Transparency: {level}")
-    if command in {"theme", "transparency", "apply"}:
-        return int(reload_session(config) or not gtk_complete)
-    return 0
+    return int(reload_session(config) or not gtk_complete)
 
 
 def main(argv):
