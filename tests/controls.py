@@ -363,6 +363,7 @@ with tempfile.TemporaryDirectory() as directory:
     capabilities.chmod(0o755)
     (root / "shell.qml").write_text(QML)
     (root / "network.txt").write_text("eth0: 100 0 0 0 0 0 0 0 50 0 0 0 0 0 0 0\n")
+    # Ponytail: inherited feature flags stay until a real fixture failure warrants explicit inputs; then pin only the tested flags.
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen",
                ICEWINE_BATTERY_ENABLED="true",
                DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(root / "no-session-bus"),

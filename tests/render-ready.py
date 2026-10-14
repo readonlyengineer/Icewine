@@ -783,6 +783,7 @@ fi
     (root / "shell.qml").write_text(qml)
     runtime = root / "runtime"
     runtime.mkdir(mode=0o700)
+    # Ponytail: inherited feature flags stay until a real fixture failure warrants explicit inputs; then pin only the tested flags.
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen",
                XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(runtime),
                QML_IMPORT_PATH=str(style_root),

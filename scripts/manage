@@ -211,6 +211,7 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
                 retire(config, data, state, feature)
         for app in ("quickshell", "wallpapers"):
             theme.install_defaults(defaults, config, data, state, overwrite, app)
+        # Ponytail: GTK-only Apply is deferred until independently used; then honour its existing gate without changing Arch coupling.
         for feature in FEATURES:
             if not selected[feature]:
                 continue

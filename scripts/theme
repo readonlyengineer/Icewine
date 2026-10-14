@@ -256,6 +256,7 @@ def effective(state, themes):
     raise AssertionError("unreachable")
 
 
+# Ponytail: cross-request freshness is deferred without a reproduced stale render; reuse ordering on the existing publication lock if demonstrated.
 def publish(config, files):
     root = config / "icewine/rendered"
     if any(parent.is_symlink() for parent in (root, *root.parents)):

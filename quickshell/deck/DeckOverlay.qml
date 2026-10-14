@@ -210,6 +210,7 @@ Scope {
         command: ["icewine-inputplumber-intercept", "events"]
         stdout: SplitParser { onRead: data => root.receive(data) }
         stderr: SplitParser { onRead: data => console.warn("Deck events:", data) }
+        // Ponytail: stream-retirement changes await a demonstrated stale action; then cancel pending work while preserving held-input safety.
         onExited: {
             root.streamReady = false
             root.eventTarget = ""
