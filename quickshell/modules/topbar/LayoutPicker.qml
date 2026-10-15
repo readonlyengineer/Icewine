@@ -8,9 +8,9 @@ import qs.icewine.theme as Theme
 ColumnLayout {
     id: root
     required property var compositor
-    readonly property var initialFocus: defaultButton
+    readonly property var initialFocus: autofullscreen
     readonly property bool available: compositor.layoutAvailable && !compositor.layoutPending
-    implicitHeight: 246
+    implicitHeight: 202
     spacing: 8
 
     Text {
@@ -74,23 +74,25 @@ ColumnLayout {
             }
         }
     }
-    Popouts.ActionButton {
-        id: defaultButton
+    Popouts.Toggle {
+        id: autofullscreen
         Layout.fillWidth: true
         Layout.leftMargin: 12
         Layout.rightMargin: 12
         enabled: root.available
-        text: "Use default"
-        onClicked: root.compositor.selectLayout("default")
+        text: "Autofullscreen"
+        Accessible.name: text
+        checked: root.compositor.layoutStatus?.autofullscreen === true
+        onToggled: root.compositor.selectAutofullscreen(checked)
     }
     Text {
         Layout.fillWidth: true
         Layout.leftMargin: 12
         Layout.rightMargin: 12
         Layout.bottomMargin: 12
-        text: root.compositor.layoutPending ? "Applying…"
-            : root.compositor.layoutError || root.compositor.layoutUnavailable
-                || (!root.compositor.layoutAvailable ? "Hyprland unavailable" : root.compositor.layoutStatus?.override ? "Session choice · clears on logout" : "Desktop fallback: " + Layouts.label(root.compositor.layoutStatus?.default) + " · workspace rules apply")
+        visible: text.length > 0
+        text: root.compositor.layoutError || root.compositor.layoutUnavailable
+            || (!root.compositor.layoutAvailable ? "Hyprland unavailable" : "")
         color: root.compositor.layoutError || root.compositor.layoutUnavailable ? Theme.Palette.error : Theme.Palette.muted
         font.pixelSize: 11
         wrapMode: Text.Wrap

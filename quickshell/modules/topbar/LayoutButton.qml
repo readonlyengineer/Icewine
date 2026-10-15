@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls as Controls
 import "popouts" as Popouts
 import "Layouts.js" as Layouts
 
@@ -14,8 +13,6 @@ Popouts.ActionButton {
         ? Layouts.label(compositor.layoutStatus.effective) : "Layout")
     onClicked: activated()
     Accessible.name: "Workspace layout: " + text
-    Controls.ToolTip.visible: hovered
-    Controls.ToolTip.text: "Choose the current workspace layout"
     // Measure using the inherited font without changing the shared button.
     Text { id: label; visible: false; text: root.text; font: root.font }
 }

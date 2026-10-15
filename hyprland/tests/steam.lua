@@ -21,7 +21,7 @@ hl = {
 		launches = launches + 1
 	end,
 }
-package.loaded["icewine.modules.Layouts"] = { default = function() return "scrolling" end }
+package.loaded["icewine.modules.Layouts"] = { default = function() return "scrolling" end, autofullscreen = function(_, fallback) return fallback end }
 dofile("hyprland/modules/Baseline.lua")
 assert(baselineMaster and baselineMaster.mfact == 0.8,
 	"Master layout should start with an 80/20 native master/stack split")

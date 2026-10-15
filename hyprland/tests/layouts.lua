@@ -1,6 +1,12 @@
 -- Dedicated fixture for real native layout preference helpers (no compositor).
 local root, module = assert(arg[1]), assert(arg[2])
 local callbacks, native = {}, {}
+local layouts
+local reconciliations = 0
+package.loaded["icewine.modules.WindowPolicy"] = {
+    autofullscreen = function(ws) return layouts.autofullscreen(ws, false) end,
+    refresh_autofullscreen = function() reconciliations = reconciliations + 1 end,
+}
 local ws = {
     { id = 1, config_name = "1" }, { id = 2, config_name = "2" },
     { id = -1337, config_name = "name:old" }, { id = -99, config_name = "special:scratch" },
@@ -39,7 +45,7 @@ hl = {
     end,
 }
 local user = hl.workspace_rule({workspace = "1", layout = "master"})
-local layouts = dofile(module)
+layouts = dofile(module)
 local function identity(id)
     return assert(layouts.status(id):match('"identity":"([0-9a-f]+)"'))
 end
@@ -108,10 +114,30 @@ assert(layouts.status(2):find('"override":""', 1, true))
 -- External native changes are reported, rather than cached as picker success.
 default = "dwindle"; refresh()
 assert(layouts.status(2):find('"effective":"dwindle"', 1, true))
+-- Boolean overrides share compositor-session storage, including explicit false.
+layouts.select_autofullscreen(1, identity(1), true)
+layouts.select_autofullscreen(2, identity(2), false)
+assert(layouts.autofullscreen(ws[1], false) == true)
+assert(layouts.autofullscreen(ws[2], true) == false)
+assert(layouts.autofullscreen(ws[3], true) == true)
+assert(layouts.status(1):find('"autofullscreen":true', 1, true))
+assert(reconciliations == 2)
+assert(not pcall(layouts.select_autofullscreen, 1, "wrong", false))
+assert(not pcall(layouts.select_autofullscreen, 1, identity(1), "off"))
+io.open = function(path, mode) if mode == "w" then return nil, "fixture write failure" end; return open(path, mode) end
+assert(not pcall(layouts.select_autofullscreen, 1, identity(1), false))
+io.open = open
+assert(layouts.autofullscreen(ws[1], false) == true and reconciliations == 2)
+select(1, "master") -- Layout changes must retain both boolean overrides.
+layouts = dofile(module); callbacks["config.reloaded"]()
+assert(layouts.autofullscreen(ws[1], false) == true)
+assert(layouts.autofullscreen(ws[2], true) == false)
 -- Next compositor instance has a new signature and no previous choices.
 local getenv = os.getenv
 os.getenv = function(name) if name == "HYPRLAND_INSTANCE_SIGNATURE" then return "next-session" end; return getenv(name) end
 native = {}; default = "scrolling"; hl.workspace_rule({workspace = "1", layout = "master"})
 layouts = dofile(module); callbacks["config.reloaded"](); refresh()
 assert(ws[1].tiled_layout == "master" and ws[3].tiled_layout == "scrolling")
+assert(layouts.autofullscreen(ws[1], false) == false)
+assert(layouts.autofullscreen(ws[2], true) == true)
 print("PASS native layout helpers: fallback, captured IDs, user-rule reset, failure, later-rule reselection/reset, reload and logout")

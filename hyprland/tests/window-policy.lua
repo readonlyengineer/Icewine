@@ -68,6 +68,12 @@ io.open = function(path, mode)
 	end
 	return original_open(path, mode)
 end
+package.loaded["icewine.modules.Layouts"] = {
+    autofullscreen = function(ws, fallback)
+        if ws and ws.autofullscreen ~= nil then return ws.autofullscreen end
+        return fallback
+    end,
+}
 local policy = dofile(assert(arg[1], "Pass the WindowPolicy.lua path"))
 local normal = { width = 1920, height = 1080 }
 local boundary = { width = 2560, height = 1280 }
@@ -321,4 +327,31 @@ policy.refresh_autofullscreen()
 assert(first.fullscreen, "application fullscreen was lost")
 events["config.reloaded"]()
 assert(first.fullscreen, "reload erased current fullscreen")
+-- Workspace overrides affect actual policy targets without changing global state.
+workspaces, windows = {}, {}
+setting = "off\n"
+policy = dofile(arg[1])
+local enabled_ws, inherited_ws = workspace("dwindle"), workspace("master")
+enabled_ws.autofullscreen = true
+local enabled_win, inherited_win = tiled(enabled_ws), tiled(inherited_ws)
+assert(enabled_win.fullscreen and not inherited_win.fullscreen)
+enabled_ws.autofullscreen = false
+policy.refresh_autofullscreen()
+assert(not enabled_win.fullscreen and not inherited_win.fullscreen)
+setting = "on\n"
+policy.refresh_autofullscreen()
+assert(not enabled_win.fullscreen and inherited_win.fullscreen)
+active = enabled_win
+policy.toggle_fullscreen()
+policy.refresh_autofullscreen()
+assert(enabled_win.fullscreen, "workspace override erased manual fullscreen")
+-- Scrolling open/toggle-width also use the workspace override.
+window(normal, 1.0, false)
+active.workspace.autofullscreen = false
+events["window.open"](active)
+check(1.0, false)
+window(normal, 1.0, false)
+active.workspace.autofullscreen = true
+events["window.open"](active)
+check(1.0, true)
 print("layout policy: singleton open/close/move/float, monocle focus, live toggle and explicit intent pass")

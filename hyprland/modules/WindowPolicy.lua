@@ -102,15 +102,19 @@ local function is_resizable(win)
 		and (not win.workspace.tiled_layout or win.workspace.tiled_layout == "scrolling")
 end
 
-local function opens_fullscreen_by_default(win)
-	local mon = monitor_for(win)
-	return autofullscreen and is_resizable(win) and monitor_opens_fullscreen(mon)
+function M.autofullscreen(ws)
+	return require("icewine.modules.Layouts").autofullscreen(ws, autofullscreen)
 end
 
-local function target_for(state, fallback_width)
+local function opens_fullscreen_by_default(win)
+	local mon = monitor_for(win)
+	return M.autofullscreen(win.workspace) and is_resizable(win) and monitor_opens_fullscreen(mon)
+end
+
+local function target_for(state, fallback_width, ws)
 	local width = state.width or fallback_width
 	local fullscreen = state.fullscreen
-	if fullscreen == nil then fullscreen = autofullscreen and same_number(fallback_width, 1.0) end
+	if fullscreen == nil then fullscreen = M.autofullscreen(ws) and same_number(fallback_width, 1.0) end
 
 	return width, fullscreen
 end
@@ -128,9 +132,9 @@ end
 
 local function window_target(win, singleton)
 	local state, layout = state_for(win), win.workspace.tiled_layout or "scrolling"
-	if layout == "scrolling" then return target_for(state, default_width(win)) end
+	if layout == "scrolling" then return target_for(state, default_width(win), win.workspace) end
 	if state.fullscreen ~= nil then return nil, state.fullscreen end
-	if not autofullscreen or win.floating then return nil, false end
+	if not M.autofullscreen(win.workspace) or win.floating then return nil, false end
 	if layout == "monocle" then
 		local focused = hl.get_active_window()
 		return nil, win == (focused and focused.workspace == win.workspace and focused or win.workspace.last_window)
@@ -312,7 +316,7 @@ function M.toggle_width()
 	else
 		local width = intended_width(win, state)
 		state.width = width > (1.0 + fallback) / 2 and fallback or 1.0
-		state.fullscreen = autofullscreen and same_number(state.width, 1.0)
+		state.fullscreen = M.autofullscreen(win.workspace) and same_number(state.width, 1.0)
 	end
 	apply_window(win)
 end

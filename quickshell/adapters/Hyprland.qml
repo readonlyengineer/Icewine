@@ -135,11 +135,19 @@ QtObject {
     }
 
     function selectLayout(layout) {
+        requestLayoutChange(layout)
+    }
+
+    function selectAutofullscreen(enabled) {
+        requestLayoutChange(enabled)
+    }
+
+    function requestLayoutChange(choice) {
         if (!layoutAvailable || layoutPending) return
         try {
             // Capture before waiting for an in-flight status query or focus change.
             nextLayoutRequest = { workspace: layoutStatus.workspace, identity: layoutStatus.identity,
-                command: Layouts.request(layoutStatus.workspace, layoutStatus.identity, layout) }
+                command: Layouts.request(layoutStatus.workspace, layoutStatus.identity, choice) }
             layoutActionError = ""
             flushLayoutRequest()
         } catch (error) {

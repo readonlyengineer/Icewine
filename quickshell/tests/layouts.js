@@ -9,7 +9,7 @@ for (const id of [1, -1337]) {
 }
 for (const [id, layout] of [[1.5,"master"], [1,"invalid"]])
     assert.throws(() => Layouts.request(id, "31", layout))
-const text = JSON.stringify({workspace: 1, identity: "31", effective: "dwindle", default: "scrolling", override: "dwindle"})
+const text = JSON.stringify({workspace: 1, identity: "31", effective: "dwindle", default: "scrolling", override: "dwindle", autofullscreen: false})
 assert.equal(Layouts.status(text, 1).effective, "dwindle")
 assert.throws(() => Layouts.status(text, 2))
 assert.throws(() => Layouts.status("ok", 1))
@@ -20,7 +20,7 @@ assert.throws(() => Layouts.status(text.replace("dwindle", "invalid"), 1))
 const adapter = fs.readFileSync(path.join(__dirname, "../adapters/Hyprland.qml"), "utf8")
 const context = vm.createContext({Layouts, layoutAvailable: true, layoutPending: false,
     layoutStatus: {workspace: 1, identity: "31"}, layoutProcess: {running: true}, nextLayoutRequest: null, layoutActionError: "", layoutErrorWorkspace: 0, layoutErrorIdentity: ""})
-for (const name of ["selectLayout", "flushLayoutRequest"]) {
+for (const name of ["selectLayout", "selectAutofullscreen", "requestLayoutChange", "flushLayoutRequest"]) {
     const start = adapter.indexOf(`    function ${name}(`)
     const end = adapter.indexOf("\n    }", start) + 6
     vm.runInContext(adapter.slice(start, end), context)
@@ -64,7 +64,7 @@ context.stdout.text = "error: unavailable"
 vm.runInContext(`(${handler})(0, 0)`, context)
 assert.equal(context.layoutStatus, null)
 assert.match(context.layoutUnavailable, /Error/)
-context.stdout.text = JSON.stringify({workspace: 2, identity: "32", effective: "monocle", default: "scrolling", override: ""})
+context.stdout.text = JSON.stringify({workspace: 2, identity: "32", effective: "monocle", default: "scrolling", override: "", autofullscreen: true})
 vm.runInContext(`(${handler})(0, 0)`, context)
 assert.equal(context.layoutStatus.effective, "monocle", "External changes must use actual compositor state")
 assert.equal(context.layoutUnavailable, "")
@@ -77,4 +77,29 @@ assert.equal(context.layoutError, "")
 for (const identity of ["3", "xx"])
     assert.throws(() => Layouts.request(1, identity, "master"))
 assert.throws(() => Layouts.status(text.replace('"31"', '"x"'), 1))
+// The same queue captures workspace identity for boolean preference changes.
+context.layoutProcess.running = true
+context.layoutPending = false
+vm.runInContext('selectAutofullscreen(false)', context)
+context.layoutStatus = {workspace: 3, identity: "33"}
+context.layoutProcess.running = false
+vm.runInContext('flushLayoutRequest()', context)
+assert.match(context.layoutProcess.command[2], /select_autofullscreen\(1,"6e6577",false\)/)
+assert.throws(() => Layouts.status(text.replace('"autofullscreen":false', '"autofullscreen":"false"'), 1))
+assert.throws(() => Layouts.request(1, "31", null))
+// Exercise the actual host x binding: only Layout follows its button; all
+// branches retain screen clamps and the generic status right alignment.
+const topbar = fs.readFileSync(path.join(__dirname, "../modules/Topbar.qml"), "utf8")
+const popout = topbar.slice(topbar.indexOf("id: statusPopout"))
+const position = popout.match(/\n                    x: ([\s\S]*?)\n                    y:/)[1]
+const placement = vm.createContext({currentPage: "layout", width: 380, panel: {width: 1920},
+    surface: {x: 500, width: 920}, input: {}, layoutButton: {mapToItem: () => ({x: 700})}})
+assert.equal(vm.runInContext(position, placement), 700)
+placement.currentPage = "audio"
+assert.equal(vm.runInContext(position, placement), 1040)
+placement.currentPage = "layout"
+placement.layoutButton.mapToItem = () => ({x: 1900})
+assert.equal(vm.runInContext(position, placement), 1532)
+placement.layoutButton.mapToItem = () => ({x: -20})
+assert.equal(vm.runInContext(position, placement), 8)
 console.log("PASS layout adapter: validation, captured focus, queued selection, semantic IPC failure and external state")

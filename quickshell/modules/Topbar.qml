@@ -365,6 +365,7 @@ Scope {
                         }
                         Bar.Workspaces { compositor: root.compositor; screen: panel.screen }
                         Bar.LayoutButton {
+                            id: layoutButton
                             visible: root.layoutsEnabled
                             compositor: root.compositor
                             onActivated: root.openWidget("layout", true, panel.screen.name)
@@ -456,7 +457,9 @@ Scope {
                         when: statusPopout.shown
                         restoreMode: Binding.RestoreNone
                     }
-                    x: Math.max(8, Math.min(surface.x + surface.width - width, panel.width - width - 8))
+                    x: Math.max(8, Math.min(currentPage === "layout"
+                        ? layoutButton.mapToItem(input, 0, 0).x : surface.x + surface.width - width,
+                        panel.width - width - 8))
                     y: root.barHeight + 4
                     width: Math.min(380, panel.width - 16)
                     height: Math.min(implicitHeight, panel.height - y - 8)

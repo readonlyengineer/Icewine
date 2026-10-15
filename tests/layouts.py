@@ -75,8 +75,9 @@ ShellRoot {
         property bool layoutPending: false
         property string layoutError: ""
         property string layoutUnavailable: ""
-        property var layoutStatus: ({workspace: 1, effective: "scrolling", default: "master", override: ""})
+        property var layoutStatus: ({workspace: 1, effective: "scrolling", default: "master", override: "", autofullscreen: false})
         function selectLayout(layout) { root.calls.push([layoutWorkspaceId, layout]) }
+        function selectAutofullscreen(enabled) { root.calls.push([layoutWorkspaceId, enabled]) }
     }
     Window {
         id: window
@@ -165,19 +166,21 @@ ShellRoot {
                 if (!button || !button.enabled) throw new Error("Missing enabled choice")
                 button.forceActiveFocus()
                 keys.keyClick(Qt.Key_Return)
-                picker.initialFocus.forceActiveFocus()
+                const toggle = root.named(picker, "Autofullscreen")
+                if (!toggle) throw new Error("Missing autofullscreen control")
+                toggle.forceActiveFocus()
                 keys.keyClick(Qt.Key_Space)
-                if (JSON.stringify(root.calls) !== JSON.stringify([[1, "dwindle"], [1, "default"]]))
-                    throw new Error("Keyboard selection/reset targeted the wrong action")
+                if (JSON.stringify(root.calls) !== JSON.stringify([[1, "dwindle"], [1, true]]))
+                    throw new Error("Keyboard selection/toggle targeted the wrong action")
                 compositor.layoutWorkspaceId = 2
-                compositor.layoutStatus = ({workspace: 2, effective: "monocle", default: "master", override: "monocle"})
+                compositor.layoutStatus = ({workspace: 2, effective: "monocle", default: "master", override: "monocle", autofullscreen: false})
                 keys.tryCompare(trigger, "text", "▥ Monocle")
                 compositor.layoutPending = true
-                if (picker.initialFocus.enabled || root.named(picker, "Master layout").enabled) throw new Error("Pending actions enabled")
+                if (toggle.enabled || picker.initialFocus.enabled || root.named(picker, "Master layout").enabled) throw new Error("Pending actions enabled")
                 compositor.layoutPending = false
                 compositor.layoutAvailable = false
                 compositor.layoutUnavailable = "Fixture unavailable"
-                if (picker.initialFocus.enabled) throw new Error("Unavailable reset enabled")
+                if (toggle.enabled || picker.initialFocus.enabled) throw new Error("Unavailable choices enabled")
                 keys.tryCompare(trigger, "text", "▥ Layout")
                 console.log("LAYOUT_PICKER_PASSED")
                 Qt.quit()
@@ -202,4 +205,4 @@ ShellRoot {
             output = result.stdout + result.stderr
             assert result.returncode == 0 and "LAYOUT_PICKER_PASSED" in output, output
             assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
-    print("PASS actual QML picker: four rendered previews at 380/320px, dark/light, unselected/selected/focused/disabled; keyboard choice/reset, external state, pending/unavailable")
+    print("PASS actual QML picker: four rendered previews at 380/320px, dark/light, unselected/selected/focused/disabled; keyboard choice/toggle, external state, pending/unavailable")
