@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Effects
 import Quickshell
+import qs.config as Config
 import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Services.Mpris
@@ -91,7 +92,7 @@ Scope {
     }
 
     function openWidget(page, engaged, screenName) {
-        if (sessionLocked || !screenName)
+        if (sessionLocked || !screenName || (page === "switcher" && !Config.Settings.windowSwitcher))
             return
         const next = State.reduce(ui, { type: "open", page: page, engaged: engaged, screen: screenName })
         if (next === ui) return
@@ -163,6 +164,14 @@ Scope {
     onSessionLockedChanged: if (sessionLocked) handoff()
 
     Connections {
+        target: Config.Settings
+        function onWindowSwitcherChanged() {
+            if (!Config.Settings.windowSwitcher && root.ui.page === "switcher")
+                root.dismissWidget()
+        }
+    }
+
+    Connections {
         target: root.compositor
         function onNavigationRequested() { root.handoff() }
         function onActiveWindowAddressChanged() {
@@ -195,9 +204,12 @@ Scope {
         onReleased: root.releaseBar()
     }
 
-    GlobalShortcut {
-        name: "windowSwitcher"
-        onReleased: root.toggleSwitcher()
+    LazyLoader {
+        active: Config.Settings.windowSwitcher
+        component: GlobalShortcut {
+            name: "windowSwitcher"
+            onReleased: root.toggleSwitcher()
+        }
     }
 
     Variants {
@@ -404,7 +416,7 @@ Scope {
                 }
                 Loader {
                     id: switcher
-                    active: panel.widgetHere && root.ui.page === "switcher" && !root.sessionLocked
+                    active: Config.Settings.windowSwitcher && panel.widgetHere && root.ui.page === "switcher" && !root.sessionLocked
                     x: 8
                     y: root.barHeight + 4
                     width: panel.width - 16

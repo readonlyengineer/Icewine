@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Backend for explicit manager Apply; deployment shares the theme helpers."""
 import fcntl
+import hashlib
 import importlib.machinery
 import json
 import os
@@ -61,6 +62,64 @@ def selections(state):
     if path.is_symlink():
         raise ValueError("refusing symlinked manager state")
     return False, validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, False) | {"steam": "none"}
+
+
+WIDGETS = ("notificationToasts", "windowSwitcher")
+
+
+def widget_state(config, state):
+    policy = json.loads(os.environ.get("ICEWINE_WIDGET_POLICY", "{}"))
+    if (not isinstance(policy, dict) or set(policy) - set(WIDGETS)
+            or any(value is not None and type(value) is not bool for value in policy.values())):
+        raise ValueError("invalid widget policy")
+    path = state / "widgets.json"
+    if path.is_symlink():
+        raise ValueError("refusing symlinked widget state")
+    contents = path.read_bytes() if path.exists() else None
+    saved = json.loads(contents) if contents is not None else {}
+    revision = hashlib.sha256(contents or b"").hexdigest()
+    if (not isinstance(saved, dict) or set(saved) - set(WIDGETS)
+            or any(type(value) is not bool for value in saved.values())):
+        raise ValueError("invalid widget selections; repair widgets.json before saving")
+    settings = config / "quickshell/config/Settings.qml"
+    # Custom settings remain editable; do not promise delivery through an
+    # unknown implementation. Restore shipped settings to enable these controls.
+    shipped = Path(os.environ.get("ICEWINE_WIDGET_SETTINGS",
+        "/usr/share/icewine/defaults/config/quickshell/config/Settings.qml"))
+    entries = os.environ.get("ICEWINE_WIDGET_SHELLS",
+        "/usr/share/icewine/defaults/config/quickshell/shell.qml:"
+        "/usr/share/icewine/defaults-handheld/config/quickshell/shell.qml").split(os.pathsep)
+    entry = config / "quickshell/shell.qml"
+    supported = (settings.is_file() and shipped.is_file() and settings.read_bytes() == shipped.read_bytes()
+                 and entry.is_file() and any(Path(path).is_file() and entry.read_bytes() == Path(path).read_bytes()
+                                            for path in entries))
+    return saved, policy, supported, revision
+
+
+def widgets(argv, config, state):
+    saved, policy, supported, revision = widget_state(config, state)
+    if argv == ["widgets-state"]:
+        print("supported=" + str(supported).lower(), "revision=" + revision, *[
+            f"{name}={str(policy.get(name) if policy.get(name) is not None else saved.get(name, True)).lower()}:{'policy' if policy.get(name) is not None else 'user'}"
+            for name in WIDGETS])
+        return
+    if len(argv) != 4 or argv[1] != "revision=" + revision:
+        raise ValueError("Widget preferences changed; reopen the manager before saving")
+    fields = {}
+    for field in argv[2:]:
+        name, separator, value = field.partition("=")
+        if not separator or name in fields or name not in WIDGETS or value not in {"true", "false"}:
+            raise ValueError("invalid widget request")
+        fields[name] = value == "true"
+    if set(fields) != set(WIDGETS) or not supported:
+        raise ValueError("widget settings unavailable; restore shipped Settings.qml through Installer")
+    if any(policy.get(name) is not None and fields[name] != policy[name] for name in WIDGETS):
+        raise ValueError("Nix widget policy changed; reopen the manager")
+    # Re-read under the existing defaults lock; preserve values owned by policy.
+    theme.atomic_text(state / "widgets.json", json.dumps(saved | {
+        name: fields[name] for name in WIDGETS if policy.get(name) is None
+    }, sort_keys=True) + "\n")
+    print("Widget preferences saved; the shipped shell watches this file.")
 
 
 def run(argv):
@@ -264,22 +323,27 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
 def main(argv):
     config, data = theme.xdg("XDG_CONFIG_HOME", ".config"), theme.xdg("XDG_DATA_HOME", ".local/share")
     state = theme.xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    if argv == ["widgets-state"]:
+        widgets(argv, config, state)
+        return
+    widget_request = bool(argv) and argv[0] == "widgets-apply"
     readonly, previous = selections(state)
     if argv == ["state"]:
         print(" ".join(f"{name}={str(bit).lower()}" for name, bit in {"readonly": readonly, **previous}.items()))
         return
-    if not argv or argv[0] != "apply":
+    if not widget_request and (not argv or argv[0] != "apply"):
         raise ValueError("invalid manager request")
-    fields = {}
-    for field in argv[1:]:
-        name, separator, value = field.partition("=")
-        if not separator or name in fields or value not in ({"none", "native", "flatpak"} if name == "steam" else {"true", "false"}):
-            raise ValueError("invalid manager request")
-        fields[name] = value if name == "steam" else value == "true"
-    if "overwrite" not in fields:
-        raise ValueError("missing overwrite choice")
-    overwrite = fields.pop("overwrite")
-    selected = validate(fields)
+    if not widget_request:
+        fields = {}
+        for field in argv[1:]:
+            name, separator, value = field.partition("=")
+            if not separator or name in fields or value not in ({"none", "native", "flatpak"} if name == "steam" else {"true", "false"}):
+                raise ValueError("invalid manager request")
+            fields[name] = value if name == "steam" else value == "true"
+        if "overwrite" not in fields:
+            raise ValueError("missing overwrite choice")
+        overwrite = fields.pop("overwrite")
+        selected = validate(fields)
     if os.getuid() == 0:
         raise ValueError("run icewine manage as your desktop user")
     # Never follow symlinked manager/configuration roots into someone else's files.
@@ -291,6 +355,9 @@ def main(argv):
     with os.fdopen(fd, "r+") as lock:
         # Ponytail: one lock serialises explicit Apply; split by root if contention matters.
         fcntl.flock(lock, fcntl.LOCK_EX)
+        if widget_request:
+            widgets(argv, config, state)
+            return
         readonly, previous = selections(state)
         apply(selected, overwrite, readonly, previous, config, data, state)
 

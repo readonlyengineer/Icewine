@@ -151,10 +151,19 @@ reopen it after Apply or changing themes.
 icewine manage
 ```
 
-Tab switches between Icewine Installer and Icewine Appearance. Use Up/Down or
+Tab cycles through Installer, Appearance and Widgets. Use Up/Down or
 Shift-Tab to navigate rows, Space to select, and Enter on Apply or Cancel.
 Left/right cycles Steam, Theme or Transparency. Theme/transparency changes and
-wallpaper selections apply immediately; Apply/Cancel affect utility choices only.
+wallpaper selections apply immediately; Installer/Appearance Apply affects utility choices.
+Widgets Save commits only widget preferences; Cancel/Esc discards unsaved drafts.
+Notification toasts and the window switcher default to enabled. Disabling toasts
+keeps notification history and sounds; session and authentication controls remain.
+Preferences live in `$XDG_STATE_HOME/icewine/widgets.json` (normally
+`~/.local/state/icewine/widgets.json`); host persistence remains your policy.
+NixOS `services.icewine.widgets.notificationToasts` and `.windowSwitcher` default
+to null (user choice); true/false enforces policy in the manager and shell.
+The Widgets page requires shipped Settings.qml and a desktop/handheld entry;
+custom settings or entries are read-only here.
 Wallpaper pickers use optional Yazi; Configure monitors opens optional HyprMon.
 HyprMon owns its live/save actions, which Cancel does not undo.
 NixOS utility selections reflect the module options and are read-only. Apply

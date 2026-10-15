@@ -21,9 +21,12 @@ ShellRoot {
     }
     Modules.BatteryAlert { session: session }
 
-    Modules.NotificationToasts {
-        compositor: hyprlandAdapter
-        notificationService: notifications
+    LazyLoader {
+        active: Config.Settings.notificationToasts
+        component: Modules.NotificationToasts {
+            compositor: hyprlandAdapter
+            notificationService: notifications
+        }
     }
 
     Modules.Topbar {

@@ -63,6 +63,83 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             else:
                 raise AssertionError(f"Accepted invalid request: {request}")
         assert not state.exists()
+    # Widgets save independently: no packages, services, dotfile deployment or
+    # utility/appearance writes. Stale drafts and failed writes cannot win.
+    widget_config, widget_saved = root / "widgets/config", root / "widgets/state/icewine"
+    settings = widget_config / "quickshell/config/Settings.qml"
+    settings.parent.mkdir(parents=True)
+    settings.write_bytes((source / "quickshell/config/Settings.qml").read_bytes())
+    entry = widget_config / "quickshell/shell.qml"
+    entry.write_bytes((source / "quickshell/shell.qml").read_bytes())
+    widget_env = env | {"ICEWINE_WIDGET_SHELLS": str(source / "quickshell/shell.qml"), "XDG_CONFIG_HOME": str(widget_config), "XDG_STATE_HOME": str(widget_saved.parent), "ICEWINE_WIDGET_SETTINGS": str(source / "quickshell/config/Settings.qml"),
+                        "ICEWINE_WIDGET_POLICY": "{}"}
+    with patch.dict(os.environ, widget_env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), \
+            patch.object(manage.subprocess, "run", side_effect=AssertionError("widget save ran host command")):
+        def widget_status():
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                manage.main(["widgets-state"])
+            return dict(field.split("=") for field in output.getvalue().split())
+        def save_widgets(revision, toasts="false", switcher="false"):
+            manage.main(["widgets-apply", "revision=" + revision,
+                         "notificationToasts=" + toasts, "windowSwitcher=" + switcher])
+        initial = widget_status()
+        assert initial["supported"] == "true"
+        assert initial["notificationToasts"] == initial["windowSwitcher"] == "true:user"
+        # Do not save yet: widget_saved remains absent (Cancel's backend contract).
+        assert not (widget_saved / "widgets.json").exists()
+        # A draft loaded while absent must not overwrite malformed empty state.
+        widget_saved.mkdir(parents=True, exist_ok=True)
+        (widget_saved / "widgets.json").write_bytes(b"")
+        try: save_widgets(initial["revision"])
+        except json.JSONDecodeError: pass
+        else: raise AssertionError("accepted present-empty widget state")
+        assert (widget_saved / "widgets.json").read_bytes() == b""
+        (widget_saved / "widgets.json").unlink()
+        save_widgets(initial["revision"])
+        assert widget_status()["windowSwitcher"] == "false:user"
+        before = (widget_saved / "widgets.json").read_bytes()
+        for request in (
+                lambda: save_widgets(initial["revision"], "true"),
+                lambda: manage.main(["widgets-apply", "revision=" + widget_status()["revision"], "unknown=false", "windowSwitcher=false"])):
+            try: request()
+            except ValueError: pass
+            else: raise AssertionError("accepted stale/invalid widget save")
+            assert (widget_saved / "widgets.json").read_bytes() == before
+        with patch.dict(os.environ, {"ICEWINE_WIDGET_POLICY": '{"notificationToasts":true,"windowSwitcher":null}'}):
+            assert widget_status()["notificationToasts"] == "true:policy"
+            try: save_widgets(widget_status()["revision"])
+            except ValueError: pass
+            else: raise AssertionError("mutable widget_saved overrode Nix policy")
+            save_widgets(widget_status()["revision"], "true", "true")
+            assert json.loads((widget_saved / "widgets.json").read_text()) == {"notificationToasts": False, "windowSwitcher": True}
+        before = (widget_saved / "widgets.json").read_bytes()
+        with patch.object(manage.theme, "atomic_text", side_effect=PermissionError("fixture save denied")):
+            try: save_widgets(widget_status()["revision"], "true", "true")
+            except PermissionError: pass
+            else: raise AssertionError("failed widget save reported success")
+        assert (widget_saved / "widgets.json").read_bytes() == before
+        settings.write_text("// user custom settings\n")
+        assert widget_status()["supported"] == "false"
+        try: save_widgets(widget_status()["revision"])
+        except ValueError: pass
+        else: raise AssertionError("custom settings promised live delivery")
+        settings.write_bytes((source / "quickshell/config/Settings.qml").read_bytes())
+        (widget_saved / "widgets.json").write_text('{"windowSwitcher":"false"}')
+        try: widget_status()
+        except ValueError: pass
+        else: raise AssertionError("accepted malformed widget preference")
+        (widget_saved / "widgets.json").unlink()
+        (widget_saved / "widgets.json").symlink_to(root / "other.json")
+        try: widget_status()
+        except ValueError: pass
+        else: raise AssertionError("followed symlinked widget state")
+        (widget_saved / "widgets.json").unlink()
+    if sys.argv[2:] == ["--widgets-only"]:
+        print("PASS: focused widget state/Save, absent versus empty, failed-write preservation and policy")
+        sys.exit(0)
+
+
+
     # Merely querying state does not even create the state directory.
     with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
         manage.main(["state"])
@@ -189,7 +266,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             session.update(field.split("=", 1) for field in argv[3:])
         if argv == ["systemctl", "--user", "start", "icewine.service"]:
             assert json.loads((state / "manage.json").read_text())["steam"] == "none"
-            result = original_run([str(wrapper_bin / "icewine-steam"), "literal argument"],
+            result = original_run(["bash", str(wrapper_bin / "icewine-steam"), "literal argument"],
                                   env=os.environ | session | {"PATH": str(wrapper_bin) + ":" + os.environ["PATH"]}, capture_output=True, text=True)
             assert result.returncode == 0, result.stderr
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), patch.object(manage, "run", side_effect=restart):

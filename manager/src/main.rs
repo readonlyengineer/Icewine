@@ -12,7 +12,7 @@ const ROWS: &[(&str, &str, &str)] = &[
 ];
 
 #[derive(Clone, Copy, PartialEq)]
-enum Control { Theme, Transparency, Wallpaper, Inherit, AuthWallpaper, Monitors, Utility(&'static str), Steam, Overwrite, Apply, Cancel }
+enum Control { Theme, Transparency, Wallpaper, Inherit, AuthWallpaper, Monitors, Utility(&'static str), Widget(usize), Steam, Overwrite, Apply, Cancel }
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
 
@@ -61,6 +61,60 @@ impl Appearance {
     }
 }
 
+const WIDGETS: &[(&str, &str, &str)] = &[
+    ("notificationToasts", "Notification toasts", "Popup cards; history and sounds stay"),
+    ("windowSwitcher", "Window switcher", "Optional window list and shortcut"),
+];
+
+struct Widgets {
+    enabled: [bool; 2], policy: [bool; 2], supported: bool, revision: String,
+}
+
+fn widget_command(args: &[String]) -> io::Result<String> {
+    let output = Command::new("icewine-manage-backend").args(args).output()?;
+    let text = String::from_utf8_lossy(&output.stdout).to_string()
+        + &String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() { return Err(io::Error::other(text)); }
+    Ok(text)
+}
+
+impl Widgets {
+    fn load() -> io::Result<Self> {
+        let text = widget_command(&["widgets-state".into()])?;
+        let mut fields = BTreeMap::new();
+        for field in text.split_whitespace() {
+            let (name, value) = field.split_once('=').ok_or_else(|| io::Error::other("Invalid widget state"))?;
+            if fields.insert(name, value).is_some() { return Err(io::Error::other("Duplicate widget field")); }
+        }
+        let boolean = |value| match value {
+            Some("true") => Ok(true), Some("false") => Ok(false),
+            _ => Err(io::Error::other("Invalid widget state")),
+        };
+        let supported = boolean(fields.remove("supported"))?;
+        let revision = fields.remove("revision").filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit()))
+            .ok_or_else(|| io::Error::other("Invalid widget revision"))?.to_owned();
+        let mut enabled = [true; 2];
+        let mut policy = [false; 2];
+        for (index, (id, _, _)) in WIDGETS.iter().enumerate() {
+            let (value, owner) = fields.remove(id).and_then(|value| value.split_once(':'))
+                .ok_or_else(|| io::Error::other("Missing widget state"))?;
+            enabled[index] = boolean(Some(value))?;
+            policy[index] = match owner { "policy" => true, "user" => false,
+                _ => return Err(io::Error::other("Invalid widget ownership")) };
+        }
+        if !fields.is_empty() { return Err(io::Error::other("Unknown widget state")); }
+        Ok(Self { enabled, policy, supported, revision })
+    }
+
+    fn save(&mut self) -> io::Result<String> {
+        let mut args = vec!["widgets-apply".into(), format!("revision={}", self.revision)];
+        args.extend(WIDGETS.iter().enumerate().map(|(index, (id, _, _))| format!("{id}={}", self.enabled[index])));
+        let text = widget_command(&args)?;
+        *self = Self::load().map_err(|error| io::Error::other(format!("Save completed; refresh failed: {error}")))?;
+        Ok(text)
+    }
+}
+
 fn filename(path: &std::path::Path) -> String {
     path.file_name().unwrap_or_default().to_string_lossy().chars()
         .map(|c| if c.is_control() { '?' } else { c }).collect()
@@ -91,9 +145,13 @@ fn handheld_available(steam: usize, selected: &BTreeMap<&str, bool>) -> bool {
 
 fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize) -> io::Result<Option<bool>> {
     let mut appearance = Appearance::load()?;
+    let (mut widgets, mut widget_message) = match Widgets::load() {
+        Ok(value) => (value, String::new()),
+        Err(error) => (Widgets { enabled: [true; 2], policy: [false; 2], supported: false, revision: String::new() }, error.to_string()),
+    };
     let mut message = String::new();
     let mut page = 0;
-    let mut focuses = [0, 0];
+    let mut focuses = [0, 0, 0];
     let mut terminal = ratatui::init();
     let result = (|| {
         let mut focus = 0;
@@ -108,6 +166,10 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 if appearance.auth.is_some() { controls.push(Control::AuthWallpaper); }
                 controls.extend([Control::Monitors, Control::Apply, Control::Cancel]);
                 controls
+            } else if page == 2 {
+                WIDGETS.iter().enumerate().filter(|(index, _)| widgets.supported && !widgets.policy[*index])
+                    .map(|(index, _)| Control::Widget(index))
+                    .chain(widgets.supported.then_some(Control::Apply)).chain([Control::Cancel]).collect()
             } else { rows.iter().filter(|(id, _, _)| !readonly
                 && (*id != "handheld" || handheld_available(*steam, selected)))
                 .map(|(id, _, _)| if *id == "steam" { Control::Steam } else { Control::Utility(*id) })
@@ -122,7 +184,11 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 let [panel] = Layout::vertical([Constraint::Max(ROWS.len() as u16 + 15)])
                     .flex(Flex::Center).areas(panel);
                 let block = Block::bordered().border_type(BorderType::Rounded)
-                    .border_style(muted).title(Line::from(if page == 0 { " Icewine Installer (1/2) | Tab: Appearance (2/2) " } else { " Icewine Appearance (2/2) | Tab: Installer (1/2) " }).style(accent))
+                    .border_style(muted).title(Line::from(match page {
+                        0 => " Icewine Installer (1/3) | Tab: Appearance ",
+                        1 => " Icewine Appearance (2/3) | Tab: Widgets ",
+                        _ => " Icewine Widgets (3/3) | Tab: Installer ",
+                    }).style(accent))
                     .padding(Padding::uniform(1));
                 let inner = block.inner(panel);
                 frame.render_widget(block, panel);
@@ -142,7 +208,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 if page == 1 {
                     frame.render_widget(Paragraph::new(vec![
                         Line::from("Appearance updates immediately."),
-                        Line::from("Apply/Cancel control utility choices only.").style(muted),
+                        Line::from("Apply/Cancel here control utility choices only.").style(muted),
                         Line::from("HyprMon live/save changes remain after Cancel.").style(muted),
                     ]), intro);
                     let settings = vec![
@@ -159,6 +225,22 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                             else if control == Control::Theme && appearance.policy { muted } else { Style::default() })),
                         [Constraint::Length(23), Constraint::Min(20)]).column_spacing(2), utilities);
                     frame.render_widget(Paragraph::new(message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent), reset);
+                } else if page == 2 {
+                    frame.render_widget(Paragraph::new(vec![
+                        Line::from("First-party widgets; no plugin loading."),
+                        Line::from("Save commits widgets only; Cancel/Esc discards drafts.").style(muted),
+                        Line::from("Installer drafts stay pending; appearance stays live.").style(muted),
+                        Line::from(if widgets.supported { "Saved preferences apply live and survive session restart." }
+                            else { "Unavailable: restore shipped settings/entry via Installer." }).style(muted),
+                    ]), intro);
+                    frame.render_widget(Table::new(WIDGETS.iter().enumerate().map(|(index, (_, label, description))| {
+                        Row::new([Cell::from(*label), Cell::from(*description),
+                            Cell::from(format!("[{}]{}", if !widgets.supported { "?" } else if widgets.enabled[index] { "x" } else { " " },
+                                if widgets.policy[index] { " Nix policy" } else if !widgets.supported { " unavailable" } else { "" }))])
+                            .style(if controls[focus] == Control::Widget(index) { focused }
+                                else if widgets.policy[index] || !widgets.supported { muted } else { Style::default() })
+                    }), [Constraint::Length(20), Constraint::Min(10), Constraint::Length(16)]).column_spacing(1), utilities);
+                    frame.render_widget(Paragraph::new(widget_message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent), reset);
                 } else {
                 let rows = rows.iter().map(|(id, purpose, defaults)| {
                     let available = *id != "handheld" || handheld_available(*steam, selected);
@@ -181,7 +263,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     .style(if controls[focus] == Control::Overwrite { focused } else { Style::default() }), reset);
                 }
                 frame.render_widget(Paragraph::new(Line::from(vec![
-                    Span::styled("[ Apply ]", if controls[focus] == Control::Apply { focused } else { accent }),
+                    Span::styled(if page == 2 { "[ Save ]" } else { "[ Apply ]" }, if controls[focus] == Control::Apply { focused } else if page == 2 && !widgets.supported { muted } else { accent }),
                     Span::raw("   "),
                     Span::styled("[ Cancel ]", if controls[focus] == Control::Cancel { focused } else { muted }),
                 ])), buttons);
@@ -193,7 +275,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             let Event::Key(key) = event::read()? else { continue };
             if key.kind != KeyEventKind::Press { continue; }
             match key.code {
-                KeyCode::Tab => { focuses[page] = focus; page = 1 - page; focus = focuses[page]; }
+                KeyCode::Tab => { focuses[page] = focus; page = (page + 1) % 3; focus = focuses[page]; }
                 KeyCode::Esc | KeyCode::Char('q') => return Ok(None),
                 KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(None),
                 KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Theme | Control::Transparency) => {
@@ -230,6 +312,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     focus = (focus + controls.len() - 1) % controls.len();
                 }
                 KeyCode::Char(' ') | KeyCode::Enter => match controls[focus] {
+                    Control::Widget(index) => widgets.enabled[index] ^= true,
                     Control::Utility(id) => {
                         *selected.get_mut(id).unwrap() ^= true;
                         if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
@@ -271,6 +354,9 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         };
                     }
                     Control::Overwrite => overwrite = !overwrite,
+                    Control::Apply if page == 2 => {
+                        widget_message = match widgets.save() { Ok(text) => text, Err(error) => error.to_string() };
+                    }
                     Control::Apply => return Ok(Some(overwrite)),
                     Control::Cancel => return Ok(None),
                 },

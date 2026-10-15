@@ -26,6 +26,7 @@ import types
 from unittest.mock import patch
 
 script, dispatcher, assets = map(lambda path: Path(path).resolve(), sys.argv[1:4])
+os.environ["ICEWINE_THEME_ASSETS"] = str(assets)
 theme = types.ModuleType("icewine_theme")
 theme.__file__ = str(script)
 importlib.machinery.SourceFileLoader(theme.__name__, str(script)).exec_module(theme)
@@ -88,6 +89,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert selected_theme.is_file() and btop_config.read_text() == preferences
     bad_assets = root / "bad-assets"
     shutil.copytree(assets, bad_assets)
+    (bad_assets / "templates/btop.theme.in").chmod((bad_assets / "templates/btop.theme.in").stat().st_mode | 0o200)
     (bad_assets / "templates/btop.theme.in").write_text('theme[main_bg]="@missingBtopColour@"\n')
     bad = subprocess.run([sys.executable, str(script), "apply"],
                          env=dict(env, ICEWINE_THEME_ASSETS=str(bad_assets)), capture_output=True, text=True)

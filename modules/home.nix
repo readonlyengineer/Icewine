@@ -136,6 +136,11 @@ let
       export ICEWINE_DEFAULT_FILES=${defaults}
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
+      export ICEWINE_WIDGET_SHELLS=${../quickshell/shell.qml}:${../quickshell/deck/shell.qml}
+      export ICEWINE_WIDGET_SETTINGS=${../quickshell/config/Settings.qml}
+      export ICEWINE_WIDGET_POLICY=${lib.escapeShellArg (builtins.toJSON cfg.widgets)}
+      export XDG_CONFIG_HOME=''${XDG_CONFIG_HOME:-${configHome}}
+      export XDG_STATE_HOME=''${XDG_STATE_HOME:-${stateHome}}
       export ICEWINE_MANAGE_SELECTIONS=${lib.escapeShellArg (builtins.toJSON ((lib.genAttrs
         [ "desktop" "terminal" "filemanager" "handheld" "login" "shellExtras" ]
         (name: cfg.${name}.enable)) // {
@@ -173,6 +178,7 @@ in {
     users.users.${cfg.user}.packages = [ icewineCli ];
     environment.etc."icewine/implementation".source = implementation;
     environment.sessionVariables = {
+      ICEWINE_WIDGET_POLICY = builtins.toJSON cfg.widgets;
       ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";
       ICEWINE_KITTY_PRESET = if cfg.terminal.enable then "true" else "false";
     };
@@ -183,6 +189,7 @@ in {
     wants = [ "nixos-activation.service" ];
     conflicts = [ "mako.service" ];
     unitConfig.ConditionUser = cfg.user;
+    environment.ICEWINE_WIDGET_POLICY = builtins.toJSON cfg.widgets;
     serviceConfig = {
       ExecStart = "${quickshell}/bin/qs";
       Environment = [

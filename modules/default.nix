@@ -36,6 +36,11 @@ in {
       default = null;
       description = "Optional Icewine theme policy. Null lets the user's CLI selection win; Catppuccin Mocha is the fallback.";
     };
+    widgets = lib.genAttrs [ "notificationToasts" "windowSwitcher" ] (name: lib.mkOption {
+      type = lib.types.nullOr lib.types.bool;
+      default = null;
+      description = "Optional ${name} policy. Null permits the user's Widgets preference; true/false fixes enablement.";
+    });
     idle.enable = lib.mkEnableOption "Icewine idle locking and suspend" // { default = true; };
     battery.enable = lib.mkEnableOption "Icewine Quickshell battery warnings and sleep" // { default = true; };
     desktop.enable = lib.mkEnableOption "Hyprland desktop session with Icewine";

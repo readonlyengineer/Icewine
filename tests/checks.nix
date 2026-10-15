@@ -84,7 +84,7 @@ in {
     touch "$out"
   '';
   native = import ../packaging/arch/integration.nix { inherit pkgs; src = self; };
-  terminal = import ./terminal.nix { inherit self nixpkgs; };
+  terminal = import ./terminal.nix { inherit self nixpkgs; manager = icewineCli; };
   logic = pkgs.runCommand "icewine-logic-checks" {
     nativeBuildInputs = [ pkgs.nodejs pkgs.lua (pkgs.python3.withPackages (python: [ python.vdf ])) ];
   } ''

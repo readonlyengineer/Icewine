@@ -47,6 +47,17 @@ with tempfile.TemporaryDirectory() as temporary:
     backend.write_text('#!' + sys.executable + '\n' + '''import json,os,sys
 with open(os.environ["TUI_LOG"],"a") as stream: stream.write(json.dumps(sys.argv[1:])+"\\n")
 if sys.argv[1:] == ["state"]: print(os.environ["TUI_STATE"])
+elif sys.argv[1:] == ["widgets-state"]:
+ with open(os.environ["TUI_WIDGETS"]) as stream: saved=json.load(stream)
+ print("supported="+os.environ["TUI_WIDGET_SUPPORTED"], "revision="+"a"*64, *[
+  name+"="+str(saved[name]).lower()+":"+("policy" if name in os.environ["TUI_WIDGET_POLICY"].split(",") else "user")
+  for name in ("notificationToasts","windowSwitcher")])
+elif sys.argv[1] == "widgets-apply":
+ if os.environ["TUI_WIDGET_FAIL"] == "1":
+  print("Widget preferences changed; reopen the manager before saving",file=sys.stderr); sys.exit(1)
+ saved=dict(field.split("=") for field in sys.argv[3:])
+ with open(os.environ["TUI_WIDGETS"],"w") as stream: json.dump({name:value=="true" for name,value in saved.items()},stream)
+ print("Widget preferences saved; the shipped shell watches this file.")
 ''')
     backend.chmod(0o755)
     tool_log = root / "tools"
@@ -81,8 +92,8 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None):
-        global last_output, last_frames
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False):
+        global last_output, last_frames, last_widget_calls
         log.unlink(missing_ok=True)
         tool_log.unlink(missing_ok=True)
         appearance_state = root / "appearance-state"
@@ -91,13 +102,16 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
         data.mkdir(parents=True, exist_ok=True)
         (data / "auth.img").unlink(missing_ok=True)
         if auth: (data / "auth.img").write_bytes(b"fixture")
+        widgets_state = root / "widgets-state"
+        widgets_state.write_text(json.dumps(widgets or {"notificationToasts": True, "windowSwitcher": True}))
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         env = dict(os.environ, TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
-                   TUI_TOOLS=str(tool_log), TUI_POLICY=str(int(policy)),
+                   TUI_WIDGETS=str(widgets_state), TUI_WIDGET_SUPPORTED=str(widget_supported).lower(),
+                   TUI_WIDGET_POLICY=widget_policy, TUI_WIDGET_FAIL=str(int(widget_fail)), TUI_TOOLS=str(tool_log), TUI_POLICY=str(int(policy)),
                    TUI_PICK=pick, TUI_PICK_EXIT=str(pick_exit), TUI_HYPRMON_EXIT=str(hyprmon_exit),
                    TUI_COMMAND_FAIL=str(int(command_fail)), TUI_DELIVERY_FAIL=str(int(delivery_fail)),
-                   TUI_APPEARANCE=str(appearance_state), XDG_DATA_HOME=str(root / "data"),
+                   TUI_APPEARANCE=str(appearance_state), XDG_DATA_HOME=str(root / "data"), XDG_STATE_HOME=str(root / "state"),
                    ICEWINE_WALLPAPER_DATA_HOME=str(root / "data"), TMPDIR=str(root))
         process = subprocess.Popen([str(binary)], stdin=slave, stdout=slave, stderr=slave, env=env)
         os.close(slave)
@@ -113,7 +127,7 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
             frames = rendered_frames(output, size)
             rendered = b"\n".join(frames)
             if not sent and frames:
-                assert b"Icewine Installer (1/2) | Tab: Appearance (2/2)" in rendered
+                assert b"Icewine Installer (1/3) | Tab: Appearance" in rendered
                 os.write(master, keys)
                 sent = True
         if process.poll() is None:
@@ -138,7 +152,9 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
         assert b"Overwrite existing dotfiles" in rendered
         assert b"[ Apply ]" in rendered and b"[ Cancel ]" in rendered
         assert (b"NixOS: utility selections are read-only." in rendered) == ("readonly=true" in state.split())
-        return [json.loads(line) for line in log.read_text().splitlines()]
+        all_calls = [json.loads(line) for line in log.read_text().splitlines()]
+        last_widget_calls = [call for call in all_calls if call[0].startswith("widgets-")]
+        return [call for call in all_calls if not call[0].startswith("widgets-")]
     ids = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras")
     visible = 6 # Steam none hides its two children.
     def state(readonly=False, **selected):
@@ -184,7 +200,7 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
     tab = b"\t"
     down = b"\x1b[B"
     # Page changes preserve utility focus and pending selections; appearance is live.
-    chosen = applied(run(b" \x1b[B" + tab + b"\x1b[C\x1b[B\x1b[C" + tab + b" " + tab + b"\x1b[C" + tab + down*visible+b"\r", state()))
+    chosen = applied(run(b" \x1b[B" + tab + b"\x1b[C\x1b[B\x1b[C" + tab*2 + b" " + tab + b"\x1b[C" + tab*2 + down*visible+b"\r", state()))
     assert chosen["desktop"] == "true" and chosen["terminal"] == "true"
     assert ["icewine", "theme", "dracula"] in tools()
     assert ["icewine", "transparency", "high"] in tools()
@@ -195,13 +211,35 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
     # The navigation affordance and controls fit a conventional 80-column TTY
     # as well as the wider default; exercise a round trip at both sizes.
     for size in ((24, 80), (24, 100)):
-        assert run(tab + tab + b"\x1b", state(), size=size) == [["state"]]
+        assert run(tab + tab + tab + b"\x1b", state(), size=size) == [["state"]]
         assert b"Appearance updates immediately." in last_output
-        assert any(b"Icewine Appearance (2/2) | Tab: Installer (1/2)" in frame for frame in last_frames)
-        assert b"Icewine Installer (1/2) | Tab: Appearance (2/2)" in last_frames[-1]
+        assert any(b"Icewine Appearance (2/3) | Tab: Widgets" in frame for frame in last_frames)
+        assert b"Icewine Installer (1/3) | Tab: Appearance" in last_frames[-1]
     # Overwrite survives page switches and Apply works from either page.
-    for finish in (tab + down + b"\r", down*5 + b"\r"):
+    for finish in (tab*2 + down + b"\r", down*5 + b"\r"):
         assert applied(run(down*visible + b" " + tab + finish, state()))["overwrite"] == "true"
+
+    # Widget Cancel discards a draft after page navigation; Save commits only
+    # widgets while an Installer draft remains pending. Width matrices belong
+    # to the shared visual checks.
+    assert run(tab*2+b" "+tab*3+b"\x1b", state(), size=(24, 80)) == [["state"]]
+    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+    assert b"Icewine Widgets (3/3)" in last_output
+    assert run(b" "+tab*2+b" "+down*2+b"\r\x1b", state(), size=(24, 80)) == [["state"]]
+    save = next(call for call in last_widget_calls if call[0] == "widgets-apply")
+    assert save[-2:] == ["notificationToasts=false", "windowSwitcher=true"]
+    # A preloaded effective mixed policy skips its owned row. Persistence itself
+    # is exercised by the real backend, not this reset-per-run mock.
+    assert run(tab*2+b" "+down+b"\r\x1b", state(readonly=True),
+               widgets={"notificationToasts": False, "windowSwitcher": False},
+               widget_policy="notificationToasts") == [["state"]]
+    save = next(call for call in last_widget_calls if call[0] == "widgets-apply")
+    assert save[-2:] == ["notificationToasts=false", "windowSwitcher=true"]
+    assert run(tab*2+b" "+down*2+b"\r\x1b", state(), widget_fail=True) == [["state"]]
+    assert any(call[0] == "widgets-apply" for call in last_widget_calls)
+    assert b"preferences changed" in last_output and b"Widget preferences saved" not in last_output
+    assert run(tab*2+b" \r", state(), widget_supported=False) == [["state"]]
+    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
     # Delivery can fail after committing a choice: display/next cycle follow saved state.
     assert run(tab+b"\x1b[C\x1b[C\x1b[B\x1b[C\x1b[C\x1b", state(), delivery_fail=True) == [["state"]]
     changes = [call for call in tools() if call[0] == "icewine" and len(call) == 3]

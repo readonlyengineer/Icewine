@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
+import qs.config as Config
 import Quickshell.Services.Notifications
 import "notifications/Model.js" as NotificationModel
 
@@ -13,6 +14,14 @@ Scope {
     readonly property int highestUrgency: NotificationModel.highestUrgency(items)
     property bool doNotDisturb: false
     property var popups: []
+
+    Connections {
+        target: Config.Settings
+        function onNotificationToastsChanged() {
+            if (!Config.Settings.notificationToasts)
+                for (const notification of root.popups.slice()) root.hidePopup(notification)
+        }
+    }
 
     onDoNotDisturbChanged: {
         if (doNotDisturb) {
@@ -60,7 +69,8 @@ Scope {
                 return
             }
 
-            root.popups = NotificationModel.prependUnique(root.popups, notification)
+            if (Config.Settings.notificationToasts)
+                root.popups = NotificationModel.prependUnique(root.popups, notification)
             root.pulseToken++
 
             if (notification.urgency === NotificationUrgency.Normal) {
