@@ -1,6 +1,8 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls as Controls
+import QtQuick.Layouts
 import Quickshell
 import Quickshell.Networking
 import "StatusModel.js" as StatusModel
@@ -11,10 +13,10 @@ Item {
     id: root
 
     required property var metrics
-    implicitHeight: Math.max(content.implicitHeight + 24,
+    implicitHeight: Math.max(tabs.height + (tabs.currentIndex === 0 ? content.implicitHeight + 24 : tailscale.implicitHeight),
         passwordNetwork ? passwordContent.implicitHeight + 36 : 0)
 
-    readonly property Item initialFocus: wifiToggle
+    readonly property Item initialFocus: networkingTab
     readonly property var wifiDevice: Networking.devices.values.find(device =>
         device.type === DeviceType.Wifi) ?? null
     readonly property var wifiNetworks: wifiDevice
@@ -28,7 +30,7 @@ Item {
 
     function setScanning(enabled) {
         if (wifiDevice)
-            wifiDevice.scannerEnabled = enabled && Networking.wifiEnabled
+            wifiDevice.scannerEnabled = enabled && visible && tabs.currentIndex === 0 && Networking.wifiEnabled
     }
 
     function connectNetwork(network) {
@@ -61,7 +63,7 @@ Item {
 
     onVisibleChanged: setScanning(visible)
     onWifiDeviceChanged: setScanning(visible)
-    Component.onCompleted: setScanning(true)
+    Component.onCompleted: setScanning(visible)
     Component.onDestruction: setScanning(false)
 
     Connections {
@@ -108,8 +110,76 @@ Item {
         onTriggered: root.setScanning(true)
     }
 
+    Controls.TabBar {
+        id: tabs
+        width: parent.width - 24
+        x: 12
+        y: 8
+        height: 36
+        onCurrentIndexChanged: {
+            root.setScanning(root.visible)
+            if (currentIndex !== 0) scanRestart.stop()
+            if (pageReveal) pageReveal.restart()
+        }
+        background: Rectangle { color: "transparent" }
+        Controls.TabButton {
+            id: networkingTab
+            implicitHeight: 36
+            text: "Networking"
+            Accessible.name: "Networking tab"
+            background: Rectangle {
+                radius: 9
+                color: networkingTab.checked ? Theme.Palette.selection : Theme.Palette.surface
+                border.width: networkingTab.activeFocus ? 1 : 0
+                border.color: Theme.Palette.secondary
+                Behavior on color { ColorAnimation { duration: 100 } }
+            }
+            contentItem: Text {
+                text: "/ Networking"
+                color: networkingTab.checked ? Theme.Palette.secondary : Theme.Palette.muted
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+        Controls.TabButton {
+            id: tailscaleTab
+            implicitHeight: 36
+            text: "Tailscale"
+            Accessible.name: "Tailscale tab"
+            background: Rectangle {
+                radius: 9
+                color: tailscaleTab.checked ? Theme.Palette.selection : Theme.Palette.surface
+                border.width: tailscaleTab.activeFocus ? 1 : 0
+                border.color: Theme.Palette.secondary
+                Behavior on color { ColorAnimation { duration: 100 } }
+            }
+            contentItem: Text {
+                text: "Tailscale \\"
+                color: tailscaleTab.checked ? Theme.Palette.secondary : Theme.Palette.muted
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+    }
+
+    NumberAnimation {
+        id: pageReveal
+        target: pages
+        property: "opacity"
+        from: 0.85; to: 1; duration: 120
+        easing.type: Easing.OutCubic
+    }
+
+    StackLayout {
+        id: pages
+        anchors { top: tabs.bottom; topMargin: 4; bottom: parent.bottom; left: parent.left; right: parent.right }
+        currentIndex: tabs.currentIndex
+
     Flickable {
-        anchors.fill: parent
         contentHeight: content.implicitHeight + 24
         clip: true
         boundsBehavior: Flickable.StopAtBounds
@@ -209,6 +279,12 @@ Item {
                 font.pixelSize: 10
                 wrapMode: Text.Wrap
             }
+        }
+    }
+
+        Tailscale {
+            id: tailscale
+            active: root.visible && tabs.currentIndex === 1
         }
     }
 

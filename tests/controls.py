@@ -133,6 +133,25 @@ ShellRoot {
         Bar.Widget { id: animatedWidget; width: 20; height: 20; shown: false }
         TestCase { id: toggleKeys; when: false }
     }
+    Window {
+        id: networkWindow
+        visible: true
+        width: 380; height: 150
+        Rectangle { anchors.fill: parent; color: "#16161e" }
+        Bar.StatusPopout {
+            id: networkPages
+            anchors.fill: parent
+            currentPage: "network"
+            compositor: ({})
+            notificationService: ({})
+            session: ({})
+            player: null
+            powerState: ({})
+            monitorName: "fixture-no-screen"
+            metrics: ({now: root.now, network: {history: []}})
+        }
+        TestCase { id: networkKeys; when: false }
+    }
     Popouts.Media {
         id: media
         width: 380; height: 420
@@ -308,6 +327,77 @@ ShellRoot {
         interval: 400
         running: true
         onTriggered: {
+            networkWindow.requestActivate()
+            networkKeys.tryCompare(networkWindow, "active", true)
+            const firstTab = root.findAccessible(networkPages, "Networking tab")
+            const secondTab = root.findAccessible(networkPages, "Tailscale tab")
+            networkPages.focusInitial()
+            if (!firstTab.activeFocus || !firstTab.checked || secondTab.checked)
+                throw new Error("Network initial tab/focus is incorrect")
+            firstTab.forceActiveFocus()
+            networkKeys.keyClick(Qt.Key_Right)
+            if (!secondTab.checked || !secondTab.activeFocus)
+                throw new Error("Right arrow did not select/focus Tailscale tab")
+            let networkPage = firstTab
+            while (networkPage && networkPage.wifiDevice === undefined) networkPage = networkPage.parent
+            if (!networkPage || networkPage.wifiDevice.scannerEnabled)
+                throw new Error("Tailscale tab left synthetic Wi-Fi scanning active")
+            const picker = root.findAccessible(networkPages, "Exit node")
+            networkKeys.tryCompare(picker, "enabled", true)
+            if (picker.currentValue !== "")
+                throw new Error("Exit node choices do not contain None and eligible fixture")
+            picker.forceActiveFocus()
+            networkKeys.keyClick(Qt.Key_Space)
+            networkKeys.tryCompare(picker.popup, "visible", true)
+            networkKeys.keyClick(Qt.Key_Down)
+            const list = picker.popup.contentItem
+            networkKeys.tryVerify(() => list.itemAtIndex(1)?.highlighted === true)
+            if (picker.currentValue !== "" || list.itemAtIndex(0).highlighted)
+                throw new Error("Down must paint the prospective choice before activation")
+            networkKeys.keyClick(Qt.Key_Up)
+            networkKeys.tryVerify(() => list.itemAtIndex(0)?.highlighted === true)
+            if (list.itemAtIndex(1).highlighted)
+                throw new Error("Up did not move the visible dropdown highlight")
+            networkKeys.keyClick(Qt.Key_Down)
+            networkKeys.keyClick(Qt.Key_Return)
+            networkKeys.tryCompare(picker.popup, "visible", false)
+            networkKeys.tryCompare(picker, "currentValue", "fixture-exit")
+            networkKeys.tryCompare(picker, "enabled", true)
+            const page = picker.parent.parent.parent
+            if (page.data.connected || page.data.selected !== "fixture-exit")
+                throw new Error("Expected confirmed Running/offline selected-node fixture")
+            picker.forceActiveFocus()
+            networkKeys.keyClick(Qt.Key_Tab)
+            networkKeys.wait(20)
+            const focused = networkWindow.activeFocusItem
+            if (focused.text !== "Refresh Tailscale")
+                throw new Error("Tailscale refresh did not receive keyboard focus")
+            let scroll = focused.parent
+            while (scroll && !(scroll instanceof Flickable)) scroll = scroll.parent
+            const top = focused.mapToItem(scroll, 0, 0).y
+            if (top < -1 || top + focused.height > scroll.height + 1)
+                throw new Error("Current StatusPopout did not reveal the focused Tailscale control")
+            picker.currentIndex = 2
+            page.selectExit(picker.currentValue)
+            if (page.busy || picker.currentValue !== "fixture-exit")
+                throw new Error("Offline new-node choice dispatched or left an unconfirmed selection")
+            picker.forceActiveFocus()
+            networkKeys.keyClick(Qt.Key_Space)
+            networkKeys.tryCompare(picker.popup, "visible", true)
+            networkKeys.keyClick(Qt.Key_Up)
+            networkKeys.tryVerify(() => list.itemAtIndex(0)?.highlighted === true)
+            if (!list.itemAtIndex(0).enabled || list.itemAtIndex(2).enabled)
+                throw new Error("Offline popup must permit only None")
+            networkKeys.keyClick(Qt.Key_Return)
+            networkKeys.tryCompare(picker.popup, "visible", false)
+            networkKeys.tryCompare(page, "busy", false)
+            networkKeys.tryCompare(page, "confirming", "")
+            if (picker.currentValue !== "" || picker.enabled || page.data.connected || page.error)
+                throw new Error("Offline clear did not confirm None or guard subsequent choices")
+            secondTab.forceActiveFocus()
+            networkKeys.keyClick(Qt.Key_Left)
+            if (!firstTab.checked || !firstTab.activeFocus || picker.visible || !networkPage.wifiDevice.scannerEnabled)
+                throw new Error("Left arrow did not restore Networking page")
             if (handheldOverlay.status !== Component.Ready)
                 throw new Error("Packaged handheld overlay did not compile")
             gameLauncher.launchSteamGamescope()
@@ -490,7 +580,7 @@ with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     (root / "icewine").mkdir()
     # Exercise the real pages, substituting only service imports for synthetic devices.
-    shutil.copytree(source / "quickshell/modules", root / "icewine/modules")
+    shutil.copytree(source / "quickshell/modules", root / "icewine/modules", copy_function=shutil.copyfile)
     for name, service in (("Audio", "Quickshell.Services.Pipewire"),
                           ("Network", "Quickshell.Networking")):
         page = root / f"icewine/modules/topbar/popouts/{name}.qml"
@@ -515,7 +605,8 @@ with tempfile.TemporaryDirectory() as directory:
         (root / "icewine" / name).symlink_to(source / "quickshell" / name)
     (root / "theme").mkdir()
     palette = (source / "theme/assets/templates/Palette.qml.in").read_text()
-    (root / "theme/Palette.qml").write_text(re.sub(r"@\w+@", "7aa2f7", palette))
+    palette = re.sub(r"@\w+@", "7aa2f7", palette)
+    (root / "theme/Palette.qml").write_text(palette)
     (root / "theme/qmldir").write_text("singleton Palette 1.0 Palette.qml\n")
     (root / "config").symlink_to(source / "quickshell/config")
     (root / "bin").mkdir()
@@ -536,6 +627,22 @@ with tempfile.TemporaryDirectory() as directory:
     capabilities = root / "bin/icewine-monitor-capabilities"
     capabilities.write_text("#!" + shutil.which("bash") + '\nexit 0\n')
     capabilities.chmod(0o755)
+    tailscale = root / "bin/tailscale"
+    tailscale.write_text("#!" + shutil.which("python3") + "\n" +
+        "import json, pathlib, sys\n" +
+        "state = pathlib.Path(" + repr(str(root / "exit-node")) + ")\n" +
+        "log = pathlib.Path(" + repr(str(root / "tailscale-calls")) + ")\n" +
+        "with log.open('a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')\n" +
+        "if sys.argv[1:] == ['status', '--json']:\n" +
+        " selected = state.exists() and state.read_text() != 'cleared'\n" +
+        " print(json.dumps({'BackendState': 'Running', 'Self': {'ID': 'fixture-local', 'Online': not state.exists()}, " +
+        "'Peer': {'demo': {'ID': 'fixture-exit', 'HostName': 'Home gateway', 'TailscaleIPs': ['100.64.0.2'], 'Online': True, 'ExitNodeOption': True}, " +
+        "'alt': {'ID': 'fixture-alt', 'HostName': 'Remote gateway', 'TailscaleIPs': ['100.64.0.5'], 'Online': True, 'ExitNodeOption': True}}, " +
+        "'ExitNodeStatus': {'ID': 'fixture-exit', 'Online': True} if selected else None}))\n" +
+        "elif sys.argv[1:] == ['set', '--exit-node=100.64.0.2']: state.write_text('offline')\n" +
+        "elif sys.argv[1:] == ['set', '--exit-node=']: state.write_text('cleared')\n" +
+        "else: sys.exit(1)\n")
+    tailscale.chmod(0o755)
     (root / "shell.qml").write_text(QML)
     (root / "network.txt").write_text("eth0: 100 0 0 0 0 0 0 0 50 0 0 0 0 0 0 0\n")
     (root / "cpu.txt").write_text("cpu 100 0 0 400 0 0 0 0\n")
@@ -557,6 +664,10 @@ with tempfile.TemporaryDirectory() as directory:
     output = result.stdout + result.stderr
     assert result.returncode == 0 and "CONTROL_CHECK_PASSED" in output, output
     assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
+    import json
+    calls = [json.loads(line) for line in (root / "tailscale-calls").read_text().splitlines()]
+    assert [call for call in calls if call[0] == "set"] == [
+        ["set", "--exit-node=100.64.0.2"], ["set", "--exit-node="]], calls
     notifications = (root / "notifications").read_text().splitlines()
     assert len(notifications) == 4, notifications
     assert any("-u normal Battery Low 20%" in call for call in notifications), notifications
