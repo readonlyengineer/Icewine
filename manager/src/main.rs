@@ -12,7 +12,7 @@ const ROWS: &[(&str, &str, &str)] = &[
 ];
 
 #[derive(Clone, Copy, PartialEq)]
-enum Control { Theme, Transparency, Layout, Wallpaper, Inherit, AuthWallpaper, Monitors, Utility(&'static str), Widget(usize), Steam, Overwrite, Apply, Cancel }
+enum Control { Theme, Transparency, Layout, Wallpaper, Monitors, Utility(&'static str), Widget(usize), Steam, Overwrite, Apply, Cancel }
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
 
@@ -32,7 +32,7 @@ fn appearance_command(args: &[&str]) -> io::Result<String> {
 
 struct Appearance {
     themes: Vec<String>, theme: usize, policy: bool, transparency: usize,
-    layout: usize, wallpaper: PathBuf, auth: Option<PathBuf>,
+    layout: usize, wallpaper: PathBuf,
 }
 
 impl Appearance {
@@ -63,8 +63,7 @@ impl Appearance {
         let directory = data.join("icewine/wallpapers");
         let wallpaper = if directory.join("selection.img").is_file() { directory.join("selection.img") }
             else { data.join("wallpapers/default.jpg") };
-        let auth = directory.join("auth.img");
-        Ok(Self { themes, theme, policy, transparency, layout, wallpaper, auth: auth.is_file().then_some(auth) })
+        Ok(Self { themes, theme, policy, transparency, layout, wallpaper })
     }
 }
 
@@ -169,8 +168,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             let controls: Vec<_> = if page == 1 {
                 let mut controls = Vec::new();
                 if !appearance.policy { controls.push(Control::Theme); }
-                controls.extend([Control::Transparency, Control::Wallpaper, Control::Inherit]);
-                if appearance.auth.is_some() { controls.push(Control::AuthWallpaper); }
+                controls.extend([Control::Transparency, Control::Wallpaper]);
                 controls.extend([Control::Monitors, Control::Layout, Control::Apply, Control::Cancel]);
                 controls
             } else if page == 2 {
@@ -217,14 +215,11 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         (Control::Theme, "Theme", format!("< {} >{}", appearance.themes[appearance.theme], if appearance.policy { " (Nix policy)" } else { "" })),
                         (Control::Transparency, "Transparency", format!("< {} >", TRANSPARENCY[appearance.transparency])),
                         (Control::Wallpaper, "Wallpaper", format!("[ {} ]", filename(&appearance.wallpaper))),
-                        (Control::Inherit, "Lockscreen Wallpaper", (if appearance.auth.is_none() { "Wallpaper [x]" } else { "Wallpaper [ ]" }).to_owned()),
-                        (Control::AuthWallpaper, "Separate image", appearance.auth.as_ref().map(|path| format!("[ {} ]", filename(path))).unwrap_or_default()),
                         (Control::Monitors, "Monitors", "[ Configure monitors… ]".to_owned()),
                         (Control::Layout, "Desktop layout default", format!("< {} >", LAYOUTS[appearance.layout])),
                     ];
-                    frame.render_widget(Table::new(settings.into_iter().filter(|(control, _, _)|
-                        *control != Control::AuthWallpaper || appearance.auth.is_some()).map(|(control, label, value)|
-                        Row::new([Cell::from(label), Cell::from(value)]).bottom_margin(u16::from(control != Control::Layout && appearance.auth.is_none())).style(if controls[focus] == control { focused }
+                    frame.render_widget(Table::new(settings.into_iter().map(|(control, label, value)|
+                        Row::new([Cell::from(label), Cell::from(value)]).bottom_margin(u16::from(control != Control::Layout)).style(if controls[focus] == control { focused }
                             else if control == Control::Theme && appearance.policy { muted } else { Style::default() })),
                         [Constraint::Length(23), Constraint::Min(20)]).column_spacing(2), utilities);
                     frame.render_widget(Paragraph::new(message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
@@ -344,18 +339,12 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
                     }
                     Control::Theme | Control::Transparency | Control::Layout => (),
-                    Control::Wallpaper | Control::AuthWallpaper | Control::Inherit => {
+                    Control::Wallpaper => {
                         let result = (|| -> io::Result<String> {
-                            if controls[focus] == Control::Inherit && appearance.auth.is_some() {
-                                let text = appearance_command(&["wallpaper", "--auth-reset"])?;
-                                appearance.auth = None;
-                                return Ok(text);
-                            }
                             let Some(path) = picker(&mut terminal)? else { return Ok("Picker cancelled.".into()); };
                             let path_text = path.to_str().ok_or_else(|| io::Error::other("Image path is not UTF-8"))?;
-                            let auth = controls[focus] != Control::Wallpaper;
-                            let text = if auth { appearance_command(&["wallpaper", "--auth", path_text]) } else { appearance_command(&["wallpaper", path_text]) }?;
-                            if auth { appearance.auth = Some(path); } else { appearance.wallpaper = path; }
+                            let text = appearance_command(&["wallpaper", path_text])?;
+                            appearance.wallpaper = path;
                             Ok(if text.is_empty() { "Wallpaper saved.".into() } else { text })
                         })();
                         message = match result { Ok(text) => text, Err(error) => error.to_string() };

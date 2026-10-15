@@ -4,6 +4,7 @@ import importlib.machinery
 import io
 import os
 from pathlib import Path
+from qml_fixture import theme_fixture
 import subprocess
 import sys
 import tempfile
@@ -190,14 +191,10 @@ ShellRoot {
             (root / "icewine").mkdir()
             (root / "icewine/modules").symlink_to(source / "quickshell/modules")
             (root / "icewine/theme").symlink_to(root / "theme")
-            (root / "theme").mkdir()
-            palette = (source / "theme/assets/templates/Palette.qml.in").read_text()
-            colours = json.loads((source / "theme/assets/themes" / (theme_name + ".json")).read_text())
-            (root / "theme/Palette.qml").write_text(re.sub(r"@(\w+)@", lambda match: colours[match[1]], palette))
-            (root / "theme/qmldir").write_text("singleton Palette 1.0 Palette.qml\n")
+            fixture_config = theme_fixture(source, root, theme_name)
             (root / "shell.qml").write_text(qml)
             env = os.environ | {"QT_QPA_PLATFORM": "offscreen", "XDG_CACHE_HOME": str(root / "cache"),
-                                "XDG_RUNTIME_DIR": str(root / "runtime"),
+                                "XDG_RUNTIME_DIR": str(root / "runtime"), "XDG_CONFIG_HOME": fixture_config,
                                 "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(root / "no-bus"),
                                 "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=" + str(root / "no-system-bus")}
             result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,

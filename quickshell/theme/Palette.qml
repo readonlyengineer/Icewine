@@ -21,6 +21,7 @@ QtObject {
     property color foregroundDark: "#" + (snapshot.foregroundDark || "a9b1d6")
     property color muted: "#" + (snapshot.muted || "565f89")
     property color primary: "#" + (snapshot.primary || "7aa2f7")
+    readonly property color highlightedText: "#" + (snapshot.highlightedText || snapshot.backgroundDark || "16161e")
     property color primaryDark: "#" + (snapshot.primaryDark || "3d59a1")
     property color secondary: "#" + (snapshot.secondary || "bb9af7")
     property color tertiary: "#" + (snapshot.tertiary || "73daca")
@@ -63,6 +64,8 @@ QtObject {
                                "secondary", "tertiary", "success", "warning", "caution", "error", "info"])
                 if (typeof next[key] !== "string" || !/^[0-9a-fA-F]{6}$/.test(next[key]))
                     return false
+            if (next.highlightedText !== undefined && (typeof next.highlightedText !== "string"
+                    || !/^[0-9a-fA-F]{6}$/.test(next.highlightedText))) return false
             if (typeof next.themeId !== "string" || typeof next.dark !== "boolean")
                 return false
             snapshot = next

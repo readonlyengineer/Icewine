@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory() as temporary:
     config, state = root / "config", root / "state"
     env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_STATE_HOME=str(state),
                XDG_DATA_HOME=str(root / "data"), ICEWINE_THEME_ASSETS=str(assets), ICEWINE_GTK_ENABLE="false",
-               ICEWINE_THEME_POLICY="", ICEWINE_SDDM_THEME_FILE="", WAYLAND_DISPLAY="", HYPRLAND_INSTANCE_SIGNATURE="")
+               ICEWINE_THEME_POLICY="", WAYLAND_DISPLAY="", HYPRLAND_INSTANCE_SIGNATURE="")
     def run(*argv):
         return subprocess.run([sys.executable, str(script), *argv], env=env, capture_output=True, text=True)
     result = run("theme", "dracula")
@@ -154,11 +154,10 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_bin.mkdir()
     (fake_bin / "ya").write_text("#!/bin/sh\nexit 0\n")
     (fake_bin / "ya").chmod(0o755)
-    sddm_file = root / "sddm/theme.ini"
     kdeglobals = root / "sddm/kdeglobals"
     env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_STATE_HOME=str(state),
                XDG_DATA_HOME=str(root / "data"), ICEWINE_THEME_ASSETS=str(assets), ICEWINE_GTK_ENABLE="false",
-               ICEWINE_THEME_POLICY="", ICEWINE_SDDM_THEME_FILE=str(sddm_file), ICEWINE_SDDM_KDEGLOBALS_FILE=str(kdeglobals), WAYLAND_DISPLAY="",
+               ICEWINE_THEME_POLICY="", ICEWINE_SDDM_KDEGLOBALS_FILE=str(kdeglobals), WAYLAND_DISPLAY="",
                HYPRLAND_INSTANCE_SIGNATURE="", DBUS_SESSION_BUS_ADDRESS="", XDG_RUNTIME_DIR=str(runtime),
                PATH=str(fake_bin)+":"+os.environ["PATH"])
     def run(*argv, policy=""):
@@ -236,7 +235,6 @@ with tempfile.TemporaryDirectory() as temporary:
     ]:
         result = run("theme", theme_id)
         assert result.returncode == 0, result.stderr
-        assert sddm_file.read_text() == f"[General]\ntheme={theme_id}\n"
         if theme_id == "dracula":
             assert kdeglobals.read_bytes() == (config / "icewine/current/kdeglobals").read_bytes()
             assert kdeglobals.stat().st_mode & 0o777 == 0o644
@@ -245,7 +243,8 @@ with tempfile.TemporaryDirectory() as temporary:
         assert f"background #{background}\n" in (current / "kitty.conf").read_text()
         assert kitty_entry.read_text() == "user Kitty theme edit\n"
         assert f'vim.opt.background = "{appearance}"' in nvim_theme.read_text()
-        assert f'dark: "{appearance}"' in (current / "Palette.qml").read_text()
+        assert json.loads((current / "palette.json").read_text())["dark"] == (appearance == "dark")
+        assert not (current / "Palette.qml").exists()
         assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}" in (current / "gtk-settings.ini").read_text()
         assert "gtk-theme-name=Adwaita\n" in (current / "gtk4-settings.ini").read_text()
         palette = json.loads((assets / "themes" / f"{theme_id}.json").read_text())
@@ -287,17 +286,12 @@ with tempfile.TemporaryDirectory() as temporary:
         for filename in ("starship.toml", "yazi-theme.toml", "yazi-keymap.toml"):
             tomllib.loads((current / filename).read_text())
     assert run("theme", "nord", policy="gruvbox-light").returncode == 0
-    assert sddm_file.read_text() == "[General]\ntheme=gruvbox-light\n"
+    assert kdeglobals.read_bytes() == (config / "icewine/current/kdeglobals").read_bytes()
     assert 'local theme = "gruvbox-light"' in nvim_theme.read_text()
     assert run("theme", "not-installed").returncode != 0
-    assert sddm_file.read_text() == "[General]\ntheme=gruvbox-light\n"
+    assert kdeglobals.read_bytes() == (config / "icewine/current/kdeglobals").read_bytes()
     blocked = root / "not-a-directory"
     blocked.write_text("keep me\n")
-    env["ICEWINE_SDDM_THEME_FILE"] = str(blocked / "theme.ini")
-    result = run("apply")
-    assert result.returncode == 0 and "Pending: SDDM colours will not update" in result.stderr
-    assert blocked.read_text() == "keep me\n"
-    env["ICEWINE_SDDM_THEME_FILE"] = str(sddm_file)
     env["ICEWINE_SDDM_KDEGLOBALS_FILE"] = str(blocked / "kdeglobals")
     result = run("apply")
     assert result.returncode == 0 and "Pending: SDDM colours will not update" in result.stderr

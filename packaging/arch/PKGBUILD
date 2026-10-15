@@ -6,7 +6,7 @@ pkgrel=1
 arch=(x86_64)
 pkgdesc='Icewine Hyprland desktop session'
 license=(custom)
-makedepends=(python cargo)
+makedepends=(python cargo plasma-desktop)
 options=(!strip)
 _plugins=4dc7f1b6458c2578f4494f10d468c68c1082214f
 source=(icewine.tar.gz "yazi-plugins-${_plugins}.tar.gz::https://codeload.github.com/yazi-rs/plugins/tar.gz/${_plugins}")
@@ -16,7 +16,6 @@ sha256sums=(SKIP 0e65f2858d06c0889a652be1c400c2df02f0cbda782dc452da52dd0cd6e2786
 build() {
   cd "$srcdir/icewine"
   cargo build --release --locked --manifest-path manager/Cargo.toml
-  python packaging/arch/sddm-palette.py > "$srcdir/Palette.qml"
 }
 
 package_icewine() {
@@ -24,7 +23,8 @@ package_icewine() {
     systemd util-linux python python-vdf procps-ng xdg-utils libnotify libcanberra
     brightnessctl ddcutil v4l-utils upower ttf-dejavu ttf-jetbrains-mono-nerd
     noto-fonts-emoji adwaita-icon-theme adwaita-cursors papirus-icon-theme dconf
-    gsettings-desktop-schemas)
+    gsettings-desktop-schemas libplasma plasma-workspace kirigami 'ki18n>=6.23'
+    qqc2-breeze-style breeze-icons breeze plasma-integration)
   optdepends=('networkmanager: network controls' 'bluez: Bluetooth controls' 'hyprmon: optional monitor configuration (requires Lua live IPC support)')
   cd "$srcdir/icewine"
   local share="$pkgdir/usr/share/icewine" defaults="$pkgdir/usr/share/icewine/defaults/config"
@@ -35,7 +35,8 @@ package_icewine() {
   cp -r theme/assets "$share/theme"
   install -Dm644 theme/assets/flower-branch.png "$share/defaults/data/wallpapers/default.jpg"
   install -d "$share/quickshell"
-  cp -r quickshell/{modules,adapters,theme,QtQuick} "$share/quickshell/"
+  cp -r quickshell/{modules,adapters,theme} "$share/quickshell/"
+  cp -r quickshell/no-animations "$share/"
   cp quickshell/{Desktop,Handheld}.qml "$share/quickshell/"
   cp -r quickshell/deck "$share/quickshell/"
   install -d "$share/hyprland"
@@ -55,7 +56,7 @@ package_icewine() {
   install -m755 manager/target/release/icewine-manage "$pkgdir/usr/bin/icewine-manage"
   install -m755 scripts/icewine "$pkgdir/usr/bin/icewine"
   install -m755 packaging/arch/command "$pkgdir/usr/lib/icewine/command"
-  for name in theme wallpaper manage-backend steam inputplumber-intercept inputplumber-hyprland inputplumber-restore keyboard-toggle; do
+  for name in shell theme wallpaper manage-backend steam inputplumber-intercept inputplumber-hyprland inputplumber-restore keyboard-toggle; do
     ln -s ../lib/icewine/command "$pkgdir/usr/bin/icewine-$name"
   done
   install -m755 quickshell/tools/steam-shortcuts "$pkgdir/usr/bin/icewine-steam-shortcuts"
@@ -116,23 +117,12 @@ package_icewine-session() {
 }
 
 package_icewine-sddm() {
-  pkgdesc='Optional Icewine SDDM theme (manual selection)'
-  depends=(icewine sddm qt6-declarative qt6-virtualkeyboard)
-  local theme="$pkgdir/usr/share/sddm/themes/icewine"
+  pkgdesc='Optional KDE Breeze SDDM with Icewine colours'
+  depends=(icewine sddm plasma-desktop breeze plasma-integration qt6-5compat qt6-virtualkeyboard)
   cd "$srcdir/icewine"
-  install -d "$theme/modules" "$theme/theme"
-  cp sddm/{Main.qml,metadata.desktop} "$theme/"
-  ln -s /usr/share/icewine/defaults/data/wallpapers/default.jpg "$theme/wallpaper.png"
-  cp -r quickshell/QtQuick "$theme/"
-  sed -i 's#import qs.icewine.theme as Theme#import IcewineTheme as Theme#' "$theme/QtQuick/VirtualKeyboard/Styles/icewine/style.qml"
-  cp quickshell/modules/{AuthScreen.qml,AuthModel.js} "$theme/modules/"
-  cp "$srcdir/Palette.qml" "$theme/theme/Palette.qml"
-  mkdir -p "$theme/IcewineTheme"
-  printf '%s\n' 'module IcewineTheme' 'singleton Palette 1.0 ../theme/Palette.qml' > "$theme/IcewineTheme/qmldir"
-  local qml="$pkgdir/usr/lib/qt6/qml"
-  install -d "$qml/QtQuick/VirtualKeyboard/Styles"
-  ln -s /usr/share/sddm/themes/icewine/QtQuick/VirtualKeyboard/Styles/icewine "$qml/QtQuick/VirtualKeyboard/Styles/icewine"
-  ln -s /usr/share/sddm/themes/icewine/IcewineTheme "$qml/IcewineTheme"
+  python sddm/package.py "${ICEWINE_BREEZE_THEME_SOURCE:-/usr/share/sddm/themes/breeze}" \
+    "$pkgdir/usr/share/sddm/themes/icewine-breeze" "$pkgdir/usr/share/icewine/sddm/kdeglobals" \
+    scripts/theme theme/assets
 }
 
 package_icewine-handheld() {

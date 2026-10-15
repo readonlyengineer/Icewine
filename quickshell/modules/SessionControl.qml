@@ -2,23 +2,19 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.VirtualKeyboard
-import QtQuick.VirtualKeyboard.Settings
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Pam
 import Quickshell.Wayland
 import "SessionModel.js" as SessionModel
-import "AuthModel.js" as AuthModel
 
 Scope {
     id: root
-    Component.onCompleted: VirtualKeyboardSettings.styleName = "icewine"
 
     required property bool authenticationRequired
 
     property alias locked: sessionLock.locked
     property alias lockRequested: lockState.requested
-    property string wallpaperRevision: String(Date.now())
     property string password: ""
     property bool authenticating: false
     property bool failed: false
@@ -206,7 +202,7 @@ Scope {
     InputPanel {
         id: keyboard
         parent: root.keyboardHost
-        width: AuthModel.keyboardWidth(parent?.width ?? 0, parent?.height ?? 0)
+        width: Math.min(parent?.width ?? 0, 900, (parent?.height ?? 0) * 1.5)
         x: ((parent?.width ?? 0) - width) / 2
         y: (parent?.height ?? 0) - height
         z: 100
@@ -280,7 +276,6 @@ Scope {
     IpcHandler {
         target: "session"
         function lock(): string { root.requestLock(); return "requested" }
-        function refreshWallpaper(revision: string): void { root.wallpaperRevision = revision }
         function refreshIcons(): void {
             if (!root.lockRequested && !root.locked)
                 Quickshell.reload(false)

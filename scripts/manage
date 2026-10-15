@@ -31,7 +31,10 @@ PACKAGES = {
     "login": ("icewine-sddm",), "shellExtras": ("starship", "fastfetch"),
 }
 LOGIN_CONFIG = Path("/etc/sddm.conf.d/90-icewine.conf")
-LOGIN_CONTENTS = "[General]\nDisplayServer=x11\nInputMethod=qtvirtualkeyboard\n[Theme]\nCurrent=icewine\n"
+LOGIN_CONTENTS = ("[General]\nDisplayServer=x11\nInputMethod=qtvirtualkeyboard\n"
+    "GreeterEnvironment=QT_QPA_PLATFORMTHEME=kde,QT_QUICK_CONTROLS_STYLE=org.kde.breeze,"
+    "KIRIGAMI_PLATFORM_THEME=org.kde.breeze,XDG_CONFIG_HOME=/var/lib/icewine/sddm,"
+    "XDG_CONFIG_DIRS=/usr/share/icewine/sddm\n[Theme]\nCurrent=icewine-breeze\n")
 
 
 def validate(value, *, saved=False):
@@ -267,7 +270,7 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         files = theme.render_theme(assets, themes[theme_id], theme.transparency_level(state))
         theme.publish(config, files)
         if selected["login"]:
-            theme.publish_sddm(files, theme_id)
+            theme.publish_sddm(files)
         for feature in FEATURES:
             if applied[feature] and not selected[feature]:
                 retire(config, data, state, feature)
@@ -281,8 +284,6 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
                 theme.install_defaults(defaults, config, data, state, overwrite, app)
                 if app in theme.APPS and theme.APPS[app]:
                     theme.install_links(config, state, overwrite, app)
-        if selected["login"]:
-            run(["icewine-wallpaper", "--publish-auth"])
         if selected["filemanager"] and not readonly:
             run(["xdg-mime", "default", "icewine-yazi.desktop", "inode/directory"])
         if selected["desktop"] and os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false":

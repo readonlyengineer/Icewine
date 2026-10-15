@@ -106,27 +106,21 @@ Add games using Steam's **Add a Non-Steam Game** action.
 
 ```sh
 icewine wallpaper "/path/to/image.png"
-icewine wallpaper --auth "/path/to/auth-image.png"
-icewine wallpaper --auth-reset
 ```
 
 Icewine copies PNG, JPEG, GIF or BMP images to
 `$XDG_DATA_HOME/icewine/wallpapers/selection.img` and refreshes the wallpaper.
-Lock and Arch/CachyOS login inherit it unless `--auth` selects a shared authentication override;
-`--auth-reset` restores inheritance. The desktop image stays unchanged by either.
-Login Apply publishes only the effective image, readable before authentication,
-under `/var/lib/icewine/sddm`. Its source is `services.icewine.user` on NixOS or
-the user who enabled Login on Arch/CachyOS; that user's wallpaper changes refresh
-it. Other private files and directory permissions are unchanged.
-Your original file can then be moved or deleted.
+Your original file can then be moved or deleted. Wallpaper affects the desktop.
+Login and lock use KDE Breeze with a black backdrop for dark themes and white
+for light themes. Lock reuses Breeze's shared layout, controls and feedback with
+Icewine's existing session lock and PAM authentication; it cannot select another
+user or session. Its keyboard button uses Qt's native on-screen keyboard.
 
-Lock uses brief focus and feedback transitions; set
-`ICEWINE_THEME_TRANSITION=off` for the shell to disable them. NixOS Login uses
-KDE Breeze with a black backdrop for dark themes and white for light themes,
-preserving its layout, input and animations. Login Apply
-and theme changes publish KDE colours readable before authentication; missing
-public state uses the packaged theme policy or Catppuccin Mocha fallback.
-Arch/CachyOS retains the Icewine greeter and its `animations=off` theme setting.
+Login Apply and theme changes publish KDE colours readable before authentication;
+missing public state uses the packaged theme policy or Catppuccin Mocha fallback.
+The old authentication wallpaper override and custom greeter are retired. Existing
+user files are left in place. Keyboard/touch and real login/unlock behavior still
+need validation on each supported device and distribution.
 
 ### Theme and transparency
 

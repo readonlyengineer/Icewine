@@ -252,7 +252,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             run(down*3+b"\x1b[C"+down*6+b"\x1b", state(desktop=True), size=size, capture="installer-actions")
             (root / "hyprmon").rename(root / "hyprmon-hidden")
             try:
-                run(tab+down*4+b"\r\x1b", state(), size=size, path=str(root), capture="monitor-error")
+                run(tab+down*3+b"\r\x1b", state(), size=size, path=str(root), capture="monitor-error")
             finally: (root / "hyprmon-hidden").rename(root / "hyprmon")
             run(tab+down*2+b"\r\x1b", state(), size=size, command_fail=True,
                 pick=str(root/"picture with spaces.png")+"\n", capture="picker-error")
@@ -333,15 +333,15 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert any(b"Configure monitors" in frame for frame in appearance_frames)
     # The tallest Appearance form fits the minimum and wider reference panels.
     for size in ((24, 80), (36, 120)):
-        assert run(tab + down*6 + b"\x1b[C\x1b", state(), auth=True, size=size) == [["state"]]
+        assert run(tab + down*4 + b"\x1b[C\x1b", state(), auth=True, size=size) == [["state"]]
         assert ["icewine", "layout", "dwindle"] in tools()
-        labels = (b"Theme", b"Transparency", b"Wallpaper", b"Lockscreen Wallpaper", b"Separate image",
+        labels = (b"Theme", b"Transparency", b"Wallpaper",
                   b"Configure monitors", b"Desktop layout default", b"[ Apply ]", b"[ Cancel ]",
                   b"Tab: page", b"Esc: cancel")
         assert any(b"Icewine Appearance" in frame and all(label in frame for label in labels)
                    for frame in last_frames), (size, last_frames)
     # Overwrite survives page switches and Apply works from either page.
-    for finish in (tab*2 + down + b"\r", down*6 + b"\r"):
+    for finish in (tab*2 + down + b"\r", down*5 + b"\r"):
         assert applied(run(down*visible + b" " + tab + finish, state()))["overwrite"] == "true"
 
     # Widget Cancel discards a draft after page navigation; Save commits only
@@ -377,7 +377,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert not any(call[:2] == ["icewine", "theme"] and len(call) == 3 for call in tools())
     # A committed fallback is read back after failed delivery, even with utility
     # controls read-only; the next cycle and Cancel follow the saved selection.
-    assert run(tab + down*5 + b"\x1b[C\x1b[C\x1b", state(readonly=True), delivery_fail=True) == [["state"]]
+    assert run(tab + down*4 + b"\x1b[C\x1b[C\x1b", state(readonly=True), delivery_fail=True) == [["state"]]
     changes = [call for call in tools() if call[:2] == ["icewine", "layout"] and len(call) == 3]
     assert changes == [["icewine", "layout", "dwindle"], ["icewine", "layout", "master"]]
     assert any(b"Desktop layout default" in frame and b"< master >" in frame for frame in last_frames)
@@ -398,24 +398,23 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert run(tab+b"\x1b[B\x1b[B\r\x1b", state()) == [["state"]]
         assert b"Yazi unavailable:" in last_output
     finally: (root / "yazi").chmod(0o755)
-    assert run(tab+b"\x1b[B"*3+b"\r\x1b", state(), pick=picked+"\n") == [["state"]]
-    assert ["icewine", "wallpaper", "--auth", picked] in tools()
-    assert run(tab+b"\x1b[B"*3+b"\r\x1b", state(), auth=True) == [["state"]]
-    assert ["icewine", "wallpaper", "--auth-reset"] in tools()
-    assert not any(call[0] == "yazi" for call in tools())
+    # A historical auth image must not restore the retired presentation controls.
+    assert run(tab+b"\x1b", state(), auth=True) == [["state"]]
+    assert b"Lockscreen Wallpaper" not in last_output and b"Separate image" not in last_output
+    assert (root / "data/icewine/wallpapers/auth.img").read_bytes() == b"fixture"
     # HyprMon owns live/save semantics; zero exit must not claim a successful save.
     for exit_code in (0, 1, 127):
-        assert run(tab+b"\x1b[B"*4+b"\r"+tab+b"\x1b", state(), hyprmon_exit=exit_code) == [["state"]]
+        assert run(tab+b"\x1b[B"*3+b"\r"+tab+b"\x1b", state(), hyprmon_exit=exit_code) == [["state"]]
         assert ["hyprmon"] in tools()
     assert b"HyprMon live/save changes remain after Cancel." in last_output
     (root / "hyprmon").chmod(0o600)
     try:
-        assert run(tab+b"\x1b[B"*4+b"\r\x1b", state()) == [["state"]]
+        assert run(tab+b"\x1b[B"*3+b"\r\x1b", state()) == [["state"]]
         assert b"HyprMon unavailable: could not run hyprmon:" in last_output
     finally: (root / "hyprmon").chmod(0o755)
     (root / "hyprmon").rename(root / "hyprmon-hidden")
     try:
-        assert run(tab+b"\x1b[B"*4+b"\r\x1b", state(readonly=True), size=(24, 80), path=str(root)) == [["state"]]
+        assert run(tab+b"\x1b[B"*3+b"\r\x1b", state(readonly=True), size=(24, 80), path=str(root)) == [["state"]]
         assert b"hyprmon on PATH" in last_output
         assert b"Lua-compatible" in last_output
         assert b"services.icewine.monitors" in last_output

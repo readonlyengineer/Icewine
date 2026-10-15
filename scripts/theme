@@ -38,7 +38,6 @@ APPS = {
     "kitty": (),
 }
 TEMPLATES = {
-    "Palette.qml": "Palette.qml.in",
     "btop.theme": "btop.theme.in",
     "Theme.lua": "Theme.lua.in",
     "kitty.conf": "kitty.conf.in",
@@ -203,6 +202,7 @@ def render_theme(assets, palette_file, level="high"):
         "themeId": palette_file.stem,
         "osGlyph": values["osGlyph"],
         "dark": values["appearance"] != "light",
+        "highlightedText": values["gtkAccentFg"],
         **{name: values[source] for name, source in {
             "background": "background", "backgroundDark": "backgroundDark",
             "surface": "surface", "selection": "selection", "border": "border",
@@ -252,18 +252,13 @@ def render_theme(assets, palette_file, level="high"):
     return files
 
 
-def publish_sddm(files, theme_id):
-    # Arch's retained greeter consumes theme.ini; NixOS Breeze consumes KDE colours.
-    for variable, contents in (
-        ("ICEWINE_SDDM_THEME_FILE", f"[General]\ntheme={theme_id}\n"),
-        ("ICEWINE_SDDM_KDEGLOBALS_FILE", files["kdeglobals"]),
-    ):
-        path = os.environ.get(variable)
-        if path:
-            try:
-                atomic_text(Path(path), contents, 0o644)
-            except OSError as error:
-                print(f"Pending: SDDM colours will not update: {error}", file=sys.stderr)
+def publish_sddm(files):
+    path = os.environ.get("ICEWINE_SDDM_KDEGLOBALS_FILE")
+    if path:
+        try:
+            atomic_text(Path(path), files["kdeglobals"], 0o644)
+        except OSError as error:
+            print(f"Pending: SDDM colours will not update: {error}", file=sys.stderr)
 
 
 def selection(state):
@@ -744,7 +739,7 @@ def dispatch(argv):
     gtk_enabled = os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false"
     gtk_complete = True
     publish(config, files)
-    publish_sddm(files, theme_id)
+    publish_sddm(files)
     if gtk_enabled:
         install_gtk_theme(config, theme_id)
         install_flatpak_theme(state, theme_id, files)

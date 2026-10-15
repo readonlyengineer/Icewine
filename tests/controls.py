@@ -4,6 +4,7 @@ Run with python3 tests/controls.py . (requires qs on PATH).
 """
 import os
 from pathlib import Path
+from qml_fixture import theme_fixture
 import re
 import shutil
 import subprocess
@@ -675,11 +676,7 @@ with tempfile.TemporaryDirectory() as directory:
     (root / "icewine/theme").symlink_to(root / "theme")
     for name in ("Desktop.qml", "Handheld.qml", "adapters", "deck"):
         (root / "icewine" / name).symlink_to(source / "quickshell" / name)
-    (root / "theme").mkdir()
-    palette = (source / "theme/assets/templates/Palette.qml.in").read_text()
-    palette = re.sub(r"@\w+@", "7aa2f7", palette)
-    (root / "theme/Palette.qml").write_text(palette)
-    (root / "theme/qmldir").write_text("singleton Palette 1.0 Palette.qml\n")
+    fixture_config = theme_fixture(source, root)
     (root / "config").symlink_to(source / "quickshell/config")
     (root / "bin").mkdir()
     mock = root / "bin/icewine-monitor-brightness"
@@ -734,6 +731,7 @@ with tempfile.TemporaryDirectory() as directory:
                XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(root / "runtime"),
                XDG_STATE_HOME=str(root / "state"), ICEWINE_WIDGET_POLICY="{}",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
+    env["XDG_CONFIG_HOME"] = fixture_config
     try:
         result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
                                 capture_output=True, text=True, timeout=25)

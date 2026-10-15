@@ -2,7 +2,8 @@
 """Check packaged stock Breeze and native KDE colours with fixture public paths.
 
 Run by checks.sddm with the actual module-configured Qt runtime and greeter.
-The native wrapper hook supplies fixture config paths; upstream QML is intact.
+The wrapper supplies fixture config paths. Packaged native layout is retained;
+only solid-backdrop configuration and password clearing are changed.
 """
 import json
 import os
@@ -28,7 +29,7 @@ with tempfile.TemporaryDirectory() as directory:
     shutil.copyfile(package / "share/icewine/sddm/kdeglobals", fallback / "kdeglobals")
     environment = dict(os.environ, HOME=str(root), XDG_RUNTIME_DIR=str(runtime),
                        QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", QT_IM_MODULE="qtvirtualkeyboard",
-                       QT_FORCE_STDERR_LOGGING="1",
+                       QT_FORCE_STDERR_LOGGING="1", QT_VIRTUALKEYBOARD_DESKTOP_DISABLE="1",
                        ICEWINE_SDDM_KDEGLOBALS_FILE=str(public / "kdeglobals"))
     executables = (qml, greeter)
     # SDDM test mode still reads its session model from native configuration.
@@ -82,7 +83,7 @@ Window {
             previous = os.environ.get("ICEWINE_SDDM_KDEGLOBALS_FILE")
             os.environ["ICEWINE_SDDM_KDEGLOBALS_FILE"] = str(colours)
             try:
-                renderer["publish_sddm"](files, state)
+                renderer["publish_sddm"](files)
             finally:
                 if previous is None:
                     os.environ.pop("ICEWINE_SDDM_KDEGLOBALS_FILE", None)
@@ -107,8 +108,16 @@ Window {
         # Selection.ForegroundNormal is the renderer's gtkAccentFg role.
         assert renderer["gtk_foreground"](palette["highlight"], palette["backgroundDark"]) == actual["selectedText"].lstrip("#"), (state, actual)
 
-    # Smoke the stock greeter once; the probe above covers all palette states.
     colours.rmdir()  # The last probe left non-file public state; use missing state.
+    (root / "breeze").symlink_to(theme)
+    shutil.copyfile(source / "tests/breeze-login.qml", root / "LoginCheck.qml")
+    result = subprocess.run([str(qml), str(root / "LoginCheck.qml")], env=environment,
+                            capture_output=True, text=True, timeout=25)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0 and "BREEZE_LOGIN_PASSED" in output, output
+    assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign|is not installed|not a type", output), output
+
+    # Smoke the actual SDDM greeter as well as the form/callback fixture.
     process = subprocess.Popen([str(executables[1]), "--test-mode", "--theme", str(theme)],
                                env=greeter_environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
@@ -119,4 +128,4 @@ Window {
         output, _ = process.communicate(timeout=5)
     assert not re.search(r'is not installed|Type .* unavailable|QQmlApplicationEngine failed|Cannot load library|Error loading QML|Fallback to embedded theme|ReferenceError|TypeError', output), output
 
-print("PASS: stock Breeze startup/imports and native black/white backdrops and dark/light/missing/invalid/non-file palette")
+print("PASS: native Breeze SDDM startup, form/models/busy/clearing/retry/OSK and public palette fallbacks")

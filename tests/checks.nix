@@ -83,16 +83,12 @@ in {
   controls = pkgs.runCommand "icewine-control-checks" {
     nativeBuildInputs = [ pkgs.nodejs pkgs.python3 quickshell pkgs.qt6.qtdeclarative ];
   } ''
-    python3 ${./controls.py} ${self}
+    python3 ${self}/tests/controls.py ${self}
     python3 ${self}/tests/layouts.py --qml
-    python3 ${./render-ready.py} ${self}
-    python3 ${./render-ready.py} ${self} --native-osk=lock
-    python3 ${./render-ready.py} ${self} --native-osk=sddm
+    python3 ${self}/tests/render-ready.py ${self}
+    python3 ${self}/tests/breeze-lock.py ${self}
+    ICEWINE_THEME_TRANSITION=off python3 ${self}/tests/breeze-lock.py ${self}
     python3 ${./theme-live.py} ${self}
-    # Retained Arch custom greeter only; Breeze is covered by the sddm target.
-    python3 ${self}/packaging/arch/sddm-palette.py > "$TMPDIR/arch-palette.qml"
-    python3 ${./sddm-palette.py} "$TMPDIR/arch-palette.qml" \
-      ${pkgs.qt6.qtdeclarative}/bin/qml ${pkgs.qt6.qtdeclarative}/lib/qt-6/qml
     touch "$out"
   '';
   theme = pkgs.runCommand "icewine-live-theme-checks" {
@@ -211,10 +207,8 @@ in {
       done
       test ! -e "$XDG_CONFIG_HOME"
       mkdir -p "$TMPDIR/public"
-      export ICEWINE_SDDM_WALLPAPER_FILE="$TMPDIR/public/wallpaper.img"
       export ICEWINE_SDDM_KDEGLOBALS_FILE="$TMPDIR/public/kdeglobals"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
-      cmp "$XDG_DATA_HOME/wallpapers/default.jpg" "$ICEWINE_SDDM_WALLPAPER_FILE"
       cmp "$XDG_CONFIG_HOME/icewine/current/kdeglobals" "$ICEWINE_SDDM_KDEGLOBALS_FILE"
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -L "$XDG_CONFIG_HOME/hypr/icewine"
@@ -237,13 +231,11 @@ in {
       printf '# user changes\n' >> "$XDG_CONFIG_HOME/kitty/kitty.conf"
       printf 'color_theme = "Default"\nupdate_ms = 500\n' > "$XDG_CONFIG_HOME/btop/btop.conf"
       mkdir -p "$TMPDIR/public"
-      export ICEWINE_SDDM_WALLPAPER_FILE="$TMPDIR/public/wallpaper.img"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       grep -Fx '# user changes' "$XDG_CONFIG_HOME/kitty/kitty.conf"
       grep -Fx 'color_theme = "icewine"' "$XDG_CONFIG_HOME/btop/btop.conf"
       grep -Fx 'update_ms = 500' "$XDG_CONFIG_HOME/btop/btop.conf"
       mkdir -p "$TMPDIR/public"
-      export ICEWINE_SDDM_WALLPAPER_FILE="$TMPDIR/public/wallpaper.img"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=true
       ! grep -q '# user changes' "$XDG_CONFIG_HOME/kitty/kitty.conf"
       export HOME=$TMPDIR/handheld XDG_CONFIG_HOME=$TMPDIR/handheld/.config XDG_DATA_HOME=$TMPDIR/handheld/.local/share XDG_STATE_HOME=$TMPDIR/handheld/.local/state

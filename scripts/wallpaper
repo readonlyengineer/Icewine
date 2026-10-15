@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select a wallpaper and publish only the effective authentication image."""
+"""Validate and atomically select the desktop wallpaper without changing its source."""
 import fcntl
 import os
 from pathlib import Path
@@ -11,7 +11,10 @@ import time
 
 
 def validate(path):
-    result = subprocess.run(["qs", "--path", os.environ["ICEWINE_WALLPAPER_VALIDATOR"]],
+    validator = os.environ.get("ICEWINE_WALLPAPER_VALIDATOR")
+    if not validator:
+        raise ValueError("Icewine wallpaper validator is unavailable")
+    result = subprocess.run(["qs", "-p", validator, "--no-color"],
         env=dict(os.environ, ICEWINE_WALLPAPER_VALIDATE=str(path), QT_QPA_PLATFORM="offscreen"),
         capture_output=True, text=True, timeout=20)
     if result.returncode or "ICEWINE_WALLPAPER_VALID" not in result.stdout + result.stderr:
@@ -19,86 +22,37 @@ def validate(path):
 
 
 def select(args):
-    if len(args) == 1 and not args[0].startswith("--"):
-        action, image = "desktop", args[0]
-    elif len(args) == 2 and args[0] == "--auth":
-        action, image = "auth", args[1]
-    elif args in (["--auth-reset"], ["--publish-auth"]):
-        action, image = args[0][2:], None
-    else:
-        raise ValueError("Usage: icewine wallpaper {IMAGE|--auth IMAGE|--auth-reset|--publish-auth}")
+    if len(args) != 1 or args[0].startswith("--"):
+        raise ValueError("Usage: icewine wallpaper IMAGE")
     data = Path(os.environ.get("ICEWINE_WALLPAPER_DATA_HOME")
         or os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local/share"))
     if not data.is_absolute():
         raise ValueError("XDG_DATA_HOME must be an absolute path")
+    source = Path(args[0]).resolve(strict=True)
+    if not source.is_file():
+        raise ValueError("image path is not a readable regular file")
     directory = data / "icewine/wallpapers"
     directory.mkdir(parents=True, exist_ok=True)
-    desktop, override = directory / "selection.img", directory / "auth.img"
-    public_value = os.environ.get("ICEWINE_SDDM_WALLPAPER_FILE")
-    public = Path(public_value) if public_value else None
-    if public and (not public.is_absolute() or public.is_symlink()):
-        raise ValueError("SDDM wallpaper must be an absolute non-symlink path")
-    temporary = []
-
-    def stage(source, destination, mode):
-        if not source.is_file():
-            raise ValueError("image path is not a readable regular file")
-        fd, name = tempfile.mkstemp(prefix=".wallpaper-", dir=destination.parent)
-        os.close(fd)
-        path = Path(name)
-        temporary.append(path)
-        shutil.copyfile(source, path)
-        path.chmod(mode)
-        return path
-
-    # Serialise desktop/override/publication updates from this user's selectors.
     with (directory / ".selection.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        fd, name = tempfile.mkstemp(prefix=".wallpaper-", dir=directory)
+        os.close(fd)
+        temporary = Path(name)
         try:
-            destination = desktop if action == "desktop" else override
-            new = stage(Path(image).resolve(strict=True), destination, 0o600) if image else None
-            if new:
-                validate(new)
-            inherited = desktop if desktop.is_file() else data / "wallpapers/default.jpg"
-            effective = new if action == "auth" else (
-                override if action != "auth-reset" and override.is_file()
-                else new if action == "desktop" else inherited)
-            public_new = public_previous = None
-            if public:
-                public_new = stage(effective, public, 0o644)
-                if effective != new:
-                    validate(public_new)
-                if public.exists():
-                    public_previous = stage(public, public, 0o644)
-                # Publication failure must not commit a private selection/reset.
-                os.replace(public_new, public)
-            try:
-                if new:
-                    os.replace(new, destination)
-                elif action == "auth-reset":
-                    override.unlink(missing_ok=True)
-            except OSError:
-                if public:
-                    if public_previous:
-                        os.replace(public_previous, public)
-                    else:
-                        public.unlink(missing_ok=True)
-                raise
+            shutil.copyfile(source, temporary)
+            temporary.chmod(0o600)
+            validate(temporary)
+            os.replace(temporary, directory / "selection.img")
         finally:
-            for path in temporary:
-                path.unlink(missing_ok=True)
-    if action != "publish-auth":
-        revision = str(time.time_ns())
-        refreshed = True
-        for target, method in [("wallpaper", "refresh"), ("session", "refreshWallpaper")]:
-            try:
-                result = subprocess.run(["qs", "ipc", "call", target, method, revision],
-                                        capture_output=True, text=True, timeout=10)
-                refreshed = refreshed and result.returncode == 0
-            except (OSError, subprocess.SubprocessError):
-                refreshed = False
-        if not refreshed:
-            print("icewine wallpaper: saved; the running shell will use it next launch", file=sys.stderr)
+            temporary.unlink(missing_ok=True)
+    try:
+        result = subprocess.run(["qs", "ipc", "call", "wallpaper", "refresh", str(time.time_ns())],
+                                capture_output=True, text=True, timeout=10)
+        refreshed = result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        refreshed = False
+    if not refreshed:
+        print("icewine wallpaper: saved; the running shell will use it next launch", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ Run: python3 tests/window-switcher.py . (qs on PATH).
 """
 import os
 from pathlib import Path
+from qml_fixture import theme_fixture
 import re
 import shutil
 import subprocess
@@ -210,10 +211,7 @@ Scope {
         + native_topbar[panel_end:]).replace("Bar.SystemMetrics { id: metrics }", "QtObject { id: metrics }"))
     (root / 'icewine/theme').symlink_to(root / 'theme')
     (root / 'config').symlink_to(source / 'quickshell/config')
-    (root / 'theme').mkdir()
-    palette = (source / 'theme/assets/templates/Palette.qml.in').read_text()
-    (root / 'theme/Palette.qml').write_text(re.sub(r'@\w+@', '7aa2f7', palette))
-    (root / 'theme/qmldir').write_text('singleton Palette 1.0 Palette.qml\n')
+    fixture_config = theme_fixture(source, root)
     (root / 'shell.qml').write_text(qml)
     (root / 'runtime').mkdir(mode=0o700)
     (root / 'state/icewine').mkdir(parents=True)
@@ -223,6 +221,7 @@ Scope {
                DBUS_SYSTEM_BUS_ADDRESS='unix:path=' + str(root / 'no-system-bus'),
                XDG_CACHE_HOME=str(root / 'cache'), XDG_RUNTIME_DIR=str(root / 'runtime'),
                XDG_STATE_HOME=str(root / 'state'), ICEWINE_WIDGET_POLICY='{}')
+    env["XDG_CONFIG_HOME"] = fixture_config
     result = subprocess.run(['qs', '-p', str(root), '--no-color'], env=env,
                             capture_output=True, text=True, timeout=10)
     output = result.stdout + result.stderr

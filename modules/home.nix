@@ -28,7 +28,7 @@ let
   ) themeConsumers);
   implementation = pkgs.runCommand "icewine-implementation" { } ''
     mkdir -p $out/quickshell/deck $out/hyprland/modules $out/kitty $out/uwsm $out/hypridle $out/gtk
-    cp -r ${../quickshell}/adapters ${../quickshell}/modules ${../quickshell}/theme ${../quickshell}/QtQuick $out/quickshell/
+    cp -r ${../quickshell}/adapters ${../quickshell}/modules ${../quickshell}/theme $out/quickshell/
     cp ${../quickshell}/deck/DeckOverlay.qml ${../quickshell}/deck/DeckMenu.js $out/quickshell/deck/
     cp ${../quickshell}/Desktop.qml ${../quickshell}/Handheld.qml $out/quickshell/
     cp ${../hyprland}/icewine.lua $out/hyprland/
@@ -99,7 +99,6 @@ let
     text = ''
       export ICEWINE_WALLPAPER_VALIDATOR=${../quickshell/modules}/WallpaperValidator.qml
       export ICEWINE_WALLPAPER_DATA_HOME=''${ICEWINE_WALLPAPER_DATA_HOME:-''${XDG_DATA_HOME:-${dataHome}}}
-      ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_WALLPAPER_FILE=\"\${ICEWINE_SDDM_WALLPAPER_FILE:-/var/lib/icewine/sddm/wallpaper.img}\""}
       exec python3 ${../scripts/wallpaper} "$@"
     '';
   };
@@ -114,7 +113,6 @@ let
       export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_ASSETS=${../theme/assets}
-      ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_THEME_FILE=/var/lib/icewine/sddm/theme.ini"}
       ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_KDEGLOBALS_FILE=\"\${ICEWINE_SDDM_KDEGLOBALS_FILE:-/var/lib/icewine/sddm/kdeglobals}\""}
       export ICEWINE_DEFAULT_FILES=${defaults}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}

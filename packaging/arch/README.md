@@ -97,8 +97,14 @@ full distribution upgrades.
 
 SDDM styling uses `/etc/sddm.conf.d/90-icewine.conf` with its X11 greeter;
 Icewine sessions use Wayland. Existing `/etc/sddm.conf` settings take precedence.
-Arch/CachyOS retains the custom Icewine greeter. Icewine publishes its theme ID to `/var/lib/icewine/sddm/theme.ini`, shared by
-one desktop user. Themes change with `icewine theme dracula`.
+Login packages the installed KDE Breeze theme with the same black/white backdrop
+and KDE colours as NixOS. Icewine publishes public colours to
+`/var/lib/icewine/sddm/kdeglobals`, shared by one desktop user; the packaged
+Catppuccin Mocha fallback is available before the first login. Themes change with
+`icewine theme dracula`. Locks reuse the same upstream Breeze components with
+Icewine's session/PAM backend. Quickshell needs Plasma's QML components and
+KI18nContext (KDE Frameworks 6.23 or later); the native package declares these
+runtime dependencies. The former custom greeter and auth wallpaper are retired.
 
 The developer Nix target builds the same makepkg archives with `--nodeps` and
 an honest empty Arch package database. It checks packaging and manager behavior,

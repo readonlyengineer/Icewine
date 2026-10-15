@@ -576,7 +576,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         host.assert_called_once_with(["sudo", "unlink", str(rules)])
     with patch.object(manage, "run") as host, patch.object(manage, "login"):
         apply(("login",), readonly=True)
-        host.assert_any_call(["icewine-wallpaper", "--publish-auth"])
+        assert not any(call.args[0][0] == "icewine-wallpaper" for call in host.call_args_list)
         assert (data / "wallpapers/default.jpg").exists()
     login_config = root / "sddm.conf"
     with patch.object(manage, "LOGIN_CONFIG", login_config), patch.object(manage, "run") as host:

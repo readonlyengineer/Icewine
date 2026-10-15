@@ -6,6 +6,7 @@ Conflicts=mako.service
 
 [Service]
 Environment=QML_IMPORT_PATH=/usr/share/icewine/quickshell
-ExecStart=/usr/bin/qs
+Environment=KIRIGAMI_PLATFORM_THEME=org.kde.breeze
+ExecStart=/usr/bin/icewine-shell
 ExecStopPost=-/usr/bin/icewine-inputplumber-intercept overlay
 Restart=on-failure
