@@ -13,7 +13,7 @@ ShellRoot {
     }
 
     Adapters.Hyprland {
-        id: compositor
+        id: hyprlandAdapter
     }
 
     Modules.NotificationService {
@@ -22,19 +22,19 @@ ShellRoot {
     Modules.BatteryAlert { session: session }
 
     Modules.NotificationToasts {
-        compositor: compositor
+        compositor: hyprlandAdapter
         notificationService: notifications
     }
 
     Modules.Topbar {
         id: topbar
-        compositor: compositor
+        compositor: hyprlandAdapter
         notificationService: notifications
         session: session
         sessionLocked: session.locked
     }
 
     Modules.GameLauncher {
-        compositor: compositor
+        compositor: hyprlandAdapter
     }
 }

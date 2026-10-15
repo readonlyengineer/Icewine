@@ -25,6 +25,14 @@ QtObject {
         window?.wayland?.activate()
     }
 
+    function activateToplevel(window) {
+        // Object identity prevents a closed window address from selecting its replacement.
+        if (!Hyprland.toplevels.values.includes(window) || !window.wayland)
+            return
+        window.workspace?.activate()
+        window.wayland.activate()
+    }
+
     function toggleFullscreen() {
         Quickshell.execDetached([
             "hyprctl",

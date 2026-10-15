@@ -98,9 +98,10 @@ function controller(file, properties) {
 const callbacks = [], focused = []
 const shell = controller("../modules/Topbar.qml", {
     State, ui: State.initial(), hoveredScreen: "", sessionLocked: false,
-    interactionActive: false, previousWindow: "", focusGeneration: 0,
+    interactionActive: false, previousWindow: "", previousToplevel: null, focusGeneration: 0,
     barVisible: false, radial: {dismiss() {}, drainInput() {}}, widgetDismissed() {},
-    compositor: {activeWindowAddress: "original", activateWindow: address => focused.push(address)},
+    compositor: {activeWindowAddress: "original", toplevels: [{address: "original"}],
+        activateWindow: address => focused.push(address), activateToplevel: window => focused.push(window)},
     Qt: {callLater: fn => callbacks.push(fn)}
 })
 const flush = () => { while (callbacks.length) callbacks.shift()() }
@@ -109,6 +110,11 @@ shell.finishInteraction()
 flush()
 assert.deepEqual(focused, ["original"], "Ordinary dismissal restores the previous window")
 focused.length = 0
+shell.beginInteraction()
+shell.finishInteraction()
+shell.compositor.toplevels = [{address: "original"}]
+flush()
+assert.equal(focused.length, 0, "Closed original object cannot restore a replacement with the same address")
 shell.beginInteraction()
 shell.finishInteraction()
 shell.beginInteraction()
@@ -130,6 +136,31 @@ shell.player = {canRaise: false, raise: () => assert.fail("Unsupported Raise")}
 shell.raiseMedia()
 flush()
 assert.equal(raises, 1)
+
+// Exercise the activation callback through the real shared handoff methods.
+const selected = shell.compositor.toplevels[0]
+shell.ui = State.reduce(shell.ui, {type: "open", page: "switcher", engaged: true, screen: "external"})
+shell.beginInteraction()
+shell.activateSwitcherWindow(selected)
+assert.equal(shell.ui.page, "")
+assert.equal(focused.length, 0, "Activation waits until after handoff")
+flush()
+assert.deepEqual(focused, [selected])
+shell.finishInteraction()
+flush()
+focused.length = 0
+shell.activateSwitcherWindow(selected)
+shell.sessionLocked = true
+flush()
+assert.equal(focused.length, 0, "Lock cancels deferred activation")
+shell.sessionLocked = false
+shell.activateSwitcherWindow(selected)
+shell.beginInteraction()
+flush()
+assert.equal(focused.length, 0, "A new interaction cancels deferred activation")
+shell.handoff()
+shell.finishInteraction()
+flush()
 
 const target = "/org/shadowblip/InputPlumber/devices/target/dbus0"
 const deck = controller("../deck/DeckOverlay.qml", {

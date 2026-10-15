@@ -39,6 +39,7 @@ Scope {
     Component.onCompleted: compositor.supress_mouse_binds(mouseBindsSuppressed)
     property bool interactionActive: false
     property string previousWindow: ""
+    property var previousToplevel: null
     property int focusGeneration: 0
     property bool reportedRender: false
     property bool oskVisible: false
@@ -58,6 +59,7 @@ Scope {
             return
         ++focusGeneration
         previousWindow = compositor.activeWindowAddress
+        previousToplevel = compositor.toplevels.find(window => window.address === previousWindow) ?? null
         interactionActive = true
     }
 
@@ -76,11 +78,14 @@ Scope {
             return
         interactionActive = false
         const address = previousWindow
+        const window = previousToplevel
         const generation = ++focusGeneration
         previousWindow = ""
+        previousToplevel = null
         // Let the layer release its keyboard ownership before restoring focus.
         Qt.callLater(() => {
-            if (address && generation === root.focusGeneration && !root.barVisible && !root.sessionLocked)
+            if (address && window && root.compositor.toplevels.includes(window)
+                    && generation === root.focusGeneration && !root.barVisible && !root.sessionLocked)
                 root.compositor.activateWindow(address)
         })
     }
@@ -94,6 +99,22 @@ Scope {
         ui = next
         if (engaged)
             Qt.callLater(() => root.focusWidgetRequested(root.ui.screen))
+    }
+
+    function toggleSwitcher() {
+        if (ui.page === "switcher") dismissWidget()
+        else openWidget("switcher", true, focusedScreenName())
+    }
+
+    function activateSwitcherWindow(window) {
+        if (sessionLocked || !compositor.toplevels.includes(window))
+            return
+        instantHandoff()
+        const generation = focusGeneration
+        Qt.callLater(() => {
+            if (!root.sessionLocked && generation === root.focusGeneration && !root.ui.page)
+                root.compositor.activateToplevel(window)
+        })
     }
 
     function engageWidget() {
@@ -174,6 +195,11 @@ Scope {
         onReleased: root.releaseBar()
     }
 
+    GlobalShortcut {
+        name: "windowSwitcher"
+        onReleased: root.toggleSwitcher()
+    }
+
     Variants {
         id: panels
         model: Quickshell.screens
@@ -191,7 +217,8 @@ Scope {
             function focusWidget() {
                 if (!widgetHere || !root.widgetEngaged)
                     return
-                if (launcher.shown) launcher.focusInitial()
+                if (switcher.item) switcher.item.forceActiveFocus()
+                else if (launcher.shown) launcher.focusInitial()
                 else statusPopout.focusInitial()
             }
 
@@ -230,6 +257,7 @@ Scope {
             mask: Region {
                 Region { item: panel.modal && !root.oskVisible && !root.sessionLocked ? input : null }
                 Region { item: root.barVisible ? surface : null }
+                Region { item: switcher.active ? switcher : null }
                 Region { item: launcher.shown ? launcher : null }
                 Region { item: statusPopout.shown ? statusPopout : null }
             }
@@ -374,6 +402,21 @@ Scope {
                     onDismissRequested: root.dismissWidget()
                     onHandoffRequested: root.handoff()
                 }
+                Loader {
+                    id: switcher
+                    active: panel.widgetHere && root.ui.page === "switcher" && !root.sessionLocked
+                    x: 8
+                    y: root.barHeight + 4
+                    width: panel.width - 16
+                    height: panel.height - y - 8
+                    onLoaded: item.forceActiveFocus()
+                    sourceComponent: WindowSwitcher {
+                        compositor: root.compositor
+                        monitorName: panel.screen.name
+                        onDismissRequested: root.dismissWidget()
+                        onActivateRequested: window => root.activateSwitcherWindow(window)
+                    }
+                }
                 Bar.StatusPopout {
                     id: statusPopout
                     layer.enabled: visible
@@ -385,7 +428,7 @@ Scope {
                         blurMax: 16
                         shadowVerticalOffset: 4
                     }
-                    shown: panel.widgetHere && root.ui.page !== "launcher"
+                    shown: panel.widgetHere && root.ui.page !== "launcher" && root.ui.page !== "switcher"
                     animateClose: !root.instantBarHide && !root.sessionLocked
                     engaged: root.widgetEngaged
                     Binding {

@@ -1,0 +1,184 @@
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls
+import Quickshell.Wayland
+import "WindowSwitcherModel.js" as Model
+import qs.icewine.theme as Theme
+
+FocusScope {
+    id: root
+    required property var compositor
+    required property string monitorName
+    readonly property var rows: Model.rows(compositor.toplevels, monitorName)
+    property var selected: null
+    property var pendingWindow: null
+    property int actionKey: 0
+    readonly property int cardWidth: Math.max(100, Math.min(240, width - 32))
+    readonly property int cardHeight: Math.max(70, Math.min(170, height - 72))
+    signal dismissRequested()
+    signal activateRequested(var window)
+
+    function navigate(horizontal, vertical) {
+        selected = Model.move(rows, selected, horizontal, vertical)
+    }
+
+    function ensureVisible() {
+        const position = Model.locate(rows, selected)
+        if (!position) return
+        const rowItem = rowViews.itemAt(position.row)
+        if (!rowItem) return
+        const top = rowItem.y
+        const bottom = top + rowItem.height
+        if (top < viewport.contentY) viewport.contentY = top
+        else if (bottom > viewport.contentY + viewport.height)
+            viewport.contentY = bottom - viewport.height
+        const left = position.column * (cardWidth + 12)
+        if (left < rowItem.list.contentX) rowItem.list.contentX = left
+        else if (left + cardWidth > rowItem.list.contentX + rowItem.list.width)
+            rowItem.list.contentX = left + cardWidth - rowItem.list.width
+    }
+
+    onRowsChanged: {
+        selected = Model.reconcile(rows, selected, compositor.activeWindowAddress)
+        Qt.callLater(ensureVisible)
+    }
+    onWidthChanged: Qt.callLater(ensureVisible)
+    onHeightChanged: Qt.callLater(ensureVisible)
+    onSelectedChanged: Qt.callLater(ensureVisible)
+    Component.onCompleted: {
+        selected = Model.reconcile(rows, selected, compositor.activeWindowAddress)
+        Qt.callLater(ensureVisible)
+    }
+    onActiveFocusChanged: if (!activeFocus) { actionKey = 0; pendingWindow = null }
+    Keys.onLeftPressed: navigate(-1, 0)
+    Keys.onRightPressed: navigate(1, 0)
+    Keys.onUpPressed: navigate(0, -1)
+    Keys.onDownPressed: navigate(0, 1)
+    Keys.onPressed: event => {
+        if (![Qt.Key_Return, Qt.Key_Enter, Qt.Key_Escape].includes(event.key)) return
+        event.accepted = true
+        if (!event.isAutoRepeat) {
+            actionKey = event.key
+            pendingWindow = selected
+        }
+    }
+    Keys.onReleased: event => {
+        if (event.isAutoRepeat || event.key !== actionKey) return
+        event.accepted = true
+        const window = pendingWindow
+        actionKey = 0
+        pendingWindow = null
+        if (event.key === Qt.Key_Escape) dismissRequested()
+        else if (Model.locate(rows, window)) activateRequested(window)
+    }
+
+    Rectangle { anchors.fill: parent; color: Theme.Palette.backgroundDark; radius: 10 }
+    MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
+    Flickable {
+        id: viewport
+        anchors.fill: parent
+        anchors.margins: 16
+        clip: true
+        contentWidth: width
+        contentHeight: contents.height
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar {}
+        Column {
+            id: contents
+            width: viewport.width
+            spacing: 16
+            Repeater {
+                id: rowViews
+                model: root.rows
+                Column {
+                    id: workspaceRow
+                    required property var modelData
+                    width: contents.width
+                    spacing: 6
+                    property alias list: cards
+                    Text {
+                        width: parent.width
+                        text: "Workspace " + (workspaceRow.modelData.name || workspaceRow.modelData.id)
+                        color: Theme.Palette.foreground
+                        elide: Text.ElideRight
+                        font.pixelSize: 16
+                    }
+                    ListView {
+                        id: cards
+                        width: parent.width
+                        height: root.cardHeight + 12
+                        orientation: ListView.Horizontal
+                        spacing: 12
+                        model: workspaceRow.modelData.windows
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.horizontal: ScrollBar {}
+                        delegate: Rectangle {
+                            id: card
+                            required property var modelData
+                            width: root.cardWidth
+                            height: root.cardHeight
+                            radius: 8
+                            color: Theme.Palette.surface
+                            border.width: root.selected === modelData ? 3 : 1
+                            border.color: root.selected === modelData ? Theme.Palette.primary : Theme.Palette.border
+                            readonly property string label: modelData.title || modelData.wayland?.appId
+                                || modelData.lastIpcObject?.class || "Window"
+                            Accessible.role: Accessible.Button
+                            Accessible.name: label
+                            Accessible.selected: root.selected === modelData
+                            // ListView virtualises cards; offscreen delegates do not keep a capture alive.
+                            readonly property bool inView: x + width > cards.contentX && x < cards.contentX + cards.width
+                                && workspaceRow.y + workspaceRow.height > viewport.contentY
+                                && workspaceRow.y < viewport.contentY + viewport.height
+                            Loader {
+                                id: preview
+                                anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
+                                height: parent.height - 48
+                                active: card.inView
+                                sourceComponent: ScreencopyView {
+                                    captureSource: card.modelData.wayland
+                                    live: true
+                                    constraintSize: Qt.size(preview.width, preview.height)
+                                    anchors.centerIn: parent
+                                    width: implicitWidth
+                                    height: implicitHeight
+                                }
+                            }
+                            Text {
+                                anchors.centerIn: preview
+                                width: preview.width
+                                visible: !preview.item?.hasContent
+                                text: card.label
+                                color: Theme.Palette.foregroundDark
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.Wrap
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 10 }
+                                text: card.label
+                                color: Theme.Palette.foreground
+                                elide: Text.ElideRight
+                                font.pixelSize: 14
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: { root.selected = card.modelData; root.forceActiveFocus() }
+                                onDoubleClicked: root.activateRequested(card.modelData)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Text {
+        anchors.centerIn: parent
+        visible: root.rows.length === 0
+        text: "No windows on this monitor"
+        color: Theme.Palette.foreground
+    }
+}

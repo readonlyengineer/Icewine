@@ -77,6 +77,8 @@ end
 -- Application launchers
 hl.bind(mainMod .. " + RETURN", hl.dsp.exec_cmd(apps.terminal))
 hl.bind(mainMod .. " + SPACE",  topbar("launcher"))
+-- Toggle on chord release, after the opening key can no longer reach the overlay.
+hl.bind(mainMod .. " + W", hl.dsp.global("quickshell:windowSwitcher"), { transparent = true })
 hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd(apps.file_manager))
 if apps.browser ~= "" then hl.bind(mainMod .. " + B", hl.dsp.exec_cmd(apps.browser)) end
 hl.bind(mainMod .. " + L",      hl.dsp.exec_cmd(apps.lock))
