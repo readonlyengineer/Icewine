@@ -422,7 +422,7 @@ Scope {
                 }
                 Loader {
                     id: switcher
-                    active: Config.Settings.windowSwitcher && panel.widgetHere && root.ui.page === "switcher" && !root.sessionLocked
+                    active: Config.Settings.windowSwitcher === true && panel.widgetHere && root.ui.page === "switcher" && !root.sessionLocked
                     x: 8
                     y: root.barHeight + 4
                     width: panel.width - 16
