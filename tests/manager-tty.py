@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Drive the built Ratatui frontend through a pseudo-TTY, without host changes."""
+import argparse
 import fcntl
 import json
 import os
@@ -14,12 +15,13 @@ import tempfile
 import termios
 import time
 
-def rendered_frames(output, size):
+def rendered_frames(output, size, check_contrast=False):
     # Ratatui emits positioned cell deltas, not complete text on page changes.
     # Replay its cursor/clear commands; retain completed draws for assertions.
     rows, columns = size
     screen = [[" "] * columns for _ in range(rows)]
     x = y = 0
+    foreground = background = None
     frames = []
     for token in re.split(r"(\x1b\[[0-?]*[ -/]*[@-~])", output.decode(errors="replace")):
         if token.startswith("\x1b["):
@@ -27,8 +29,22 @@ def rendered_frames(output, size):
             if command in ("H", "f"):
                 position = [int(value or 1) for value in args.split(";")]
                 y, x = position[0] - 1, (position[1] if len(position) > 1 else 1) - 1
-            elif command == "J" and args == "2":
+            elif (command == "J" and args == "2") or token == "\x1b[?1049h":
                 screen = [[" "] * columns for _ in range(rows)]
+            elif command == "m":
+                codes = [int(value or 0) for value in args.split(";")]
+                while codes:
+                    code = codes.pop(0)
+                    if code == 0: foreground = background = None
+                    elif code == 39: foreground = None
+                    elif code == 49: background = None
+                    # Fixed manager palette emits indexed SGR; extend only
+                    # when a real palette or transport needs another encoding.
+                    elif code in (38, 48) and len(codes) >= 2 and codes[0] == 5:
+                        codes.pop(0)
+                        colour = codes.pop(0)
+                        if code == 38: foreground = colour
+                        else: background = colour
             elif token == "\x1b[?25l":
                 frames.append("\n".join("".join(row) for row in screen).encode())
         else:
@@ -36,11 +52,21 @@ def rendered_frames(output, size):
                 if char == "\r": x = 0
                 elif char == "\n": y += 1
                 elif char >= " ":
+                    if check_contrast and char != " " and background is not None:
+                        assert foreground != background, f"Invisible {char!r} at ({y+1}, {x+1}): fg=bg={background}"
                     if 0 <= y < rows and 0 <= x < columns: screen[y][x] = char
                     x += 1
     return frames
 
-binary = Path(sys.argv[1]).resolve()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("binary", type=Path)
+parser.add_argument("--export-frames", type=Path, help="write complete text frames and raw terminal cells for developer inspection")
+parser.add_argument("--frames-only", action="store_true", help="capture representative visual states without repeating the semantic suite")
+options = parser.parse_args()
+if options.frames_only and not options.export_frames: parser.error("--frames-only requires --export-frames")
+binary = options.binary.resolve()
+if options.export_frames: options.export_frames.mkdir(parents=True, exist_ok=True)
+capture_number = 0
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     backend = root / "icewine-manage-backend"
@@ -92,8 +118,8 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False):
-        global last_output, last_frames, last_widget_calls
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run"):
+        global last_output, last_frames, last_widget_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.unlink(missing_ok=True)
         appearance_state = root / "appearance-state"
@@ -127,7 +153,8 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
             frames = rendered_frames(output, size)
             rendered = b"\n".join(frames)
             if not sent and frames:
-                assert b"Icewine Installer (1/3) | Tab: Appearance" in rendered
+                assert (b"Icewine needs an 80 x 24 terminal." if size[1] < 80 or size[0] < 24 else
+                        b"Icewine Installer (1/3) | Tab: Appearance") in rendered
                 os.write(master, keys)
                 sent = True
         if process.poll() is None:
@@ -136,8 +163,21 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
         while select.select([master], [], [], 0)[0]:
             try: output.extend(os.read(master, 65536))
             except OSError: break
-        last_frames = rendered_frames(output, size)
+        # Final semantic runs reject glyphs painted in the same colour as their
+        # background, including focused Installer checkbox and Steam values.
+        # Historical BEFORE exports may contain the known inherited defect.
+        last_frames = rendered_frames(output, size, check_contrast=not options.frames_only)
         rendered = b"\n".join(last_frames)
+        if options.export_frames:
+            capture_number += 1
+            name = f"{capture_number:03d}-{capture}-{size[1]}x{size[0]}"
+            directory = options.export_frames / name
+            directory.mkdir()
+            (directory / "terminal.ansi").write_bytes(output)
+            for index, frame in enumerate(last_frames):
+                (directory / f"{index:03d}.txt").write_bytes(frame + b"\n")
+            (directory / "capture.json").write_text(json.dumps({"binary": str(binary), "size": size,
+                "keys_hex": keys.hex(), "frames": len(last_frames)}, indent=2)+"\n")
         if sent:
             assert termios.tcgetattr(master)[3] & termios.ICANON, "terminal raw mode was not restored"
         os.close(master)
@@ -147,11 +187,13 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
             assert not sent
             return [json.loads(line) for line in log.read_text().splitlines()]
         assert sent, output.decode(errors="replace")
-        assert (b"Esc: cancel" if size[1] == 100 else b"Esc: canc") in rendered
-        assert b"Icewine Installer" in rendered
-        assert b"Overwrite existing dotfiles" in rendered
-        assert b"[ Apply ]" in rendered and b"[ Cancel ]" in rendered
-        assert (b"NixOS: utility selections are read-only." in rendered) == ("readonly=true" in state.split())
+        if size[1] < 80 or size[0] < 24:
+            assert b"Resize to continue; Esc: cancel." in rendered
+        else:
+            assert b"Icewine Installer" in rendered
+            assert b"Overwrite existing dotfiles" in rendered
+            assert b"[ Apply ]" in rendered and b"[ Cancel ]" in rendered
+            assert (b"NixOS: utility selections are read-only." in rendered) == ("readonly=true" in state.split())
         all_calls = [json.loads(line) for line in log.read_text().splitlines()]
         last_widget_calls = [call for call in all_calls if call[0].startswith("widgets-")]
         return [call for call in all_calls if not call[0].startswith("widgets-")]
@@ -166,6 +208,26 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
         fields = dict(field.split("=") for field in calls[1][1:])
         assert len(fields) == len(ids) + 1 and set(fields) == {*ids, "overwrite"}
         return fields
+    if options.frames_only:
+        tab, down = b"\t", b"\x1b[B"
+        for size in ((24, 80), (36, 120)):
+            run(tab + b"\x1b", state(), size=size, capture="pages")
+            run(tab + b"\x1b", state(readonly=True, desktop=True, steam="native", gamescope=True, handheld=True),
+                policy=True, auth=True, size=size, capture="readonly-auth")
+            run(tab*2+b" "+down*2+b"\r\x1b", state(), size=size, capture="widgets-save")
+            if size[1] != 80: continue
+            run(down*3+b"\x1b[C"+down*6+b"\x1b", state(desktop=True), size=size, capture="installer-actions")
+            (root / "hyprmon").rename(root / "hyprmon-hidden")
+            try:
+                run(tab+down*4+b"\r\x1b", state(), size=size, path=str(root), capture="monitor-error")
+            finally: (root / "hyprmon-hidden").rename(root / "hyprmon")
+            run(tab+down*2+b"\r\x1b", state(), size=size, command_fail=True,
+                pick=str(root/"picture with spaces.png")+"\n", capture="picker-error")
+            run(tab*2+b" "+down*2+b"\r\x1b", state(), size=size, widget_fail=True, capture="widgets-error")
+            run(tab*2+b"\x1b", state(), size=size, widget_supported=False, capture="widgets-unavailable")
+            run(tab*2+b"\x1b", state(), size=size, widget_policy="notificationToasts,windowSwitcher", capture="widgets-policy")
+        print("PASS: completed visual frames exported; semantic suite not run")
+        sys.exit(0)
     assert run(b" \x1b", state()) == [["state"]]
     assert run(b"\x1b[B"*(visible+2)+b"\r", state()) == [["state"]]
     expected = dict.fromkeys(ids, "false") | {"steam": "none", "desktop": "true", "overwrite": "false"}
@@ -199,6 +261,9 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
         return [json.loads(line) for line in tool_log.read_text().splitlines()]
     tab = b"\t"
     down = b"\x1b[B"
+    # Without the size guard, Tab/Right would immediately change Appearance.
+    assert run(tab+b"\x1b[C\x1b", state(), size=(20, 70)) == [["state"]]
+    assert not any(len(call) > 2 or call[0] != "icewine" for call in tools()), "hidden control acted"
     # Page changes preserve utility focus and pending selections; appearance is live.
     chosen = applied(run(b" \x1b[B" + tab + b"\x1b[C\x1b[B\x1b[C" + tab*2 + b" " + tab + b"\x1b[C" + tab*2 + down*visible+b"\r", state()))
     assert chosen["desktop"] == "true" and chosen["terminal"] == "true"
@@ -210,11 +275,18 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
     assert b"Appearance updates immediately." in last_output
     # The navigation affordance and controls fit a conventional 80-column TTY
     # as well as the wider default; exercise a round trip at both sizes.
-    for size in ((24, 80), (24, 100)):
-        assert run(tab + tab + tab + b"\x1b", state(), size=size) == [["state"]]
-        assert b"Appearance updates immediately." in last_output
+    for size in ((24, 80), (24, 100), (36, 120)):
+        assert run(tab + tab + tab + b"\x1b", state(), size=size, auth=size[1] == 80) == [["state"]]
         assert any(b"Icewine Appearance (2/3) | Tab: Widgets" in frame for frame in last_frames)
         assert b"Icewine Installer (1/3) | Tab: Appearance" in last_frames[-1]
+        for frame in last_frames:
+            if b"Icewine " in frame:
+                assert b"Tab: page" in frame and b"Esc: cancel" in frame
+                assert b"[ Cancel ]" in frame
+        appearance_frames = [frame for frame in last_frames if b"Icewine Appearance" in frame]
+        assert any(b"Configure monitors" in frame for frame in appearance_frames)
+        if size[1] == 80:
+            assert any(b"Separate image" in frame and b"Configure monitors" in frame for frame in appearance_frames)
     # Overwrite survives page switches and Apply works from either page.
     for finish in (tab*2 + down + b"\r", down*5 + b"\r"):
         assert applied(run(down*visible + b" " + tab + finish, state()))["overwrite"] == "true"

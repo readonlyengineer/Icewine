@@ -1,13 +1,13 @@
 use std::{collections::BTreeMap, fs::{self, OpenOptions}, io, os::unix::fs::OpenOptionsExt, path::PathBuf, process::{Command, ExitCode}};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::{layout::Flex, prelude::*, widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table}};
+use ratatui::{layout::Flex, prelude::*, widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table, Wrap}};
 
 const ROWS: &[(&str, &str, &str)] = &[
     ("desktop", "Desktop session", "Hyprland + Icewine Quickshell"),
     ("terminal", "Terminal", "Kitty"),
     ("filemanager", "File manager", "Yazi"),
     ("steam", "Steam (unfree)", ""),
-    ("gamescope", " +- Gamescope", ""), ("handheld", " \u{005c}- Handheld", "Requires Desktop Session, Steam native, and Gamescope"),
+    ("gamescope", " +- Gamescope", ""), ("handheld", " \u{005c}- Handheld", "Needs Desktop + native Steam + Gamescope"),
     ("login", "Login screen", "SDDM"), ("shellExtras", "Shell Extras", "Starship + Fastfetch + btop theme"),
 ];
 
@@ -179,9 +179,9 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 let accent = Style::default().fg(Color::Cyan).bold();
                 let muted = Style::default().fg(Color::DarkGray);
                 let focused = Style::default().fg(Color::Black).bg(Color::Cyan).bold();
-                let [panel] = Layout::horizontal([Constraint::Max(90)])
+                let [panel] = Layout::horizontal([Constraint::Max(96)])
                     .flex(Flex::Center).areas(frame.area());
-                let [panel] = Layout::vertical([Constraint::Max(ROWS.len() as u16 + 15)])
+                let [panel] = Layout::vertical([Constraint::Max(24)])
                     .flex(Flex::Center).areas(panel);
                 let block = Block::bordered().border_type(BorderType::Rounded)
                     .border_style(muted).title(Line::from(match page {
@@ -189,25 +189,20 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         1 => " Icewine Appearance (2/3) | Tab: Widgets ",
                         _ => " Icewine Widgets (3/3) | Tab: Installer ",
                     }).style(accent))
-                    .padding(Padding::uniform(1));
+                    .padding(Padding::horizontal(1));
+                if frame.area().width < 80 || frame.area().height < 24 {
+                    frame.render_widget(Paragraph::new("Icewine needs an 80 x 24 terminal.\nResize to continue; Esc: cancel.").style(accent), frame.area());
+                    return;
+                }
                 let inner = block.inner(panel);
                 frame.render_widget(block, panel);
                 let [intro, utilities, reset, buttons, help] = Layout::vertical([
-                    Constraint::Length(4), Constraint::Length(ROWS.len() as u16 + 2),
-                    Constraint::Length(2), Constraint::Length(2), Constraint::Length(1),
+                    Constraint::Length(4), Constraint::Min(10),
+                    Constraint::Length(3), Constraint::Length(2), Constraint::Length(2),
                 ]).areas(inner);
-                frame.render_widget(Paragraph::new(vec![
-                    Line::from("Optional utilities, configured for Icewine."),
-                    Line::from("Selected utilities are installed and configured.").style(muted),
-                    Line::from(if readonly {
-                        "NixOS: utility selections are read-only."
-                    } else {
-                        "Deselecting removes Icewine configuration; packages stay installed."
-                    }).style(muted),
-                ]), intro);
                 if page == 1 {
                     frame.render_widget(Paragraph::new(vec![
-                        Line::from("Appearance updates immediately."),
+                        Line::from("Appearance updates immediately.").style(accent),
                         Line::from("Apply/Cancel here control utility choices only.").style(muted),
                         Line::from("HyprMon live/save changes remain after Cancel.").style(muted),
                     ]), intro);
@@ -221,43 +216,53 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     ];
                     frame.render_widget(Table::new(settings.into_iter().filter(|(control, _, _)|
                         *control != Control::AuthWallpaper || appearance.auth.is_some()).map(|(control, label, value)|
-                        Row::new([Cell::from(label), Cell::from(value)]).style(if controls[focus] == control { focused }
+                        Row::new([Cell::from(label), Cell::from(value)]).bottom_margin(u16::from(control != Control::Monitors)).style(if controls[focus] == control { focused }
                             else if control == Control::Theme && appearance.policy { muted } else { Style::default() })),
                         [Constraint::Length(23), Constraint::Min(20)]).column_spacing(2), utilities);
-                    frame.render_widget(Paragraph::new(message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent), reset);
+                    frame.render_widget(Paragraph::new(message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
                 } else if page == 2 {
                     frame.render_widget(Paragraph::new(vec![
-                        Line::from("First-party widgets; no plugin loading."),
+                        Line::from("First-party widgets; no plugin loading.").style(accent),
                         Line::from("Save commits widgets only; Cancel/Esc discards drafts.").style(muted),
                         Line::from("Installer drafts stay pending; appearance stays live.").style(muted),
                         Line::from(if widgets.supported { "Saved preferences apply live and survive session restart." }
                             else { "Unavailable: restore shipped settings/entry via Installer." }).style(muted),
                     ]), intro);
                     frame.render_widget(Table::new(WIDGETS.iter().enumerate().map(|(index, (_, label, description))| {
-                        Row::new([Cell::from(*label), Cell::from(*description),
+                        Row::new([Cell::from(Text::from(vec![Line::from(*label), Line::from(*description).style(if controls[focus] == Control::Widget(index) { focused } else { muted })])),
                             Cell::from(format!("[{}]{}", if !widgets.supported { "?" } else if widgets.enabled[index] { "x" } else { " " },
-                                if widgets.policy[index] { " Nix policy" } else if !widgets.supported { " unavailable" } else { "" }))])
+                                if widgets.policy[index] { " Nix policy" } else if !widgets.supported { " unavailable" } else { "" }))]).height(2).top_margin(u16::from(index == 0)).bottom_margin(1)
                             .style(if controls[focus] == Control::Widget(index) { focused }
                                 else if widgets.policy[index] || !widgets.supported { muted } else { Style::default() })
-                    }), [Constraint::Length(20), Constraint::Min(10), Constraint::Length(16)]).column_spacing(1), utilities);
-                    frame.render_widget(Paragraph::new(widget_message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent), reset);
+                    }), [Constraint::Min(36), Constraint::Length(16)]).column_spacing(2), utilities);
+                    frame.render_widget(Paragraph::new(widget_message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
                 } else {
+                frame.render_widget(Paragraph::new(vec![
+                    Line::from("Optional utilities, configured for Icewine.").style(accent),
+                    Line::from("Selected utilities are installed and configured.").style(muted),
+                    Line::from(if readonly {
+                        "NixOS: utility selections are read-only."
+                    } else {
+                        "Deselecting removes Icewine configuration; packages stay installed."
+                    }).style(muted),
+                ]), intro);
                 let rows = rows.iter().map(|(id, purpose, defaults)| {
                     let available = *id != "handheld" || handheld_available(*steam, selected);
+                    let active = controls[focus] == (if *id == "steam" { Control::Steam } else { Control::Utility(id) });
                     Row::new(vec![
                         Cell::from(*purpose),
                         Cell::from(*defaults).style(muted),
                         Cell::from(Line::from(if *id == "steam" { format!("< {} >", STEAM[*steam]) }
                             else { (if selected[id] { "[x]" } else { "[ ]" }).to_owned() }).right_aligned())
-                            .style(if readonly || !available { muted } else { accent }),
-                    ]).style(if controls[focus] == (if *id == "steam" { Control::Steam } else { Control::Utility(id) }) { focused } else { Style::default() })
+                            .style(if active { focused } else if readonly || !available { muted } else { accent }),
+                    ]).style(if active { focused } else { Style::default() })
                 });
                 frame.render_widget(Table::new(rows, [
                     Constraint::Length(18), Constraint::Min(20), Constraint::Length(11),
                 ]).column_spacing(2).header(Row::new([
                     Cell::from("Utility"), Cell::from("Contains"),
                     Cell::from(Line::from("Configure").right_aligned()),
-                ]).style(accent)), utilities);
+                ]).style(accent).bottom_margin(1)), utilities);
                 frame.render_widget(Paragraph::new(format!("[{}] Overwrite existing dotfiles",
                     if overwrite { "x" } else { " " }))
                     .style(if controls[focus] == Control::Overwrite { focused } else { Style::default() }), reset);
@@ -267,17 +272,20 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     Span::raw("   "),
                     Span::styled("[ Cancel ]", if controls[focus] == Control::Cancel { focused } else { muted }),
                 ])), buttons);
-                frame.render_widget(Paragraph::new(
-                    if page == 0 { "Tab: page   Up/down: move   Left/right: Steam   Space/Enter: act   Esc: cancel" }
-                    else { "Tab: page   Up/down: move   Left/right: cycle   Space/Enter: act   Esc: cancel" }
-                ).style(muted), help);
+                frame.render_widget(Paragraph::new(vec![
+                    Line::from("Tab: page   Up/down: move   Shift-Tab: previous control"),
+                    Line::from(if page == 0 { "Left/right: Steam   Space/Enter: act   Esc: cancel" }
+                        else if page == 1 { "Left/right: cycle   Space/Enter: act   Esc: cancel" }
+                        else { "Space/Enter: act   Esc: cancel" }),
+                ]).style(muted), help);
             })?;
             let Event::Key(key) = event::read()? else { continue };
             if key.kind != KeyEventKind::Press { continue; }
             match key.code {
-                KeyCode::Tab => { focuses[page] = focus; page = (page + 1) % 3; focus = focuses[page]; }
                 KeyCode::Esc | KeyCode::Char('q') => return Ok(None),
                 KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(None),
+                _ if terminal.size()?.width < 80 || terminal.size()?.height < 24 => (),
+                KeyCode::Tab => { focuses[page] = focus; page = (page + 1) % 3; focus = focuses[page]; }
                 KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Theme | Control::Transparency) => {
                     let (values, current, command) = if controls[focus] == Control::Theme {
                         (appearance.themes.iter().map(String::as_str).collect::<Vec<_>>(), appearance.theme, "theme")
