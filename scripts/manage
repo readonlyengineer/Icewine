@@ -264,7 +264,10 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine/theme"))
         themes = theme.installed(assets)
         theme_id, _ = theme.effective(state, themes)
-        theme.publish(config, theme.render_theme(assets, themes[theme_id], theme.transparency_level(state)))
+        files = theme.render_theme(assets, themes[theme_id], theme.transparency_level(state))
+        theme.publish(config, files)
+        if selected["login"]:
+            theme.publish_sddm(files, theme_id)
         for feature in FEATURES:
             if applied[feature] and not selected[feature]:
                 retire(config, data, state, feature)

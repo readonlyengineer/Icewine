@@ -1,46 +1,27 @@
-{ lib, runCommand, writeText, qt6 }:
-let
-  themeFiles = builtins.filter (name: lib.hasSuffix ".json" name)
-    (builtins.attrNames (builtins.readDir ../theme/assets/themes));
-  palettes = builtins.listToAttrs (map (file: {
-    name = lib.removeSuffix ".json" file;
-    value = builtins.fromJSON (builtins.readFile (../theme/assets/themes + "/${file}"));
-  }) themeFiles);
-  colors = [ "background" "backgroundDark" "surface" "selection" "border"
-    "foreground" "foregroundDark" "muted" "highlight" "highlightDark"
-    "secondaryHighlight" "tertiaryHighlight" "success" "warning" "caution"
-    "error" "info" ];
-  paletteQml = writeText "icewine-palette.qml" (
-    builtins.replaceStrings
-      ([ "import QtQuick\n" "QtObject {\n" "\"@appearance@\"" ]
-        ++ map (name: "\"#@${name}@\"") colors)
-      ([ "import QtQuick\nimport QtCore\n" ''
-QtObject {
-    property Settings themeSettings: Settings {
-        location: "file:///var/lib/icewine/sddm/theme.ini"
-    }
-    readonly property var palettes: (${builtins.toJSON palettes})
-    readonly property string themeId: themeSettings.value("theme", "")
-    readonly property var palette: Object.prototype.hasOwnProperty.call(palettes, themeId)
-        ? palettes[themeId] : palettes["tokyo-night"]
-'' "palette.appearance" ] ++ map (name: "\"#\" + palette.${name}") colors)
-      (builtins.readFile ../theme/assets/templates/Palette.qml.in)
-  );
-in
-runCommand "icewine-sddm-theme" { } ''
-  theme="$out/share/sddm/themes/icewine"
-  mkdir -p "$theme"/{modules,theme}
-  cp ${./Main.qml} "$theme/Main.qml"
-  ln -s ${../theme/assets/flower-branch.png} "$theme/wallpaper.png"
-  cp -r ${../quickshell/QtQuick} "$theme/QtQuick"
-  chmod -R u+w "$theme/QtQuick"
-  substituteInPlace "$theme/QtQuick/VirtualKeyboard/Styles/icewine/style.qml" \
-    --replace-fail 'import qs.icewine.theme as Theme' 'import IcewineTheme as Theme'
-  cp ${./metadata.desktop} "$theme/metadata.desktop"
-  cp ${../quickshell/modules/AuthScreen.qml} "$theme/modules/AuthScreen.qml"
-  cp ${../quickshell/modules/AuthModel.js} "$theme/modules/AuthModel.js"
-  cp ${paletteQml} "$theme/theme/Palette.qml"
-  mkdir -p "$theme/IcewineTheme" "$out/${qt6.qtbase.qtQmlPrefix}"
-  printf 'module IcewineTheme\nsingleton Palette 1.0 ../theme/Palette.qml\n' > "$theme/IcewineTheme/qmldir"
-  ln -s "$theme/QtQuick" "$theme/IcewineTheme" "$out/${qt6.qtbase.qtQmlPrefix}/"
+{ runCommand, kdePackages, python3, theme ? null }:
+# Keep KDE's QML intact; only the supported theme configuration is local.
+runCommand "icewine-breeze-sddm-theme" {
+  selectedTheme = if theme == null then "" else theme;
+} ''
+  theme="$out/share/sddm/themes/breeze"
+  mkdir -p "$theme"
+  cp -r ${kdePackages.plasma-desktop}/share/sddm/themes/breeze/. "$theme/"
+  chmod -R u+w "$theme"
+  mkdir -p "$out/share/icewine/sddm"
+  ${python3}/bin/python3 - ${../scripts/theme} ${../theme/assets} "$out/share/icewine/sddm/kdeglobals" <<'PYTHON'
+import os, runpy, sys
+from pathlib import Path
+os.environ["ICEWINE_THEME_ASSETS"] = sys.argv[2]
+renderer = runpy.run_path(sys.argv[1])
+assets = Path(sys.argv[2])
+selected = os.environ["selectedTheme"] or renderer["DEFAULT"]
+files = renderer["render_theme"](assets, assets / "themes" / (selected + ".json"))
+Path(sys.argv[3]).write_text(files["kdeglobals"])
+PYTHON
+  cat > "$theme/theme.conf.user" <<'EOF'
+[General]
+background=/var/lib/icewine/sddm/wallpaper.img
+color=#1a1b26
+iconTheme=breeze
+EOF
 ''

@@ -155,9 +155,10 @@ with tempfile.TemporaryDirectory() as temporary:
     (fake_bin / "ya").write_text("#!/bin/sh\nexit 0\n")
     (fake_bin / "ya").chmod(0o755)
     sddm_file = root / "sddm/theme.ini"
+    kdeglobals = root / "sddm/kdeglobals"
     env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_STATE_HOME=str(state),
                XDG_DATA_HOME=str(root / "data"), ICEWINE_THEME_ASSETS=str(assets), ICEWINE_GTK_ENABLE="false",
-               ICEWINE_THEME_POLICY="", ICEWINE_SDDM_THEME_FILE=str(sddm_file), WAYLAND_DISPLAY="",
+               ICEWINE_THEME_POLICY="", ICEWINE_SDDM_THEME_FILE=str(sddm_file), ICEWINE_SDDM_KDEGLOBALS_FILE=str(kdeglobals), WAYLAND_DISPLAY="",
                HYPRLAND_INSTANCE_SIGNATURE="", DBUS_SESSION_BUS_ADDRESS="", XDG_RUNTIME_DIR=str(runtime),
                PATH=str(fake_bin)+":"+os.environ["PATH"])
     def run(*argv, policy=""):
@@ -236,6 +237,10 @@ with tempfile.TemporaryDirectory() as temporary:
         result = run("theme", theme_id)
         assert result.returncode == 0, result.stderr
         assert sddm_file.read_text() == f"[General]\ntheme={theme_id}\n"
+        if theme_id == "dracula":
+            assert kdeglobals.read_bytes() == (config / "icewine/current/kdeglobals").read_bytes()
+            assert kdeglobals.stat().st_mode & 0o777 == 0o644
+
         current = config / "icewine/current"
         assert f"background #{background}\n" in (current / "kitty.conf").read_text()
         assert kitty_entry.read_text() == "user Kitty theme edit\n"
@@ -293,6 +298,11 @@ with tempfile.TemporaryDirectory() as temporary:
     assert result.returncode == 0 and "Pending: SDDM colours will not update" in result.stderr
     assert blocked.read_text() == "keep me\n"
     env["ICEWINE_SDDM_THEME_FILE"] = str(sddm_file)
+    env["ICEWINE_SDDM_KDEGLOBALS_FILE"] = str(blocked / "kdeglobals")
+    result = run("apply")
+    assert result.returncode == 0 and "Pending: SDDM colours will not update" in result.stderr
+    assert blocked.read_text() == "keep me\n"
+    env["ICEWINE_SDDM_KDEGLOBALS_FILE"] = str(kdeglobals)
 
     # Opacity is independent of theme selection and survives reapplication.
     saved_theme = (state / "icewine/theme").read_text()

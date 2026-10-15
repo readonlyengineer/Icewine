@@ -115,6 +115,7 @@ let
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_ASSETS=${../theme/assets}
       ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_THEME_FILE=/var/lib/icewine/sddm/theme.ini"}
+      ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_KDEGLOBALS_FILE=\"\${ICEWINE_SDDM_KDEGLOBALS_FILE:-/var/lib/icewine/sddm/kdeglobals}\""}
       export ICEWINE_DEFAULT_FILES=${defaults}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
@@ -133,6 +134,7 @@ let
     text = ''
       export ICEWINE_THEME_SCRIPT=${../scripts/theme}
       export ICEWINE_THEME_ASSETS=${../theme/assets}
+      ${lib.optionalString cfg.login.enable "export ICEWINE_SDDM_KDEGLOBALS_FILE=\"\${ICEWINE_SDDM_KDEGLOBALS_FILE:-/var/lib/icewine/sddm/kdeglobals}\""}
       export ICEWINE_DEFAULT_FILES=${defaults}
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}

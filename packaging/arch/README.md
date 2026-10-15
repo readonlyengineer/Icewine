@@ -72,7 +72,7 @@ full distribution upgrades.
 
 SDDM styling uses `/etc/sddm.conf.d/90-icewine.conf` with its X11 greeter;
 Icewine sessions use Wayland. Existing `/etc/sddm.conf` settings take precedence.
-Icewine publishes theme colours to `/var/lib/icewine/sddm/theme.ini`, shared by
+Arch/CachyOS retains the custom Icewine greeter. Icewine publishes its theme ID to `/var/lib/icewine/sddm/theme.ini`, shared by
 one desktop user. Themes change with `icewine theme dracula`.
 
 The developer Nix target builds the same makepkg archives with `--nodeps` and

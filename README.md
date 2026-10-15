@@ -120,9 +120,12 @@ the user who enabled Login on Arch/CachyOS; that user's wallpaper changes refres
 it. Other private files and directory permissions are unchanged.
 Your original file can then be moved or deleted.
 
-Lock/login use brief focus and feedback transitions. Set
-`ICEWINE_THEME_TRANSITION=off` for the shell or `animations=off` in SDDM
-theme configuration to disable them.
+Lock uses brief focus and feedback transitions; set
+`ICEWINE_THEME_TRANSITION=off` for the shell to disable them. NixOS Login uses
+upstream KDE Breeze, preserving its layout, input and animations. Login Apply
+and theme changes publish KDE colours readable before authentication; missing
+public state uses the packaged theme policy or Catppuccin Mocha fallback.
+Arch/CachyOS retains the Icewine greeter and its `animations=off` theme setting.
 
 ### Theme and transparency
 
@@ -331,7 +334,7 @@ These options belong under `services.icewine`:
 | `steam = "none";` | Steam integration and dependent Gamescope/Handheld |
 | `gamescope.enable = false;` | Gamescope launch integration; ordinary Steam remains available |
 | `monitors.enable = false;` | Optional HyprMon; locked default needs a Lua-compatible `monitors.package` override |
-| `login.enable = false;` | Icewine SDDM styling; host SDDM enablement is retained |
+| `login.enable = false;` | KDE Breeze SDDM with Icewine colours; host SDDM enablement is retained |
 | `shellExtras.enable = false;` | Starship/Fastfetch defaults and btop styling |
 | `shellExtras.git.enable = false;` | Git information in the prompt |
 | `gtk.enable = false;` | GTK styling |

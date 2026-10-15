@@ -41,6 +41,9 @@ let
   loginOff = (desktopSystem.extendModules { modules = [{ services.displayManager.sddm.enable = true; }]; }).config;
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
   sddmTheme = pkgs.callPackage ../sddm { };
+  sddm = loginOnly.services.displayManager.sddm.package.override (old: {
+    extraPackages = (old.extraPackages or [ ]) ++ loginOnly.services.displayManager.sddm.extraPackages;
+  });
   icewineCli = builtins.head (lib.filter
     (package: lib.getName package == "icewine") optIn.users.users.demo.packages);
   handheldCli = builtins.head (lib.filter
@@ -49,6 +52,26 @@ let
     (package: lib.getName package == "mimeapps.list") optIn.users.users.demo.packages);
   hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
 in {
+  sddm = pkgs.runCommand "icewine-breeze-sddm-checks" {
+    nativeBuildInputs = [ pkgs.python3 pkgs.qt6.wrapQtAppsHook pkgs.libredirect ];
+    buildInputs = sddm.buildInputs ++ [ pkgs.qt6.qtdeclarative ];
+    dontWrapQtApps = true;
+  } ''
+    python3 ${./sddm-standalone.py} ${self}
+    # Use the native wrapper hook; its executables may be compiled binaries.
+    mkdir -p "$TMPDIR/fixture"
+    makeQtWrapper ${pkgs.qt6.qtdeclarative}/bin/qml "$TMPDIR/qml" \
+      ${lib.escapeShellArgs loginOnly.services.displayManager.sddm.package.qtWrapperArgs} \
+      --set XDG_CONFIG_HOME "$TMPDIR/fixture/public" --set XDG_CONFIG_DIRS "$TMPDIR/fixture/fallback"
+    makeQtWrapper ${sddm.unwrapped}/bin/sddm-greeter-qt6 "$TMPDIR/greeter" \
+      ${lib.escapeShellArgs loginOnly.services.displayManager.sddm.package.qtWrapperArgs} \
+      --set SDDM_GREETER_DIR ${sddm}/bin \
+      --set XDG_CONFIG_HOME "$TMPDIR/fixture/public" --set XDG_CONFIG_DIRS "$TMPDIR/fixture/fallback"
+    python3 ${./breeze-sddm.py} ${self} ${sddmTheme} "$TMPDIR/qml" \
+      "$TMPDIR/greeter" "$TMPDIR/fixture" \
+      ${pkgs.libredirect}/lib/libredirect.so
+    touch "$out"
+  '';
   brightness = pkgs.runCommand "icewine-brightness-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.python3 pkgs.shellcheck pkgs.jq pkgs.util-linux ];
   } ''
@@ -66,7 +89,9 @@ in {
     python3 ${./render-ready.py} ${self} --native-osk=lock
     python3 ${./render-ready.py} ${self} --native-osk=sddm
     python3 ${./theme-live.py} ${self}
-    python3 ${./sddm-palette.py} ${sddmTheme}/share/sddm/themes/icewine/theme/Palette.qml \
+    # Retained Arch custom greeter only; Breeze is covered by the sddm target.
+    python3 ${self}/packaging/arch/sddm-palette.py > "$TMPDIR/arch-palette.qml"
+    python3 ${./sddm-palette.py} "$TMPDIR/arch-palette.qml" \
       ${pkgs.qt6.qtdeclarative}/bin/qml ${pkgs.qt6.qtdeclarative}/lib/qt-6/qml
     touch "$out"
   '';
@@ -147,16 +172,13 @@ in {
     assert !(hasPackage "bazaar" optIn.environment.systemPackages);
     assert !(hasPackage "hyprmon" desktop.users.users.demo.packages);
     assert hasPackage "hello" monitorsOnly.users.users.demo.packages;
-    assert optIn.services.displayManager.sddm.theme == "icewine";
     assert loginOnly.services.displayManager.sddm.enable;
-    assert loginOnly.services.displayManager.sddm.theme == "icewine";
+    assert loginOnly.services.displayManager.sddm.theme == "breeze";
     assert loginOnly.services.displayManager.sddm.settings.General.GreeterEnvironment == "HOST_GREETER_SETTING=retained";
-    assert hasPackage "icewine-sddm-theme" loginOnly.services.displayManager.sddm.extraPackages;
     assert !loginOnly.programs.hyprland.enable;
     assert loginOnly.services.displayManager.defaultSession == null;
     assert lib.all (assertion: assertion.assertion) loginOnly.assertions;
     assert loginOff.services.displayManager.sddm.enable;
-    assert loginOff.services.displayManager.sddm.theme != "icewine";
     assert nativeGaming.programs.steam.enable;
     assert !nativeGaming.services.flatpak.enable;
     assert nativeGaming.nixpkgs.config.allowUnfreePackages == [ "steam" "steam-unwrapped" ];
@@ -190,8 +212,10 @@ in {
       test ! -e "$XDG_CONFIG_HOME"
       mkdir -p "$TMPDIR/public"
       export ICEWINE_SDDM_WALLPAPER_FILE="$TMPDIR/public/wallpaper.img"
+      export ICEWINE_SDDM_KDEGLOBALS_FILE="$TMPDIR/public/kdeglobals"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       cmp "$XDG_DATA_HOME/wallpapers/default.jpg" "$ICEWINE_SDDM_WALLPAPER_FILE"
+      cmp "$XDG_CONFIG_HOME/icewine/current/kdeglobals" "$ICEWINE_SDDM_KDEGLOBALS_FILE"
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -L "$XDG_CONFIG_HOME/hypr/icewine"
       test "$(readlink "$XDG_CONFIG_HOME/quickshell/icewine")" = /etc/icewine/implementation/quickshell
