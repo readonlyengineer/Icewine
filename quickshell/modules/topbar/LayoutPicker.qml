@@ -33,6 +33,7 @@ ColumnLayout {
                 id: choice
                 required property string modelData
                 Layout.fillWidth: true
+                implicitWidth: 80
                 implicitHeight: 86
                 enabled: root.available
                 text: Layouts.label(modelData)
