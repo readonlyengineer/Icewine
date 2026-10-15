@@ -95,8 +95,9 @@ with open(os.environ["TUI_APPEARANCE"]) as stream: saved=json.load(stream)
 if args == ["theme"]:
  print("Installed: dracula, tokyo-night")
  print("Effective: " + saved["theme"] + (" (Nix policy)" if os.environ["TUI_POLICY"] == "1" else ""))
+elif args == ["layout"]: print("Layout: " + saved["layout"] + " (desktop fallback)")
 elif args == ["transparency"]: print("Transparency: " + saved["transparency"] + " (off, low, med, high)")
-elif args[0] in ("theme", "transparency"):
+elif args[0] in ("theme", "transparency", "layout"):
  saved[args[0]]=args[1]
  with open(os.environ["TUI_APPEARANCE"],"w") as stream: json.dump(saved,stream)
  if os.environ["TUI_DELIVERY_FAIL"] == "1":
@@ -118,12 +119,12 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run"):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling"):
         global last_output, last_frames, last_widget_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.unlink(missing_ok=True)
         appearance_state = root / "appearance-state"
-        appearance_state.write_text(json.dumps({"theme": "tokyo-night", "transparency": "med"}))
+        appearance_state.write_text(json.dumps({"theme": "tokyo-night", "transparency": "med", "layout": layout}))
         data = root / "data/icewine/wallpapers"
         data.mkdir(parents=True, exist_ok=True)
         (data / "auth.img").unlink(missing_ok=True)
@@ -276,7 +277,7 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
     # The navigation affordance and controls fit a conventional 80-column TTY
     # as well as the wider default; exercise a round trip at both sizes.
     for size in ((24, 80), (24, 100), (36, 120)):
-        assert run(tab + tab + tab + b"\x1b", state(), size=size, auth=size[1] == 80) == [["state"]]
+        assert run(tab + tab + tab + b"\x1b", state(), size=size) == [["state"]]
         assert any(b"Icewine Appearance (2/3) | Tab: Widgets" in frame for frame in last_frames)
         assert b"Icewine Installer (1/3) | Tab: Appearance" in last_frames[-1]
         for frame in last_frames:
@@ -285,10 +286,17 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
                 assert b"[ Cancel ]" in frame
         appearance_frames = [frame for frame in last_frames if b"Icewine Appearance" in frame]
         assert any(b"Configure monitors" in frame for frame in appearance_frames)
-        if size[1] == 80:
-            assert any(b"Separate image" in frame and b"Configure monitors" in frame for frame in appearance_frames)
+    # The tallest Appearance form fits the minimum and wider reference panels.
+    for size in ((24, 80), (36, 120)):
+        assert run(tab + down*6 + b"\x1b[C\x1b", state(), auth=True, size=size) == [["state"]]
+        assert ["icewine", "layout", "dwindle"] in tools()
+        labels = (b"Theme", b"Transparency", b"Wallpaper", b"Lockscreen Wallpaper", b"Separate image",
+                  b"Configure monitors", b"Desktop layout default", b"[ Apply ]", b"[ Cancel ]",
+                  b"Tab: page", b"Esc: cancel")
+        assert any(b"Icewine Appearance" in frame and all(label in frame for label in labels)
+                   for frame in last_frames), (size, last_frames)
     # Overwrite survives page switches and Apply works from either page.
-    for finish in (tab*2 + down + b"\r", down*5 + b"\r"):
+    for finish in (tab*2 + down + b"\r", down*6 + b"\r"):
         assert applied(run(down*visible + b" " + tab + finish, state()))["overwrite"] == "true"
 
     # Widget Cancel discards a draft after page navigation; Save commits only
@@ -322,6 +330,15 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
     assert run(tab+b"\x1b[C\x1b", state(readonly=True), policy=True) == [["state"]]
     assert ["icewine", "transparency", "high"] in tools()
     assert not any(call[:2] == ["icewine", "theme"] and len(call) == 3 for call in tools())
+    # A committed fallback is read back after failed delivery, even with utility
+    # controls read-only; the next cycle and Cancel follow the saved selection.
+    assert run(tab + down*5 + b"\x1b[C\x1b[C\x1b", state(readonly=True), delivery_fail=True) == [["state"]]
+    changes = [call for call in tools() if call[:2] == ["icewine", "layout"] and len(call) == 3]
+    assert changes == [["icewine", "layout", "dwindle"], ["icewine", "layout", "master"]]
+    assert any(b"Desktop layout default" in frame and b"< master >" in frame for frame in last_frames)
+    assert b"live delivery failed after saving selection" in last_output
+    # Malformed layout responses fail before entering the terminal UI.
+    assert run(b"", state(), valid=False, layout="invalid") == [["state"]]
     # Native chooser restores the terminal after success, cancel and failure.
     picked = str(root / "picture with spaces.png")
     for pick, exit_code, fail in ((picked+"\n", 0, False), ("", 0, False), (picked+"\n", 1, False), (picked+"\n", 0, True)):

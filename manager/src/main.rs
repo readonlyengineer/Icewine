@@ -12,9 +12,11 @@ const ROWS: &[(&str, &str, &str)] = &[
 ];
 
 #[derive(Clone, Copy, PartialEq)]
-enum Control { Theme, Transparency, Wallpaper, Inherit, AuthWallpaper, Monitors, Utility(&'static str), Widget(usize), Steam, Overwrite, Apply, Cancel }
+enum Control { Theme, Transparency, Layout, Wallpaper, Inherit, AuthWallpaper, Monitors, Utility(&'static str), Widget(usize), Steam, Overwrite, Apply, Cancel }
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
+
+const LAYOUTS: &[&str] = &["scrolling", "dwindle", "master", "monocle"];
 
 const TRANSPARENCY: &[&str] = &["off", "low", "med", "high"];
 
@@ -30,7 +32,7 @@ fn appearance_command(args: &[&str]) -> io::Result<String> {
 
 struct Appearance {
     themes: Vec<String>, theme: usize, policy: bool, transparency: usize,
-    wallpaper: PathBuf, auth: Option<PathBuf>,
+    layout: usize, wallpaper: PathBuf, auth: Option<PathBuf>,
 }
 
 impl Appearance {
@@ -50,6 +52,11 @@ impl Appearance {
             .ok_or_else(|| io::Error::other("Missing transparency"))?;
         let transparency = TRANSPARENCY.iter().position(|value| *value == selected)
             .ok_or_else(|| io::Error::other("Invalid transparency"))?;
+        let layout = appearance_command(&["layout"])?;
+        let selected = layout.strip_prefix("Layout: ").and_then(|text| text.split_whitespace().next())
+            .ok_or_else(|| io::Error::other("Missing layout"))?;
+        let layout = LAYOUTS.iter().position(|value| *value == selected)
+            .ok_or_else(|| io::Error::other("Invalid layout"))?;
         let data = std::env::var_os("ICEWINE_WALLPAPER_DATA_HOME")
             .or_else(|| std::env::var_os("XDG_DATA_HOME")).map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share"));
@@ -57,7 +64,7 @@ impl Appearance {
         let wallpaper = if directory.join("selection.img").is_file() { directory.join("selection.img") }
             else { data.join("wallpapers/default.jpg") };
         let auth = directory.join("auth.img");
-        Ok(Self { themes, theme, policy, transparency, wallpaper, auth: auth.is_file().then_some(auth) })
+        Ok(Self { themes, theme, policy, transparency, layout, wallpaper, auth: auth.is_file().then_some(auth) })
     }
 }
 
@@ -164,7 +171,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 if !appearance.policy { controls.push(Control::Theme); }
                 controls.extend([Control::Transparency, Control::Wallpaper, Control::Inherit]);
                 if appearance.auth.is_some() { controls.push(Control::AuthWallpaper); }
-                controls.extend([Control::Monitors, Control::Apply, Control::Cancel]);
+                controls.extend([Control::Monitors, Control::Layout, Control::Apply, Control::Cancel]);
                 controls
             } else if page == 2 {
                 WIDGETS.iter().enumerate().filter(|(index, _)| widgets.supported && !widgets.policy[*index])
@@ -213,10 +220,11 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         (Control::Inherit, "Lockscreen Wallpaper", (if appearance.auth.is_none() { "Wallpaper [x]" } else { "Wallpaper [ ]" }).to_owned()),
                         (Control::AuthWallpaper, "Separate image", appearance.auth.as_ref().map(|path| format!("[ {} ]", filename(path))).unwrap_or_default()),
                         (Control::Monitors, "Monitors", "[ Configure monitors… ]".to_owned()),
+                        (Control::Layout, "Desktop layout default", format!("< {} >", LAYOUTS[appearance.layout])),
                     ];
                     frame.render_widget(Table::new(settings.into_iter().filter(|(control, _, _)|
                         *control != Control::AuthWallpaper || appearance.auth.is_some()).map(|(control, label, value)|
-                        Row::new([Cell::from(label), Cell::from(value)]).bottom_margin(u16::from(control != Control::Monitors)).style(if controls[focus] == control { focused }
+                        Row::new([Cell::from(label), Cell::from(value)]).bottom_margin(u16::from(control != Control::Layout && appearance.auth.is_none())).style(if controls[focus] == control { focused }
                             else if control == Control::Theme && appearance.policy { muted } else { Style::default() })),
                         [Constraint::Length(23), Constraint::Min(20)]).column_spacing(2), utilities);
                     frame.render_widget(Paragraph::new(message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
@@ -286,9 +294,11 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(None),
                 _ if terminal.size()?.width < 80 || terminal.size()?.height < 24 => (),
                 KeyCode::Tab => { focuses[page] = focus; page = (page + 1) % 3; focus = focuses[page]; }
-                KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Theme | Control::Transparency) => {
+                KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Theme | Control::Transparency | Control::Layout) => {
                     let (values, current, command) = if controls[focus] == Control::Theme {
                         (appearance.themes.iter().map(String::as_str).collect::<Vec<_>>(), appearance.theme, "theme")
+                    } else if controls[focus] == Control::Layout {
+                        (LAYOUTS.to_vec(), appearance.layout, "layout")
                     } else { (TRANSPARENCY.to_vec(), appearance.transparency, "transparency") };
                     let next = (current + if key.code == KeyCode::Right { 1 } else { values.len() - 1 }) % values.len();
                     message = match appearance_command(&[command, values[next]]) {
@@ -302,6 +312,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                             appearance.theme = updated.theme;
                             appearance.policy = updated.policy;
                             appearance.transparency = updated.transparency;
+                            appearance.layout = updated.layout;
                         }
                         Err(error) => message.push_str(&format!("\nCould not refresh appearance state: {error}")),
                     }
@@ -332,7 +343,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         if *steam == 0 { selected.insert("gamescope", false); }
                         if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
                     }
-                    Control::Theme | Control::Transparency => (),
+                    Control::Theme | Control::Transparency | Control::Layout => (),
                     Control::Wallpaper | Control::AuthWallpaper | Control::Inherit => {
                         let result = (|| -> io::Result<String> {
                             if controls[focus] == Control::Inherit && appearance.auth.is_some() {

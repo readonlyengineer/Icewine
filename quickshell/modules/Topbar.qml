@@ -23,6 +23,7 @@ Scope {
     property var radial: null
     property bool fullWidth: false
     property bool excludeSteamApps: false
+    property bool layoutsEnabled: true
     readonly property int barHeight: 38
     readonly property var player: Mpris.players.values.find(candidate => candidate.isPlaying)
         ?? Mpris.players.values[0] ?? null
@@ -363,6 +364,11 @@ Scope {
                             onActivated: root.openWidget("launcher", true, panel.screen.name)
                         }
                         Bar.Workspaces { compositor: root.compositor; screen: panel.screen }
+                        Bar.LayoutButton {
+                            visible: root.layoutsEnabled
+                            compositor: root.compositor
+                            onActivated: root.openWidget("layout", true, panel.screen.name)
+                        }
                     }
                     Bar.Clock { anchors.centerIn: parent; now: clock.date }
                     Row {
@@ -489,6 +495,7 @@ Scope {
         function release(): void { root.releaseBar() }
         function hide(): void { root.dismiss() }
         function audio(): void { root.openWidget("audio", true, root.focusedScreenName()) }
+        function layout(): void { if (root.layoutsEnabled) root.openWidget("layout", true, root.focusedScreenName()) }
         function network(): void { root.openWidget("network", true, root.focusedScreenName()) }
         function performance(): void { root.openWidget("performance", true, root.focusedScreenName()) }
         function screenshot(): void { root.openWidget("screenshot", true, root.focusedScreenName()) }

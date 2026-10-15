@@ -42,7 +42,7 @@ let
     cp ${../gtk}/defaults.css $out/gtk/defaults.css
     ${lib.concatMapStringsSep "\n" (name:
       "cp ${../hyprland}/modules/${name}.lua $out/hyprland/modules/"
-    ) [ "Baseline" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" "Binds" ]}
+    ) [ "Baseline" "Layouts" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" "Binds" ]}
     cp ${../hyprland}/deck/Deck.lua $out/hyprland/modules/
   '';
   defaults = pkgs.runCommand "icewine-default-files" { } ''

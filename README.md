@@ -264,14 +264,21 @@ hl.workspace_rule({ workspace = "2", layout = "master" })
 
 #### Runtime changes
 
-For a temporary change in the running session:
+Choose the persistent desktop layout fallback in `icewine manage` (Appearance),
+or with `icewine layout scrolling|dwindle|master|monocle`. The topbar layout
+button (or Super+Shift+D) changes only the focused workspace; **Use default** removes its session
+choice. Choices survive locking, shell restarts and config reloads, and expire
+when Hyprland exits. The picker displays the compositor's actual layout.
 
-```sh
-hyprctl eval 'hl.workspace_rule({ workspace = "2", layout = "dwindle" })'
-```
-
-Runtime changes clear on config reload or restart. Desktop controls support
-scrolling, dwindle, master and monocle; Deck controls assume scrolling.
+The saved fallback loads before your `hyprland.lua` overrides. Explicit user
+workspace rules take precedence over that fallback; the handheld profile keeps
+scrolling. Picker choices temporarily take precedence over workspace rules;
+Use default restores those rules and otherwise inherits the global layout.
+Saving a global fallback reloads Hyprland, so ordinary external runtime rules
+clear on reload. For permanent workspace choices, use the native rule above.
+Icewine reserves workspace selector spellings starting with a tab and a space
+for its removable native picker rules; use ordinary selectors in user rules.
+Desktop controls support scrolling, dwindle, master and monocle.
 
 ### Automatic fullscreen
 

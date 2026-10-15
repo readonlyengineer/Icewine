@@ -602,13 +602,36 @@ def reload_session(config, app=None):
 
 
 def dispatch(argv):
-    if not argv or argv[0] not in {"theme", "transparency", "autofullscreen", "apply"}:
-        raise ValueError("Usage: icewine {theme [THEME_ID]|transparency [off|low|med|high]|autofullscreen [on|off]}")
+    if not argv or argv[0] not in {"theme", "transparency", "autofullscreen", "layout", "apply"}:
+        raise ValueError("Usage: icewine {theme [THEME_ID]|transparency [off|low|med|high]|autofullscreen [on|off]|layout [scrolling|dwindle|master|monocle]}")
     command, *args = argv
     if len(args) > (0 if command == "apply" else 1):
         raise ValueError("unexpected arguments")
     config = xdg("XDG_CONFIG_HOME", ".config")
     state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    if command == "layout":
+        path = state / "layout"
+        layouts = ("scrolling", "dwindle", "master", "monocle")
+        value = path.read_text(encoding="utf-8").strip() if path.exists() else "scrolling"
+        if value not in layouts:
+            value = "scrolling"
+        if args:
+            value = args[0]
+            if value not in layouts:
+                raise ValueError("invalid layout; choose scrolling, dwindle, master or monocle")
+            atomic_text(path, value + "\n")
+            if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+                try:
+                    result = subprocess.run(["hyprctl", "reload"], check=True, timeout=10,
+                                            capture_output=True, text=True)
+                    if result.stdout.strip() != "ok":
+                        raise ValueError(f"layout saved, but Hyprland reload failed: {result.stdout.strip()}")
+                except (OSError, subprocess.SubprocessError) as error:
+                    raise ValueError(f"layout saved, but Hyprland reload failed: {error}") from error
+            else:
+                print("Pending: layout takes effect at next Hyprland login.")
+        print(f"Layout: {value} (desktop fallback; user rules and handheld policy take precedence)")
+        return 0
     if command == "autofullscreen":
         path = state / "autofullscreen"
         value = args[0] if args else (path.read_text(encoding="utf-8").strip() if path.exists() else "off")

@@ -1,6 +1,7 @@
 -- Icewine handheld bindings and session behaviour.
 
 hl.config({
+	general = { layout = "scrolling" }, -- Handheld controls deliberately assume scrolling.
 	cursor = {
 		enable_hyprcursor = false,
 		inactive_timeout = 3,

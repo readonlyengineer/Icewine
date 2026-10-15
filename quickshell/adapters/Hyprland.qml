@@ -4,6 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
+import "../modules/topbar/Layouts.js" as Layouts
 
 QtObject {
     id: adapter
@@ -108,6 +109,99 @@ QtObject {
         Hyprland.dispatch(Hyprland.usingLua
             ? "hl.dsp.focus({ workspace = " + JSON.stringify(String(id)) + " })"
             : "workspace " + id)
+    }
+
+    readonly property int layoutWorkspaceId: focusedWorkspaceId()
+    property var layoutStatus: null
+    property string layoutActionError: ""
+    property int layoutErrorWorkspace: 0
+    property string layoutErrorIdentity: ""
+    readonly property string layoutError: layoutErrorWorkspace === layoutWorkspaceId
+        && layoutStatus?.identity === layoutErrorIdentity ? layoutActionError : ""
+    property string layoutUnavailable: ""
+    property var nextLayoutRequest: null
+    readonly property bool layoutPending: nextLayoutRequest !== null || (layoutProcess.running && layoutProcess.action)
+    readonly property bool layoutAvailable: layoutStatus?.workspace === layoutWorkspaceId
+        && layoutUnavailable === ""
+    onLayoutWorkspaceIdChanged: refreshLayout()
+
+    function refreshLayout() {
+        if (layoutProcess.running || !layoutWorkspaceId) return
+        layoutProcess.action = false
+        layoutProcess.workspace = layoutWorkspaceId
+        layoutProcess.command = ["hyprctl", "repl",
+            'return require("icewine.modules.Layouts").status(' + layoutWorkspaceId + ')']
+        layoutProcess.running = true
+    }
+
+    function selectLayout(layout) {
+        if (!layoutAvailable || layoutPending) return
+        try {
+            // Capture before waiting for an in-flight status query or focus change.
+            nextLayoutRequest = { workspace: layoutStatus.workspace, identity: layoutStatus.identity,
+                command: Layouts.request(layoutStatus.workspace, layoutStatus.identity, layout) }
+            layoutActionError = ""
+            flushLayoutRequest()
+        } catch (error) {
+            layoutErrorWorkspace = layoutStatus.workspace
+            layoutErrorIdentity = layoutStatus.identity
+            layoutActionError = String(error)
+        }
+    }
+
+    function flushLayoutRequest() {
+        if (layoutProcess.running || nextLayoutRequest === null) return
+        layoutProcess.command = nextLayoutRequest.command
+        layoutProcess.workspace = nextLayoutRequest.workspace
+        layoutProcess.identity = nextLayoutRequest.identity
+        layoutProcess.action = true
+        nextLayoutRequest = null
+        layoutProcess.running = true
+    }
+
+    property Process layoutProcess: Process {
+        property bool action: false
+        property int workspace: 0
+        property string identity: ""
+        stdout: StdioCollector {}
+        stderr: StdioCollector {}
+        onExited: (exitCode, exitStatus) => {
+            const output = stdout.text.trim()
+            if (action) {
+                if (exitCode !== 0 || exitStatus !== 0 || output !== "ok") {
+                    adapter.layoutErrorWorkspace = workspace
+                    adapter.layoutErrorIdentity = identity
+                    adapter.layoutActionError = output || stderr.text.trim() || "Layout request failed"
+                }
+            } else {
+                try {
+                    if (exitCode !== 0 || exitStatus !== 0) throw new Error(stderr.text.trim() || "Hyprland unavailable")
+                    const state = Layouts.status(output, workspace)
+                    if (workspace === adapter.layoutWorkspaceId) {
+                        adapter.layoutStatus = state
+                        adapter.layoutUnavailable = ""
+                    }
+                } catch (error) {
+                    if (workspace === adapter.layoutWorkspaceId) {
+                        adapter.layoutStatus = null
+                        adapter.layoutUnavailable = String(error)
+                    }
+                }
+            }
+            if (adapter.nextLayoutRequest !== null)
+                Qt.callLater(adapter.flushLayoutRequest)
+            else if (action || workspace !== adapter.layoutWorkspaceId)
+                Qt.callLater(adapter.refreshLayout)
+        }
+    }
+    // Native 0.56 IPC has no workspace-layout event. One shared, bounded query
+    // follows external rule/global changes too; replace with an event when offered.
+    property Timer layoutPoll: Timer {
+        interval: 750
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: adapter.refreshLayout()
     }
 
     function getMonitors() {

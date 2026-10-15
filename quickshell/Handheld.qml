@@ -31,6 +31,7 @@ ShellRoot {
         sessionLocked: session.locked
         fullWidth: true
         excludeSteamApps: true
+        layoutsEnabled: false
         onRendered: gameLauncher.autostartSteamGamescope()
     }
     Modules.GameLauncher {

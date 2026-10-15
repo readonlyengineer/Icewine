@@ -98,6 +98,7 @@ hl.bind(mainMod .. " + SHIFT + N", topbar("network"))
 hl.bind(mainMod .. " + SHIFT + A", topbar("audio"))
 hl.bind(mainMod .. " + SHIFT + J", topbar("battery"))
 hl.bind(mainMod .. " + SHIFT + P", topbar("performance"))
+hl.bind(mainMod .. " + SHIFT + D", topbar("layout"))
 
 -- Session control
 hl.bind(mainMod .. " + SHIFT + L", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || uwsm stop"))

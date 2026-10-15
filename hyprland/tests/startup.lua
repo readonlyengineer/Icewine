@@ -3,7 +3,7 @@ local entry, profile = assert(arg[1]), assert(arg[2])
 local emptyBrowser = arg[3] == "empty-browser"
 local legacyBrowser = not emptyBrowser and arg[3]
 local config = assert(os.getenv("XDG_CONFIG_HOME")) .. "/hypr/"
-local binds = 0
+local binds, generalLayout = 0, nil
 local environment, commands, callbacks, launches = {}, {}, {}, {}
 local getenv = os.getenv
 os.getenv = function(name)
@@ -14,6 +14,7 @@ end
 local action = setmetatable({}, { __index = function() return function() return {} end end })
 hl = setmetatable({
     dsp = setmetatable({ window = action, exec_cmd = function(command) return { command = command } end }, { __index = function() return function() return {} end end }),
+    config = function(values) if values.general and values.general.layout then generalLayout = values.general.layout end end,
     bind = function(key, action)
         binds = binds + 1
         commands[key] = commands[key] or {}
@@ -69,6 +70,8 @@ end
 assert(user_override_loaded, "Inline overrides did not run after shared bindings")
 assert(type(package.loaded["icewine.modules.Binds"].supress_mouse_binds) == "function")
 assert(package.loaded["icewine.modules.WindowPolicy"])
+assert(generalLayout == (profile == "handheld" and "scrolling" or package.loaded["icewine.modules.Layouts"].default()),
+       "Desktop fallback or intentional handheld layout was lost")
 assert((package.loaded["icewine.modules.Deck"] ~= nil) == (profile == "handheld"))
 assert(binds > 20, "Real packaged bindings were not registered")
 print("packaged Hyprland " .. profile .. " startup checks passed")

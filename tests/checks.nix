@@ -61,6 +61,7 @@ in {
     nativeBuildInputs = [ pkgs.nodejs pkgs.python3 quickshell pkgs.qt6.qtdeclarative ];
   } ''
     python3 ${./controls.py} ${self}
+    python3 ${self}/tests/layouts.py --qml
     python3 ${./render-ready.py} ${self}
     python3 ${./render-ready.py} ${self} --native-osk=lock
     python3 ${./render-ready.py} ${self} --native-osk=sddm
@@ -95,6 +96,7 @@ in {
     lua hyprland/tests/steam.lua
     lua hyprland/tests/window-policy.lua hyprland/modules/WindowPolicy.lua
     python3 tests/theme-cli.py scripts/theme scripts/icewine theme/assets
+    python3 tests/layouts.py
     touch "$out"
   '';
   wallpaper = pkgs.runCommand "icewine-wallpaper-checks" {
