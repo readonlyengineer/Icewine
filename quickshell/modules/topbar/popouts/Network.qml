@@ -135,7 +135,7 @@ Item {
                 Behavior on color { ColorAnimation { duration: 100 } }
             }
             contentItem: Text {
-                text: "/ Networking"
+                text: "Networking"
                 color: networkingTab.checked ? Theme.Palette.secondary : Theme.Palette.muted
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 11
@@ -156,7 +156,7 @@ Item {
                 Behavior on color { ColorAnimation { duration: 100 } }
             }
             contentItem: Text {
-                text: "Tailscale \\"
+                text: "Tailscale"
                 color: tailscaleTab.checked ? Theme.Palette.secondary : Theme.Palette.muted
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 11
