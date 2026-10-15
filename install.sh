@@ -1,0 +1,54 @@
+#!/bin/sh
+# Experimental source bootstrap; run as the desktop user from a terminal.
+# Parse the entire compound command before replacing the piped script input.
+{
+set -eu
+fail() { printf '%s\n' "Icewine: $*" >&2; exit 1; }
+revision=${1:-}
+[ "$#" = 1 ] || fail 'Usage: sh install.sh FULL_COMMIT_ID'
+case $revision in *[!0-9a-f]*|'') fail 'Expected a lowercase full Git commit ID' ;; esac
+[ "${#revision}" = 40 ] || fail 'Expected a full 40-character Git commit ID'
+[ "$(id -u)" != 0 ] || fail 'Run as your desktop user, never root'
+ID=$(sed -n 's/^ID=//p' /etc/os-release) || fail 'Cannot identify the platform'
+ID=$(printf '%s' "$ID" | tr -d '"')
+case ${ID:-} in
+    arch|cachyos) ;;
+    nixos) fail 'NixOS: import the Icewine module in your host configuration, rebuild, then icewine manage' ;;
+    *) fail 'Experimental bootstrap supports only Arch/CachyOS x86_64' ;;
+esac
+[ "$(uname -m)" = x86_64 ] || fail 'Experimental bootstrap supports only x86_64'
+# Reopen the controlling terminal: stdin may still be the curl script pipe.
+exec </dev/tty >/dev/tty 2>&1 || exit 1
+for tool in git makepkg cargo python3 pacman tar sha256sum mktemp sed tr; do
+    command -v "$tool" >/dev/null || fail "Missing prerequisite: $tool; see packaging/arch/README.md"
+done
+pacman -T base-devel cargo python || fail 'Install base-devel, cargo and python through your normal full-upgrade workflow first'
+printf '%s\n' "Experimental Icewine source $revision" \
+    'Prepare all split archives with makepkg as your user (network and compilation).' \
+    'No host installation or user config changes until the manager confirmation.' \
+    'Keep a TTY and fallback desktop; installed sessions remain unqualified.' \
+    'Prepare source and packages? Type yes to continue:'
+read -r answer || exit 1
+[ "$answer" = yes ] || exit 0
+work=$(mktemp -d "${TMPDIR:-/tmp}/icewine-install.XXXXXXXX")
+# Retain partial work for diagnosis/retry; never remove user files or old packages.
+trap 'printf "Preparation retained at %s\n" "$work"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+printf 'Preparation directory: %s\n' "$work"
+git init --quiet "$work/source"
+git -C "$work/source" -c fetch.fsckObjects=true fetch --quiet --depth=1 \
+    https://github.com/readonlyengineer/Icewine.git "$revision"
+[ "$(git -C "$work/source" rev-parse FETCH_HEAD)" = "$revision" ] || fail 'Fetched revision mismatch'
+git -C "$work/source" fsck --strict
+mkdir "$work/build"
+git -C "$work/source" archive --format=tar.gz --prefix=icewine/ "$revision" > "$work/build/icewine.tar.gz"
+git -C "$work/source" show "$revision:packaging/arch/PKGBUILD" > "$work/build/PKGBUILD"
+printf '%s\n' "$revision" > "$work/build/source-revision"
+(cd "$work/build"; sha256sum icewine.tar.gz > source-archive.sha256; makepkg --nosign)
+# makepkg owns source validation and the locked Rust build; launch only on success.
+ICEWINE_PACKAGE_DIR="$work/build" "$work/build/src/icewine/manager/target/release/icewine-manage" \
+    --bootstrap "$work/build" "$revision"
+
+exit
+}

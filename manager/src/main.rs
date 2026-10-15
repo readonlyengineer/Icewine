@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs::{self, OpenOptions}, io, os::unix::fs::OpenOptionsExt, path::PathBuf, process::{Command, ExitCode}};
+use std::{collections::BTreeMap, fs::{self, OpenOptions}, io::{self, IsTerminal}, os::unix::fs::OpenOptionsExt, path::PathBuf, process::{Command, ExitCode}};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{layout::Flex, prelude::*, widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table, Wrap}};
 
@@ -387,8 +387,82 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     result
 }
 
+// Shared confirmations stay in the existing TUI; subprocesses run after restore.
+fn confirm(title: &str, lines: Vec<String>) -> io::Result<bool> {
+    let mut scroll = 0u16;
+    let mut terminal = ratatui::init();
+    let result = (|| {
+        loop {
+            terminal.draw(|frame| {
+                if frame.area().width < 80 || frame.area().height < 24 {
+                    frame.render_widget(Paragraph::new("Icewine needs an 80 x 24 terminal.\nResize to continue; Esc: cancel."), frame.area());
+                    return;
+                }
+                let block = Block::bordered().title(title).padding(Padding::uniform(1));
+                let inner = block.inner(frame.area());
+                frame.render_widget(block, frame.area());
+                let [body, help] = Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).areas(inner);
+                frame.render_widget(Paragraph::new(lines.join("\n"))
+                    .wrap(ratatui::widgets::Wrap { trim: false }).scroll((scroll, 0)), body);
+                frame.render_widget(Paragraph::new("Up/down: scroll   I: continue\nEsc/Q/Ctrl+C: cancel"), help);
+            })?;
+            let Event::Key(key) = event::read()? else { continue };
+            if key.kind != KeyEventKind::Press { continue; }
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => return Ok(false),
+                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(false),
+                _ if terminal.size()?.width < 80 || terminal.size()?.height < 24 => (),
+                KeyCode::Down => scroll = scroll.saturating_add(1).min(lines.iter().map(|line| line.len()).sum::<usize>().min(u16::MAX as usize) as u16),
+                KeyCode::Up => scroll = scroll.saturating_sub(1),
+                KeyCode::Char('i') => return Ok(true),
+                _ => (),
+            }
+        }
+    })();
+    ratatui::restore();
+    result
+}
+
+fn bootstrap(directory: &str, revision: &str) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let directory = fs::canonicalize(directory)?;
+    if revision.len() != 40 || !revision.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        || fs::read_to_string(directory.join("source-revision"))?.trim() != revision {
+        return Err("Invalid prepared source revision".into());
+    }
+    let archives = fs::read_dir(&directory)?.filter_map(Result::ok).map(|entry| entry.path())
+        .filter(|path| path.file_name().is_some_and(|name| {
+            let name = name.to_string_lossy();
+            name.starts_with("icewine-0.1-1-x86_64.pkg.tar.") && !name.ends_with(".sig")
+        })).collect::<Vec<_>>();
+    if archives.len() != 1 || !archives[0].is_file() || archives[0].is_symlink() {
+        return Err("Expected one regular Icewine base archive; preparation incomplete".into());
+    }
+    if !confirm(" Icewine onboarding: base package ", vec![
+        "Experimental Arch/CachyOS x86_64; installed sessions remain unqualified.".into(),
+        format!("Source commit: {revision}"),
+        "Prerequisites: full distro upgrade, base-devel, cargo, python; keep a fallback desktop.".into(),
+        "Plan: sudo pacman -U the prepared base archive and its runtime dependencies.".into(),
+        format!("Archive: {}", archives[0].display()),
+        "Pacman will show its transaction and request approval. User configuration is untouched here.".into(),
+        "Then choose optional integrations in the installed manager; all begin unchecked on first use.".into(),
+        "Cancel retains build/cache files; packages and user configuration remain unchanged.".into(),
+    ])? { return Ok(ExitCode::SUCCESS); }
+    let status = Command::new("sudo").args(["pacman", "-U"]).arg(&archives[0]).status()?;
+    if !status.success() {
+        eprintln!("Base installation failed; packages may have changed. Retained archives: {}. Retry this bootstrap or inspect pacman output before proceeding.", directory.display());
+        return Ok(ExitCode::FAILURE);
+    }
+    let status = Command::new("icewine-manage").env("ICEWINE_PACKAGE_DIR", &directory).status()?;
+    Ok(if status.success() { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+}
+
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
-    if std::env::args().len() != 1 { return Err("Usage: icewine manage".into()); }
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err("A terminal is required; run icewine manage from a TTY".into());
+    }
+    let args = std::env::args().collect::<Vec<_>>();
+    if args.len() == 4 && args[1] == "--bootstrap" { return bootstrap(&args[2], &args[3]); }
+    if args.len() != 1 { return Err("Usage: icewine manage".into()); }
     let output = Command::new("icewine-manage-backend").arg("state").output()?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).into_owned().into());
@@ -415,6 +489,19 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         return Err("Invalid manager selections".into());
     }
     if let Some(overwrite) = choose(readonly, &mut selected, &mut steam)? {
+        let choices = ROWS.iter().map(|(id, label, _)| format!("{label}: {}",
+            if *id == "steam" { STEAM[steam].to_owned() } else { selected[id].to_string() })).collect::<Vec<_>>();
+        let mut plan = vec![if readonly { "NixOS: host packages/services remain declarative; deploy selected user defaults.".into() }
+            else { "Install selected packages; configure selected utilities; deselection keeps packages.".into() }];
+        plan.push("Create missing shared Quickshell/wallpaper defaults and publish theme outputs.".into());
+        plan.extend(choices);
+        plan.push(if overwrite { "Overwrite selected defaults WITHOUT backups.".into() }
+            else { "Preserve existing dotfiles; create missing defaults. btop selects the Icewine theme in regular configs.".into() });
+        plan.push(if readonly { "Host services and device permissions remain in your NixOS configuration.".into() }
+            else { "Host prerequisites: services/device permissions; Multilib for native Steam; private packages for Handheld.".into() });
+        plan.push("Earlier package/file changes can remain after failure or interruption. Retry Apply after resolving the error.".into());
+        plan.push("Cancel leaves utility choices unapplied; earlier Appearance changes remain.".into());
+        if !confirm(" Icewine: planned changes ", plan)? { return Ok(ExitCode::SUCCESS); }
         let status = Command::new("icewine-manage-backend").arg("apply")
             .args(selected.iter().map(|(id, value)| format!("{id}={value}")))
             .arg(format!("steam={}", STEAM[steam]))

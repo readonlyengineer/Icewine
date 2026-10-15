@@ -222,19 +222,19 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         for package in ("icewine-session", "icewine-sddm", "icewine-handheld", "icewine-keyboard", "icewine-controller-idle"):
             if package not in packages:
                 continue
-            installed = subprocess.run(["pacman", "-Qq", package], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if installed.returncode == 0:
-                packages.remove(package)
-            elif package_dir:
-                archives = sorted(path for path in Path(package_dir).glob(package + "-[0-9]*.pkg.tar.*") if path.suffix != ".sig")
-                if len(archives) != 1:
-                    raise ValueError(f"expected one {package} archive in {package_dir}")
+            archives = sorted(path for path in Path(package_dir).glob(package + "-[0-9]*.pkg.tar.*") if path.suffix != ".sig") if package_dir else []
+            if len(archives) > 1:
+                raise ValueError(f"expected one {package} archive in {package_dir}")
+            if archives:
+                # Prepared source takes precedence even at the same package version.
                 local.append(str(archives[0].resolve()))
+                packages.remove(package)
+            elif subprocess.run(["pacman", "-Qq", package], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
                 packages.remove(package)
         if packages:
             run(["sudo", "pacman", "-S", "--needed", *packages])
         if local:
-            run(["sudo", "pacman", "-U", "--needed", *local])
+            run(["sudo", "pacman", "-U", *local])
         if selected["steam"] == "flatpak":
             run(["flatpak", "remote-add", "--user", "--if-not-exists", "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"])
             run(["flatpak", "install", "--user", "--noninteractive", "flathub", "com.valvesoftware.Steam"])
@@ -320,7 +320,12 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
     theme.atomic_text(applied_path, json.dumps(selected, sort_keys=True) + "\n")
     if not readonly:
         theme.atomic_text(state / "manage.json", json.dumps(selected, sort_keys=True) + "\n")
-    print("Applied Icewine selections.")
+    print("Applied Icewine selections. Reopen with icewine manage; existing dotfiles are preserved by default.")
+    if selected["desktop"]:
+        print("Keep your fallback desktop. Next login: Hyprland (UWSM) on NixOS; Icewine on Arch/CachyOS, or icewine-session from a logged-in TTY.")
+        print("Session diagnosis: journalctl --user -u icewine.service -b")
+    if not readonly:
+        print("Experimental Arch/CachyOS: installed-session and device qualification remain pending.")
 
 
 def main(argv):
@@ -370,4 +375,6 @@ if __name__ == "__main__":
         main(sys.argv[1:])
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"Icewine Apply failed: {error}", file=sys.stderr)
+        if sys.argv[1:2] == ["apply"]:
+            print("Earlier packages/files may have changed; no complete rollback occurred. Resolve the error, then reopen icewine manage and retry Apply with overwrite off. Keep the local split-package directory available.", file=sys.stderr)
         sys.exit(1)

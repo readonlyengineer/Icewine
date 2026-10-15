@@ -4,15 +4,39 @@ Native packaging is experimental; installed sessions and hardware remain unquali
 Keep a TTY and a fallback desktop available. Icewine does not configure users,
 login shells, hardware permissions, networking or Bluetooth services.
 
-From a committed Icewine checkout, bootstrap as your normal user:
+Prepare prerequisites through your normal full distribution upgrade first:
 
 ```sh
-sudo pacman -Syu --needed base-devel cargo python
+sudo pacman -Syu --needed base-devel cargo python git curl
+```
+
+For a published commit containing `install.sh`, set its full commit ID:
+
+```sh
+revision=FULL_PUBLISHED_COMMIT_ID
+curl -fL --proto '=https' --tlsv1.2 "https://raw.githubusercontent.com/readonlyengineer/Icewine/$revision/install.sh" | sh -s -- "$revision"
+```
+
+This candidate has not been published. The bootstrap fetches exactly that Git
+commit over HTTPS, checks Git object integrity and the fetched ID, then runs
+existing makepkg packaging without installing missing build dependencies.
+Git/HTTPS establish source identity; no independent signature or prebuilt
+release checksum is available. Inspect the script before running it if desired.
+Preparation and its revision/archive hash are retained in a printed temporary
+directory. The manager confirms base installation with pacman before optional
+choices. Cancel before installation changes no user configuration.
+If acquisition or compilation fails, fix the prerequisite and rerun; incomplete
+preparation never launches the manager. Keep the prepared directory for later
+optional Apply, or reopen with `ICEWINE_PACKAGE_DIR=/path/to/build icewine manage`.
+
+From a committed local checkout, the existing manual path also works:
+
+```sh
 mkdir -p build
 git archive --format=tar.gz --prefix=icewine/ HEAD -o build/icewine.tar.gz
 cp packaging/arch/PKGBUILD build/
 cd build
-makepkg -s
+makepkg
 sudo pacman -U ./icewine-0.1-1-x86_64.pkg.tar.zst
 ICEWINE_PACKAGE_DIR="$PWD" icewine manage
 ```
@@ -28,7 +52,8 @@ or Handheld restarts a running Icewine shell after stopping its affected helpers
 Use Tab/arrows to navigate and Space to select. Apply creates missing dotfiles;
 **Overwrite existing dotfiles** replaces selected defaults without backups.
 Shell Extras Apply selects Icewine in regular btop configs while preserving other
-preferences. Other existing files are preserved. Cancel changes nothing. Reopen with
+preferences. Other existing files are preserved. Cancel before Apply leaves utility choices unapplied; Appearance changes act immediately. Review the planned changes before confirming Apply. Failures can leave earlier
+package/file changes; resolve the error and retry with overwrite off. Reopen with
 `icewine manage`; previous successful selections are retained. On deselection,
 only recorded Icewine configuration is removed and edited user files are preserved.
 Desktop deselection removes only the Hyprland implementation link. Login

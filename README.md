@@ -5,8 +5,8 @@ developed NixOS-first.
 
 It is deeply experimental; it will move fast and break things. Use at your own risk.
 
-Experimental native desktop packages for [Arch Linux and CachyOS](packaging/arch/README.md)
-reuse the existing login manager; installed-session and hardware qualification remain pending.
+Experimental source bootstrap and native packages for [Arch Linux and CachyOS](packaging/arch/README.md)
+open the existing manager and reuse the login manager; installed-session and hardware qualification remain pending.
 
 ## Install on NixOS
 

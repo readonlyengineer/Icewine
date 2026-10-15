@@ -84,6 +84,7 @@ elif sys.argv[1] == "widgets-apply":
  saved=dict(field.split("=") for field in sys.argv[3:])
  with open(os.environ["TUI_WIDGETS"],"w") as stream: json.dump({name:value=="true" for name,value in saved.items()},stream)
  print("Widget preferences saved; the shipped shell watches this file.")
+elif sys.argv[1:] and sys.argv[1] == "apply": sys.exit(int(os.environ["TUI_APPLY_EXIT"]))
 ''')
     backend.chmod(0o755)
     tool_log = root / "tools"
@@ -106,7 +107,7 @@ elif os.environ["TUI_COMMAND_FAIL"] == "1":
  print("invalid image; saved preference unchanged", file=sys.stderr); sys.exit(1)
 ''')
     icewine.chmod(0o755)
-    for tool in ("yazi", "hyprmon"):
+    for tool in ("yazi", "hyprmon", "sudo", "icewine-manage"):
         executable = root / tool
         executable.write_text('#!' + sys.executable + '\n' + '''import json,os,sys,termios
 assert os.isatty(0)
@@ -115,11 +116,11 @@ with open(os.environ["TUI_TOOLS"],"a") as stream: stream.write(json.dumps([os.pa
 if os.path.basename(sys.argv[0]) == "yazi":
  with open(sys.argv[2],"w") as stream: stream.write(os.environ["TUI_PICK"])
  sys.exit(int(os.environ["TUI_PICK_EXIT"]))
-sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
+sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "sudo" else os.environ["TUI_HYPRMON_EXIT"]))
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling"):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, incomplete=False):
         global last_output, last_frames, last_widget_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.unlink(missing_ok=True)
@@ -133,57 +134,88 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
         widgets_state.write_text(json.dumps(widgets or {"notificationToasts": True, "windowSwitcher": True}))
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
-        env = dict(os.environ, TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
-                   TUI_WIDGETS=str(widgets_state), TUI_WIDGET_SUPPORTED=str(widget_supported).lower(),
+        env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
+                   TUI_APPLY_EXIT=str(apply_exit), TUI_WIDGETS=str(widgets_state), TUI_WIDGET_SUPPORTED=str(widget_supported).lower(),
                    TUI_WIDGET_POLICY=widget_policy, TUI_WIDGET_FAIL=str(int(widget_fail)), TUI_TOOLS=str(tool_log), TUI_POLICY=str(int(policy)),
                    TUI_PICK=pick, TUI_PICK_EXIT=str(pick_exit), TUI_HYPRMON_EXIT=str(hyprmon_exit),
                    TUI_COMMAND_FAIL=str(int(command_fail)), TUI_DELIVERY_FAIL=str(int(delivery_fail)),
                    TUI_APPEARANCE=str(appearance_state), XDG_DATA_HOME=str(root / "data"), XDG_STATE_HOME=str(root / "state"),
                    ICEWINE_WALLPAPER_DATA_HOME=str(root / "data"), TMPDIR=str(root))
-        process = subprocess.Popen([str(binary)], stdin=slave, stdout=slave, stderr=slave, env=env)
+        arguments = [str(binary)]
+        if bootstrap:
+            package_dir = root / "packages"
+            package_dir.mkdir(exist_ok=True)
+            (package_dir / "source-revision").write_text("a"*40+"\n")
+            archive = package_dir / "icewine-0.1-1-x86_64.pkg.tar.zst"
+            archive.unlink(missing_ok=True)
+            if not incomplete: archive.write_bytes(b"synthetic package")
+            arguments += ["--bootstrap", str(package_dir), "a"*40]
+        process = subprocess.Popen(arguments, stdin=slave, stdout=slave, stderr=slave, env=env)
         os.close(slave)
         output = bytearray()
         deadline = time.monotonic() + 10
         sent = False
+        reviewed = False
+        stop_reason = "child-exit"
         while process.poll() is None and time.monotonic() < deadline:
             if select.select([master], [], [], 0.1)[0]:
                 try:
                     output.extend(os.read(master, 65536))
-                except OSError:
+                except OSError as error:
+                    stop_reason = f"read-error:{error.errno}"
                     break
             frames = rendered_frames(output, size)
             rendered = b"\n".join(frames)
+            if sent and not reviewed and b"Icewine: planned changes" in rendered:
+                os.write(master, b"i" if confirm else b"\x1b")
+                reviewed = True
             if not sent and frames:
                 assert (b"Icewine needs an 80 x 24 terminal." if size[1] < 80 or size[0] < 24 else
+                        b"Icewine onboarding: base package" if bootstrap else
                         b"Icewine Installer (1/3) | Tab: Appearance") in rendered
                 os.write(master, keys)
                 sent = True
-        if process.poll() is None:
+        forced_kill = process.poll() is None
+        if forced_kill:
+            if stop_reason == "child-exit": stop_reason = "deadline"
             process.kill()
         code = process.wait()
         while select.select([master], [], [], 0)[0]:
             try: output.extend(os.read(master, 65536))
             except OSError: break
-        # Final semantic runs reject glyphs painted in the same colour as their
-        # background, including focused Installer checkbox and Steam values.
-        # Historical BEFORE exports may contain the known inherited defect.
+        diagnostic = {"binary": str(binary), "size": size, "keys_hex": keys.hex(),
+            "exit": code, "forced_kill": forced_kill, "stop_reason": stop_reason,
+            "sent": sent, "reviewed": reviewed,
+            "mock_calls": log.read_text().splitlines() if log.exists() else [],
+            "tool_calls": tool_log.read_text().splitlines() if tool_log.exists() else []}
+        if options.export_frames:
+            capture_number += 1
+            directory = options.export_frames / f"{capture_number:03d}-{capture}-{size[1]}x{size[0]}"
+            directory.mkdir()
+            (directory / "terminal.ansi").write_bytes(output)
+            (directory / "capture.json").write_text(json.dumps(diagnostic, indent=2)+"\n")
+        # Preserve the child outcome before either contrast or ICANON assertions.
         last_frames = rendered_frames(output, size, check_contrast=not options.frames_only)
         rendered = b"\n".join(last_frames)
         if options.export_frames:
-            capture_number += 1
-            name = f"{capture_number:03d}-{capture}-{size[1]}x{size[0]}"
-            directory = options.export_frames / name
-            directory.mkdir()
-            (directory / "terminal.ansi").write_bytes(output)
+            diagnostic["frames"] = len(last_frames)
+            (directory / "capture.json").write_text(json.dumps(diagnostic, indent=2)+"\n")
             for index, frame in enumerate(last_frames):
                 (directory / f"{index:03d}.txt").write_bytes(frame + b"\n")
-            (directory / "capture.json").write_text(json.dumps({"binary": str(binary), "size": size,
-                "keys_hex": keys.hex(), "frames": len(last_frames)}, indent=2)+"\n")
         if sent:
-            assert termios.tcgetattr(master)[3] & termios.ICANON, "terminal raw mode was not restored"
+            assert termios.tcgetattr(master)[3] & termios.ICANON, "terminal raw mode was not restored: " + json.dumps(diagnostic)
         os.close(master)
         last_output = rendered
-        assert code == (0 if valid else 1), output.decode(errors="replace")
+        assert code == (0 if valid and apply_exit == 0 else 1), output.decode(errors="replace")
+        if bootstrap:
+            if not valid:
+                assert not sent and b"preparation incomplete" in output
+                return []
+            if size[1] < 80 or size[0] < 24:
+                assert sent and b"Resize to continue; Esc: cancel." in rendered
+            else:
+                assert sent
+            return [] if not tool_log.exists() else [json.loads(line) for line in tool_log.read_text().splitlines()]
         if not valid:
             assert not sent
             return [json.loads(line) for line in log.read_text().splitlines()]
@@ -229,10 +261,23 @@ sys.exit(int(os.environ["TUI_HYPRMON_EXIT"]))
             run(tab*2+b"\x1b", state(), size=size, widget_policy="notificationToasts,windowSwitcher", capture="widgets-policy")
         print("PASS: completed visual frames exported; semantic suite not run")
         sys.exit(0)
+    no_tty = subprocess.run([str(binary)], stdin=subprocess.DEVNULL, capture_output=True)
+    assert no_tty.returncode == 1 and b"A terminal is required" in no_tty.stderr
+    assert run(b"", "", valid=False, bootstrap=True, incomplete=True) == []
+    assert run(b"\x1b", "", bootstrap=True) == []
+    assert run(b"\x03", "", bootstrap=True) == []
+    assert run(b"i\x1b", "", bootstrap=True, size=(24, 79)) == []
+    calls = run(b"i", "", bootstrap=True)
+    assert calls[0][:3] == ["sudo", "pacman", "-U"] and len(calls)==2
+    assert calls[1] == ["icewine-manage"]
+    calls = run(b"i", "", bootstrap=True, apply_exit=1)
+    assert len(calls)==1 and calls[0][0] == "sudo"
     assert run(b" \x1b", state()) == [["state"]]
     assert run(b"\x1b[B"*(visible+2)+b"\r", state()) == [["state"]]
     expected = dict.fromkeys(ids, "false") | {"steam": "none", "desktop": "true", "overwrite": "false"}
     assert applied(run(b" "+b"\x1b[B"*(visible+1)+b"\r", state())) == expected
+    assert run(b" "+b"\x1b[B"*(visible+1)+b"\r", state(), confirm=False) == [["state"]]
+    assert applied(run(b" "+b"\x1b[B"*(visible+1)+b"\r", state(), apply_exit=1))["desktop"] == "true"
     # A second row toggles its own ID, not the backend's second field.
     expected["desktop"], expected["terminal"] = "false", "true"
     assert applied(run(b"\x1b[B "+b"\x1b[B"*visible+b"\r", state())) == expected

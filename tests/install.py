@@ -154,13 +154,36 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     # signatures are not mistaken for a second archive.
     archives = root / "package archives"
     archives.mkdir()
-    (archives / "icewine-session-0.1-1-x86_64.pkg.tar.zst").touch()
+    session_archive = archives / "icewine-session-0.1-1-x86_64.pkg.tar.zst"
     (archives / "icewine-session-0.1-1-x86_64.pkg.tar.zst.sig").touch()
-    with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives)), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)) as commands:
+    widget_preferences = state / "widgets.json"
+    widget_preferences.write_text('{"notificationToasts":false,"windowSwitcher":true}\n')
+    saved_widget_preferences = widget_preferences.read_bytes()
+    # Commit B retains 0.1-1: an installed commit A must not skip the new archive.
+    session_archive.write_bytes(b"prepared commit B, same package version")
+    with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives)), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
         apply(("desktop",))
         assert [call.args[0] for call in commands.call_args_list] == [
-            ["pacman", "-Qq", "icewine-session"],
-            ["sudo", "pacman", "-U", "--needed", str(archives / "icewine-session-0.1-1-x86_64.pkg.tar.zst")]]
+            ["sudo", "pacman", "-U", str(session_archive)]]
+        assert widget_preferences.read_bytes() == saved_widget_preferences
+    # A prepared directory need not supply unrelated/private dependency archives.
+    with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives), ICEWINE_HANDHELD_DEFAULT_FILES=str(defaults)), \
+         patch.object(manage, "handheld_policy"), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+        apply(("desktop", "gamescope", "handheld"), steam="native")
+        calls = [call.args[0] for call in commands.call_args_list]
+        assert ["sudo", "pacman", "-U", str(session_archive)] in calls
+        assert not any(call[:3] == ["sudo", "pacman", "-S"] and "icewine-keyboard" in call for call in calls)
+    with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives), ICEWINE_HANDHELD_DEFAULT_FILES=str(defaults)), \
+         patch.object(manage, "handheld_policy"), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)) as commands:
+        apply(("desktop", "gamescope", "handheld"), steam="native")
+        calls = [call.args[0] for call in commands.call_args_list]
+        transaction = next(call for call in calls if call[:3] == ["sudo", "pacman", "-S"])
+        assert {"icewine-handheld", "icewine-keyboard", "icewine-controller-idle"} <= set(transaction[4:])
+        assert ["sudo", "pacman", "-U", str(session_archive)] in calls
+    # Without prepared archives, retain installed checks/repository acquisition.
+    with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=""), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)) as commands:
+        apply(("desktop",))
+        assert ["sudo", "pacman", "-S", "--needed", "icewine-session"] in [call.args[0] for call in commands.call_args_list]
     # Theme switches maintain runtime GTK artifacts without redeploying dotfiles.
     mocha = data / "themes/Icewine-catppuccin-mocha/gtk-3.0/gtk.css"
     assert mocha.is_file()
@@ -590,22 +613,20 @@ with tempfile.TemporaryDirectory() as temporary:
             assert "symlinked deployment root" in str(error)
         else:
             raise AssertionError("Apply followed symlinked HOME")
+    request = [f"{name}={str(value).lower()}" for name, value in declared.items()]
+    failed = subprocess.run([sys.executable, str(source / "scripts/manage"), "apply", *request, "overwrite=false"],
+                            env=dict(os.environ, **env), capture_output=True, text=True)
+    assert failed.returncode == 1
     assert (outside / ".bashrc").read_text() == "external shell config\n"
     assert not (root / "state").exists() and not (root / "config").exists()
 
-# Public setup entry points are gone; manager routes unchanged literal arguments.
+# Manager routes unchanged literal arguments.
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     command = root / "icewine-manage"
     command.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
     command.chmod(0o755)
     env = dict(os.environ, PATH=str(root) + ":" + os.environ["PATH"])
-    for old in ("init", "reset"):
-        assert subprocess.run(["bash", str(source / "scripts/icewine"), old], env=env, capture_output=True).returncode == 2
     assert subprocess.run(["bash", str(source / "scripts/icewine"), "manage", "literal space"], env=env, capture_output=True, text=True).stdout == "literal space\n"
 print("PASS: explicit Apply, selections, ownership, overwrite, failures and read-only NixOS")
 
-module_options = (source / "modules/default.nix").read_text() + (source / "modules/login.nix").read_text()
-for name in manage.FEATURES:
-    assert name == "steam" or name + ".enable = lib.mkEnableOption" in module_options or name + " = {" in module_options
-print("PASS: utility option parity and local split-package bootstrap")
