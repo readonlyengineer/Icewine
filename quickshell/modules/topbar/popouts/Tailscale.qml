@@ -15,6 +15,7 @@ Flickable {
     property var request: null
     property int generation: 0
     property string confirming: ""
+    property var menuData: ({devices: [], countries: []})
     readonly property bool busy: request !== null
     implicitHeight: content.implicitHeight + 24
     contentHeight: implicitHeight
@@ -22,7 +23,7 @@ Flickable {
     boundsBehavior: Flickable.StopAtBounds
 
     function refresh() {
-        if (!active || busy || process.running || exitPicker.popup.visible) return
+        if (!active || busy || process.running || exitPicker.visible) return
         request = { generation: generation, kind: "status" }
         process.command = ["tailscale", "status", "--json"]
         deadline.restart()
@@ -82,9 +83,8 @@ Flickable {
     }
 
     function syncPicker() {
-        if (!exitPicker || exitPicker.popup.visible) return
-        exitPicker.model = data.exits
-        exitPicker.currentIndex = Math.max(0, data.exits.findIndex(peer => peer.id === data.selected))
+        if (!exitPicker || exitPicker.visible) return
+        menuData = Model.exitMenu(data)
     }
 
     onActiveChanged: {
@@ -133,64 +133,76 @@ Flickable {
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 10
         }
-        Controls.ComboBox {
-            id: exitPicker
+        ActionButton {
+            id: exitButton
             width: parent.width
-            implicitHeight: 36
-            model: root.data.exits
-            textRole: "name"
-            valueRole: "id"
+            text: root.data.exits.find(peer => peer.id === root.data.selected)?.name ?? "None"
             enabled: Model.exitCommand(root.data, "") !== null && !root.busy && !root.confirming
             Accessible.name: "Exit node"
-            font.family: "JetBrainsMono Nerd Font"
-            font.pixelSize: 11
-            onActivated: root.selectExit(currentValue)
-            // Keep the choice model stable while the dropdown is open.
-            Connections { target: exitPicker.popup; function onClosed() { root.syncPicker() } }
-            background: Rectangle {
-                radius: 9; color: Theme.Palette.surface
-                border.width: exitPicker.activeFocus ? 1 : 0
-                border.color: Theme.Palette.secondary
-            }
-            contentItem: Text {
-                textFormat: Text.PlainText
-                leftPadding: 10; rightPadding: 28
-                text: exitPicker.displayText
-                color: exitPicker.enabled ? Theme.Palette.foreground : Theme.Palette.muted
-                font: exitPicker.font
-                elide: Text.ElideRight
-                verticalAlignment: Text.AlignVCenter
-            }
-            delegate: Controls.ItemDelegate {
-                required property int index
-                required property var modelData
-                width: exitPicker.width
-                text: modelData.name
-                font: exitPicker.font
-                enabled: Model.exitCommand(root.data, modelData.id) !== null
-                highlighted: exitPicker.highlightedIndex === index
-                contentItem: Text {
-                    textFormat: Text.PlainText
-                    text: parent.text; font: parent.font
-                    color: Theme.Palette.foreground
-                    elide: Text.ElideRight
-                    verticalAlignment: Text.AlignVCenter
+            onClicked: exitPicker.popup(exitButton, 0, exitButton.height)
+
+            Controls.Menu {
+                id: exitPicker
+                width: root.width - 24
+                palette.window: Theme.Palette.surface
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: 11
+                palette.text: Theme.Palette.foreground
+                palette.windowText: Theme.Palette.foreground
+                palette.light: Theme.Palette.selection
+                palette.midlight: Theme.Palette.primaryDark
+                palette.dark: Theme.Palette.border
+                palette.buttonText: Theme.Palette.foreground
+                palette.highlight: Theme.Palette.selection
+                palette.highlightedText: Theme.Palette.foreground
+                onClosed: root.syncPicker()
+                Controls.MenuItem {
+                    text: "None"
+                    checkable: true
+                    checked: root.data.selected === ""
+                    onTriggered: root.selectExit("")
                 }
-                background: Rectangle { color: parent.highlighted ? Theme.Palette.selection : Theme.Palette.surface }
-            }
-            popup: Controls.Popup {
-                y: exitPicker.height
-                width: exitPicker.width
-                padding: 1
-                implicitHeight: Math.min(240, exitList.contentHeight + 2)
-                background: Rectangle { color: Theme.Palette.surface; radius: 9 }
-                contentItem: ListView {
-                    id: exitList
-                    clip: true
-                    implicitHeight: contentHeight
-                    model: exitPicker.popup.visible ? exitPicker.delegateModel : null
-                    currentIndex: exitPicker.highlightedIndex
-                    Controls.ScrollIndicator.vertical: Controls.ScrollIndicator {}
+                Instantiator {
+                    id: deviceItems
+                    model: root.menuData.devices
+                    onObjectAdded: (index, object) => exitPicker.insertItem(index + 1, object)
+                    onObjectRemoved: (index, object) => exitPicker.removeItem(object)
+                    delegate: Controls.MenuItem {
+                        required property var modelData
+                        text: modelData.name
+                        checkable: true
+                        checked: root.data.selected === modelData.id
+                        enabled: Model.exitCommand(root.data, modelData.id) !== null
+                        onTriggered: root.selectExit(modelData.id)
+                    }
+                }
+                Controls.MenuSeparator { visible: deviceItems.count > 0 && countryMenus.count > 0 }
+                Instantiator {
+                    id: countryMenus
+                    model: root.menuData.countries
+                    onObjectAdded: (index, object) => exitPicker.insertMenu(index + deviceItems.count + 2, object)
+                    onObjectRemoved: (index, object) => exitPicker.removeMenu(object)
+                    delegate: Controls.Menu {
+                        id: countryMenu
+                        required property var modelData
+                        title: modelData.name
+                        enabled: modelData.cities.some(city => Model.exitCommand(root.data, city.id) !== null)
+                        width: exitPicker.width
+                        palette: exitPicker.palette
+                        Instantiator {
+                            model: countryMenu.modelData.cities
+                            onObjectAdded: (index, object) => countryMenu.insertItem(index, object)
+                            onObjectRemoved: (index, object) => countryMenu.removeItem(object)
+                            delegate: Controls.MenuItem {
+                                required property var modelData
+                                text: modelData.name
+                                checkable: true
+                                checked: modelData.selected
+                                enabled: Model.exitCommand(root.data, modelData.id) !== null
+                                onTriggered: root.selectExit(modelData.id)
+                            }
+                        }
+                    }
                 }
             }
         }

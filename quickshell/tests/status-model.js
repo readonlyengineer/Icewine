@@ -105,10 +105,37 @@ for (const output of ["broken", JSON.stringify({...running, Self: {ID: "", Onlin
     JSON.stringify({...running, Peer: []}), JSON.stringify({...running, Peer: {bad: null}})])
     assert.throws(() => tailscaleModel.decode(output))
 
+const located = (id, country, city, extra = {}) => peer(id, {
+    DNSName: `${id}.mullvad.ts.net.`, Location: {Country: country, CountryCode: country,
+        City: city, CityCode: city, Priority: 1}, ...extra})
+const locations = {...running, Peer: {home: peer("home", {Location: {Country: "Australia", City: "Home"}}),
+    au: located("au", "Australia", "Sydney"),
+    auBest: located("au-best", "Australia", "Sydney", {Location: {Country: "Australia", CountryCode: "Australia", City: "Sydney", CityCode: "Sydney", Priority: 2}}),
+    mel: located("mel", "Australia", "Melbourne"),
+    de: located("de", "Germany", "Berlin"),
+    missing: located("missing", "", "", {Location: null}),
+    spoof: peer("spoof", {DNSName: "host.mullvad.ts.net.example."}),
+    offline: located("offline", "Germany", "Berlin", {Online: false})}}
+const grouped = tailscaleModel.decode(JSON.stringify(locations))
+assert.deepEqual(grouped.peers.map(peer => peer.id), ["home", "spoof"])
+const menu = tailscaleModel.exitMenu(grouped)
+assert.deepEqual(menu.devices.map(peer => peer.id), ["home", "spoof"])
+assert.deepEqual(menu.countries.map(country => country.name), ["Australia", "Germany", "Unknown country"])
+assert.deepEqual(menu.countries[0].cities.map(city => [city.name, city.id]), [["Melbourne", "mel"], ["Sydney", "au-best"]])
+const selectedCity = tailscaleModel.exitMenu(tailscaleModel.decode(JSON.stringify({...locations,
+    ExitNodeStatus: {ID: "au", Online: true}}))).countries[0].cities[1]
+assert.equal(selectedCity.id, "au", "Keep the active eligible server within a city")
+assert.equal(selectedCity.selected, true)
+const offlineCity = tailscaleModel.exitMenu(tailscaleModel.decode(JSON.stringify({...locations,
+    ExitNodeStatus: {ID: "offline", Online: false}}))).countries[1].cities[0]
+assert.equal(offlineCity.id, "de", "Offer an eligible alternative when the selected city server is offline")
+assert.equal(offlineCity.selected, true)
+assert.deepEqual(tailscaleModel.exitCommand(grouped, "au-best"), ["tailscale", "set", "--exit-node=100.64.0.2"])
+
 const tailscale = fs.readFileSync(path.join(__dirname, "../modules/topbar/popouts/Tailscale.qml"), "utf8")
 const context = vm.createContext({Model: tailscaleModel, active: true, data: unavailableExit,
     error: "", request: null, generation: 1, confirming: "", process: {running: false},
-    deadline: {restart() {}, stop() {}}, exitPicker: {popup: {visible: false}},
+    deadline: {restart() {}, stop() {}}, exitPicker: {visible: false},
     Qt: {callLater(fn) { later.push(fn) }}})
 const later = []
 context.root = context

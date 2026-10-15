@@ -344,26 +344,47 @@ ShellRoot {
                 throw new Error("Tailscale tab left synthetic Wi-Fi scanning active")
             const picker = root.findAccessible(networkPages, "Exit node")
             networkKeys.tryCompare(picker, "enabled", true)
-            if (picker.currentValue !== "")
-                throw new Error("Exit node choices do not contain None and eligible fixture")
+            const page = picker.parent.parent.parent
+            networkKeys.tryVerify(() => page.data.peers.length === 2)
+            if (picker.text !== "None") throw new Error("Initial exit-node choice is not None")
             picker.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Space)
-            networkKeys.tryCompare(picker.popup, "visible", true)
+            const menu = Array.from(picker.data).find(child => child.title !== undefined && child.count !== undefined)
+            networkKeys.tryCompare(menu, "visible", true)
+            networkKeys.tryCompare(menu, "count", 6)
+            if (menu.itemAt(1).text !== "Home gateway" || menu.itemAt(2).text !== "Remote gateway")
+                throw new Error("Tailnet exit devices must precede countries")
+            menu.currentIndex = 0
             networkKeys.keyClick(Qt.Key_Down)
-            const list = picker.popup.contentItem
-            networkKeys.tryVerify(() => list.itemAtIndex(1)?.highlighted === true)
-            if (picker.currentValue !== "" || list.itemAtIndex(0).highlighted)
-                throw new Error("Down must paint the prospective choice before activation")
+            networkKeys.tryVerify(() => menu.itemAt(1).highlighted)
+            if (page.data.selected !== "") throw new Error("Navigation changed routing")
             networkKeys.keyClick(Qt.Key_Up)
-            networkKeys.tryVerify(() => list.itemAtIndex(0)?.highlighted === true)
-            if (list.itemAtIndex(1).highlighted)
-                throw new Error("Up did not move the visible dropdown highlight")
+            networkKeys.tryVerify(() => menu.itemAt(0).highlighted)
+            menu.currentIndex = 4
+            networkKeys.keyClick(Qt.Key_Right)
+            const country = menu.menuAt(4)
+            networkKeys.tryCompare(country, "visible", true)
+            if (country.title !== "Australia" || country.itemAt(0).text !== "Melbourne"
+                    || country.itemAt(1).text !== "Sydney")
+                throw new Error("Country/city grouping is incorrect")
+            country.currentIndex = 0
+            networkKeys.keyClick(Qt.Key_Down)
+            networkKeys.tryVerify(() => country.itemAt(1).highlighted)
+            networkKeys.keyClick(Qt.Key_Return)
+            networkKeys.tryCompare(menu, "visible", false)
+            networkKeys.tryCompare(picker, "enabled", true)
+            networkKeys.tryCompare(page, "confirming", "")
+            if (page.data.selected !== "fixture-sydney-best" || picker.text !== "Australia · Sydney")
+                throw new Error("City selection did not confirm its highest-priority exit node")
+            picker.forceActiveFocus()
+            networkKeys.keyClick(Qt.Key_Space)
+            networkKeys.tryCompare(menu, "visible", true)
+            menu.currentIndex = 0
             networkKeys.keyClick(Qt.Key_Down)
             networkKeys.keyClick(Qt.Key_Return)
-            networkKeys.tryCompare(picker.popup, "visible", false)
-            networkKeys.tryCompare(picker, "currentValue", "fixture-exit")
+            networkKeys.tryCompare(menu, "visible", false)
             networkKeys.tryCompare(picker, "enabled", true)
-            const page = picker.parent.parent.parent
+            networkKeys.tryCompare(page, "confirming", "")
             if (page.data.connected || page.data.selected !== "fixture-exit")
                 throw new Error("Expected confirmed Running/offline selected-node fixture")
             picker.forceActiveFocus()
@@ -377,22 +398,20 @@ ShellRoot {
             const top = focused.mapToItem(scroll, 0, 0).y
             if (top < -1 || top + focused.height > scroll.height + 1)
                 throw new Error("Current StatusPopout did not reveal the focused Tailscale control")
-            picker.currentIndex = 2
-            page.selectExit(picker.currentValue)
-            if (page.busy || picker.currentValue !== "fixture-exit")
+            page.selectExit("fixture-alt")
+            if (page.busy || picker.text !== "Home gateway")
                 throw new Error("Offline new-node choice dispatched or left an unconfirmed selection")
             picker.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Space)
-            networkKeys.tryCompare(picker.popup, "visible", true)
-            networkKeys.keyClick(Qt.Key_Up)
-            networkKeys.tryVerify(() => list.itemAtIndex(0)?.highlighted === true)
-            if (!list.itemAtIndex(0).enabled || list.itemAtIndex(2).enabled)
-                throw new Error("Offline popup must permit only None")
+            networkKeys.tryCompare(menu, "visible", true)
+            if (!menu.itemAt(0).enabled || menu.itemAt(2).enabled || menu.itemAt(4).enabled)
+                throw new Error("Offline menu must permit only None")
+            menu.currentIndex = 0
             networkKeys.keyClick(Qt.Key_Return)
-            networkKeys.tryCompare(picker.popup, "visible", false)
+            networkKeys.tryCompare(menu, "visible", false)
             networkKeys.tryCompare(page, "busy", false)
             networkKeys.tryCompare(page, "confirming", "")
-            if (picker.currentValue !== "" || picker.enabled || page.data.connected || page.error)
+            if (picker.text !== "None" || picker.enabled || page.data.connected || page.error)
                 throw new Error("Offline clear did not confirm None or guard subsequent choices")
             secondTab.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Left)
@@ -634,11 +653,17 @@ with tempfile.TemporaryDirectory() as directory:
         "log = pathlib.Path(" + repr(str(root / "tailscale-calls")) + ")\n" +
         "with log.open('a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')\n" +
         "if sys.argv[1:] == ['status', '--json']:\n" +
-        " selected = state.exists() and state.read_text() != 'cleared'\n" +
-        " print(json.dumps({'BackendState': 'Running', 'Self': {'ID': 'fixture-local', 'Online': not state.exists()}, " +
+        " selection = state.read_text() if state.exists() else ''\n" +
+        " selected = selection not in ('', 'cleared')\n" +
+        " print(json.dumps({'BackendState': 'Running', 'Self': {'ID': 'fixture-local', 'Online': selection not in ('offline', 'cleared')}, " +
         "'Peer': {'demo': {'ID': 'fixture-exit', 'HostName': 'Home gateway', 'TailscaleIPs': ['100.64.0.2'], 'Online': True, 'ExitNodeOption': True}, " +
-        "'alt': {'ID': 'fixture-alt', 'HostName': 'Remote gateway', 'TailscaleIPs': ['100.64.0.5'], 'Online': True, 'ExitNodeOption': True}}, " +
-        "'ExitNodeStatus': {'ID': 'fixture-exit', 'Online': True} if selected else None}))\n" +
+        "'alt': {'ID': 'fixture-alt', 'HostName': 'Remote gateway', 'TailscaleIPs': ['100.64.0.5'], 'Online': True, 'ExitNodeOption': True}, " +
+        "'sydney': {'ID': 'fixture-sydney', 'DNSName': 'sydney.mullvad.ts.net.', 'TailscaleIPs': ['100.64.0.6'], 'Online': True, 'ExitNodeOption': True, 'Location': {'Country': 'Australia', 'City': 'Sydney', 'Priority': 1}}, " +
+        "'best': {'ID': 'fixture-sydney-best', 'DNSName': 'best.mullvad.ts.net.', 'TailscaleIPs': ['100.64.0.7'], 'Online': True, 'ExitNodeOption': True, 'Location': {'Country': 'Australia', 'City': 'Sydney', 'Priority': 2}}, " +
+        "'mel': {'ID': 'fixture-melbourne', 'DNSName': 'mel.mullvad.ts.net.', 'TailscaleIPs': ['100.64.0.8'], 'Online': True, 'ExitNodeOption': True, 'Location': {'Country': 'Australia', 'City': 'Melbourne'}}, " +
+        "'de': {'ID': 'fixture-berlin', 'DNSName': 'berlin.mullvad.ts.net.', 'TailscaleIPs': ['100.64.0.9'], 'Online': True, 'ExitNodeOption': True, 'Location': {'Country': 'Germany', 'City': 'Berlin'}}}, " +
+        "'ExitNodeStatus': {'ID': 'fixture-sydney-best' if selection == 'city' else 'fixture-exit', 'Online': True} if selected else None}))\n" +
+        "elif sys.argv[1:] == ['set', '--exit-node=100.64.0.7']: state.write_text('city')\n" +
         "elif sys.argv[1:] == ['set', '--exit-node=100.64.0.2']: state.write_text('offline')\n" +
         "elif sys.argv[1:] == ['set', '--exit-node=']: state.write_text('cleared')\n" +
         "else: sys.exit(1)\n")
@@ -667,7 +692,7 @@ with tempfile.TemporaryDirectory() as directory:
     import json
     calls = [json.loads(line) for line in (root / "tailscale-calls").read_text().splitlines()]
     assert [call for call in calls if call[0] == "set"] == [
-        ["set", "--exit-node=100.64.0.2"], ["set", "--exit-node="]], calls
+        ["set", "--exit-node=100.64.0.7"], ["set", "--exit-node=100.64.0.2"], ["set", "--exit-node="]], calls
     notifications = (root / "notifications").read_text().splitlines()
     assert len(notifications) == 4, notifications
     assert any("-u normal Battery Low 20%" in call for call in notifications), notifications
