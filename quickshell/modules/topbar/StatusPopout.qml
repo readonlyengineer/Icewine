@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Window
 import Quickshell
 import "popouts" as Popouts
 import qs.icewine.theme as Theme
@@ -28,6 +29,31 @@ Widget {
     function focusInitial() {
         root.forceActiveFocus(Qt.ShortcutFocusReason)
         pageLoader.item?.initialFocus?.forceActiveFocus(Qt.ShortcutFocusReason)
+    }
+
+    function revealFocus() {
+        const item = root.Window.window?.activeFocusItem
+        let page = item
+        while (page && page !== pageLoader.item) page = page.parent
+        if (!root.visible || !root.enabled || !page || item === page)
+            return
+        for (let scroll = item.parent; scroll; scroll = scroll.parent) {
+            if (scroll instanceof Flickable && scroll.height > 0) {
+                const top = item.mapToItem(scroll.contentItem, 0, 0).y
+                const bottom = top + item.height
+                const target = top < scroll.contentY ? top
+                    : bottom > scroll.contentY + scroll.height ? bottom - scroll.height : scroll.contentY
+                scroll.contentY = Math.max(scroll.originY, Math.min(target,
+                    scroll.originY + Math.max(0, scroll.contentHeight - scroll.height)))
+            }
+            if (scroll === pageLoader.item) break
+        }
+    }
+
+    onHeightChanged: Qt.callLater(root.revealFocus)
+    Connections {
+        target: root.Window.window
+        function onActiveFocusItemChanged() { Qt.callLater(root.revealFocus) }
     }
 
     function capture(mode) {
