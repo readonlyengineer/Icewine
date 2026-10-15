@@ -13,7 +13,7 @@ Item {
     id: root
 
     required property var metrics
-    implicitHeight: Math.max(tabs.height + (tabs.currentIndex === 0 ? content.implicitHeight + 24 : tailscale.implicitHeight),
+    implicitHeight: Math.max(tabs.y + tabs.height + (tabs.currentIndex === 0 ? content.implicitHeight + 24 : tailscale.implicitHeight),
         passwordNetwork ? passwordContent.implicitHeight + 36 : 0)
 
     readonly property Item initialFocus: networkingTab
@@ -110,73 +110,96 @@ Item {
         onTriggered: root.setScanning(true)
     }
 
+    // Local file tabs share a bottom edge with the card; only the selected tab joins it.
+    component PageTab: Controls.TabButton {
+        id: tab
+        implicitHeight: 44
+        horizontalPadding: 4
+        opacity: enabled ? 1 : 0.45
+        background: Item {
+            Rectangle {
+                id: silhouette
+                y: tab.checked ? 0 : 5
+                width: parent.width
+                height: parent.height - y - (tab.checked ? 0 : 5)
+                topLeftRadius: 9
+                topRightRadius: 9
+                color: tab.checked ? Theme.Palette.selection : Theme.Palette.surface
+                border.width: 1
+                border.color: tab.hovered ? Theme.Palette.secondary : Theme.Palette.border
+
+                // Cover the shared border so the selected surface joins the card.
+                Rectangle {
+                    visible: tab.checked
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    anchors.bottomMargin: -1
+                    height: 2
+                    color: silhouette.color
+                }
+                Rectangle {
+                    visible: tab.checked
+                    x: 12; y: 5; width: parent.width - 24; height: 2
+                    radius: 1
+                    color: Theme.Palette.secondary
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 4
+                    visible: tab.activeFocus
+                    radius: 5
+                    color: "transparent"
+                    border.width: 2
+                    border.color: Theme.Palette.secondary
+                }
+            }
+        }
+        contentItem: Text {
+            text: tab.text
+            color: Theme.Palette.foreground
+            font.family: "JetBrainsMono Nerd Font"
+            font.pixelSize: 11
+            font.bold: tab.checked
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
+    Rectangle {
+        anchors.fill: pages
+        bottomLeftRadius: 9
+        bottomRightRadius: 9
+        color: Theme.Palette.selection
+        border.width: 1
+        border.color: Theme.Palette.border
+    }
+
     Controls.TabBar {
         id: tabs
         width: parent.width - 24
         x: 12
         y: 8
-        height: 36
+        height: 44
+        spacing: 3
         onCurrentIndexChanged: {
             root.setScanning(root.visible)
             if (currentIndex !== 0) scanRestart.stop()
-            if (pageReveal) pageReveal.restart()
         }
         background: Rectangle { color: "transparent" }
-        Controls.TabButton {
+        PageTab {
             id: networkingTab
-            implicitHeight: 36
             text: "Networking"
             Accessible.name: "Networking tab"
-            background: Rectangle {
-                radius: 9
-                color: networkingTab.checked ? Theme.Palette.selection : Theme.Palette.surface
-                border.width: networkingTab.activeFocus ? 1 : 0
-                border.color: Theme.Palette.secondary
-                Behavior on color { ColorAnimation { duration: 100 } }
-            }
-            contentItem: Text {
-                text: "Networking"
-                color: networkingTab.checked ? Theme.Palette.secondary : Theme.Palette.muted
-                font.family: "JetBrainsMono Nerd Font"
-                font.pixelSize: 11
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
         }
-        Controls.TabButton {
+        PageTab {
             id: tailscaleTab
-            implicitHeight: 36
             text: "Tailscale"
             Accessible.name: "Tailscale tab"
-            background: Rectangle {
-                radius: 9
-                color: tailscaleTab.checked ? Theme.Palette.selection : Theme.Palette.surface
-                border.width: tailscaleTab.activeFocus ? 1 : 0
-                border.color: Theme.Palette.secondary
-                Behavior on color { ColorAnimation { duration: 100 } }
-            }
-            contentItem: Text {
-                text: "Tailscale"
-                color: tailscaleTab.checked ? Theme.Palette.secondary : Theme.Palette.muted
-                font.family: "JetBrainsMono Nerd Font"
-                font.pixelSize: 11
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
         }
-    }
-
-    NumberAnimation {
-        id: pageReveal
-        target: pages
-        property: "opacity"
-        from: 0.85; to: 1; duration: 120
-        easing.type: Easing.OutCubic
     }
 
     StackLayout {
         id: pages
-        anchors { top: tabs.bottom; topMargin: 4; bottom: parent.bottom; left: parent.left; right: parent.right }
+        anchors { top: tabs.bottom; bottom: parent.bottom; left: parent.left; right: parent.right; leftMargin: 12; rightMargin: 12 }
         currentIndex: tabs.currentIndex
 
     Flickable {
@@ -189,7 +212,7 @@ Item {
 
             x: 12
             y: 12
-            width: root.width - 24
+            width: parent.width - 24
             spacing: 7
 
             Text {

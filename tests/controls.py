@@ -323,6 +323,31 @@ ShellRoot {
         root.items = []
         root.count = 0
     }
+    function checkNetworkTabs(selected, other, page) {
+        const front = selected.background.children[0]
+        const back = other.background.children[0]
+        const body = descendants(page, item => item instanceof Flickable && !(item instanceof ListView) && item.visible)[0]
+        const card = page.children.find(item => item.bottomLeftRadius === 9)
+        const edge = front.mapToItem(page, 0, front.height).y
+        const top = body.mapToItem(page, 0, 0).y
+        if (Math.abs(edge - top) > 0.5 || !card || Math.abs(card.y - top) > 0.5
+                || front.color.toString() !== card.color.toString())
+            throw new Error(`Selected tab must join the card with no air gap: edge=${edge}, top=${top}, bgY=${selected.background.y}, bgH=${selected.background.height}, tabH=${selected.height}`)
+        if (front.y !== 0 || back.y !== 5 || front.height <= back.height)
+            throw new Error("Tab silhouettes lost their front/back depth")
+        for (const tab of [selected, other]) {
+            const left = tab.mapToItem(page, 0, 0).x
+            if (Math.abs(selected.width - other.width) > 0.5
+                    || tab.contentItem.implicitWidth > tab.contentItem.width
+                    || left < -0.5 || left + tab.width > page.width + 0.5)
+                throw new Error(`Tab label/target overflow: page=${page.width}, left=${left}, width=${tab.width}, label=${tab.contentItem.implicitWidth}/${tab.contentItem.width}`)
+        }
+        const ring = descendants(front, item => item.border?.width === 2)[0]
+        if (!selected.activeFocus || !ring?.visible)
+            throw new Error("Selected tab keyboard focus ring is missing")
+        if (body.height <= 0 || !body.clip || body.contentHeight <= body.height)
+            throw new Error("Constrained network page must retain its scroll viewport")
+    }
     Timer {
         interval: 400
         running: true
@@ -334,12 +359,34 @@ ShellRoot {
             networkPages.focusInitial()
             if (!firstTab.activeFocus || !firstTab.checked || secondTab.checked)
                 throw new Error("Network initial tab/focus is incorrect")
+            let networkPage = firstTab
+            while (networkPage && networkPage.wifiDevice === undefined) networkPage = networkPage.parent
+            const password = descendants(networkPage,
+                item => item instanceof TextInput && item.echoMode === TextInput.Password)[0]
+            networkPage.passwordNetwork = {name: "Fixture Wi-Fi"}
+            password.text = "fixture secret"
+            const tabCentre = firstTab.mapToItem(networkPage, firstTab.width / 2, firstTab.height / 2)
+            if (networkPage.childAt(tabCentre.x, tabCentre.y) !== password.parent.parent.parent)
+                throw new Error("Password overlay must remain above the file tabs")
+            networkPage.closePassword()
+            if (password.text || networkPage.passwordNetwork)
+                throw new Error("Password dismissal retained a secret or pending network")
+            for (const width of [380, 280, 200]) {
+                networkWindow.width = width
+                networkKeys.wait(20)
+                root.checkNetworkTabs(firstTab, secondTab, networkPage)
+            }
+            networkWindow.width = 280
+            networkKeys.wait(20)
+            const wifiPage = descendants(networkPage, item => item instanceof Flickable && !(item instanceof ListView))[0]
+            wifiPage.contentY = 50
+            networkPage.errorMessage = "Retained fixture error"
             firstTab.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Right)
             if (!secondTab.checked || !secondTab.activeFocus)
                 throw new Error("Right arrow did not select/focus Tailscale tab")
-            let networkPage = firstTab
-            while (networkPage && networkPage.wifiDevice === undefined) networkPage = networkPage.parent
+            networkKeys.wait(20)
+            root.checkNetworkTabs(secondTab, firstTab, networkPage)
             if (!networkPage || networkPage.wifiDevice.scannerEnabled)
                 throw new Error("Tailscale tab left synthetic Wi-Fi scanning active")
             const picker = root.findAccessible(networkPages, "Exit node")
@@ -417,6 +464,12 @@ ShellRoot {
             networkKeys.keyClick(Qt.Key_Left)
             if (!firstTab.checked || !firstTab.activeFocus || picker.visible || !networkPage.wifiDevice.scannerEnabled)
                 throw new Error("Left arrow did not restore Networking page")
+            root.checkNetworkTabs(firstTab, secondTab, networkPage)
+            if (wifiPage.contentY !== 50 || networkPage.errorMessage !== "Retained fixture error"
+                    || page.active || page.data.selected !== "")
+                throw new Error("Tab styling reset page state or left Tailscale active")
+            networkPage.errorMessage = ""
+            networkWindow.width = 380
             if (handheldOverlay.status !== Component.Ready)
                 throw new Error("Packaged handheld overlay did not compile")
             gameLauncher.launchSteamGamescope()
