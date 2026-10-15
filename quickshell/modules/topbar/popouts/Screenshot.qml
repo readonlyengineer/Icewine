@@ -1,16 +1,24 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import Quickshell
 import qs.icewine.theme as Theme
 
 Item {
     id: root
 
     readonly property Item initialFocus: monitor
-    readonly property bool clipboardOnly: clipboard.checked
-    readonly property bool delayCapture: delay.checked
+    signal captureRequested(var command)
 
-    signal captureRequested(string mode)
+    function capture(mode) {
+        const command = ["hyprshot", "--freeze", "--mode", mode]
+        if (mode === "output" && Quickshell.screens.length === 1)
+            command.push("--mode", Quickshell.screens[0].name)
+        if (clipboard.checked) command.push("--clipboard-only")
+        if (delay.checked)
+            command.unshift("sh", "-c", 'sleep 3 && exec "$@"', "icewine-screenshot")
+        root.captureRequested(command)
+    }
 
     implicitHeight: delay.y + delay.height + 12
 
@@ -38,17 +46,17 @@ Item {
             id: monitor
             width: (actions.width - 2 * actions.spacing) / 3
             text: "Monitor"
-            onClicked: root.captureRequested("output")
+            onClicked: root.capture("output")
         }
         ActionButton {
             width: (actions.width - 2 * actions.spacing) / 3
             text: "Region"
-            onClicked: root.captureRequested("region")
+            onClicked: root.capture("region")
         }
         ActionButton {
             width: (actions.width - 2 * actions.spacing) / 3
             text: "Window"
-            onClicked: root.captureRequested("window")
+            onClicked: root.capture("window")
         }
     }
 

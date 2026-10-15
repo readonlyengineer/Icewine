@@ -56,15 +56,7 @@ Widget {
         function onActiveFocusItemChanged() { Qt.callLater(root.revealFocus) }
     }
 
-    function capture(mode) {
-        const page = pageLoader.item
-        if (!page) return
-        const command = ["hyprshot", "--freeze", "--mode", mode]
-        if (mode === "output" && Quickshell.screens.length === 1)
-            command.push("--mode", Quickshell.screens[0].name)
-        if (page.clipboardOnly) command.push("--clipboard-only")
-        if (page.delayCapture)
-            command.unshift("sh", "-c", 'sleep 3 && exec "$@"', "icewine-screenshot")
+    function capture(command) {
         instantHandoffRequested()
         // Hide the popout before Hyprshot freezes the selection surface.
         Qt.callLater(() => Quickshell.execDetached(command))
@@ -139,7 +131,7 @@ Widget {
     Component {
         id: screenshotPage
         Popouts.Screenshot {
-            onCaptureRequested: mode => root.capture(mode)
+            onCaptureRequested: command => root.capture(command)
         }
     }
     Component {
