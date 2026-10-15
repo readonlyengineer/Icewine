@@ -13,8 +13,8 @@ function reduce(state, event) {
     case "open":
         if (!["switcher", "launcher", "audio", "network", "performance", "bluetooth", "battery", "media", "notifications", "screenshot", "layout"].includes(event.page))
             return state
-        // Hover cannot replace a widget the user is interacting with.
-        if (state.engaged && !event.engaged)
+        // Hover can leave the window overview, but cannot replace an engaged popout.
+        if (state.engaged && state.page !== "switcher" && !event.engaged)
             return state
         return Object.assign({}, state, {
             page: event.page, engaged: event.engaged === true, screen: event.screen

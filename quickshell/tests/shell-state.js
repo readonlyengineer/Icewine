@@ -86,6 +86,14 @@ assert.equal(state.screen, "external")
 send({type: "dismiss"})
 assert.equal(State.barVisible(state, false, false), false)
 
+send({type: "open", page: "switcher", engaged: true, screen: "deck"})
+for (const page of ["launcher", "audio", "network", "layout"]) {
+    send({type: "open", page, engaged: false, screen: "deck"})
+    assert.equal(state.page, page, "Hover replaces the window overview")
+    send({type: "open", page: "switcher", engaged: true, screen: "deck"})
+}
+send({type: "dismiss"})
+
 function controller(file, properties) {
     const context = vm.createContext(properties)
     context.root = context

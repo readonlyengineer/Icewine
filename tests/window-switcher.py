@@ -13,6 +13,7 @@ import tempfile
 source = Path(sys.argv[1]).resolve()
 qml = '''import QtQuick
 import QtQuick.Window
+import QtQuick.Controls
 import QtTest
 import Quickshell
 import Quickshell.Io
@@ -71,6 +72,7 @@ ShellRoot {
                 onDismissRequested: ++window.dismissals
             }
         }
+        Button { id: otherControl; text: "Other top-bar control" }
         TestCase {
             id: keys
             when: false
@@ -117,6 +119,11 @@ ShellRoot {
                 compare(window.activations, 1, "Focus loss cancels activation")
                 keyClick(Qt.Key_Escape)
                 compare(window.dismissals, 1)
+                otherControl.forceActiveFocus()
+                tryVerify(() => otherControl.activeFocus)
+                keyClick(Qt.Key_Escape)
+                compare(window.dismissals, 2, "Escape dismisses after focus leaves the window cards")
+                view.forceActiveFocus()
                 mockCompositor.toplevels = [a, b, d, c]
                 tryVerify(() => view.rows[0].windows.length === 3)
                 view.selected = a

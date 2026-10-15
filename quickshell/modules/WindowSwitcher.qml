@@ -51,12 +51,17 @@ FocusScope {
         Qt.callLater(ensureVisible)
     }
     onActiveFocusChanged: if (!activeFocus) { actionKey = 0; pendingWindow = null }
+    Shortcut {
+        sequence: "Escape"
+        enabled: root.visible && root.enabled
+        onActivated: root.dismissRequested()
+    }
     Keys.onLeftPressed: navigate(-1, 0)
     Keys.onRightPressed: navigate(1, 0)
     Keys.onUpPressed: navigate(0, -1)
     Keys.onDownPressed: navigate(0, 1)
     Keys.onPressed: event => {
-        if (![Qt.Key_Return, Qt.Key_Enter, Qt.Key_Escape].includes(event.key)) return
+        if (![Qt.Key_Return, Qt.Key_Enter].includes(event.key)) return
         event.accepted = true
         if (!event.isAutoRepeat) {
             actionKey = event.key
@@ -69,8 +74,7 @@ FocusScope {
         const window = pendingWindow
         actionKey = 0
         pendingWindow = null
-        if (event.key === Qt.Key_Escape) dismissRequested()
-        else if (Model.locate(rows, window)) activateRequested(window)
+        if (Model.locate(rows, window)) activateRequested(window)
     }
 
     Rectangle { anchors.fill: parent; color: Theme.Palette.backgroundDark; radius: 10 }

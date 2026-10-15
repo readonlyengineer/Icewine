@@ -237,7 +237,7 @@ Scope {
 
             onHoverPageChanged: {
                 previewOpen.stop()
-                if (hoverPage && !root.widgetEngaged)
+                if (hoverPage && (!root.widgetEngaged || root.ui.page === "switcher"))
                     previewOpen.restart()
             }
 
