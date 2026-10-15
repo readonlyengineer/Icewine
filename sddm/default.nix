@@ -1,5 +1,5 @@
 { runCommand, kdePackages, python3, theme ? null }:
-# Keep KDE's QML intact; only the supported theme configuration is local.
+# Use KDE's greeter with a solid, palette-driven backdrop.
 runCommand "icewine-breeze-sddm-theme" {
   selectedTheme = if theme == null then "" else theme;
 } ''
@@ -7,6 +7,9 @@ runCommand "icewine-breeze-sddm-theme" {
   mkdir -p "$theme"
   cp -r ${kdePackages.plasma-desktop}/share/sddm/themes/breeze/. "$theme/"
   chmod -R u+w "$theme"
+  substituteInPlace "$theme/Main.qml" --replace-fail \
+    'sceneBackgroundColor: config.color' \
+    'sceneBackgroundColor: Kirigami.Theme.backgroundColor'
   mkdir -p "$out/share/icewine/sddm"
   ${python3}/bin/python3 - ${../scripts/theme} ${../theme/assets} "$out/share/icewine/sddm/kdeglobals" <<'PYTHON'
 import os, runpy, sys
@@ -20,8 +23,7 @@ Path(sys.argv[3]).write_text(files["kdeglobals"])
 PYTHON
   cat > "$theme/theme.conf.user" <<'EOF'
 [General]
-background=/var/lib/icewine/sddm/wallpaper.img
-color=#1a1b26
+type=color
 iconTheme=breeze
 EOF
 ''

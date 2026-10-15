@@ -100,7 +100,8 @@ Window {
         assert match, (state, output)
         actual = json.loads(match[1])
         palette = json.loads((assets / "themes" / (expected + ".json")).read_text())
-        for role, key in (("background", "background"), ("foreground", "foreground"),
+        assert actual["background"].lower() == ("#ffffff" if palette["appearance"] == "light" else "#000000"), (state, actual)
+        for role, key in (("foreground", "foreground"),
                           ("view", "backgroundDark"), ("button", "surface"), ("selection", "highlight")):
             assert actual[role].lower() == "#" + palette[key], (state, role, actual)
         # Selection.ForegroundNormal is the renderer's gtkAccentFg role.
@@ -118,4 +119,4 @@ Window {
         output, _ = process.communicate(timeout=5)
     assert not re.search(r'is not installed|Type .* unavailable|QQmlApplicationEngine failed|Cannot load library|Error loading QML|Fallback to embedded theme|ReferenceError|TypeError', output), output
 
-print("PASS: stock Breeze startup/imports and native dark/light/missing/invalid/non-file palette")
+print("PASS: stock Breeze startup/imports and native black/white backdrops and dark/light/missing/invalid/non-file palette")

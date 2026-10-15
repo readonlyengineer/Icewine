@@ -19,13 +19,16 @@ with tempfile.TemporaryDirectory() as directory:
     standalone.parent.mkdir()
     shutil.copyfile(source / "scripts/theme", standalone)
     output = root / "kdeglobals"
-    environment = dict(os.environ, selectedTheme="dracula")
-    environment.pop("ICEWINE_THEME_ASSETS", None)
-    subprocess.run([sys.executable, "-c", code, str(standalone), str(assets), str(output)],
-                   env=environment, check=True, capture_output=True, text=True)
-    config = configparser.ConfigParser()
-    config.read(output)
-    palette = json.loads((assets / "themes" / "dracula.json").read_text())
-    assert config["Colors:Complementary"]["BackgroundNormal"] == "#" + palette["background"]
+    for palette_file in sorted((assets / "themes").glob("*.json")):
+        environment = dict(os.environ, selectedTheme=palette_file.stem)
+        environment.pop("ICEWINE_THEME_ASSETS", None)
+        subprocess.run([sys.executable, "-c", code, str(standalone), str(assets), str(output)],
+                       env=environment, check=True, capture_output=True, text=True)
+        config = configparser.ConfigParser()
+        config.read(output)
+        palette = json.loads(palette_file.read_text())
+        expected = "#ffffff" if palette["appearance"] == "light" else "#000000"
+        assert config["Colors:Complementary"]["BackgroundNormal"] == expected, palette_file.stem
+        assert config["Colors:Window"]["BackgroundNormal"] == "#" + palette["background"]
 
-print("PASS: standalone fallback packaging renders explicit Dracula with no inherited assets env")
+print("PASS: standalone fallback packaging renders black/white login backdrops for every theme")

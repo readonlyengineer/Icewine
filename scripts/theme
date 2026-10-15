@@ -233,6 +233,8 @@ def render_theme(assets, palette_file, level="high"):
             "ForegroundNeutral": values["caution"], "ForegroundPositive": values["success"],
             "DecorationFocus": values["highlight"], "DecorationHover": values["secondaryHighlight"],
         }
+        if group == "Complementary":
+            roles["BackgroundNormal"] = "ffffff" if values["appearance"] == "light" else "000000"
         groups.append(f"[Colors:{group}]\n" + "".join(f"{key}=#{value}\n" for key, value in roles.items()))
     files["kdeglobals"] = "[General]\nColorScheme=Icewine\n[Icons]\nTheme=breeze\n" + "\n".join(groups)
     files["gtk4-settings.ini"] = files["gtk-settings.ini"]

@@ -112,7 +112,7 @@ icewine wallpaper --auth-reset
 
 Icewine copies PNG, JPEG, GIF or BMP images to
 `$XDG_DATA_HOME/icewine/wallpapers/selection.img` and refreshes the wallpaper.
-Lock and login inherit it unless `--auth` selects a shared authentication override;
+Lock and Arch/CachyOS login inherit it unless `--auth` selects a shared authentication override;
 `--auth-reset` restores inheritance. The desktop image stays unchanged by either.
 Login Apply publishes only the effective image, readable before authentication,
 under `/var/lib/icewine/sddm`. Its source is `services.icewine.user` on NixOS or
@@ -122,7 +122,8 @@ Your original file can then be moved or deleted.
 
 Lock uses brief focus and feedback transitions; set
 `ICEWINE_THEME_TRANSITION=off` for the shell to disable them. NixOS Login uses
-upstream KDE Breeze, preserving its layout, input and animations. Login Apply
+KDE Breeze with a black backdrop for dark themes and white for light themes,
+preserving its layout, input and animations. Login Apply
 and theme changes publish KDE colours readable before authentication; missing
 public state uses the packaged theme policy or Catppuccin Mocha fallback.
 Arch/CachyOS retains the Icewine greeter and its `animations=off` theme setting.
