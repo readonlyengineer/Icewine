@@ -13,7 +13,9 @@ Scope {
 
     required property bool authenticationRequired
 
-    property alias locked: sessionLock.locked
+    // Guard acquisition too, and re-read native state when intent clears:
+    // Quickshell 0.3.2 does not notify QML when its native lock is released.
+    readonly property bool locked: lockRequested || sessionLock.locked
     property alias lockRequested: lockState.requested
     property string password: ""
     property bool authenticating: false
@@ -111,8 +113,8 @@ Scope {
             return
         password = ""
         failed = false
-        lockRequested = false
         lockState.acquired = false
+        lockRequested = false
         writeLockHint()
         wakeDisplay()
         if (notifyLogind)

@@ -18,11 +18,12 @@ import QtQuick.Controls
 import QtTest
 import Quickshell
 import Quickshell.Io
+import Quickshell.Services.Pam
 import qs.config as Config
 import "icewine/modules" as Modules
 ShellRoot {
     id: shell
-    QtObject { id: mockSession }
+    Modules.SessionControl { id: mockSession; authenticationRequired: true }
     QtObject { id: mockNotifications }
     Modules.NotificationService { id: notificationService }
     Modules.Topbar {
@@ -30,6 +31,8 @@ ShellRoot {
         compositor: mockCompositor
         notificationService: mockNotifications
         session: mockSession
+        sessionLocked: mockSession.locked
+        function focusedScreenName() { return "DP-1" } // Offscreen output has no name.
     }
     Process {
         id: preferenceWriter
@@ -91,6 +94,59 @@ ShellRoot {
                     && position.y >= 16 && position.y + card.height <= loader.height - 15
             }
             function check() {
+                // Keep the real session/PAM-result handlers and topbar bindings.
+                // Only native lock delivery is replaced: acquisition notifies,
+                // unlock changes the getter without a notification (qs 0.3.2).
+                mockSession.fixtureNativeLock = {locked: true, secure: true}
+                verify(mockSession.locked, "A native lock still guards UI without recorded intent")
+                mockSession.fixtureNativeLock = {locked: false, secure: false}
+                for (let cycle = 0; cycle < 3; ++cycle) {
+                    mockCompositor.restored = ""
+                    topbar.openWidget("launcher", true, "DP-1")
+                    topbar.pressBar()
+                    verify(topbar.barVisible && topbar.widgetEngaged)
+                    mockSession.lockFromLogind()
+                    verify(mockSession.locked && mockSession.lockRequested)
+                    verify(!topbar.barVisible && !topbar.widgetEngaged)
+                    compare(topbar.ui.page, "")
+                    verify(!topbar.ui.held && !mockCompositor.suppressed)
+                    topbar.pressBar()
+                    topbar.toggleSwitcher()
+                    topbar.openWidget("audio", true, "DP-1")
+                    verify(!topbar.barVisible && !topbar.ui.held && !topbar.ui.page)
+                    mockSession.password = "fixture response"
+                    mockSession.authenticating = true
+                    mockSession.fixturePam.completed(PamResult.Success + 1)
+                    verify(mockSession.locked && mockSession.failed && !mockSession.password)
+                    verify(!mockSession.authenticating && !topbar.barVisible)
+                    mockSession.authenticating = true
+                    mockSession.fixturePam.completed(PamResult.Success)
+                    verify(!mockSession.locked && !mockSession.lockRequested,
+                        "Successful unlock releases every UI guard without native notify")
+                    verify(!mockSession.password && !mockSession.failed && !mockSession.authenticating)
+                    wait(1)
+                    compare(mockCompositor.restored, "", "Lock handoff cancels old focus restoration")
+                    topbar.pressBar()
+                    verify(topbar.barVisible && topbar.ui.held, "Hold opens after unlock")
+                    topbar.releaseBar()
+                    verify(!topbar.barVisible && !topbar.ui.held, "Release hides after unlock")
+                    topbar.toggleSwitcher()
+                    compare(topbar.ui.page, "switcher")
+                    topbar.toggleSwitcher()
+                    compare(topbar.ui.page, "")
+                    for (const page of ["launcher", "audio", "network", "bluetooth", "battery",
+                            "performance", "layout", "screenshot"]) {
+                        topbar.openWidget(page, true, "DP-1")
+                        compare(topbar.ui.page, page, "Configured page opens after unlock")
+                        topbar.dismissWidget()
+                    }
+                }
+                mockSession.lockRequested = true
+                verify(mockSession.locked, "Pending acquisition already guards UI")
+                topbar.pressBar()
+                verify(!topbar.barVisible && !topbar.ui.held)
+                mockSession.lockRequested = false
+                console.log("SESSION_LOCK_GUARDS_PASSED")
                 const view = loader.item
                 view.forceActiveFocus()
                 tryVerify(() => view.activeFocus)
@@ -200,6 +256,29 @@ Scope {
     signal notification(var notification)
 }
 """)
+    session_source = root / 'icewine/modules/SessionControl.qml'
+    native_session = session_source.read_text()
+    # A JS object's fields have no QML notifier. Replacing the object on acquire
+    # but mutating it on unlock models the native getter/NOTIFY mismatch, without
+    # acquiring a compositor lock or starting a PAM conversation. An alias read
+    # is represented by its equivalent binding so it can target the JS getter.
+    native_session = native_session.replace('property alias locked: sessionLock.locked',
+        'readonly property bool locked: sessionLock.locked')
+    native_session = native_session.replace('    property string password: ""',
+        '    property var fixtureNativeLock: ({locked: false, secure: false})\n'
+        '    readonly property var fixturePam: pam\n    property string password: ""')
+    native_session, count = re.subn(r'^        WlSessionLock \{[\s\S]*?^        \}', '''        Connections {
+            target: lockState
+            function onAcquiredChanged() {
+                if (lockState.acquired) root.fixtureNativeLock = {locked: true, secure: true}
+                else {
+                    root.fixtureNativeLock.locked = false
+                    root.fixtureNativeLock.secure = false
+                }
+            }
+        }''', native_session, flags=re.M)
+    assert count == 1, 'Expected one native session-lock boundary'
+    session_source.write_text(native_session.replace('sessionLock.', 'root.fixtureNativeLock.'))
     topbar_source = root / 'icewine/modules/Topbar.qml'
     native_topbar = topbar_source.read_text()
     # Keep actual shared state/IPC/settings methods without Wayland panels or
@@ -248,4 +327,4 @@ ShellRoot {
     result = subprocess.run(['qs', '-p', str(root), '--no-color'], env=env,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0 and 'MIXED_POLICY_PASSED' in result.stdout + result.stderr, result.stdout + result.stderr
-    print('Native switcher checks, widget watcher/modal/popup release and mixed policy pass')
+    print('Switcher, widget policy and repeated lock/unlock UI guards without native unlock notify pass')
