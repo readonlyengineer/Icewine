@@ -197,16 +197,19 @@ Flickable {
                 id: exitPicker
                 width: root.width - 24
                 palette.window: Theme.Palette.surface
+                palette.base: Theme.Palette.surface
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 11
-                palette.text: Theme.Palette.foreground
+                palette.active.text: Theme.Palette.foreground
+                palette.inactive.text: Theme.Palette.foreground
+                palette.disabled.text: Theme.Palette.foregroundDark
                 palette.windowText: Theme.Palette.foreground
                 palette.light: Theme.Palette.selection
                 palette.midlight: Theme.Palette.primaryDark
                 palette.dark: Theme.Palette.border
                 palette.buttonText: Theme.Palette.foreground
-                palette.highlight: Theme.Palette.selection
-                palette.highlightedText: Theme.Palette.foreground
+                palette.highlight: Theme.Palette.primary
+                palette.highlightedText: Theme.Palette.highlightedText
                 onClosed: root.syncPicker()
                 Controls.MenuItem {
                     text: "None"
@@ -228,7 +231,14 @@ Flickable {
                         onTriggered: root.selectExit(modelData.id)
                     }
                 }
-                Controls.MenuSeparator { visible: deviceItems.count > 0 && countryMenus.count > 0 }
+                Controls.MenuSeparator {
+                    visible: deviceItems.count > 0 && countryMenus.count > 0
+                    contentItem: Rectangle {
+                        implicitWidth: 188
+                        implicitHeight: 1
+                        color: Theme.Palette.muted
+                    }
+                }
                 Instantiator {
                     id: countryMenus
                     model: root.menuData.countries

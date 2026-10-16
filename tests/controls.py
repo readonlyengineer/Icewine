@@ -789,6 +789,208 @@ ShellRoot {
 }
 """
 
+# Separate run so rendering waits cannot disturb the metric/lifecycle timers.
+MENU_QML = """import QtQuick
+import QtQuick.Window
+import QtTest
+import Quickshell
+import Quickshell.Io
+import "icewine/modules/topbar/popouts" as Popouts
+import "icewine/theme" as Theme
+ShellRoot {
+    id: root
+    Window {
+        id: networkPages
+        visible: true; width: 760; height: 600
+        Popouts.Tailscale { id: page; width: 380; height: 500; active: true }
+        TestCase { id: networkKeys; when: false }
+    }
+    function descendants(item, predicate) {
+        let result = predicate(item) ? [item] : []
+        for (const child of item.children ?? []) result = result.concat(descendants(child, predicate))
+        return result
+    }
+    FileView { id: darkPalette; path: Qt.resolvedUrl("palette-dark.json"); blockAllReads: true }
+    FileView { id: lightPalette; path: Qt.resolvedUrl("palette-light.json"); blockAllReads: true }
+    function luminance(color) {
+        const linear = value => value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4)
+        return 0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    }
+    function contrast(first, second) {
+        // Checkmark images use translucent ink; compare its composite against the box.
+        first = Qt.rgba(first.r * first.a + second.r * (1 - first.a),
+                        first.g * first.a + second.g * (1 - first.a),
+                        first.b * first.a + second.b * (1 - first.a), 1)
+        const a = luminance(first), b = luminance(second)
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+    }
+    function captureMenu(menu, name) {
+        const image = networkKeys.grabImage(menu.contentItem.parent)
+        const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
+        if (directory) image.save(directory + "/" + name + ".png")
+        return image
+    }
+    function checkMenuSurface(menu, name) {
+        const image = captureMenu(menu, name)
+        // Sample the empty right edge of an unhighlighted row, not the assigned palette.
+        const background = image.pixel(image.width - 6, 8)
+        if (background.toString() !== Theme.Palette.surface.toString()
+                || contrast(menu.itemAt(0).contentItem.color, background) < 4.5)
+            throw new Error(name + ": rendered menu background/text mismatch: " + background)
+    }
+    function checkMenuStates(menu, page, label) {
+        menu.currentIndex = -1
+        networkKeys.wait(30)
+        checkMenuSurface(menu, label + "-normal")
+        const row = menu.itemAt(1)
+        row.forceActiveFocus()
+        menu.currentIndex = 1
+        networkKeys.wait(30)
+        if (!row.activeFocus || !row.highlighted
+                || contrast(row.contentItem.color, row.background.color) < 4.5)
+            throw new Error(label + ": keyboard highlight is unreadable: focus=" + row.activeFocus + " highlighted=" + row.highlighted + " colors=" + row.contentItem.color + "/" + row.background.color + " contrast=" + contrast(row.contentItem.color, row.background.color))
+        captureMenu(menu, label + "-focus")
+        menu.currentIndex = -1
+        networkKeys.mouseMove(row, row.width / 2, row.height / 2)
+        networkKeys.wait(40)
+        if (!row.hovered || !row.highlighted
+                || contrast(row.contentItem.color, row.background.color) < 4.5)
+            throw new Error(label + ": mouse hover is unreadable: hovered=" + row.hovered + " hoverEnabled=" + row.hoverEnabled + " highlighted=" + row.highlighted)
+        captureMenu(menu, label + "-hover")
+        networkKeys.mouseMove(networkPages, 0, networkPages.height - 1)
+        menu.currentIndex = -1
+        const originalData = page.data
+        const id = menu.title === "Australia" ? "fixture-sydney-best" : "fixture-exit"
+        page.data = Object.assign({}, originalData, {exits: originalData.exits.map(peer =>
+            peer.id === id ? Object.assign({}, peer, {address: ""}) : peer)})
+        networkKeys.wait(30)
+        if (row.contentItem.color.toString() === Theme.Palette.foreground.toString()
+                || contrast(row.contentItem.color, menu.background.color) < 3)
+            throw new Error(label + ": disabled label is indistinguishable/unreadable: " + row.contentItem.color + " / " + menu.background.color)
+        captureMenu(menu, label + "-disabled")
+        if (row.enabled) throw new Error(label + ": unavailable entry stayed enabled")
+        page.data = originalData
+    }
+    function checkMenuRendering(menu, page) {
+        const country = menu.menuAt(4)
+        const selected = menu.itemAt(0)
+        if (!selected.checked) throw new Error("None lost its initial checkmark")
+        for (const [name, palette] of [["dark", darkPalette], ["light", lightPalette]]) {
+            // Use the real palette-file refresh path while the root popup stays open.
+            Theme.Palette.file.setText(palette.text())
+            if (!Theme.Palette.refresh()) throw new Error("Fixture palette refresh failed")
+            networkKeys.wait(220)
+            checkMenuStates(menu, page, name + "-root")
+            const separator = menu.itemAt(3).contentItem
+            const separatorImage = captureMenu(menu, name + "-separator")
+            const point = separator.mapToItem(menu.contentItem.parent, 5, 0)
+            const separatorContrast = Math.max(...[0, 1].map(offset => contrast(
+                separatorImage.pixel(Math.round(point.x), Math.floor(point.y) + offset), menu.background.color)))
+            if (separatorContrast < 1.5) throw new Error(name + ": separator disappeared")
+            const arrow = menu.itemAt(4).arrow
+            if (!arrow.visible || contrast(arrow.color, menu.background.color) < 4.5)
+                throw new Error(name + ": country arrow is unreadable")
+            const mark = descendants(selected.indicator, item => item.source !== undefined && item.visible)[0]
+            if (!mark || contrast(mark.color, selected.indicator.color) < 3)
+                throw new Error(name + ": None checkmark is unreadable")
+            menu.currentIndex = 4
+            const countryEntry = menu.itemAt(4)
+            countryEntry.forceActiveFocus()
+            networkKeys.mouseMove(countryEntry, countryEntry.width / 2, countryEntry.height / 2)
+            networkKeys.wait(40)
+            if (!countryEntry.hovered || !countryEntry.highlighted
+                    || contrast(countryEntry.contentItem.color, countryEntry.background.color) < 4.5
+                    || contrast(arrow.color, countryEntry.background.color) < 4.5)
+                throw new Error(name + ": highlighted country label/arrow is unreadable")
+            captureMenu(menu, name + "-country-hover")
+            networkKeys.keyClick(Qt.Key_Right)
+            networkKeys.tryCompare(country, "visible", true)
+            checkMenuStates(country, page, name + "-cities")
+            // Refresh again with both popups open: inherited colours must stay live.
+            Theme.Palette.file.setText((name === "light" ? darkPalette : lightPalette).text())
+            if (!Theme.Palette.refresh()) throw new Error("Open submenu refresh failed")
+            networkKeys.wait(220)
+            country.currentIndex = -1; menu.currentIndex = -1
+            if (!menu.visible || !country.visible) throw new Error("Theme refresh closed an open menu")
+            checkMenuSurface(menu, name + "-root-live")
+            checkMenuSurface(country, name + "-cities-live")
+            country.close()
+            menu.currentIndex = -1
+            const originalData = page.data
+            page.data = Object.assign({}, originalData, {connected: false})
+            networkKeys.wait(30)
+            if (country.enabled || contrast(countryEntry.contentItem.color, menu.background.color) < 3
+                    || countryEntry.contentItem.color.toString() === Theme.Palette.foreground.toString()
+                    || contrast(arrow.color, menu.background.color) < 3)
+                throw new Error(name + ": disabled country label/arrow is unreadable")
+            captureMenu(menu, name + "-country-disabled")
+            page.data = originalData
+        }
+        Theme.Palette.file.setText(darkPalette.text())
+        if (!Theme.Palette.refresh()) throw new Error("Fixture palette restore failed")
+        networkKeys.wait(220)
+        menu.currentIndex = 0
+        menu.itemAt(0).forceActiveFocus()
+    }
+    Timer {
+        interval: 300; running: true
+        onTriggered: {
+            try {
+                networkPages.requestActivate()
+                networkKeys.tryCompare(networkPages, "active", true)
+                const picker = descendants(page, item => item.Accessible?.name === "Exit node")[0]
+                networkKeys.tryCompare(picker, "enabled", true)
+                picker.forceActiveFocus()
+                networkKeys.keyClick(Qt.Key_Space)
+                const menu = Array.from(picker.data).find(child => child.title !== undefined && child.count !== undefined)
+                networkKeys.tryCompare(menu, "visible", true)
+                networkKeys.tryCompare(menu, "count", 6)
+                root.checkMenuRendering(menu, page)
+                menu.currentIndex = 4
+                networkKeys.keyClick(Qt.Key_Right)
+                const country = menu.menuAt(4)
+                networkKeys.tryCompare(country, "visible", true)
+                country.currentIndex = 1
+                networkKeys.keyClick(Qt.Key_Return)
+                networkKeys.tryCompare(menu, "visible", false)
+                networkKeys.tryCompare(page, "confirming", "")
+                networkKeys.tryCompare(picker, "enabled", true)
+                if (page.data.selected !== "fixture-sydney-best") throw new Error("City selection was not confirmed")
+                picker.forceActiveFocus()
+                networkKeys.keyClick(Qt.Key_Space)
+                networkKeys.tryCompare(menu, "visible", true)
+                const checkedCountry = menu.menuAt(4)
+                menu.currentIndex = 4
+                networkKeys.keyClick(Qt.Key_Right)
+                networkKeys.tryCompare(checkedCountry, "visible", true)
+                for (const [name, palette] of [["dark", darkPalette], ["light", lightPalette]]) {
+                    Theme.Palette.file.setText(palette.text())
+                    if (!Theme.Palette.refresh()) throw new Error("Checked city theme refresh failed")
+                    networkKeys.wait(220)
+                    const city = checkedCountry.itemAt(1)
+                    const mark = descendants(city.indicator, item => item.source !== undefined && item.visible)[0]
+                    if (!city.checked || !mark || contrast(mark.color, city.indicator.color) < 3)
+                        throw new Error(name + ": selected city checkmark is unreadable")
+                    captureMenu(checkedCountry, name + "-checked-city")
+                }
+                Theme.Palette.file.setText(darkPalette.text())
+                if (!Theme.Palette.refresh()) throw new Error("Checked city theme restore failed")
+                checkedCountry.close()
+                menu.close()
+                networkKeys.wait(220)
+                const touch = networkKeys.touchEvent(picker)
+                touch.press(0, picker).commit()
+                touch.release(0, picker).commit()
+                networkKeys.tryCompare(menu, "visible", true)
+                menu.close()
+                console.log("MENU_RENDER_CHECK_PASSED")
+                Qt.quit()
+            } catch (error) { console.error(error); Qt.exit(1) }
+        }
+    }
+}
+"""
+
 SERVICE_FIXTURES = {
     "Pipewire": """
         property var nodes: ({values: Array.from({length: 2}, (_, id) => ({
@@ -853,6 +1055,11 @@ with tempfile.TemporaryDirectory() as directory:
     for name in ("Desktop.qml", "Handheld.qml", "adapters", "deck"):
         (root / "icewine" / name).symlink_to(source / "quickshell" / name)
     fixture_config = theme_fixture(source, root)
+    (root / "palette-dark.json").write_bytes((Path(fixture_config) / "icewine/current/palette.json").read_bytes())
+    import runpy
+    render_theme = runpy.run_path(str(source / "scripts/theme"))["render_theme"]
+    assets = source / "theme/assets"
+    (root / "palette-light.json").write_text(render_theme(assets, assets / "themes/catppuccin-latte.json")["palette.json"])
     (root / "config").symlink_to(source / "quickshell/config")
     (root / "bin").mkdir()
     mock = root / "bin/icewine-monitor-brightness"
@@ -918,6 +1125,18 @@ with tempfile.TemporaryDirectory() as directory:
                XDG_STATE_HOME=str(root / "state"), ICEWINE_WIDGET_POLICY="{}",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
     env["XDG_CONFIG_HOME"] = fixture_config
+    (root / "shell.qml").write_text(MENU_QML)
+    # The offscreen platform has no desktop hover capability unless supplied explicitly.
+    result = subprocess.run(["qs", "-p", str(root), "--no-color"],
+                            env=dict(env, QT_QUICK_CONTROLS_HOVER_ENABLED="1"),
+                            capture_output=True, text=True, timeout=15)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0 and "MENU_RENDER_CHECK_PASSED" in output, output
+    assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
+    # The rendering fixture confirms a city using the fake CLI; reset it for lifecycle checks.
+    for name in ("exit-node", "tailscale-calls"):
+        (root / name).unlink(missing_ok=True)
+    (root / "shell.qml").write_text(QML)
     try:
         result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
                                 capture_output=True, text=True, timeout=25)
