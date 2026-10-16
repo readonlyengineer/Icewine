@@ -478,7 +478,7 @@ ShellRoot {
             throw new Error("Hover/focus selected the alternate card")
         // Real click and early reversal, with both bodies inert and focus stationary.
         networkKeys.mouseClick(second, 40, 20)
-        networkKeys.wait(150)
+        networkKeys.wait(30)
         const outgoing = first.parent
         if (!page.exchanging || outgoing.x >= 26 || outgoing.z !== 2
                 || wifi.enabled || tailscale.enabled || first.activeFocus || second.activeFocus)
@@ -509,7 +509,7 @@ ShellRoot {
         second.forceActiveFocus()
         networkKeys.keyClick(Qt.Key_Return)
         const animation = Array.from(page.data).find(item => item.property === "progress")
-        networkKeys.wait(190)
+        networkKeys.wait(40)
         animation.pause()
         page.progress = 0.5
         if (outgoing.x + outgoing.width >= 0 || outgoing.z !== 1 || second.parent.z !== 2)
@@ -522,7 +522,7 @@ ShellRoot {
         // Late reversal and repeated requests settle on the latest intent.
         second.forceActiveFocus()
         networkKeys.keyClick(Qt.Key_Space)
-        networkKeys.wait(420)
+        networkKeys.wait(90)
         if (!page.exchanging || outgoing.z !== 1) throw new Error("Late sweep did not tuck behind")
         const lateX = outgoing.x
         page.selectCard(0)
@@ -535,7 +535,7 @@ ShellRoot {
         const touch = networkKeys.touchEvent(networkWindow)
         touch.press(0, first, 40, 20).commit()
         touch.release(0, first, 40, 20).commit()
-        networkKeys.wait(100)
+        networkKeys.wait(20)
         networkKeys.keyPress(Qt.Key_Enter)
         if (page.selectedCard !== 0) throw new Error("Motion reversal acted on key press")
         networkKeys.keyRelease(Qt.Key_Enter)
@@ -547,7 +547,7 @@ ShellRoot {
         checkNetworkCards(first, second, page)
         // A half-exchanged retained page stops moving/scanning immediately when dismissed.
         selectCardTarget(second)
-        networkKeys.wait(100)
+        networkKeys.wait(20)
         networkPages.shown = false
         if (page.exchanging || page.wifiDevice.scannerEnabled || tailscale.active)
             throw new Error("Hidden/closing card kept animation, scanning or polling")
@@ -1249,7 +1249,7 @@ ShellRoot {
                 for (const key of [Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space]) {
                     first.selector.forceActiveFocus()
                     keys.keyClick(Qt.Key_Right)
-                    keys.wait(150)
+                    keys.wait(30)
                     const motion = window.activeFocusItem
                     if (motion !== stack.motionInitialFocus || !stack.exchanging)
                         throw new Error("Expected stationary motion focus before pending activation")
@@ -1269,7 +1269,7 @@ ShellRoot {
                 keys.keyPress(Qt.Key_Right)
                 if (stack.selectedCard !== 1 || !stack.exchanging) throw new Error("Right did not select next")
                 keys.keyRelease(Qt.Key_Right)
-                keys.wait(100)
+                keys.wait(20)
                 keys.keyClick(Qt.Key_Left)
                 if (stack.selectedCard !== 0) throw new Error("Left did not reverse to previous")
                 keys.tryCompare(stack, "exchanging", false, 900)

@@ -25,7 +25,7 @@ in index order. `index` defaults to zero; set the second card's index to one.
 The host supplies the stack's actual width and height. A single card fills it
 at (0, 0), with no geometry deduction. The existing two-card presentation uses
 34px horizontal and 64px vertical allowance, an 18px/48px front offset, and the
-existing 560ms reversible exchange. The stack clips the sweep and draws only a
+existing 120ms reversible exchange. The stack clips the sweep and draws only a
 short stationary keyboard focus mark during exchange, never a frame.
 
 The current supported compositions are one card and a pair, matching the

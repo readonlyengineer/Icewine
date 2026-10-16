@@ -63,7 +63,7 @@ FocusScope {
         selectedCard = index
         exchanging = true
         exchange.to = index === outgoingCard ? 0 : 1
-        exchange.duration = 560 * Math.abs(exchange.to - progress)
+        exchange.duration = 120 * Math.abs(exchange.to - progress)
         if (exchange.duration === 0) finishExchange()
         else exchange.start()
     }
