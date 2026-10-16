@@ -86,12 +86,12 @@ FocusScope {
         actionItemsVisible: root.keyboardInset === 0
         actionItems: [
             Breeze.ActionButton {
-                icon.name: "system-reboot"
+                icon.name: "system-reboot-symbolic"
                 text: qsTr("Restart")
                 onClicked: root.session.requestReboot()
             },
             Breeze.ActionButton {
-                icon.name: "system-shutdown"
+                icon.name: "system-shutdown-symbolic"
                 text: qsTr("Shut Down")
                 onClicked: root.session.requestShutdown()
             }
