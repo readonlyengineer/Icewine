@@ -9,6 +9,7 @@ FocusScope {
     id: root
     // Ponytail: fixed one-card/pair compositions; larger decks need a selection design.
     property list<Card> cards
+    onCardsChanged: resetSelection()
     readonly property bool stacked: cards.length > 1
     property Item initialFocus: exchanging ? motionFocus : cards[selectedCard]?.initialFocus ?? null
     readonly property Item motionInitialFocus: motionFocus
@@ -65,6 +66,19 @@ FocusScope {
         exchange.duration = 120 * Math.abs(exchange.to - progress)
         if (exchange.duration === 0) finishExchange()
         else exchange.start()
+    }
+
+    // A fixed single/pair membership change always returns to the first card.
+    function resetSelection() {
+        motionFocus.activationKey = 0
+        selectionChanging()
+        exchange.stop()
+        selectedCard = 0
+        frontCard = 0
+        outgoingCard = 0
+        exchanging = false
+        progress = 0
+        if (available && root.activeFocus) initialFocus?.forceActiveFocus()
     }
 
     function finishExchange() {

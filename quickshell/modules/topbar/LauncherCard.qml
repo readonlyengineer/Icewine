@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
-import Quickshell.Services.SystemTray
 import Quickshell.Widgets
 import "LauncherSearch.js" as LauncherSearch
 import qs.icewine.theme as Theme
@@ -14,31 +13,12 @@ Card {
     signal handoffRequested()
     initialFocus: search
 
-    property bool showingBackground: false
     property bool excludeSteamApps: false
 
     SteamShortcuts { id: steamShortcuts }
-    readonly property var backgroundItems: SystemTray.items.values
-    readonly property int backgroundCount: backgroundItems.length
-    readonly property bool backgroundAttention: backgroundItems.some(
-        item => item.status === Status.NeedsAttention)
 
     function focusInitial() {
         search.forceActiveFocus(Qt.ShortcutFocusReason)
-    }
-
-    function showBackground() {
-        if (backgroundCount === 0)
-            return
-        showingBackground = true
-    }
-
-    function hideBackground() {
-        showingBackground = false
-        Qt.callLater(() => {
-            if (root.active && root.engaged)
-                search.forceActiveFocus()
-        })
     }
 
     function launch(entry) {
@@ -53,20 +33,8 @@ Card {
         if (active && excludeSteamApps)
             steamShortcuts.refresh()
     }
-    onVisibleChanged: {
-        if (!visible) {
-            search.text = ""
-            showingBackground = false
-        }
-    }
-    onSelectedChanged: if (!selected) {
-        search.text = ""
-        showingBackground = false
-    }
-    onBackgroundCountChanged: {
-        if (backgroundCount === 0 && showingBackground)
-            hideBackground()
-    }
+    onVisibleChanged: if (!visible) search.text = ""
+    onSelectedChanged: if (!selected) search.text = ""
 
     implicitWidth: 400
     implicitHeight: 424
@@ -86,7 +54,6 @@ Card {
                 right: parent.right
                 margins: 12
             }
-            visible: !root.showingBackground
             height: 38
             radius: 10
             color: Theme.Palette.surface
@@ -146,44 +113,6 @@ Card {
             }
         }
 
-        Rectangle {
-            id: backgroundHeader
-
-            anchors {
-                top: parent.top
-                left: parent.left
-                right: parent.right
-                margins: 12
-            }
-            visible: root.showingBackground
-            height: 38
-            radius: 10
-            color: headerHover.hovered ? Theme.Palette.selection : Theme.Palette.surface
-
-            Text {
-                anchors.left: parent.left
-                anchors.leftMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                text: "←  Background applications"
-                color: Theme.Palette.foreground
-                font.family: "JetBrainsMono Nerd Font"
-                font.pixelSize: 12
-            }
-
-            HoverHandler {
-                id: headerHover
-                cursorShape: Qt.PointingHandCursor
-            }
-
-            TapHandler {
-                onTapped: backgroundPage.item?.back()
-            }
-
-            Behavior on color {
-                ColorAnimation { duration: 100 }
-            }
-        }
-
         ListView {
             id: results
 
@@ -191,13 +120,12 @@ Card {
                 top: searchFrame.bottom
                 left: parent.left
                 right: parent.right
-                bottom: backgroundFooter.top
+                bottom: parent.bottom
                 topMargin: 8
                 leftMargin: 12
                 rightMargin: 12
-                bottomMargin: backgroundFooter.visible ? 8 : 0
+                bottomMargin: 12
             }
-            visible: !root.showingBackground
             clip: true
             spacing: 4
             currentIndex: count > 0 ? 0 : -1
@@ -278,96 +206,6 @@ Card {
             }
         }
 
-        Rectangle {
-            id: backgroundFooter
-
-            anchors {
-                left: parent.left
-                right: parent.right
-                bottom: parent.bottom
-                leftMargin: 12
-                rightMargin: 12
-                bottomMargin: 12
-            }
-            visible: !root.showingBackground && search.text.length === 0
-                && root.backgroundCount > 0
-            activeFocusOnTab: visible
-            height: visible ? 38 : 0
-            radius: 10
-            color: footerHover.hovered || activeFocus
-                ? Theme.Palette.selection : Theme.Palette.surface
-            border.width: activeFocus ? 1 : 0
-            border.color: Theme.Palette.primary
-
-            Text {
-                anchors.left: parent.left
-                anchors.leftMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                text: "  Background applications"
-                color: Theme.Palette.foreground
-                font.family: "JetBrainsMono Nerd Font"
-                font.pixelSize: 11
-            }
-
-            Text {
-                anchors.right: parent.right
-                anchors.rightMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.backgroundCount + "  ›"
-                color: Theme.Palette.secondary
-                font.family: "JetBrainsMono Nerd Font"
-                font.pixelSize: 11
-            }
-
-            HoverHandler {
-                id: footerHover
-                cursorShape: Qt.PointingHandCursor
-            }
-
-            TapHandler {
-                onTapped: root.showBackground()
-            }
-
-            Keys.onReturnPressed: root.showBackground()
-            Keys.onEnterPressed: root.showBackground()
-            Keys.onSpacePressed: root.showBackground()
-
-            Behavior on color {
-                ColorAnimation { duration: 100 }
-            }
-        }
-
-        Loader {
-            id: backgroundPage
-
-            anchors {
-                top: backgroundHeader.bottom
-                left: parent.left
-                right: parent.right
-                bottom: parent.bottom
-                topMargin: 8
-                leftMargin: 12
-                rightMargin: 12
-                bottomMargin: 12
-            }
-            active: root.showingBackground
-            sourceComponent: BackgroundApps {
-                items: root.backgroundItems
-            }
-            onLoaded: item.focusInitial()
-        }
-
-        Connections {
-            target: backgroundPage.item
-
-            function onBackRequested() {
-                root.hideBackground()
-            }
-
-            function onHandoffRequested() {
-                root.handoffRequested()
-            }
-        }
     }
 
 }

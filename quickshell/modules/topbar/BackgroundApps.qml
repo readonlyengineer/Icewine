@@ -11,6 +11,8 @@ FocusScope {
     id: root
 
     property var items: []
+    property var selectedItem: null
+    readonly property Item initialFocus: activeItem ? menuEntries : apps
     property var activeItem: null
     property var menuPath: []
     readonly property var menuHandle: menuPath.length > 0
@@ -23,15 +25,30 @@ FocusScope {
     signal handoffRequested()
 
     function focusInitial() {
-        apps.currentIndex = apps.count > 0 ? 0 : -1
-        apps.forceActiveFocus()
+        initialFocus.forceActiveFocus()
     }
 
     function focusMenu() {
         Qt.callLater(() => {
+            if (!root.enabled || !root.visible || !root.activeItem) return
             menuEntries.currentIndex = firstMenuIndex()
             menuEntries.forceActiveFocus()
         })
+    }
+
+    function closeMenu() {
+        apps.activationKey = 0
+        menuEntries.activationKey = 0
+        activeItem = null
+        menuPath = []
+    }
+
+    function selectApp(index) {
+        selectedItem = items[index] ?? null
+    }
+
+    function moveApp(step) {
+        if (items.length) selectApp((apps.currentIndex + step + items.length) % items.length)
     }
 
     function firstMenuIndex() {
@@ -50,7 +67,7 @@ FocusScope {
     }
 
     function openItem(item) {
-        if (!item)
+        if (!enabled || !item || !items.includes(item))
             return
         if (!item.hasMenu) {
             item.activate()
@@ -64,7 +81,7 @@ FocusScope {
     }
 
     function trigger(entry) {
-        if (!entry || entry.isSeparator || !entry.enabled)
+        if (!enabled || !entry || entry.isSeparator || !entry.enabled)
             return
         if (entry.hasChildren) {
             menuPath = menuPath.concat([entry])
@@ -87,10 +104,14 @@ FocusScope {
         }
     }
 
+    onEnabledChanged: if (!enabled) closeMenu()
     onItemsChanged: {
-        if (!activeItem || items.indexOf(activeItem) === -1) {
-            activeItem = null
-            menuPath = []
+        apps.activationKey = 0
+        menuEntries.activationKey = 0
+        if (!items.includes(selectedItem)) selectApp(0)
+        if (activeItem && !items.includes(activeItem)) {
+            closeMenu()
+            if (enabled && activeFocus) focusInitial()
         }
     }
 
@@ -111,9 +132,10 @@ FocusScope {
         spacing: 4
         keyNavigationWraps: true
         model: root.items
+        currentIndex: root.items.indexOf(root.selectedItem)
 
-        Keys.onDownPressed: incrementCurrentIndex()
-        Keys.onUpPressed: decrementCurrentIndex()
+        Keys.onDownPressed: root.moveApp(1)
+        Keys.onUpPressed: root.moveApp(-1)
         Keys.onReturnPressed: event => { if (!event.isAutoRepeat) apps.activationKey = event.key }
         Keys.onEnterPressed: event => { if (!event.isAutoRepeat) apps.activationKey = event.key }
         Keys.onReleased: event => {
@@ -191,7 +213,7 @@ FocusScope {
                 cursorShape: Qt.PointingHandCursor
                 onHoveredChanged: {
                     if (hovered)
-                        apps.currentIndex = app.index
+                        root.selectApp(app.index)
                 }
             }
 

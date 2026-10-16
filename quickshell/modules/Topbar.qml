@@ -43,12 +43,13 @@ Scope {
     property string previousWindow: ""
     property var previousToplevel: null
     property int focusGeneration: 0
+    property int widgetFocusGeneration: 0
     property bool reportedRender: false
     property bool oskVisible: false
     property bool instantBarHide: false
 
     signal widgetDismissed()
-    signal focusWidgetRequested(string screenName)
+    signal focusWidgetRequested(string screenName, bool launcherRequest)
     signal rendered()
 
     function focusedScreenName() {
@@ -99,8 +100,12 @@ Scope {
         if (next === ui) return
         beginInteraction()
         ui = next
+        const generation = ++widgetFocusGeneration
         if (engaged)
-            Qt.callLater(() => root.focusWidgetRequested(root.ui.screen))
+            Qt.callLater(() => {
+                if (!root.sessionLocked && generation === root.widgetFocusGeneration)
+                    root.focusWidgetRequested(next.screen, page === "launcher")
+            })
     }
 
     function toggleSwitcher() {
@@ -124,12 +129,14 @@ Scope {
     }
 
     function dismissWidget() {
+        ++widgetFocusGeneration
         if (ui.engaged) radial?.drainInput()
         widgetDismissed()
         ui = State.reduce(ui, { type: "dismiss" })
     }
 
     function dismiss() {
+        ++widgetFocusGeneration
         if (ui.engaged) radial?.drainInput()
         widgetDismissed()
         ui = State.reduce(ui, { type: "reset" })
@@ -227,11 +234,14 @@ Scope {
                 : nowPlaying.hovered ? "media" : statusIcons.hoveredPage
             readonly property bool widgetHovered: launcher.hovered || statusPopout.hovered
 
-            function focusWidget() {
+            function focusWidget(launcherRequest) {
                 if (!widgetHere || !root.widgetEngaged)
                     return
                 if (switcher.item) switcher.item.forceActiveFocus()
-                else if (launcher.shown) launcher.focusInitial()
+                else if (launcher.shown) {
+                    if (launcherRequest) launcher.openLauncher()
+                    else launcher.focusInitial()
+                }
                 else statusPopout.focusInitial()
             }
 
@@ -423,8 +433,8 @@ Scope {
                     engaged: root.widgetEngaged
                     x: Math.max(8, surface.x)
                     y: root.barHeight + 4
-                    width: Math.min(400, panel.width - 16)
-                    height: Math.min(424, panel.height - y - 8)
+                    width: Math.min(implicitWidth, panel.width - 16)
+                    height: Math.min(implicitHeight, panel.height - y - 8)
                     onEngageRequested: root.engageWidget()
                     onDismissRequested: root.dismissWidget()
                     onHandoffRequested: root.handoff()
@@ -488,8 +498,8 @@ Scope {
             Connections {
                 target: root
                 function onWidgetDismissed() { previewOpen.stop() }
-                function onFocusWidgetRequested(screenName) {
-                    if (screenName === panel.screen.name) panel.focusWidget()
+                function onFocusWidgetRequested(screenName, launcherRequest) {
+                    if (screenName === panel.screen.name) panel.focusWidget(launcherRequest)
                 }
             }
         }

@@ -28,10 +28,13 @@ at (0, 0), with no geometry deduction. The existing two-card presentation uses
 existing 120ms reversible exchange. The stack clips the sweep and draws no
 frame or focus underline.
 
-The current supported compositions are one card and a pair, matching the
-existing desktop. Larger decks, dynamic removal/reordering during exchange,
-and user-configurable groupings require their own interaction design; they are
-not implemented guarantees. Keep the card list stable while exchanging.
+The supported compositions are one card and a pair. Changing membership cancels
+motion and pending motion-key activation, closes transient menus through
+`selectionChanging()`, and resets selection/front geometry to the first card.
+Focus returns to its `initialFocus` only if the available stack already owns
+focus. Use this for an optional second card; destroy it through its owner Loader.
+Nonempty content updates should retain the same card. Larger decks, reordering
+and user-configurable groupings require their own interaction design.
 
 Expose `initialFocus` as a control inside the card, or keep the shared
 `selector` default. Set `accessibleName` to identify the card. The stack exposes
@@ -102,12 +105,21 @@ needed. `StatusPopout` wraps its ordinary pages in one shared card, preserves
 page dependency injection, and retains its existing focused-control scroll
 reveal. Pages retain responsibility for their constrained Flickable/ListView.
 
-`LauncherCard` is reusable content with `initialFocus`, `focusInitial()`,
-`showBackground()`, `hideBackground()`, `showingBackground`, `excludeSteamApps`,
-`backgroundCount` and `backgroundAttention`. Set `engaged` from the host. Its
-`handoffRequested()` must reach the existing host handoff before application
-execution; rear/inactive launch requests are ignored. `Launcher.qml` is the
-ordinary single-card topbar host and keeps its previous 400×424 presentation.
+`LauncherCard` owns application search, `initialFocus`, `focusInitial()` and
+`excludeSteamApps`. Set `engaged` from the host. Its `handoffRequested()` must
+reach the existing host handoff before application execution; rear/inactive
+launch requests are ignored. `Launcher.qml` owns the existing tray model and
+exposes `backgroundCount`/`backgroundAttention`. It adds a Background Apps card
+only for nonempty tray contents. The single-card host remains 400×424; a pair
+adds the shared 34×64 allowance, constrained by the panel.
+
+Ordinary `Launcher.focusInitial()` follows the selected card, including its
+active menu. Explicit launcher requests call `openLauncher()`: this uses
+`CardStack.resetSelection()` to cancel motion, close the tray menu and focus
+search. Do not use that opening intent for generic focus restoration. Background
+Apps keeps app selection and active menus by item identity through nonempty
+updates, closes menus on inactivity/removal and cancels deferred menu focus
+when inactive.
 
 ## Register and compose
 
@@ -145,8 +157,9 @@ For a pair, use `cards: [launcher, companion]`, set both cards' `stack`, and set
 `companion.index: 1`. `tests/controls.py` contains an executable composition of
 `LauncherCard` and a companion card: it verifies one-card geometry at two sizes,
 shared exchange, selected focus/activity and launcher handoff through a mocked
-`uwsm`. Use that fixture when extending composition rather than introducing
-an unsolicited production launcher grouping.
+`uwsm`. The same check exercises the production launcher's optional tray card,
+identity-preserving updates, removal during motion and explicit-open focus routing.
+Use these fixtures when extending composition.
 
 Run `python3 tests/controls.py .` with the installed `qs` on PATH. This exercises
 real QML geometry, exchange/reversal, keyboard/touch selection, scrolling,

@@ -288,6 +288,102 @@ ShellRoot {
             }
         }
     }
+    Window {
+        id: backgroundWindow
+        width: 434; height: 488
+        property int activations: 0
+        property int handoffs: 0
+        property var trayItems: []
+        Bar.Launcher {
+            id: backgroundLauncher
+            anchors.fill: parent
+            engaged: true
+            backgroundItems: backgroundWindow.trayItems
+            onHandoffRequested: ++backgroundWindow.handoffs
+        }
+    }
+    function checkBackgroundCards() {
+        backgroundWindow.visible = true
+        backgroundWindow.requestActivate()
+        toggleKeys.tryCompare(backgroundWindow, "active", true)
+        const host = backgroundLauncher
+        const stack = descendants(host, item => item.cards !== undefined)[0]
+        const launcher = stack.cards[0]
+        host.openLauncher()
+        if (stack.cards.length !== 1 || host.implicitWidth !== 400 || host.implicitHeight !== 424
+                || launcher.x !== 0 || launcher.y !== 0 || !launcher.initialFocus.activeFocus)
+            throw new Error("Empty tray left a rear card or stack allowance")
+        const first = {id: "first", title: "First", icon: "", status: 0, hasMenu: false,
+            activate: () => ++backgroundWindow.activations}
+        const second = {id: "second", title: "Second", icon: "", status: 0, hasMenu: true, menu: null}
+        backgroundWindow.trayItems = [first, second]
+        toggleKeys.wait(30)
+        if (stack.cards.length !== 2 || host.implicitWidth !== 434 || host.implicitHeight !== 488)
+            throw new Error("First tray arrival failed optional-card creation")
+        const rear = stack.cards[1]
+        const apps = descendants(rear, item => item.selectedItem !== undefined)[0]
+        toggleKeys.mouseClick(rear, 8, 80)
+        toggleKeys.tryCompare(stack, "exchanging", false, 900)
+        if (stack.selectedCard !== 1 || backgroundWindow.activations || backgroundWindow.handoffs
+                || !apps.initialFocus.activeFocus)
+            throw new Error("Rear promotion activated an app or lost background focus")
+        host.focusInitial()
+        if (stack.selectedCard !== 1 || !apps.initialFocus.activeFocus)
+            throw new Error("Ordinary focus restoration reset the selected card")
+        apps.selectApp(1)
+        backgroundWindow.trayItems = [second, first]
+        toggleKeys.wait(30)
+        if (apps.selectedItem !== second || apps.initialFocus.currentIndex !== 0)
+            throw new Error("Tray reorder lost selected app identity")
+        apps.openItem(second)
+        host.openLauncher()
+        host.openLauncher()
+        toggleKeys.wait(20)
+        if (stack.selectedCard !== 0 || stack.exchanging || apps.activeItem || apps.menuPath.length
+                || !launcher.initialFocus.activeFocus)
+            throw new Error("Repeated explicit launcher open failed menu/focus reset")
+        stack.selectCard(1)
+        toggleKeys.wait(30)
+        host.openLauncher()
+        if (stack.exchanging || stack.frontCard !== 0 || !launcher.initialFocus.activeFocus)
+            throw new Error("Explicit open failed during exchange")
+        for (const duringMotion of [false, true]) {
+            stack.selectCard(1)
+            if (!duringMotion) toggleKeys.tryCompare(stack, "exchanging", false, 900)
+            if (duringMotion) stack.motionInitialFocus.forceActiveFocus()
+            toggleKeys.keyPress(Qt.Key_Return)
+            backgroundWindow.trayItems = []
+            toggleKeys.wait(30)
+            toggleKeys.keyRelease(Qt.Key_Return)
+            toggleKeys.wait(140)
+            if (stack.cards.length !== 1 || stack.selectedCard !== 0 || stack.frontCard !== 0
+                    || stack.exchanging || !launcher.initialFocus.activeFocus
+                    || backgroundWindow.activations || backgroundWindow.handoffs)
+                throw new Error("Last tray removal left stale motion, focus or activation")
+            backgroundWindow.trayItems = [first, second]
+            toggleKeys.wait(30)
+        }
+        stack.selectCard(1)
+        toggleKeys.tryCompare(stack, "exchanging", false, 900)
+        const currentApps = descendants(stack.cards[1], item => item.selectedItem !== undefined)[0]
+        currentApps.openItem(second)
+        toggleKeys.wait(20)
+        host.focusInitial()
+        if (stack.selectedCard !== 1 || !currentApps.initialFocus.activeFocus)
+            throw new Error("Ordinary focus restoration lost the active tray menu")
+        backgroundWindow.trayItems = [second, first]
+        toggleKeys.wait(20)
+        if (currentApps.activeItem !== second)
+            throw new Error("Nonempty tray reorder closed a valid active menu")
+        backgroundWindow.trayItems = [first]
+        toggleKeys.wait(30)
+        if (currentApps.activeItem || currentApps.menuPath.length || !currentApps.initialFocus.activeFocus)
+            throw new Error("Removed menu app failed to restore the app list")
+        currentApps.openItem(first)
+        if (backgroundWindow.activations !== 1 || backgroundWindow.handoffs !== 1)
+            throw new Error("Selected background app lost existing activation/handoff")
+        backgroundWindow.visible = false
+    }
     function checkSharedCards() {
         cardWindow.requestActivate()
         toggleKeys.tryCompare(cardWindow, "active", true)
@@ -1059,7 +1155,7 @@ ShellRoot {
                         || value < 0 || value > 100)
                     throw new Error("Live CPU/RAM sampling failed")
             }
-            try { root.checkSharedCards(); root.checkPopoutFocus(); root.checkTailscaleConnection(); root.checkTailscaleLifetime(); root.checkRetainedNetworkFocus() }
+            try { root.checkSharedCards(); root.checkBackgroundCards(); root.checkPopoutFocus(); root.checkTailscaleConnection(); root.checkTailscaleLifetime(); root.checkRetainedNetworkFocus() }
             catch (error) { console.error(error); Qt.exit(1); return }
             console.log("CONTROL_CHECK_PASSED")
             Qt.quit()

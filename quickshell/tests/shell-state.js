@@ -103,16 +103,76 @@ function controller(file, properties) {
     return context
 }
 
-const callbacks = [], focused = []
+const callbacks = [], focused = [], focusRequests = []
 const shell = controller("../modules/Topbar.qml", {
-    State, ui: State.initial(), hoveredScreen: "", sessionLocked: false,
-    interactionActive: false, previousWindow: "", previousToplevel: null, focusGeneration: 0,
+    State, focusWidgetRequested: (...args) => focusRequests.push(args), ui: State.initial(), hoveredScreen: "", sessionLocked: false,
+    interactionActive: false, previousWindow: "", previousToplevel: null, focusGeneration: 0, widgetFocusGeneration: 0,
     barVisible: false, radial: {dismiss() {}, drainInput() {}}, widgetDismissed() {},
     compositor: {activeWindowAddress: "original", toplevels: [{address: "original"}],
         activateWindow: address => focused.push(address), activateToplevel: window => focused.push(window)},
     Qt: {callLater: fn => callbacks.push(fn)}
 })
 const flush = () => { while (callbacks.length) callbacks.shift()() }
+for (let repeat = 0; repeat < 2; ++repeat) {
+    shell.openWidget("launcher", true, "external")
+    flush()
+}
+assert.deepEqual(focusRequests, [["external", true], ["external", true]],
+    "Every explicit launcher request carries opening intent, even while already open")
+for (const method of ["releaseBar", "pressBar", "engageWidget"]) {
+    focusRequests.length = 0
+    shell.openWidget("launcher", true, "external")
+    shell[method]()
+    flush()
+    assert.deepEqual(focusRequests, [["external", true]],
+        `${method} must preserve the pending explicit launcher request`)
+}
+for (const method of ["dismissWidget", "dismiss"]) {
+    focusRequests.length = 0
+    shell.openWidget("launcher", true, "external")
+    shell[method]()
+    flush()
+    assert.deepEqual(focusRequests, [], `${method} cancels pending widget focus`)
+    shell.openWidget("launcher", true, "external")
+    shell[method]()
+    shell.openWidget("launcher", true, "external")
+    flush()
+    assert.deepEqual(focusRequests, [["external", true]],
+        "Reopening the same target cannot revive its dismissed request")
+}
+focusRequests.length = 0
+shell.openWidget("launcher", true, "external")
+shell.sessionLocked = true
+flush()
+assert.deepEqual(focusRequests, [], "Lock suppresses queued widget focus")
+shell.sessionLocked = false
+shell.dismissWidget()
+shell.openWidget("launcher", true, "external")
+shell.openWidget("launcher", true, "deck")
+flush()
+assert.deepEqual(focusRequests, [["deck", true]], "A newer monitor target supersedes old focus")
+focusRequests.length = 0
+shell.openWidget("launcher", true, "external")
+shell.openWidget("audio", true, "deck")
+flush()
+assert.deepEqual(focusRequests, [["deck", false]], "A superseded request cannot reset another widget")
+shell.dismissWidget()
+flush()
+shell.openWidget("launcher", false, "external")
+flush()
+assert.equal(focusRequests.length, 1, "Hover does not request keyboard focus")
+shell.dismissWidget()
+flush()
+const panelFocus = topbar.match(/            function focusWidget\(launcherRequest\) \{[\s\S]*?^            \}/m)[0]
+const routes = []
+const panel = vm.createContext({widgetHere: true, root: {widgetEngaged: true},
+    switcher: {item: null}, launcher: {shown: true,
+        openLauncher: () => routes.push("open"), focusInitial: () => routes.push("restore")},
+    statusPopout: {focusInitial: () => routes.push("status")}})
+vm.runInContext(panelFocus, panel)
+panel.focusWidget(true)
+panel.focusWidget(false)
+assert.deepEqual(routes, ["open", "restore"], "Panel separates explicit launcher opening from focus restoration")
 shell.beginInteraction()
 shell.finishInteraction()
 flush()
