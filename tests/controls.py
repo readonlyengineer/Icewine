@@ -255,6 +255,74 @@ ShellRoot {
                 throw new Error(`${label}: focused control clipped: top=${top}, height=${item.height}, viewport=${scroll.height}`)
         }
     }
+    Window {
+        id: cardWindow
+        visible: true
+        width: 400; height: 424
+        property int handoffs: 0
+        Bar.CardStack {
+            id: launcherStack
+            anchors.fill: parent
+            cards: [launcherCard, companionCard]
+            Bar.LauncherCard {
+                id: launcherCard
+                stack: launcherStack
+                onHandoffRequested: ++cardWindow.handoffs
+            }
+            Bar.Card {
+                id: companionCard
+                index: 1
+                stack: launcherStack
+                implicitWidth: 400; implicitHeight: 424
+                initialFocus: companionButton
+                Popouts.ActionButton {
+                    id: companionButton
+                    text: "Companion"
+                    enabled: companionCard.active
+                    onClicked: launcherStack.selectCard(0)
+                }
+            }
+        }
+    }
+    function checkSharedCards() {
+        cardWindow.requestActivate()
+        toggleKeys.tryCompare(cardWindow, "active", true)
+        launcherStack.cards = [launcherCard]
+        toggleKeys.wait(20)
+        if (launcherCard.x !== 0 || launcherCard.y !== 0 || launcherCard.width !== 400
+                || launcherCard.height !== 424 || launcherCard.radius !== 12
+                || launcherCard.border.width !== 0
+                || launcherCard.color.toString() !== Theme.Palette.backgroundDark.toString())
+            throw new Error("Single launcher card changed its geometry or surface")
+        launcherCard.focusInitial()
+        if (!launcherCard.initialFocus.activeFocus) throw new Error("Launcher focus entry failed")
+        launcherStack.cards = [launcherCard, companionCard]
+        toggleKeys.wait(20)
+        if (launcherCard.width !== 366 || launcherCard.height !== 360
+                || launcherCard.x !== 26 || launcherCard.y !== 56 || companionCard.active)
+            throw new Error("Launcher did not compose through shared stack geometry")
+        launcherStack.selectCard(1)
+        toggleKeys.tryCompare(launcherStack, "exchanging", false, 900)
+        if (launcherCard.active || !companionCard.active || !companionButton.activeFocus)
+            throw new Error("Shared stack selection did not transfer focus/activity")
+        launcherCard.launch({command: ["fixture-card"]})
+        if (cardWindow.handoffs !== 0) throw new Error("Rear launcher dispatched a handoff")
+        launcherStack.selectCard(0)
+        toggleKeys.tryCompare(launcherStack, "exchanging", false, 900)
+        launcherCard.launch({command: ["fixture-card"]})
+        if (cardWindow.handoffs !== 1) throw new Error("Selected launcher lost handoff")
+        launcherStack.enabled = false
+        if (launcherCard.active || companionCard.active) throw new Error("Disabled stack remained active")
+        launcherStack.enabled = true
+        for (const size of [[400, 424], [170, 90]]) {
+            cardWindow.width = size[0]; cardWindow.height = size[1]
+            launcherStack.cards = [launcherCard]
+            toggleKeys.wait(20)
+            if (launcherCard.width !== size[0] || launcherCard.height !== size[1])
+                throw new Error("Single-card constraints added an inset")
+        }
+        cardWindow.visible = false
+    }
     function checkPopoutFocus() {
         focusWindow.requestActivate()
         toggleKeys.tryCompare(focusWindow, "active", true)
@@ -264,6 +332,12 @@ ShellRoot {
         toggleKeys.wait(20)
         const play = root.findAccessible(focusPopout, "Play")
         assertRevealed(play, "Media initial")
+        const surface = focusPopout.currentItem.parent.parent
+        if (surface.x !== 0 || surface.y !== 0 || surface.width !== focusPopout.width
+                || surface.height !== focusPopout.height || surface.radius !== 12
+                || surface.border.width !== 0
+                || surface.color.toString() !== Theme.Palette.backgroundDark.toString())
+            throw new Error("Single status page acquired extra surface geometry")
         focusWindow.height = 100
         toggleKeys.wait(20)
         assertRevealed(play, "Media resized")
@@ -547,6 +621,7 @@ ShellRoot {
                 throw new Error("Reconnection lost the saved exit-node preference")
         }
     }
+    FileView { id: tailscaleRelease; path: Qt.resolvedUrl("tailscale-release") }
     FileView { id: tailscaleMode; path: Qt.resolvedUrl("tailscale-mode") }
     function checkTailscaleLifetime() {
         const connection = root.findAccessible(networkPages, "Tailscale connection")
@@ -564,15 +639,16 @@ ShellRoot {
         cards.selectCard(1)
         settleCards(cards)
         networkPages.shown = false
-        networkKeys.wait(200) // Outlast the real close animation, while the one-second command is pending.
+        networkKeys.wait(200) // Outlast close; the fake command waits for explicit release below.
         if (networkPages.visible || page.active || !page.busy || page.request !== pending)
-            throw new Error("Closing StatusPopout discarded or continued polling its pending network page")
+            throw new Error(`Closing StatusPopout pending page: visible=${networkPages.visible}, active=${page.active}, busy=${page.busy}, retained=${page.request === pending}, progress=${cards.progress}`)
         networkPages.shown = true
         networkKeys.wait(30)
         if (root.findAccessible(networkPages, "Tailscale connection") !== connection
                 || page.request !== pending || connection.enabled)
             throw new Error("Reopening StatusPopout replaced the request owner or allowed a duplicate mutation")
         page.toggleConnection()
+        tailscaleRelease.setText("go")
         networkKeys.tryCompare(page, "busy", false)
         networkKeys.tryCompare(page, "confirming", "")
         if (page.data.state !== "Stopped" || page.error)
@@ -954,7 +1030,7 @@ ShellRoot {
                         || value < 0 || value > 100)
                     throw new Error("Live CPU/RAM sampling failed")
             }
-            try { root.checkPopoutFocus(); root.checkTailscaleConnection(); root.checkTailscaleLifetime(); root.checkRetainedNetworkFocus() }
+            try { root.checkSharedCards(); root.checkPopoutFocus(); root.checkTailscaleConnection(); root.checkTailscaleLifetime(); root.checkRetainedNetworkFocus() }
             catch (error) { console.error(error); Qt.exit(1); return }
             console.log("CONTROL_CHECK_PASSED")
             Qt.quit()
@@ -1247,6 +1323,9 @@ with tempfile.TemporaryDirectory() as directory:
                          + '" ]; then exit 1; fi\ntouch "' + str(root / "shortcuts-read")
                          + '"\necho \'[["demo"]]\'\n')
     shortcuts.chmod(0o755)
+    uwsm = root / "bin/uwsm"
+    uwsm.write_text("#!" + shutil.which("bash") + "\nexit 0\n")
+    uwsm.chmod(0o755)
     service = root / "bin/systemctl"
     service.write_text("#!" + shutil.which("bash") + '\nprintf "LoadState=not-found\\nMainPID=0\\n"\n')
     service.chmod(0o755)
@@ -1276,7 +1355,9 @@ with tempfile.TemporaryDirectory() as directory:
         "'ExitNodeStatus': {'ID': 'fixture-sydney-best' if selection == 'city' else 'fixture-exit', 'Online': True} if selected else None}))\n" +
         "elif sys.argv[1:] == ['up']: time.sleep(0.1); backend.write_text('Running')\n" +
         "elif sys.argv[1:] == ['down']:\n" +
-        " time.sleep(1 if mode else 0.1)\n" +
+        " if mode == 'success':\n" +
+        "  while not (mode_file.parent / 'tailscale-release').exists(): time.sleep(0.01)\n" +
+        " else: time.sleep(1 if mode else 0.1)\n" +
         " if mode == 'failure': print('request failed', file=sys.stderr); sys.exit(1)\n" +
         " backend.write_text('Stopped')\n" +
         " if mode == 'profile': profile.write_text('fixture-other')\n" +

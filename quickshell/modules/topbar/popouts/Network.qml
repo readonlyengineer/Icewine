@@ -7,7 +7,7 @@ import "StatusModel.js" as StatusModel
 import ".." as Bar
 import qs.icewine.theme as Theme
 
-FocusScope {
+Bar.CardStack {
     id: root
 
     required property var metrics
@@ -15,85 +15,10 @@ FocusScope {
         passwordNetwork ? passwordContent.implicitHeight + 36 : 0)
     clip: true
 
-    readonly property Item initialFocus: passwordNetwork ? password : exchanging ? motionFocus
-        : selectedCard === 0 ? networkCard.selector : tailscaleCard.selector
-    property int selectedCard: 0
-    property int frontCard: 0
-    property int outgoingCard: 0
-    property real progress: 0
-    property bool exchanging: false
-    readonly property bool available: visible && enabled && !passwordNetwork
-
-    function selectCard(index) {
-        if (!available) return
-        if (selectedCard === index) {
-            if (exchanging && root.activeFocus) motionFocus.forceActiveFocus()
-            return
-        }
-        tailscale.closeMenus()
-        if (root.activeFocus) motionFocus.forceActiveFocus()
-        exchange.stop()
-        if (!exchanging) {
-            outgoingCard = frontCard
-            progress = 0
-        }
-        selectedCard = index
-        exchanging = true
-        exchange.to = index === outgoingCard ? 0 : 1
-        exchange.duration = 560 * Math.abs(exchange.to - progress)
-        if (exchange.duration === 0) finishExchange()
-        else exchange.start()
-    }
-
-    function finishExchange() {
-        exchange.stop()
-        frontCard = selectedCard
-        exchanging = false
-        progress = 0
-        if (available && motionFocus.activeFocus) initialFocus.forceActiveFocus()
-    }
-
-    function inOutCubic(t) {
-        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
-    }
-
-    NumberAnimation {
-        id: exchange
-        target: root
-        property: "progress"
-        easing.type: Easing.Linear
-        onFinished: root.finishExchange()
-    }
-
-    // A stationary keyboard target while either title may be clipped by the sweep.
-    Item {
-        id: motionFocus
-        anchors.fill: parent
-        property int activationKey: 0
-        onActiveFocusChanged: if (!activeFocus) activationKey = 0
-        Keys.onPressed: event => {
-            if (![Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space].includes(event.key)) return
-            event.accepted = true
-            if (!event.isAutoRepeat) activationKey = event.key
-        }
-        Keys.onReleased: event => {
-            if (event.isAutoRepeat || event.key !== activationKey) return
-            event.accepted = true
-            activationKey = 0
-            root.selectCard(1 - root.selectedCard)
-        }
-    }
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: 2
-        z: 3
-        visible: motionFocus.activeFocus
-        radius: 12
-        color: "transparent"
-        border.width: 2
-        border.color: Theme.Palette.secondary
-    }
-
+    initialFocus: passwordNetwork ? password : exchanging ? motionInitialFocus : selectedCard === 0 ? networkCard.selector : tailscaleCard.selector
+    available: visible && enabled && !passwordNetwork
+    cards: [networkCard, tailscaleCard]
+    onSelectionChanging: tailscale.closeMenus()
     readonly property var wifiDevice: Networking.devices.values.find(device =>
         device.type === DeviceType.Wifi) ?? null
     readonly property var wifiNetworks: wifiDevice
@@ -143,7 +68,6 @@ FocusScope {
         if (!available) {
             scanRestart.stop()
             tailscale.closeMenus()
-            if (exchanging) finishExchange()
         }
     }
     onSelectedCardChanged: {
@@ -200,34 +124,16 @@ FocusScope {
         onTriggered: root.setScanning(true)
     }
 
-    // Two real consumers share geometry locally; page/service ownership stays unchanged.
-    component Card: Rectangle {
+    // Network keeps its title controls and service ownership; shared cards supply geometry.
+    component NetworkCard: Bar.Card {
         id: card
-        required property int index
         required property string title
         required property color titleColor
         property alias selector: heading
         default property alias contentData: body.data
-        readonly property bool outgoing: index === root.outgoingCard
-        readonly property real advance: root.inOutCubic(root.progress)
-        readonly property real sweep: root.progress < 0.5 ? root.inOutCubic(root.progress * 2)
-            : 1 - Math.pow(1 - (root.progress - 0.5) * 2, 3)
-        width: Math.max(0, root.width - 34)
-        height: Math.max(0, root.height - 64)
-        x: 8 + (!root.exchanging ? (index === root.frontCard ? 18 : 0)
-            : !outgoing ? 18 * advance
-            : root.progress < 0.5 ? 18 + (-width - 30) * sweep : (-width - 12) * (1 - sweep))
-        y: 8 + (!root.exchanging ? (index === root.frontCard ? 48 : 0)
-            : !outgoing ? 48 * advance
-            : root.progress < 0.5 ? 48 - 24 * sweep : 24 * (1 - sweep))
-        // The outgoing card clears the clipped host before this handoff, also in reverse.
-        z: !root.exchanging ? (index === root.frontCard ? 2 : 1)
-            : outgoing === (root.progress < 0.5) ? 2 : 1
-        radius: 12
-        color: Theme.Palette.backgroundDark
+        stack: root
         border.width: 1
         border.color: Theme.Palette.border
-        clip: true
         enabled: !root.passwordNetwork
         MouseArea {
             anchors.fill: parent
@@ -276,9 +182,8 @@ FocusScope {
         }
     }
 
-    Card {
+    NetworkCard {
         id: networkCard
-        index: 0
         title: "Networking"
         titleColor: Theme.Palette.success
     Flickable {
@@ -378,7 +283,7 @@ FocusScope {
     }
 
     }
-    Card {
+    NetworkCard {
         id: tailscaleCard
         index: 1
         title: "Tailscale"

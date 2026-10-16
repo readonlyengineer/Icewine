@@ -66,34 +66,39 @@ Widget {
     width: 380
     implicitHeight: Math.min(620, root.currentItem?.implicitHeight ?? 0)
 
-    Rectangle {
+    CardStack {
         anchors.fill: parent
-        radius: 12
-        color: Theme.Palette.backgroundDark
-
-        Loader {
-            id: pageLoader
-            anchors.fill: parent
-            active: root.visible && root.currentPage !== "network"
-            sourceComponent: root.currentPage === "audio" ? audioPage
-                : root.currentPage === "performance" ? performancePage
-                : root.currentPage === "network" ? null
-                : root.currentPage === "layout" ? layoutPage
-                        : root.currentPage === "bluetooth" ? bluetoothPage
-                        : root.currentPage === "battery" ? batteryPage
-                            : root.currentPage === "screenshot" ? screenshotPage
-                            : root.currentPage === "media" ? mediaPage : notificationsPage
+        cards: [pageCard]
+        visible: root.currentPage !== "network"
+        Card {
+            id: pageCard
+            stack: parent
+            implicitHeight: pageLoader.item?.implicitHeight ?? 0
+            initialFocus: pageLoader.item?.initialFocus ?? null
+            Loader {
+                id: pageLoader
+                anchors.fill: parent
+                active: root.visible && root.currentPage !== "network"
+                sourceComponent: root.currentPage === "audio" ? audioPage
+                    : root.currentPage === "performance" ? performancePage
+                    : root.currentPage === "network" ? null
+                    : root.currentPage === "layout" ? layoutPage
+                            : root.currentPage === "bluetooth" ? bluetoothPage
+                            : root.currentPage === "battery" ? batteryPage
+                                : root.currentPage === "screenshot" ? screenshotPage
+                                : root.currentPage === "media" ? mediaPage : notificationsPage
+            }
         }
-        // Network owns asynchronous mutations and their feedback across popout/page changes.
-        Loader {
-            id: networkLoader
-            anchors.fill: parent
-            active: root.visible && root.currentPage === "network"
-            visible: root.currentPage === "network"
-            sourceComponent: networkPage
-            // Replace the visibility binding after first load to retain the operation owner.
-            onLoaded: active = true
-        }
+    }
+    // Network owns asynchronous mutations and their feedback across popout/page changes.
+    Loader {
+        id: networkLoader
+        anchors.fill: parent
+        active: root.visible && root.currentPage === "network"
+        visible: root.currentPage === "network"
+        sourceComponent: networkPage
+        // Replace the visibility binding after first load to retain the operation owner.
+        onLoaded: active = true
     }
 
     Component {

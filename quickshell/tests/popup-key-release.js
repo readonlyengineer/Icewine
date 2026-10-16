@@ -5,7 +5,7 @@ const path = require("node:path")
 const vm = require("node:vm")
 
 const cases = [
-    ["Launcher.qml", "search", "launchKey", ["Return", "Enter"], "launch"],
+    ["LauncherCard.qml", "search", "launchKey", ["Return", "Enter"], "launch"],
     ["Widget.qml", "viewport", "escapeHeld", ["Escape"], "dismissRequested"],
     ["BackgroundApps.qml", "apps", "activationKey", ["Return", "Enter"], "openItem"],
     ["BackgroundApps.qml", "menuEntries", "activationKey", ["Return", "Enter", "Right"], "trigger"],
