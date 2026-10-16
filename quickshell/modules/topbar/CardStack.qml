@@ -64,7 +64,7 @@ FocusScope {
         onFinished: root.finishExchange()
     }
 
-    // A stationary keyboard target while either title may be clipped by the sweep.
+    // A stationary keyboard target while either card may be clipped by the sweep.
     Item {
         id: motionFocus
         anchors.fill: parent
@@ -83,14 +83,11 @@ FocusScope {
         }
     }
     Rectangle {
-        anchors.fill: parent
-        anchors.margins: 2
+        x: 12; y: 41
+        width: 24; height: 3
         z: 3
         visible: motionFocus.activeFocus
-        radius: 12
-        color: "transparent"
-        border.width: 2
-        border.color: Theme.Palette.secondary
+        color: Theme.Palette.secondary
     }
 
 }

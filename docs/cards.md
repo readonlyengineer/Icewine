@@ -8,15 +8,16 @@ These are first-party QML components, not a plugin API or dynamic registry.
 This is the implemented card contract. The separate style-guide ticket owns
 `widget-plugin-standard.md` and the other draft guides; its draft card guidance
 is superseded by this document pending that ticket's link/update. Do not copy
-its proposed plugin/service framework into a card. A future borderless/header
-ticket may revise surface decoration and selection; neither is a permanent API.
+its proposed plugin/service framework into a card. The separate arrow-navigation
+ticket will revise keyboard selection.
 
 ## Surface and content
 
 Create a `Card`, give it natural `implicitWidth`/`implicitHeight`, and place
 content inside it. Cards default to the existing dark background, radius 12,
-no border and rectangular clipping. Network opts into its existing 1px border
-and title controls. There is no mandatory title, content inset or new decoration.
+no border and rectangular clipping. Titles are plain text without hover/selection
+fill or a border. Do not add a
+decorative card border. There is no mandatory title or content inset.
 Content keeps its own established margins and scrolling. Card clipping bounds
 children to the card; it does not create a rounded mask.
 
@@ -26,19 +27,27 @@ The host supplies the stack's actual width and height. A single card fills it
 at (0, 0), with no geometry deduction. The existing two-card presentation uses
 34px horizontal and 64px vertical allowance, an 18px/48px front offset, and the
 existing 560ms reversible exchange. The stack clips the sweep and draws only a
-transient keyboard focus indicator during exchange, never a resting frame.
+short stationary keyboard focus mark during exchange, never a frame.
 
 The current supported compositions are one card and a pair, matching the
 existing desktop. Larger decks, dynamic removal/reordering during exchange,
 and user-configurable groupings require their own interaction design; they are
 not implemented guarantees. Keep the card list stable while exchanging.
 
-Expose `initialFocus` as a control inside the card. The stack exposes
+Expose `initialFocus` as a control inside the card, or keep the shared
+`selector` default. Set `accessibleName` to identify the card. The stack exposes
 `initialFocus` for its selected card, or a stationary target during motion.
 Call `selectCard(index)` to exchange cards; do not assign `selectedCard`
-directly. Selection occurs only through explicit controls: Network keeps its
-existing title buttons. Hover, focus and arrow keys do not select cards.
-Return, Enter and Space on the stationary motion target select on release.
+directly. Clicking any exposed rear-card surface promotes it, consuming the
+gesture
+without activating content. The shared card intercepts rear/moving input above
+content; front controls keep normal input and front title clicks do nothing.
+Keep content below that selection interception (`z: 100`). Hover, focus and
+arrow keys do not select cards. Until arrow navigation lands, the shared
+`selector` remains a Tab-accessible radio target: Return, Enter and Space select
+its card on release. Its short underline marks keyboard focus without framing
+the title or card. The stationary motion target uses the same keys to cycle on
+release. Keep a valid focus target even if the card has no enabled controls.
 `selectionChanging()` lets an owner close transient menus before motion.
 
 ## Visibility, services and host ownership

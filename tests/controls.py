@@ -260,17 +260,20 @@ ShellRoot {
         visible: true
         width: 400; height: 424
         property int handoffs: 0
+        property int companionCalls: 0
         Bar.CardStack {
             id: launcherStack
             anchors.fill: parent
             cards: [launcherCard, companionCard]
             Bar.LauncherCard {
                 id: launcherCard
+                accessibleName: "Launcher card"
                 stack: launcherStack
                 onHandoffRequested: ++cardWindow.handoffs
             }
             Bar.Card {
                 id: companionCard
+                accessibleName: "Companion card"
                 index: 1
                 stack: launcherStack
                 implicitWidth: 400; implicitHeight: 424
@@ -278,8 +281,9 @@ ShellRoot {
                 Popouts.ActionButton {
                     id: companionButton
                     text: "Companion"
+                    x: 0; y: 60; width: 24; height: 70
                     enabled: companionCard.active
-                    onClicked: launcherStack.selectCard(0)
+                    onClicked: ++cardWindow.companionCalls
                 }
             }
         }
@@ -301,6 +305,17 @@ ShellRoot {
         if (launcherCard.width !== 366 || launcherCard.height !== 360
                 || launcherCard.x !== 26 || launcherCard.y !== 56 || companionCard.active)
             throw new Error("Launcher did not compose through shared stack geometry")
+        // The exposed rear body lies over a real control, but promotes only.
+        toggleKeys.mouseClick(companionCard, 8, 80)
+        toggleKeys.tryCompare(launcherStack, "exchanging", false, 900)
+        if (launcherStack.selectedCard !== 1 || cardWindow.companionCalls !== 0)
+            throw new Error("Rear body click failed selection-only routing")
+        toggleKeys.mouseClick(companionButton, 8, 20)
+        if (cardWindow.companionCalls !== 1)
+            throw new Error("Selected card control lost normal pointer input")
+        toggleKeys.mouseClick(companionCard, 40, 20)
+        if (launcherStack.selectedCard !== 1 || launcherStack.exchanging)
+            throw new Error("Front title/body click cycled the stack")
         launcherStack.selectCard(1)
         toggleKeys.tryCompare(launcherStack, "exchanging", false, 900)
         if (launcherCard.active || !companionCard.active || !companionButton.activeFocus)
@@ -415,6 +430,7 @@ ShellRoot {
         root.items = []
         root.count = 0
     }
+    function selectCardTarget(target) { target.parent.stack.selectCard(target.parent.index) }
     function checkNetworkCards(selected, other, page) {
         const front = selected.parent
         const rear = other.parent
@@ -427,8 +443,12 @@ ShellRoot {
                     || card.y + card.height > page.height || !card.clip)
                 throw new Error("Resting card exceeds constrained host")
         }
+        if (!selected.Accessible.checkable || selected.Accessible.checked !== selected.checked
+                || other.Accessible.checked !== other.checked)
+            throw new Error("Shared card selection lost accessible state")
         if (!selected.activeFocus || !selected.checked || other.checked
-                || !selected.background.children[0].visible || !body.enabled
+                || !front.children.find(item => item.z === 101)?.visible || !body.enabled
+                || front.border.width !== 0 || rear.border.width !== 0
                 || descendants(rear, item => item instanceof Flickable)[0].enabled)
             throw new Error("Card input, selection or focus ownership is incorrect")
         if (body.height <= 0 || !body.clip)
@@ -440,6 +460,16 @@ ShellRoot {
     function checkCardMotion(page, first, second) {
         const wifi = descendants(first.parent, item => item instanceof Flickable)[0]
         const tailscale = descendants(second.parent, item => item instanceof Flickable)[0]
+        first.forceActiveFocus()
+        networkKeys.keyPress(Qt.Key_Space)
+        const toggle = root.findVisible(first.parent, item => item.text === "Wi-Fi" && item.checked !== undefined)
+        toggle.forceActiveFocus()
+        networkKeys.keyRelease(Qt.Key_Space)
+        if (page.selectedCard !== 0 || page.exchanging)
+            throw new Error("Focus interruption activated a stale selection key")
+        first.forceActiveFocus()
+        for (let i = 0; i < 30 && !second.activeFocus; ++i) networkKeys.keyClick(Qt.Key_Tab)
+        if (!second.activeFocus) throw new Error("Rear card is missing from keyboard focus traversal")
         // Mere hover, keyboard focus and arrow navigation must not select a card.
         networkKeys.mouseMove(second, 40, 20)
         second.forceActiveFocus()
@@ -460,7 +490,7 @@ ShellRoot {
             networkPages.focusInitial()
             const focus = networkWindow.activeFocusItem
             const point = focus.mapToItem(page, 0, 0)
-            const outline = page.children.find(item => item.z === 3 && item.border?.width === 2)
+            const outline = page.children.find(item => item.z === 3 && item.height === 3)
             if (focus !== stationary || page.initialFocus !== stationary || !focus.activeFocus
                     || !focus.visible || !focus.enabled || !outline?.visible
                     || point.x < 0 || point.y < 0 || point.x + focus.width > page.width
@@ -512,19 +542,19 @@ ShellRoot {
         networkKeys.keyRelease(Qt.Key_Enter)
         if (page.selectedCard !== 1) throw new Error("Motion reversal did not act on release")
         settleCards(page)
-        first.click()
+        selectCardTarget(first)
         settleCards(page)
         first.forceActiveFocus()
         checkNetworkCards(first, second, page)
         // A half-exchanged retained page stops moving/scanning immediately when dismissed.
-        second.click()
+        selectCardTarget(second)
         networkKeys.wait(100)
         networkPages.shown = false
         if (page.exchanging || page.wifiDevice.scannerEnabled || tailscale.active)
             throw new Error("Hidden/closing card kept animation, scanning or polling")
         networkPages.shown = true
         networkKeys.wait(30)
-        first.click()
+        selectCardTarget(first)
         settleCards(page)
         first.forceActiveFocus()
     }
@@ -536,7 +566,7 @@ ShellRoot {
             if (!Theme.Palette.refresh()) throw new Error("Card theme refresh failed")
             networkKeys.wait(220)
             for (const [selected, other] of [[first, second], [second, first]]) {
-                selected.click()
+                selectCardTarget(selected)
                 settleCards(page)
                 selected.forceActiveFocus()
                 for (const width of [380, 320]) {
@@ -549,8 +579,8 @@ ShellRoot {
                         checkNetworkCards(selected, other, page)
                         if (page.implicitHeight !== naturalHeight)
                             throw new Error("Constrained card height fed back into natural measurement")
-                        if (first.contentItem.color.toString() !== Theme.Palette.success.toString()
-                                || second.contentItem.color.toString() !== Theme.Palette.secondary.toString())
+                        if (descendants(first.parent, item => item.text === "Networking")[0].color.toString() !== Theme.Palette.success.toString()
+                                || descendants(second.parent, item => item.text === "Tailscale")[0].color.toString() !== Theme.Palette.secondary.toString())
                             throw new Error("Card titles did not follow theme roles")
                         const image = networkKeys.grabImage(page)
                         for (const [card, dy] of [[selected.parent, 48], [other.parent, 46]]) {
@@ -564,7 +594,7 @@ ShellRoot {
         networkWindow.height = 150
         Theme.Palette.file.setText(cardDarkPalette.text())
         if (!Theme.Palette.refresh()) throw new Error("Card theme restore failed")
-        first.click()
+        selectCardTarget(first)
         settleCards(page)
         first.forceActiveFocus()
     }
@@ -572,7 +602,7 @@ ShellRoot {
     function checkTailscaleConnection() {
         networkWindow.requestActivate()
         networkKeys.tryCompare(networkWindow, "active", true)
-        root.findAccessible(networkPages, "Tailscale card").click()
+        selectCardTarget(root.findAccessible(networkPages, "Tailscale card"))
         settleCards(networkPages.currentItem)
         const picker = root.findAccessible(networkPages, "Exit node")
         const page = picker.parent.parent.parent
@@ -639,7 +669,8 @@ ShellRoot {
         cards.selectCard(1)
         settleCards(cards)
         networkPages.shown = false
-        networkKeys.wait(200) // Outlast close; the fake command waits for explicit release below.
+        // Wait for the real close animation; the fake command awaits release below.
+        networkKeys.tryCompare(networkPages, "visible", false, 1000)
         if (networkPages.visible || page.active || !page.busy || page.request !== pending)
             throw new Error(`Closing StatusPopout pending page: visible=${networkPages.visible}, active=${page.active}, busy=${page.busy}, retained=${page.request === pending}, progress=${cards.progress}`)
         networkPages.shown = true
@@ -690,7 +721,7 @@ ShellRoot {
                 || !page.error.includes("profile changed") || page.data.self !== "fixture-other")
             throw new Error("Profile-change confirmation was lost across popout and page replacement")
         const networking = root.findAccessible(networkPages, "Networking card")
-        networking.click()
+        selectCardTarget(networking)
         settleCards(networkPages.currentItem)
         let networkPage = networking
         while (networkPage && networkPage.wifiDevice === undefined) networkPage = networkPage.parent
@@ -769,8 +800,8 @@ ShellRoot {
             const tabCentre = firstTab.mapToItem(networkPage, firstTab.width / 2, firstTab.height / 2)
             if (networkPage.childAt(tabCentre.x, tabCentre.y) !== password.parent.parent.parent)
                 throw new Error("Password overlay must remain above both cards")
-            firstTab.click()
-            secondTab.click()
+            selectCardTarget(firstTab)
+            selectCardTarget(secondTab)
             if (networkPage.selectedCard !== 0 || networkPage.exchanging
                     || firstTab.enabled || secondTab.enabled || networkPage.wifiDevice.scannerEnabled)
                 throw new Error("Password overlay did not suppress card input/scanning")
@@ -818,7 +849,7 @@ ShellRoot {
             networkKeys.tryCompare(closureCountry, "visible", false)
             networkKeys.tryCompare(closureMenu, "visible", false)
             root.settleCards(networkPage)
-            secondTab.click()
+            selectCardTarget(secondTab)
             root.settleCards(networkPage)
             picker.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Space)

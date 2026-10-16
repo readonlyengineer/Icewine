@@ -124,56 +124,27 @@ Bar.CardStack {
         onTriggered: root.setScanning(true)
     }
 
-    // Network keeps its title controls and service ownership; shared cards supply geometry.
+    // Network keeps its content and service ownership; shared cards supply selection.
     component NetworkCard: Bar.Card {
         id: card
         required property string title
         required property color titleColor
-        property alias selector: heading
+        accessibleName: title + " card"
         default property alias contentData: body.data
         stack: root
-        border.width: 1
-        border.color: Theme.Palette.border
         enabled: !root.passwordNetwork
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.AllButtons
-            onWheel: event => event.accepted = true
-        }
-        ActionButton {
+        Text {
             id: heading
             width: parent.width
             height: 44
             text: card.title
-            checked: root.selectedCard === card.index
-            focusPolicy: root.exchanging ? Qt.ClickFocus : Qt.StrongFocus
-            Accessible.name: card.title + " card"
-            Accessible.checkable: true
-            Accessible.checked: checked
+            color: card.titleColor
+            font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true
-            onClicked: root.selectCard(card.index)
-            background: Rectangle {
-                radius: 12
-                color: heading.hovered ? Theme.Palette.surface : Theme.Palette.backgroundDark
-                Rectangle {
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    visible: heading.activeFocus
-                    radius: 8
-                    color: "transparent"
-                    border.width: 2
-                    border.color: Theme.Palette.secondary
-                }
-            }
-            contentItem: Text {
-                text: heading.text
-                color: card.titleColor
-                font: heading.font
-                leftPadding: 12
-                verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
-            }
+            leftPadding: 12
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
         }
         Item {
             id: body
