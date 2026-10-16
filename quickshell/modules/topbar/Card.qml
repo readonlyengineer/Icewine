@@ -8,6 +8,8 @@ Rectangle {
     property CardStack stack: null
     property int index: 0
     property Item initialFocus: selector
+    // Reserve custom arrow owners (and their descendants), including ignored endpoints.
+    property list<Item> arrowKeyOwners
     property string accessibleName: "Card"
     readonly property alias selector: selector
     readonly property bool selected: !stack || stack.selectedCard === index
@@ -32,7 +34,7 @@ Rectangle {
     z: !stack ? 0 : !card.stack.exchanging ? (card.index === card.stack.frontCard ? 2 : 1)
         : outgoing === (card.stack.progress < 0.5) ? 2 : 1
 
-    // Keep keyboard selection available until stack arrow navigation replaces it.
+    // Explicit keyboard selection and a plain target for stack arrow navigation.
     Item {
         id: selector
         width: parent.width

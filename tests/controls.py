@@ -470,13 +470,12 @@ ShellRoot {
         first.forceActiveFocus()
         for (let i = 0; i < 30 && !second.activeFocus; ++i) networkKeys.keyClick(Qt.Key_Tab)
         if (!second.activeFocus) throw new Error("Rear card is missing from keyboard focus traversal")
-        // Mere hover, keyboard focus and arrow navigation must not select a card.
+        // Mere hover and keyboard focus must not select a card.
         networkKeys.mouseMove(second, 40, 20)
         second.forceActiveFocus()
-        networkKeys.keyClick(Qt.Key_Right)
         networkKeys.wait(30)
         if (page.selectedCard !== 0 || page.exchanging)
-            throw new Error("Hover/focus/arrow selected the alternate card")
+            throw new Error("Hover/focus selected the alternate card")
         // Real click and early reversal, with both bodies inert and focus stationary.
         networkKeys.mouseClick(second, 40, 20)
         networkKeys.wait(150)
@@ -1071,6 +1070,256 @@ ShellRoot {
 """
 
 # Separate run so rendering waits cannot disturb the metric/lifecycle timers.
+ARROW_QML = """import QtQuick
+import QtQuick.Controls
+import QtQuick.Window
+import QtTest
+import Quickshell
+import "icewine/modules/topbar" as Bar
+import "icewine/modules/topbar/popouts" as Popouts
+ShellRoot {
+    Window {
+        id: window
+        visible: true
+        width: 500; height: 600
+        property int activations: 0
+        Item {
+            anchors.fill: parent
+            property int bubbled: 0
+            id: boundary
+            Keys.priority: Keys.AfterItem
+            Keys.onPressed: event => { if ([Qt.Key_Left, Qt.Key_Right].includes(event.key)) ++bubbled }
+            Bar.CardStack {
+                id: stack
+                anchors.fill: parent
+                cards: [first, second]
+                Bar.Card {
+                    id: first
+                    stack: stack
+                    arrowKeyOwners: [customButton, directionalGroup]
+                    Slider { id: slider; y: 50; from: 0; to: 1; stepSize: 0.1; value: 0.5 }
+                    ScrollBar { id: bar; y: 100; width: 200; orientation: Qt.Horizontal; size: 0.2 }
+                    TextField { id: field; y: 150; text: "abc" }
+                    TextEdit { id: edit; y: 200; text: "abc" }
+                    Button { id: button; y: 300; text: "Native button"; onClicked: ++window.activations }
+                    Popouts.ActionButton { id: action; y: 350; text: "Real action"; onClicked: ++window.activations }
+                    Popouts.Toggle { id: toggle; y: 400; text: "Real toggle"; onToggled: ++window.activations }
+                    ToolButton { id: tool; text: "Tool" }
+                    ButtonGroup { id: nativeGroup }
+                    Button { id: grouped; checkable: true; checked: true; ButtonGroup.group: nativeGroup }
+                    RadioButton { id: radio; text: "Radio" }
+                    TabButton { id: tab; text: "Tab" }
+                    MenuItem { id: entry; text: "Menu entry" }
+                    Button {
+                        id: customButton
+                        property int value: 0
+                        Keys.onPressed: event => {
+                            if (event.key === Qt.Key_Right && value < 1) { ++value; event.accepted = true }
+                        }
+                    }
+                    Item {
+                        id: directionalGroup
+                        Button { id: groupStart; KeyNavigation.right: groupEnd }
+                        Button { id: groupEnd; x: 100; KeyNavigation.left: groupStart }
+                    }
+                    // A custom owner deliberately ignores its endpoint, like native text controls.
+                    Item {
+                        id: custom
+                        y: 250; width: 100; height: 30
+                        property int value: 0
+                        Keys.onPressed: event => {
+                            if (event.key === Qt.Key_Right && value < 1) { ++value; event.accepted = true }
+                        }
+                    }
+                    Menu {
+                        id: menu
+                        Menu {
+                            id: submenu
+                            title: "Nested"
+                            MenuItem { text: "Entry" }
+                        }
+                        MenuItem { text: "Last" }
+                    }
+                }
+                Bar.Card { id: second; stack: stack; index: 1 }
+            }
+        }
+        TestCase { id: keys; when: false }
+    }
+    function unchanged(item, key, modifiers = Qt.NoModifier) {
+        item.forceActiveFocus()
+        keys.keyClick(key, modifiers)
+        if (stack.selectedCard !== 0 || stack.exchanging) throw new Error("Control arrow escaped: " + item)
+    }
+    Timer {
+        interval: 100; running: true
+        onTriggered: {
+            try {
+                window.requestActivate()
+                keys.tryCompare(window, "active", true)
+                field.cursorPosition = field.length
+                edit.cursorPosition = edit.length
+                for (const item of [slider, bar, field, edit, custom]) {
+                    unchanged(item, Qt.Key_Right)
+                    unchanged(item, Qt.Key_Left)
+                }
+                if (slider.value !== 0.5 || field.cursorPosition !== 2 || edit.cursorPosition !== 2
+                        || custom.value !== 1) throw new Error("Native/custom controls lost their arrow handling")
+                for (const endpoint of [0, 1]) {
+                    slider.value = endpoint
+                    unchanged(slider, endpoint ? Qt.Key_Right : Qt.Key_Left)
+                    if (slider.value !== endpoint) throw new Error("Slider endpoint changed")
+                    bar.position = endpoint ? 0.8 : 0
+                    unchanged(bar, endpoint ? Qt.Key_Right : Qt.Key_Left)
+                    for (const text of [field, edit]) {
+                        text.cursorPosition = endpoint ? text.length : 0
+                        const before = boundary.bubbled
+                        unchanged(text, endpoint ? Qt.Key_Right : Qt.Key_Left)
+                        if (boundary.bubbled !== before + 1) throw new Error("Expected native text endpoint bubbling")
+                        unchanged(text, endpoint ? Qt.Key_Right : Qt.Key_Left, Qt.ShiftModifier)
+                        unchanged(text, endpoint ? Qt.Key_Right : Qt.Key_Left, Qt.ControlModifier)
+                    }
+                }
+                // Ordinary native and production buttons/toggles navigate without activation.
+                for (const item of [button, action, toggle, tool, grouped]) {
+                    for (const key of [Qt.Key_Left, Qt.Key_Right]) {
+                        item.forceActiveFocus()
+                        keys.keyClick(key)
+                        if (stack.selectedCard !== 1 || !stack.exchanging)
+                            throw new Error("Ordinary button/toggle arrow did not navigate: " + item + " selected=" + stack.selectedCard + " focus=" + window.activeFocusItem)
+                        keys.tryCompare(stack, "exchanging", false, 900)
+                        keys.keyClick(key)
+                        keys.tryCompare(stack, "exchanging", false, 900)
+                        if (stack.selectedCard !== 0) throw new Error("Button navigation failed cyclic return")
+                    }
+                }
+                if (window.activations !== 0 || toggle.checked || !grouped.checked)
+                    throw new Error("Arrow navigation activated content")
+                // Arrow selection cancels a pending ActionButton release through focus loss.
+                action.forceActiveFocus()
+                keys.keyPress(Qt.Key_Return)
+                keys.keyClick(Qt.Key_Right)
+                keys.keyRelease(Qt.Key_Return)
+                keys.tryCompare(stack, "exchanging", false, 900)
+                if (window.activations !== 0 || action.activationKey !== 0)
+                    throw new Error("Arrow selection released a stale button activation")
+                keys.keyClick(Qt.Key_Left)
+                keys.tryCompare(stack, "exchanging", false, 900)
+                for (const item of [radio, tab, entry]) {
+                    unchanged(item, Qt.Key_Left)
+                    unchanged(item, Qt.Key_Right)
+                }
+                unchanged(customButton, Qt.Key_Right)
+                if (customButton.value !== 1) throw new Error("Custom button lost first key handling")
+                const ownerBefore = boundary.bubbled
+                unchanged(customButton, Qt.Key_Right)
+                unchanged(customButton, Qt.Key_Left)
+                if (boundary.bubbled !== ownerBefore + 2) throw new Error("Custom button endpoint did not bubble")
+                groupStart.forceActiveFocus()
+                keys.keyClick(Qt.Key_Right)
+                if (!groupEnd.activeFocus || stack.selectedCard !== 0) throw new Error("Native group navigation failed")
+                unchanged(groupEnd, Qt.Key_Right)
+                groupEnd.forceActiveFocus()
+                keys.keyClick(Qt.Key_Left)
+                if (!groupStart.activeFocus || stack.selectedCard !== 0) throw new Error("Native group reversal failed")
+                unchanged(groupStart, Qt.Key_Left)
+                field.cursorPosition = 0
+                unchanged(field, Qt.Key_Right, Qt.ShiftModifier)
+                if (field.selectedText !== "a") throw new Error("Native text selection failed")
+                custom.value = 1
+                const before = boundary.bubbled
+                unchanged(custom, Qt.Key_Right)
+                if (boundary.bubbled !== before + 1) throw new Error("Custom endpoint did not reach shared boundary")
+                menu.popup()
+                keys.tryCompare(menu, "visible", true)
+                menu.currentIndex = 0
+                menu.itemAt(0).forceActiveFocus()
+                keys.keyClick(Qt.Key_Right)
+                keys.tryCompare(submenu, "visible", true)
+                keys.keyClick(Qt.Key_Left)
+                keys.tryCompare(submenu, "visible", false)
+                menu.currentIndex = 1
+                menu.itemAt(1).forceActiveFocus()
+                keys.keyClick(Qt.Key_Right)
+                if (stack.selectedCard !== 0 || stack.exchanging) throw new Error("Nested menu arrow escaped")
+                menu.close()
+                keys.tryCompare(menu, "visible", false)
+
+                // A superseding selection cancels a pending motion key without focus loss.
+                for (const key of [Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space]) {
+                    first.selector.forceActiveFocus()
+                    keys.keyClick(Qt.Key_Right)
+                    keys.wait(150)
+                    const motion = window.activeFocusItem
+                    if (motion !== stack.motionInitialFocus || !stack.exchanging)
+                        throw new Error("Expected stationary motion focus before pending activation")
+                    keys.keyPress(key)
+                    if (motion.activationKey !== key) throw new Error("Motion activation was not armed")
+                    keys.keyClick(Qt.Key_Left)
+                    if (stack.selectedCard !== 0 || window.activeFocusItem !== motion)
+                        throw new Error("Arrow reversal lost selection or stationary focus")
+                    keys.keyRelease(key)
+                    if (stack.selectedCard !== 0 || motion.activationKey !== 0)
+                        throw new Error("Stale motion activation undid arrow reversal: " + key)
+                    keys.tryCompare(stack, "exchanging", false, 900)
+                    if (!first.selector.activeFocus) throw new Error("Reversal lost selected focus")
+                }
+                // Real presses, reversal, and fresh repeated presses use the shared path.
+                first.selector.forceActiveFocus()
+                keys.keyPress(Qt.Key_Right)
+                if (stack.selectedCard !== 1 || !stack.exchanging) throw new Error("Right did not select next")
+                keys.keyRelease(Qt.Key_Right)
+                keys.wait(100)
+                keys.keyClick(Qt.Key_Left)
+                if (stack.selectedCard !== 0) throw new Error("Left did not reverse to previous")
+                keys.tryCompare(stack, "exchanging", false, 900)
+                for (const key of [Qt.Key_Left, Qt.Key_Right, Qt.Key_Right, Qt.Key_Left]) {
+                    const expected = 1 - stack.selectedCard
+                    keys.keyClick(key)
+                    if (stack.selectedCard !== expected) throw new Error("Cyclic pair endpoint failed")
+                    keys.tryCompare(stack, "exchanging", false, 900)
+                    if (!stack.initialFocus.activeFocus) throw new Error("Navigation lost visible selector focus")
+                }
+                // QtTest has no auto-repeat flag; exercise the same event entry explicitly.
+                first.selector.forceActiveFocus()
+                const repeat = { key: Qt.Key_Right, modifiers: Qt.NoModifier, isAutoRepeat: true, accepted: false }
+                stack.navigate(repeat)
+                if (!repeat.accepted || stack.selectedCard !== 0 || stack.exchanging)
+                    throw new Error("Held arrow repeated selection")
+                first.selector.focus = false
+                stack.forceActiveFocus()
+                if (window.activeFocusItem !== stack) throw new Error("Fixture did not focus stack itself")
+                keys.keyClick(Qt.Key_Right)
+                keys.tryCompare(stack, "exchanging", false, 900)
+                second.forceActiveFocus()
+                if (window.activeFocusItem !== second) throw new Error("Fixture did not focus card itself")
+                keys.keyClick(Qt.Key_Left)
+                keys.tryCompare(stack, "exchanging", false, 900)
+                stack.cards = [first]
+                first.selector.forceActiveFocus()
+                const singleBefore = boundary.bubbled
+                keys.keyClick(Qt.Key_Left); keys.keyClick(Qt.Key_Right)
+                if (boundary.bubbled !== singleBefore + 2 || stack.selectedCard !== 0 || stack.exchanging)
+                    throw new Error("Single card consumed or navigated")
+                stack.cards = [first, second]
+                for (const property of ["visible", "enabled"]) {
+                    first.selector.forceActiveFocus()
+                    stack[property] = false
+                    const event = { key: Qt.Key_Right, modifiers: Qt.NoModifier, isAutoRepeat: false, accepted: false }
+                    stack.navigate(event)
+                    keys.keyClick(Qt.Key_Right)
+                    if (event.accepted || stack.selectedCard !== 0 || stack.exchanging)
+                        throw new Error("Unavailable stack navigated or consumed")
+                    stack[property] = true
+                }
+                console.log("ARROW_CHECK_PASSED")
+                Qt.quit()
+            } catch (error) { console.error(error); Qt.exit(1) }
+        }
+    }
+}
+"""
+
 MENU_QML = """import QtQuick
 import QtQuick.Window
 import QtTest
@@ -1411,6 +1660,15 @@ with tempfile.TemporaryDirectory() as directory:
                XDG_STATE_HOME=str(root / "state"), ICEWINE_WIDGET_POLICY="{}",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
     env["XDG_CONFIG_HOME"] = fixture_config
+    (root / "shell.qml").write_text(ARROW_QML)
+    result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                            capture_output=True, text=True, timeout=25)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0 and "ARROW_CHECK_PASSED" in output, output
+    assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
+    if "--arrows-only" in sys.argv:
+        print("native control ownership and stack arrow checks pass")
+        sys.exit(0)
     (root / "shell.qml").write_text(MENU_QML)
     # The offscreen platform has no desktop hover capability unless supplied explicitly.
     result = subprocess.run(["qs", "-p", str(root), "--no-color"],

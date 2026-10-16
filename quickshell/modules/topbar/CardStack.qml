@@ -1,6 +1,8 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Window
+import QtQuick.Templates as T
 import qs.icewine.theme as Theme
 
 // Nonvisual arrangement and selection; card surfaces belong to Card.
@@ -23,12 +25,34 @@ FocusScope {
     property bool exchanging: false
     property bool available: visible && enabled
 
+    Keys.priority: Keys.AfterItem
+    Keys.onPressed: event => navigate(event)
+
+    function navigate(event) {
+        if (!available || cards.length !== 2 || event.modifiers !== Qt.NoModifier
+                || ![Qt.Key_Left, Qt.Key_Right].includes(event.key)) return
+        const target = root.Window.window?.activeFocusItem
+        // Owners retain even ignored endpoint keys, including composite groups.
+        for (let item = target; item && item !== root; item = item.parent)
+            if (cards.some(card => card.arrowKeyOwners.includes(item))) return
+        const plainButton = target instanceof T.AbstractButton
+            && !(target instanceof T.MenuItem || target instanceof T.RadioButton
+                || target instanceof T.TabButton)
+        // Other controls (text, sliders, scrollbars, etc.) never opt in by bubbling.
+        if (!plainButton && target !== root && target !== motionFocus
+                && !cards.some(card => target === card || target === card.selector)) return
+        event.accepted = true
+        if (!event.isAutoRepeat)
+            selectCard((selectedCard + (event.key === Qt.Key_Left ? -1 : 1) + cards.length) % cards.length)
+    }
+
     function selectCard(index) {
         if (!available || !Number.isInteger(index) || index < 0 || index >= cards.length) return
         if (selectedCard === index) {
             if (exchanging && root.activeFocus) motionFocus.forceActiveFocus()
             return
         }
+        motionFocus.activationKey = 0
         selectionChanging()
         if (root.activeFocus) motionFocus.forceActiveFocus()
         exchange.stop()

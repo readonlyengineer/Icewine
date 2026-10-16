@@ -8,8 +8,7 @@ These are first-party QML components, not a plugin API or dynamic registry.
 This is the implemented card contract. The separate style-guide ticket owns
 `widget-plugin-standard.md` and the other draft guides; its draft card guidance
 is superseded by this document pending that ticket's link/update. Do not copy
-its proposed plugin/service framework into a card. The separate arrow-navigation
-ticket will revise keyboard selection.
+its proposed plugin/service framework into a card.
 
 ## Surface and content
 
@@ -42,13 +41,42 @@ directly. Clicking any exposed rear-card surface promotes it, consuming the
 gesture
 without activating content. The shared card intercepts rear/moving input above
 content; front controls keep normal input and front title clicks do nothing.
-Keep content below that selection interception (`z: 100`). Hover, focus and
-arrow keys do not select cards. Until arrow navigation lands, the shared
+Keep content below that selection interception (`z: 100`). Hover and
+focus alone do not select cards. The shared
 `selector` remains a Tab-accessible radio target: Return, Enter and Space select
 its card on release. Its short underline marks keyboard focus without framing
 the title or card. The stationary motion target uses the same keys to cycle on
 release. Keep a valid focus target even if the card has no enabled controls.
 `selectionChanging()` lets an owner close transient menus before motion.
+
+For the supported fixed pair, unmodified Left selects the previous card and
+Right the next in declared `cards` order, wrapping at either end. With two cards
+both directions reach the other card; the existing sweep reverses when selecting
+the outgoing card during motion. This does not add support for larger decks.
+Navigation runs after child key handling. Plain stack/card/shared-selector/motion
+focus targets and ordinary native buttons/toggles (`AbstractButton` descendants)
+can navigate with an unhandled arrow. Menu items, radio buttons and tab buttons
+remain reserved contexts. Other focused controls, including text editing,
+sliders and scrollbars, retain arrows even when ignoring an endpoint event.
+Native nested menus retain their own key routing.
+
+Set a card's `arrowKeyOwners` to custom controls or composite groups that own
+Left/Right when their focus target could otherwise navigate. This reserves each
+listed item and its descendants, including ignored endpoint keys. For example,
+`arrowKeyOwners: [directionalButton, horizontalGroup]` protects a custom button
+and a group containing buttons whose arrows move focus. Authors must declare
+such owners; an ignored event cannot reveal that a custom control owns a key.
+This also applies to native directional containers with focusable button children.
+Plain `ButtonGroup` membership alone does not handle arrows in the installed Qt;
+unhandled arrows from those buttons navigate without changing their checked state.
+No reservation is needed for ordinary non-owning `ActionButton`/`Toggle` callers.
+The first press selects immediately; auto-repeat presses are consumed without
+further selection and release does nothing. A fresh opposite press during motion
+can reverse selection. Focus moves through the stationary target to the selected
+card's `initialFocus`, preserving its visible focus mark. Hidden, disabled and
+single-card stacks do not consume or navigate with arrows. Return, Enter and
+Space still activate on release; a superseding selection change cancels pending
+motion-target activation even when focus stays stationary.
 
 ## Visibility, services and host ownership
 
