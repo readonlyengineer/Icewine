@@ -18,7 +18,7 @@ assert.throws(() => Layouts.status(text.replace("dwindle", "invalid"), 1))
 // Exercise the real adapter functions, including a query in flight and focus
 // moving before delivery. The command must keep the ID captured by selection.
 const adapter = fs.readFileSync(path.join(__dirname, "../adapters/Hyprland.qml"), "utf8")
-const context = vm.createContext({Layouts, layoutAvailable: true, layoutPending: false,
+const context = vm.createContext({Layouts, layoutActive: true, layoutRefreshPending: false, layoutAvailable: true, layoutPending: false,
     layoutStatus: {workspace: 1, identity: "31"}, layoutProcess: {running: true}, nextLayoutRequest: null, layoutActionError: "", layoutErrorWorkspace: 0, layoutErrorIdentity: ""})
 for (const name of ["selectLayout", "selectAutofullscreen", "requestLayoutChange", "flushLayoutRequest"]) {
     const start = adapter.indexOf(`    function ${name}(`)
@@ -102,4 +102,95 @@ placement.layoutButton.mapToItem = () => ({x: 1900})
 assert.equal(vm.runInContext(position, placement), 1532)
 placement.layoutButton.mapToItem = () => ({x: -20})
 assert.equal(vm.runInContext(position, placement), 8)
+// Event-driven refreshes execute the real adapter functions and handlers.
+const refreshContext = vm.createContext({Layouts, layoutActive: false, layoutWorkspaceId: 1,
+    layoutStatus: null, layoutUnavailable: "", layoutRefreshPending: false,
+    layoutProcess: {running: false}, nextLayoutRequest: null, layoutPending: false})
+refreshContext.adapter = refreshContext
+const deferred = []
+refreshContext.Qt = {callLater: fn => deferred.push(fn)}
+for (const name of ["refreshLayout", "requestLayoutChange", "flushLayoutRequest"]) {
+    const start = adapter.indexOf(`    function ${name}(`)
+    const end = adapter.indexOf("\n    }", start) + 6
+    vm.runInContext(adapter.slice(start, end), refreshContext)
+}
+const activeChanged = adapter.match(/    onLayoutActiveChanged: (\{[\s\S]*?\n    \})/)[1]
+const workspaceChanged = adapter.match(/    onLayoutWorkspaceIdChanged: (.*)/)[1]
+function show(active) {
+    refreshContext.layoutActive = active
+    vm.runInContext(activeChanged, refreshContext)
+}
+function focus(workspace) {
+    refreshContext.layoutWorkspaceId = workspace
+    vm.runInContext(workspaceChanged, refreshContext)
+}
+function complete(state, action = false) {
+    refreshContext.workspace = refreshContext.layoutProcess.workspace
+    refreshContext.action = action
+    refreshContext.stdout = {text: typeof state === "string" ? state : JSON.stringify(state)}
+    refreshContext.stderr = {text: ""}
+    refreshContext.layoutProcess.running = false
+    vm.runInContext(`(${handler})(0, 0)`, refreshContext)
+}
+function drain() {
+    while (deferred.length) deferred.shift()()
+}
+const state = {workspace: 1, identity: "31", effective: "master", default: "scrolling", override: "", autofullscreen: false}
+vm.runInContext("refreshLayout()", refreshContext)
+focus(2)
+assert.equal(refreshContext.layoutProcess.running, false, "Disabled startup and workspace changes must not query")
+assert.doesNotMatch(adapter, /layoutPoll|interval: 750/, "No recurring layout status timer")
+show(true)
+assert.equal(refreshContext.layoutProcess.workspace, 2, "First open queries current workspace")
+focus(3)
+focus(1)
+assert.equal(refreshContext.layoutProcess.workspace, 2, "Workspace changes coalesce behind an in-flight query")
+complete({...state, workspace: 2, identity: "32"})
+assert.equal(refreshContext.layoutStatus, null, "Stale response is rejected")
+drain()
+assert.equal(refreshContext.layoutProcess.workspace, 1)
+complete(state)
+assert.equal(refreshContext.layoutStatus.effective, "master")
+// Opening again during an old same-workspace query must not accept its result.
+vm.runInContext("refreshLayout()", refreshContext)
+show(false)
+show(true)
+complete({...state, effective: "dwindle"})
+assert.equal(refreshContext.layoutStatus, null)
+drain()
+complete(state)
+assert.equal(refreshContext.layoutStatus.effective, "master")
+// An action completion queues a query, but closing before callLater suppresses it.
+complete("ok", true)
+show(false)
+drain()
+assert.equal(refreshContext.layoutProcess.running, false)
+assert.equal(refreshContext.layoutStatus, null)
+// Hidden query completion cannot publish state or restart queries, even on error.
+show(true)
+show(false)
+complete("error: unavailable")
+drain()
+assert.equal(refreshContext.layoutUnavailable, "")
+assert.equal(refreshContext.layoutProcess.running, false)
+// Successful local mutation refreshes current workspace while open.
+show(true)
+complete(state)
+complete("ok", true)
+drain()
+assert.equal(refreshContext.layoutProcess.running, true)
+assert.equal(refreshContext.layoutProcess.workspace, 1)
+complete(state)
+// Both production shells bind activity to actual picker lifetime and feature flag.
+for (const shell of ["Desktop", "Handheld"]) {
+    const source = fs.readFileSync(path.join(__dirname, `../${shell}.qml`), "utf8")
+    const binding = source.match(/layoutActive: (.*)/)[1]
+    for (const enabled of [false, true]) for (const locked of [false, true])
+        for (const page of ["", "battery", "layout"]) {
+            const actual = vm.runInNewContext(binding, {topbar: {layoutsEnabled: enabled, ui: {page}}, session: {locked}})
+            assert.equal(actual, enabled && !locked && page === "layout", `${shell}: ${enabled}/${locked}/${page}`)
+        }
+    if (shell === "Handheld") assert.match(source, /layoutsEnabled: false/)
+}
+console.log("PASS layout refresh: first open, coalesced focus, reopen, hidden completion, mutation and disabled handheld")
 console.log("PASS layout adapter: validation, captured focus, queued selection, semantic IPC failure and external state")

@@ -63,11 +63,49 @@ if "--qml" in sys.argv:
 import QtQuick.Window
 import QtTest
 import Quickshell
+import "icewine/adapters" as Adapters
 import "icewine/modules/topbar" as Bar
 import "theme" as Theme
 ShellRoot {
     id: root
     property var calls: []
+    property int queries: 0
+    Adapters.Hyprland { id: backend }
+    Connections {
+        target: backend.layoutProcess
+        function onRunningChanged() { if (backend.layoutProcess.running) ++root.queries }
+    }
+    function checkRefresh() {
+        keys.wait(850)
+        backend.layoutWorkspaceId = 2
+        keys.wait(30)
+        if (root.queries !== 0) throw new Error("Disabled adapter queried at startup or focus change")
+        backend.layoutActive = true
+        backend.layoutWorkspaceId = 3
+        backend.layoutWorkspaceId = 4
+        keys.tryCompare(backend, "layoutAvailable", true)
+        if (backend.layoutStatus.workspace !== 4 || root.queries !== 2)
+            throw new Error("In-flight workspace refresh was lost or not coalesced")
+        backend.selectLayout("master")
+        keys.tryCompare(backend, "layoutPending", false)
+        keys.tryCompare(root, "queries", 4)
+        keys.tryCompare(backend.layoutProcess, "running", false)
+        // Close and reopen during a same-workspace query; discard its old result.
+        backend.refreshLayout()
+        backend.layoutActive = false
+        backend.layoutActive = true
+        keys.tryCompare(root, "queries", 6)
+        keys.tryCompare(backend, "layoutAvailable", true)
+        backend.refreshLayout()
+        backend.layoutActive = false
+        keys.tryCompare(backend.layoutProcess, "running", false)
+        const closedQueries = root.queries
+        backend.layoutWorkspaceId = 5
+        keys.wait(850)
+        if (root.queries !== closedQueries || backend.layoutStatus !== null)
+            throw new Error("Closed adapter published or restarted status queries")
+        console.log("LAYOUT_REFRESH_PASSED")
+    }
     QtObject {
         id: compositor
         property int layoutWorkspaceId: 1
@@ -161,6 +199,7 @@ ShellRoot {
             try {
                 window.requestActivate()
                 keys.tryCompare(window, "active", true)
+                root.checkRefresh()
                 root.checkPreviews()
                 const button = root.named(picker, "Dwindle layout")
                 if (!button || !button.enabled) throw new Error("Missing enabled choice")
@@ -194,15 +233,33 @@ ShellRoot {
             (root / "icewine").mkdir()
             (root / "icewine/modules").symlink_to(source / "quickshell/modules")
             (root / "icewine/theme").symlink_to(root / "theme")
+            # Replace only the native focus input; execute the real adapter/Process lifecycle.
+            (root / "icewine/adapters").mkdir()
+            adapter = (source / "quickshell/adapters/Hyprland.qml").read_text()
+            focus_binding = "readonly property int layoutWorkspaceId: focusedWorkspaceId()"
+            assert adapter.count(focus_binding) == 1
+            (root / "icewine/adapters/Hyprland.qml").write_text(
+                adapter.replace(focus_binding, "property int layoutWorkspaceId: 1"))
+            (root / "bin").mkdir()
+            cli = root / "bin/hyprctl"
+            cli.write_text("#!" + sys.executable + "\n" +
+                           "import json,re,sys,time\ntime.sleep(0.1)\n" +
+                           "if sys.argv[1] == 'eval': print('ok')\n" +
+                           "else:\n workspace=int(re.search(r'status\\((-?\\d+)\\)', sys.argv[2])[1])\n" +
+                           " print(json.dumps(dict(workspace=workspace,identity='31',effective='master'," +
+                           "default='scrolling',override='',autofullscreen=False)))\n")
+            cli.chmod(0o755)
             fixture_config = theme_fixture(source, root, theme_name)
             (root / "shell.qml").write_text(qml)
             env = os.environ | {"QT_QPA_PLATFORM": "offscreen", "XDG_CACHE_HOME": str(root / "cache"),
                                 "XDG_RUNTIME_DIR": str(root / "runtime"), "XDG_CONFIG_HOME": fixture_config,
                                 "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(root / "no-bus"),
-                                "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=" + str(root / "no-system-bus")}
+                                "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=" + str(root / "no-system-bus"),
+                                "HYPRLAND_INSTANCE_SIGNATURE": "", "WAYLAND_DISPLAY": "",
+                                "PATH": str(root / "bin") + os.pathsep + os.environ["PATH"]}
             result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
                                     capture_output=True, text=True, timeout=10)
             output = result.stdout + result.stderr
-            assert result.returncode == 0 and "LAYOUT_PICKER_PASSED" in output, output
+            assert result.returncode == 0 and "LAYOUT_PICKER_PASSED" in output and "LAYOUT_REFRESH_PASSED" in output, output
             assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
-    print("PASS actual QML picker: four rendered previews at 380/320px, dark/light, unselected/selected/focused/disabled; keyboard choice/toggle, external state, pending/unavailable")
+    print("PASS actual QML adapter: disabled startup, coalesced focus, action completion, reopen and hidden lifetime; picker: four rendered previews at 380/320px, dark/light, unselected/selected/focused/disabled; keyboard choice/toggle, external state, pending/unavailable")

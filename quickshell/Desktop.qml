@@ -14,6 +14,7 @@ ShellRoot {
 
     Adapters.Hyprland {
         id: hyprlandAdapter
+        layoutActive: topbar.layoutsEnabled && !session.locked && topbar.ui.page === "layout"
     }
 
     Modules.NotificationService {

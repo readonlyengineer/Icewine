@@ -10,7 +10,10 @@ ShellRoot {
         id: session
         authenticationRequired: Config.Settings.authenticationRequired
     }
-    Adapters.Hyprland { id: hyprlandAdapter }
+    Adapters.Hyprland {
+        id: hyprlandAdapter
+        layoutActive: topbar.layoutsEnabled && !session.locked && topbar.ui.page === "layout"
+    }
     Modules.NotificationService {
         id: notifications
     }

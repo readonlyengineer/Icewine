@@ -112,6 +112,9 @@ QtObject {
     }
 
     readonly property int layoutWorkspaceId: focusedWorkspaceId()
+    property bool layoutActive: false
+    // A newer open/focus request invalidates a status result already in flight.
+    property bool layoutRefreshPending: false
     property var layoutStatus: null
     property string layoutActionError: ""
     property int layoutErrorWorkspace: 0
@@ -124,9 +127,20 @@ QtObject {
     readonly property bool layoutAvailable: layoutStatus?.workspace === layoutWorkspaceId
         && layoutUnavailable === ""
     onLayoutWorkspaceIdChanged: refreshLayout()
+    onLayoutActiveChanged: {
+        layoutStatus = null
+        layoutUnavailable = ""
+        if (layoutActive) refreshLayout()
+        else layoutRefreshPending = false
+    }
 
     function refreshLayout() {
-        if (layoutProcess.running || !layoutWorkspaceId) return
+        if (!layoutActive || !layoutWorkspaceId) return
+        if (layoutProcess.running) {
+            layoutRefreshPending = true
+            return
+        }
+        layoutRefreshPending = false
         layoutProcess.action = false
         layoutProcess.workspace = layoutWorkspaceId
         layoutProcess.command = ["hyprctl", "repl",
@@ -143,7 +157,7 @@ QtObject {
     }
 
     function requestLayoutChange(choice) {
-        if (!layoutAvailable || layoutPending) return
+        if (!layoutActive || !layoutAvailable || layoutPending) return
         try {
             // Capture before waiting for an in-flight status query or focus change.
             nextLayoutRequest = { workspace: layoutStatus.workspace, identity: layoutStatus.identity,
@@ -185,12 +199,14 @@ QtObject {
                 try {
                     if (exitCode !== 0 || exitStatus !== 0) throw new Error(stderr.text.trim() || "Hyprland unavailable")
                     const state = Layouts.status(output, workspace)
-                    if (workspace === adapter.layoutWorkspaceId) {
+                    if (adapter.layoutActive && !adapter.layoutRefreshPending
+                            && workspace === adapter.layoutWorkspaceId) {
                         adapter.layoutStatus = state
                         adapter.layoutUnavailable = ""
                     }
                 } catch (error) {
-                    if (workspace === adapter.layoutWorkspaceId) {
+                    if (adapter.layoutActive && !adapter.layoutRefreshPending
+                            && workspace === adapter.layoutWorkspaceId) {
                         adapter.layoutStatus = null
                         adapter.layoutUnavailable = String(error)
                     }
@@ -198,18 +214,9 @@ QtObject {
             }
             if (adapter.nextLayoutRequest !== null)
                 Qt.callLater(adapter.flushLayoutRequest)
-            else if (action || workspace !== adapter.layoutWorkspaceId)
+            else if (action || adapter.layoutRefreshPending || workspace !== adapter.layoutWorkspaceId)
                 Qt.callLater(adapter.refreshLayout)
         }
-    }
-    // Native 0.56 IPC has no workspace-layout event. One shared, bounded query
-    // follows external rule/global changes too; replace with an event when offered.
-    property Timer layoutPoll: Timer {
-        interval: 750
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: adapter.refreshLayout()
     }
 
     function getMonitors() {
