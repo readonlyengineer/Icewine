@@ -71,7 +71,7 @@ FocusScope {
         selectedCard = index
         exchanging = true
         exchange.to = index === outgoingCard ? 0 : 1
-        exchange.duration = 120 * Math.abs(exchange.to - progress)
+        exchange.duration = 200 * Math.abs(exchange.to - progress)
         if (exchange.duration === 0) finishExchange()
         else exchange.start()
     }
@@ -105,7 +105,7 @@ FocusScope {
             motionFocus.activationKey = 0
             selectionChanging()
             exchange.to = 1
-            exchange.duration = 120
+            exchange.duration = 200
             exchange.start()
             return
         }

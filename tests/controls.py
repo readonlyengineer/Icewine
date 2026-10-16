@@ -614,7 +614,7 @@ ShellRoot {
         toggleKeys.keyClick(Qt.Key_Right)
         if (!stack.exchanging || body.enabled || graphPage.enabled || body.brightness.active)
             throw new Error("Power exchange retained interactive/recurring work")
-        toggleKeys.wait(160)
+        toggleKeys.wait(240)
         if (!perf.active || !graphPage.enabled || !graphPage.activeFocus)
             throw new Error("Performance exchange did not enter the graph page")
         toggleKeys.keyClick(Qt.Key_End)
@@ -623,7 +623,7 @@ ShellRoot {
         if (stack.selectedCard !== 1) throw new Error("Focus restoration reset Power selection")
         // Whole rear surface consumes selection without firing the Lock beneath it.
         toggleKeys.mouseClick(power, 8, 80)
-        toggleKeys.wait(160)
+        toggleKeys.wait(240)
         if (!power.active || root.sessionAction !== actions || !body.brightness.active)
             throw new Error("Rear Power surface activated content or lost brightness activity")
         const slider = descendants(body, item => item.from === 0 && item.to === 100)[0]
@@ -633,7 +633,7 @@ ShellRoot {
         toggleKeys.keyClick(Qt.Key_Right)
         if (stack.selectedCard !== 0) throw new Error("Brightness endpoint escaped to stack")
         focusPopout.openPowerPage("performance")
-        toggleKeys.wait(160)
+        toggleKeys.wait(240)
         if (!perf.active || body.brightness.active) throw new Error("Explicit Performance entry failed")
         focusPopout.shown = false
         if (body.brightness.active || power.active || perf.active)
@@ -645,7 +645,7 @@ ShellRoot {
         const touch = toggleKeys.touchEvent(focusWindow)
         touch.press(0, perf, 8, 12).commit()
         touch.release(0, perf, 8, 12).commit()
-        toggleKeys.wait(160)
+        toggleKeys.wait(240)
         if (!perf.active || root.sessionAction !== actions)
             throw new Error("Touch promotion failed or fired a session action")
         focusPopout.currentPage = "media"
@@ -687,7 +687,7 @@ ShellRoot {
         }
         focusPopout.openAudioPage("bluetooth")
         focusPopout.focusInitial()
-        toggleKeys.wait(160)
+        toggleKeys.wait(240)
         if (!bluetooth.active || body.enabled || !bt.initialFocus.activeFocus)
             throw new Error("Dedicated Bluetooth entry lost focus/activity")
         focusPopout.focusInitial()
@@ -700,7 +700,7 @@ ShellRoot {
             throw new Error("Pairing did not start")
         // Rear promotion consumes the click, preserving discovery and pair intent.
         toggleKeys.mouseClick(audio, 8, 20)
-        toggleKeys.wait(160)
+        toggleKeys.wait(240)
         const sink = Fixtures.Pipewire.defaultAudioSink
         const muted = sink.audio.muted
         if (!audio.active || !adapter.discovering || bt.pairingDevice !== device)
@@ -713,7 +713,7 @@ ShellRoot {
                 || stack.selectedCard !== 0 || !body.initialFocus.activeFocus || sink.audio.muted !== muted)
             throw new Error("Hidden pairing completion acted on focus or wrong control")
         focusPopout.openAudioPage("bluetooth")
-        toggleKeys.wait(160)
+        toggleKeys.wait(240)
         device.connected = true
         bt.activate(device)
         device.connected = false
@@ -737,7 +737,7 @@ ShellRoot {
             throw new Error("Dismissal lost pair-to-connect ownership")
         focusPopout.currentPage = "bluetooth"
         focusPopout.shown = true
-        toggleKeys.wait(180)
+        toggleKeys.wait(260)
         if (descendants(bluetooth, item => item.pairingDevice !== undefined)[0] !== bt)
             throw new Error("Bluetooth operation owner was recreated")
         for (const loss of ["cancel", "device", "adapter", "radio"]) {
@@ -771,7 +771,7 @@ ShellRoot {
         if (!bluetooth.selector.activeFocus) throw new Error("Unavailable Bluetooth has no focus target")
         Fixtures.Bluetooth.defaultAdapter = adapter
         focusPopout.currentPage = "audio"
-        toggleKeys.wait(180)
+        toggleKeys.wait(260)
         body = descendants(audio, item => item.sinks !== undefined)[0]
         slider = descendants(body, item => item.from === 0 && item.to === 1)[0]
         Fixtures.Pipewire.defaultAudioSink = null
@@ -969,7 +969,7 @@ ShellRoot {
         // Late reversal and repeated requests settle on the latest intent.
         second.forceActiveFocus()
         networkKeys.keyClick(Qt.Key_Space)
-        networkKeys.wait(90)
+        networkKeys.wait(150)
         if (!page.exchanging || outgoing.z !== 1) throw new Error("Late sweep did not tuck behind")
         const lateX = outgoing.x
         page.selectCard(0)

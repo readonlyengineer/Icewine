@@ -25,14 +25,14 @@ in index order. `index` defaults to zero; set subsequent indices to one/two.
 The host supplies the stack's actual width and height. A single card fills it
 at (0, 0), with no geometry deduction. The existing two-card presentation uses
 34px horizontal and 64px vertical allowance, an 18px/48px front offset, and the
-existing 120ms reversible exchange. The stack clips the sweep and draws no
+existing 200ms reversible exchange. The stack clips the sweep and draws no
 frame or focus underline.
 
 The supported compositions are one, two or three cards. Three cards keep the
 same outer allowance and front offset; the next card in cyclic declared order
 rests at 9px/24px behind the front and the other at 0px/0px (all inside the
 existing 8px inset). Both rear strips are exposed. Each exchange still moves
-one front/rear pair for 120ms; the third card interpolates its rear position.
+one front/rear pair for 200ms; the third card interpolates its rear position.
 Requesting the outgoing card reverses the sweep. Requesting the third card
 during motion queues the latest intent until the current sweep completes,
 then exchanges again, without jumping moving surfaces. Arrow/motion-key cycles
