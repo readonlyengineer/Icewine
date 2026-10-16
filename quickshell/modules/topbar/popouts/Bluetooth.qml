@@ -18,12 +18,19 @@ Flickable {
     property var pairingDevice: null
 
     function busy(device) {
-        return device.pairing || device.state === BluetoothDeviceState.Connecting
+        return !device || device.pairing || device.state === BluetoothDeviceState.Connecting
             || device.state === BluetoothDeviceState.Disconnecting
     }
 
+    function available(device) {
+        return !!device && !!adapter?.enabled && allDevices.includes(device)
+    }
+
+    onAdapterChanged: pairingDevice = null
+    onAllDevicesChanged: if (pairingDevice && !allDevices.includes(pairingDevice)) pairingDevice = null
+
     function activate(device) {
-        if (busy(device))
+        if (!enabled || !available(device) || busy(device))
             return
         if (device.connected) {
             device.disconnect()
@@ -36,7 +43,7 @@ Flickable {
     }
 
     function forget(device) {
-        if (!busy(device))
+        if (enabled && available(device) && !busy(device))
             device.forget()
     }
 
@@ -50,11 +57,24 @@ Flickable {
         ignoreUnknownSignals: true
 
         function onPairedChanged() {
-            if (root.pairingDevice?.paired) {
-                root.pairingDevice.connect()
+            const device = root.pairingDevice
+            if (device?.paired) {
                 root.pairingDevice = null
+                if (root.available(device)) device.connect()
             }
         }
+        function onPairingChanged() {
+            // Let pairedChanged settle before dropping a failed/cancelled attempt.
+            const device = root.pairingDevice
+            Qt.callLater(() => {
+                if (device && root.pairingDevice === device && !device.pairing && !device.paired)
+                    root.pairingDevice = null
+            })
+        }
+    }
+    Connections {
+        target: root.adapter
+        function onEnabledChanged() { if (!root.adapter?.enabled) root.pairingDevice = null }
     }
 
     Column {

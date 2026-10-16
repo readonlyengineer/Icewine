@@ -252,6 +252,8 @@ Scope {
                 else {
                     if (openingPage === "battery" || openingPage === "performance")
                         statusPopout.openPowerPage(openingPage)
+                    else if (openingPage === "audio" || openingPage === "bluetooth")
+                        statusPopout.openAudioPage(openingPage)
                     statusPopout.focusInitial()
                 }
             }

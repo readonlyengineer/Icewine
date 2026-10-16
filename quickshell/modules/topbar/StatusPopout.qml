@@ -24,18 +24,21 @@ Widget {
     }
     property string currentPage: "audio"
     readonly property bool powerPage: currentPage === "battery" || currentPage === "performance"
-    readonly property Item currentItem: powerPage ? powerStack
+    readonly property bool audioPage: currentPage === "audio" || currentPage === "bluetooth"
+    readonly property Item currentItem: audioPage ? audioStack : powerPage ? powerStack
         : currentPage === "network" ? networkLoader.item : pageLoader.item
     property bool powerEntryPending: true
     onCurrentPageChanged: {
         powerEntryPending = true
         if (powerEntry) powerEntry.restart()
+        if (audioEntry) audioEntry.restart()
     }
     onShownChanged: if (shown && powerEntry) {
         powerEntryPending = true
         powerEntry.restart()
+        audioEntry.restart()
     }
-    Component.onCompleted: powerEntry.restart()
+    Component.onCompleted: { powerEntry.restart(); audioEntry.restart() }
 
     // Wait for page visibility/enabled bindings before selecting; never poll.
     Timer {
@@ -50,6 +53,17 @@ Widget {
         powerStack.resetSelection()
         if (page === "performance") powerStack.selectCard(1)
         powerEntryPending = false
+    }
+    Timer {
+        id: audioEntry
+        interval: 0
+        onTriggered: if (root.audioPage) root.openAudioPage(root.currentPage)
+    }
+
+    function openAudioPage(page) {
+        if (!root.audioPage || !root.visible || !root.enabled) return
+        audioStack.resetSelection()
+        if (page === "bluetooth") audioStack.selectCard(1)
     }
     signal mediaRequested()
     signal instantHandoffRequested()
@@ -96,7 +110,7 @@ Widget {
     CardStack {
         anchors.fill: parent
         cards: [pageCard]
-        visible: !root.powerPage && root.currentPage !== "network"
+        visible: !root.audioPage && !root.powerPage && root.currentPage !== "network"
         Card {
             id: pageCard
             stack: parent
@@ -105,12 +119,47 @@ Widget {
             Loader {
                 id: pageLoader
                 anchors.fill: parent
-                active: root.visible && !root.powerPage && root.currentPage !== "network"
-                sourceComponent: root.currentPage === "audio" ? audioPage
-                    : root.currentPage === "network" ? null
-                    : root.currentPage === "bluetooth" ? bluetoothPage
-                    : root.currentPage === "screenshot" ? screenshotPage
-                    : root.currentPage === "media" ? mediaPage : notificationsPage
+                active: root.visible && !root.audioPage && !root.powerPage && root.currentPage !== "network"
+                sourceComponent: root.currentPage === "screenshot" ? screenshotPage
+                    : root.currentPage === "media" ? mediaPage
+                    : root.currentPage === "notifications" ? notificationsPage : null
+            }
+        }
+    }
+    CardStack {
+        id: audioStack
+        anchors.fill: parent
+        visible: root.audioPage
+        cards: [audioCard, bluetoothCard]
+        Card {
+            id: audioCard
+            stack: audioStack
+            accessibleName: "Audio card"
+            implicitHeight: audioLoader.item?.implicitHeight ?? 0
+            initialFocus: audioLoader.item?.initialFocus?.enabled ? audioLoader.item.initialFocus : selector
+            Loader {
+                id: audioLoader
+                anchors.fill: parent
+                active: root.visible && root.audioPage
+                enabled: audioCard.active
+                sourceComponent: audioContent
+            }
+        }
+        Card {
+            id: bluetoothCard
+            stack: audioStack
+            index: 1
+            accessibleName: "Bluetooth card"
+            implicitHeight: bluetoothLoader.item?.implicitHeight ?? 0
+            initialFocus: bluetoothLoader.item?.initialFocus?.enabled ? bluetoothLoader.item.initialFocus : selector
+            Loader {
+                id: bluetoothLoader
+                anchors.fill: parent
+                active: root.visible && root.audioPage
+                enabled: bluetoothCard.active
+                sourceComponent: bluetoothPage
+                // Pair-to-connect ownership survives card/page changes and dismissal.
+                onLoaded: active = true
             }
         }
     }
@@ -167,7 +216,7 @@ Widget {
         }
     }
     Component {
-        id: audioPage
+        id: audioContent
         Popouts.Audio {}
     }
     Component {

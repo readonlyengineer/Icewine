@@ -151,6 +151,14 @@ polling follows that same state, including host dismissal. Pending brightness wr
 retain their existing owner. Use the card selectors to navigate from graph content;
 its Up/Down/Home/End keys retain scrolling, and brightness sliders retain arrows.
 
+Audio and Bluetooth share a two-card stack, in that order. Explicit entry selects
+its named card; generic focus restoration follows the selected card. Audio keeps
+its native PipeWire tracker. Bluetooth is retained after first load so pairing can
+finish and connect across card/page changes or dismissal, without moving focus.
+Only the settled front card accepts actions. Adapter loss, removal and cancelled
+pairing discard the pending pair-to-connect intent. Discovery remains explicitly
+user controlled; constructing or selecting either card performs no device action.
+
 ## Register and compose
 
 There is no registry: import the topbar QML directory and explicitly instantiate

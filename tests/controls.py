@@ -653,6 +653,139 @@ ShellRoot {
         if (power.active || perf.active)
             throw new Error("Leaving Power retained card work")
     }
+    Component {
+        id: doomedBluetoothDevice
+        QtObject {
+            property bool pairing: true
+            property bool paired: false
+        }
+    }
+    function checkAudioCards() {
+        focusWindow.requestActivate()
+        toggleKeys.tryCompare(focusWindow, "active", true)
+        focusPopout.currentPage = "audio"
+        toggleKeys.wait(180)
+        const stack = focusPopout.currentItem
+        const audio = stack.cards[0]
+        const bluetooth = stack.cards[1]
+        let body = descendants(audio, item => item.sinks !== undefined)[0]
+        const bt = descendants(bluetooth, item => item.pairingDevice !== undefined)[0]
+        const adapter = Fixtures.Bluetooth.defaultAdapter
+        const device = Fixtures.Bluetooth.testDevice
+        if (stack.cards.length !== 2 || !audio.active || bt.enabled
+                || Fixtures.Bluetooth.calls.length || adapter.discovering)
+            throw new Error("Audio construction acted or lost initial selection")
+        focusPopout.focusInitial()
+        assertRevealed(body.initialFocus, "Audio entry")
+        // Endpoint arrows belong to the real volume slider even when ignored.
+        let slider = descendants(body, item => item.from === 0 && item.to === 1)[0]
+        for (const [value, key] of [[0, Qt.Key_Left], [1, Qt.Key_Right]]) {
+            slider.value = value
+            slider.forceActiveFocus()
+            toggleKeys.keyClick(key)
+            if (stack.selectedCard !== 0) throw new Error("Volume endpoint escaped to stack")
+        }
+        focusPopout.openAudioPage("bluetooth")
+        focusPopout.focusInitial()
+        toggleKeys.wait(160)
+        if (!bluetooth.active || body.enabled || !bt.initialFocus.activeFocus)
+            throw new Error("Dedicated Bluetooth entry lost focus/activity")
+        focusPopout.focusInitial()
+        if (stack.selectedCard !== 1) throw new Error("Focus restoration reset Bluetooth selection")
+        const discover = descendants(bt, item => item.text === "Discover devices")[0]
+        discover.click()
+        if (!adapter.discovering) throw new Error("Discovery did not use existing adapter")
+        bt.activate(device)
+        if (bt.pairingDevice !== device || Fixtures.Bluetooth.calls.join() !== "pair")
+            throw new Error("Pairing did not start")
+        // Rear promotion consumes the click, preserving discovery and pair intent.
+        toggleKeys.mouseClick(audio, 8, 20)
+        toggleKeys.wait(160)
+        const sink = Fixtures.Pipewire.defaultAudioSink
+        const muted = sink.audio.muted
+        if (!audio.active || !adapter.discovering || bt.pairingDevice !== device)
+            throw new Error("Rear promotion lost explicit Bluetooth state")
+        bt.activate(device); bt.forget(device)
+        device.pairing = false
+        device.paired = true
+        toggleKeys.wait(20)
+        if (Fixtures.Bluetooth.calls.join() !== "pair,connect" || bt.pairingDevice
+                || stack.selectedCard !== 0 || !body.initialFocus.activeFocus || sink.audio.muted !== muted)
+            throw new Error("Hidden pairing completion acted on focus or wrong control")
+        focusPopout.openAudioPage("bluetooth")
+        toggleKeys.wait(160)
+        device.connected = true
+        bt.activate(device)
+        device.connected = false
+        bt.activate(device)
+        bt.forget(device)
+        if (Fixtures.Bluetooth.calls.join() !== "pair,connect,disconnect,connect,forget")
+            throw new Error("Existing device actions changed")
+        const calls = Fixtures.Bluetooth.calls.length
+        device.state = Fixtures.BluetoothDeviceState.Connecting
+        bt.activate(device); bt.forget(device)
+        if (Fixtures.Bluetooth.calls.length !== calls) throw new Error("Busy device accepted action")
+        device.state = 0
+        // Retained owner survives dismissal and page replacement without taking focus.
+        device.paired = false
+        bt.activate(device)
+        focusPopout.shown = false
+        focusPopout.currentPage = "media"
+        device.paired = true
+        toggleKeys.wait(180)
+        if (Fixtures.Bluetooth.calls.slice(-2).join() !== "pair,connect" || bt.pairingDevice)
+            throw new Error("Dismissal lost pair-to-connect ownership")
+        focusPopout.currentPage = "bluetooth"
+        focusPopout.shown = true
+        toggleKeys.wait(180)
+        if (descendants(bluetooth, item => item.pairingDevice !== undefined)[0] !== bt)
+            throw new Error("Bluetooth operation owner was recreated")
+        for (const loss of ["cancel", "device", "adapter", "radio"]) {
+            device.paired = false
+            device.pairing = false
+            bt.activate(device)
+            const before = Fixtures.Bluetooth.calls.length
+            if (loss === "cancel") device.pairing = false
+            else if (loss === "device") adapter.devices = {values: []}
+            else if (loss === "adapter") Fixtures.Bluetooth.defaultAdapter = null
+            else adapter.enabled = false
+            toggleKeys.wait(20)
+            if (bt.pairingDevice) throw new Error("Stale pairing retained after " + loss)
+            device.paired = true
+            toggleKeys.wait(20)
+            bt.activate(device); bt.forget(device)
+            if (Fixtures.Bluetooth.calls.length !== before + (loss === "cancel" ? 2 : 0))
+                throw new Error("Unavailable/stale pairing acted after " + loss)
+            Fixtures.Bluetooth.defaultAdapter = adapter
+            adapter.devices = {values: [device]}
+            adapter.enabled = true
+            device.pairing = false
+        }
+        const doomed = doomedBluetoothDevice.createObject(root)
+        bt.pairingDevice = doomed
+        doomed.destroy()
+        toggleKeys.wait(20)
+        if (bt.pairingDevice) throw new Error("Destroyed device retained a pending callback owner")
+        Fixtures.Bluetooth.defaultAdapter = null
+        focusPopout.focusInitial()
+        if (!bluetooth.selector.activeFocus) throw new Error("Unavailable Bluetooth has no focus target")
+        Fixtures.Bluetooth.defaultAdapter = adapter
+        focusPopout.currentPage = "audio"
+        toggleKeys.wait(180)
+        body = descendants(audio, item => item.sinks !== undefined)[0]
+        slider = descendants(body, item => item.from === 0 && item.to === 1)[0]
+        Fixtures.Pipewire.defaultAudioSink = null
+        focusPopout.focusInitial()
+        if (body.initialFocus.enabled || !audio.selector.activeFocus)
+            throw new Error("Unavailable audio did not guard mute/focus")
+        const volume = sink.audio.volume
+        slider.moved()
+        body.initialFocus.toggled()
+        if (sink.audio.volume !== volume || sink.audio.muted !== muted)
+            throw new Error("Unavailable audio changed the old sink")
+        Fixtures.Pipewire.defaultAudioSink = sink
+        adapter.discovering = false
+    }
     function checkPopoutFocus() {
         focusWindow.requestActivate()
         toggleKeys.tryCompare(focusWindow, "active", true)
@@ -679,7 +812,7 @@ ShellRoot {
         toggleKeys.wait(40)
         if (mediaScroll.contentY !== 0) throw new Error("Focus reveal fights manual scrolling")
 
-        focusWindow.height = 40
+        focusWindow.height = 104
         focusPopout.currentPage = "audio"
         toggleKeys.wait(30)
         const audio = descendants(focusPopout, item => item instanceof Flickable)[0]
@@ -1377,7 +1510,7 @@ ShellRoot {
             }
             try {
                 root.checkSharedCards(); root.checkBackgroundCards(); root.checkLayoutCards()
-                root.checkPopoutFocus(); root.checkPowerCards(); root.checkTailscaleConnection(); root.checkTailscaleLifetime()
+                root.checkPopoutFocus(); root.checkPowerCards(); root.checkAudioCards(); root.checkTailscaleConnection(); root.checkTailscaleLifetime()
                 root.checkRetainedNetworkFocus()
             }
             catch (error) { console.error(error); Qt.exit(1); return }
@@ -1850,6 +1983,33 @@ SERVICE_FIXTURES = {
         property var preferredDefaultAudioSink: null
         property var preferredDefaultAudioSource: null
     """,
+    "Bluetooth": """
+        id: bluetooth
+        property var calls: []
+        property QtObject testDevice: QtObject {
+            property string name: "Fixture headphones"
+            property string deviceName: name
+            property string icon: "audio-headset"
+            property bool paired: false
+            property bool bonded: false
+            property bool pairing: false
+            property bool connected: false
+            property int state: 0
+            property bool batteryAvailable: false
+            property real battery: 0.5
+            function pair() { bluetooth.calls.push("pair"); pairing = true }
+            function connect() { bluetooth.calls.push("connect") }
+            function disconnect() { bluetooth.calls.push("disconnect") }
+            function forget() { bluetooth.calls.push("forget") }
+        }
+        property QtObject fixtureAdapter: QtObject {
+            property bool enabled: true
+            property bool discovering: false
+            property var devices: ({values: [bluetooth.testDevice]})
+        }
+        property var defaultAdapter: fixtureAdapter
+    """,
+    "BluetoothDeviceState": "enum State { Idle, Connecting, Disconnecting }",
     "Networking": """
         property bool wifiEnabled: true
         property bool wifiHardwareEnabled: true
@@ -1882,6 +2042,7 @@ with tempfile.TemporaryDirectory() as directory:
     # Exercise the real pages, substituting only service imports for synthetic devices.
     shutil.copytree(source / "quickshell/modules", root / "icewine/modules", copy_function=shutil.copyfile)
     for name, service in (("Audio", "Quickshell.Services.Pipewire"),
+                          ("Bluetooth", "Quickshell.Bluetooth"),
                           ("Network", "Quickshell.Networking")):
         page = root / f"icewine/modules/topbar/popouts/{name}.qml"
         page_source = page.read_text()
@@ -2020,7 +2181,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert any("-u critical Battery Critical 10%" in call for call in notifications), notifications
     assert any("-u critical Battery Danger 5%" in call for call in notifications), notifications
     # Restore native service imports for the existing packaged-entry resolution check.
-    for name in ("Audio", "Network"):
+    for name in ("Audio", "Bluetooth", "Network"):
         relative = f"quickshell/modules/topbar/popouts/{name}.qml"
         (root / "icewine/modules/topbar/popouts" / f"{name}.qml").write_bytes((source / relative).read_bytes())
     # Native panels require a Wayland backend. Resolve the actual writable entry
