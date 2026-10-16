@@ -134,6 +134,11 @@ assert (desktop / "usr/bin/icewine-shell").is_file()
 assert (desktop / "usr/share/icewine/no-animations/quickshellrc").read_text() == "[KDE]\nAnimationDurationFactor[$i]=0\n"
 payload = desktop / "usr/share/icewine"
 defaults = payload / "defaults"
+deck = payload / "quickshell/deck"
+assert {path.name for path in deck.iterdir()} == {"DeckOverlay.qml", "DeckMenu.js"}
+for name in ("DeckOverlay.qml", "DeckMenu.js"):
+    assert (deck / name).read_bytes() == (source / "quickshell/deck" / name).read_bytes()
+assert (payload / "defaults-handheld/config/quickshell/shell.qml").read_bytes() == (source / "quickshell/deck/shell.qml").read_bytes()
 theme = importlib.machinery.SourceFileLoader("native_theme", str(source / "scripts/theme")).load_module()
 for variant, profile in [("defaults", "desktop"), ("defaults-handheld", "handheld")]:
     with tempfile.TemporaryDirectory() as directory:
