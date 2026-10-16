@@ -20,10 +20,37 @@ Widget {
     MonitorBrightness {
         id: monitorBrightness
         monitorName: root.monitorName
-        active: root.visible && root.currentPage === "battery"
+        active: powerCard.active && !root.powerEntryPending
     }
     property string currentPage: "audio"
-    readonly property Item currentItem: currentPage === "network" ? networkLoader.item : pageLoader.item
+    readonly property bool powerPage: currentPage === "battery" || currentPage === "performance"
+    readonly property Item currentItem: powerPage ? powerStack
+        : currentPage === "network" ? networkLoader.item : pageLoader.item
+    property bool powerEntryPending: true
+    onCurrentPageChanged: {
+        powerEntryPending = true
+        if (powerEntry) powerEntry.restart()
+    }
+    onShownChanged: if (shown && powerEntry) {
+        powerEntryPending = true
+        powerEntry.restart()
+    }
+    Component.onCompleted: powerEntry.restart()
+
+    // Wait for page visibility/enabled bindings before selecting; never poll.
+    Timer {
+        id: powerEntry
+        interval: 0
+        onTriggered: if (root.powerPage) root.openPowerPage(root.currentPage)
+    }
+
+    function openPowerPage(page) {
+        if (!root.powerPage || !root.visible || !root.enabled) return
+        powerEntryPending = true
+        powerStack.resetSelection()
+        if (page === "performance") powerStack.selectCard(1)
+        powerEntryPending = false
+    }
     signal mediaRequested()
     signal instantHandoffRequested()
 
@@ -69,7 +96,7 @@ Widget {
     CardStack {
         anchors.fill: parent
         cards: [pageCard]
-        visible: root.currentPage !== "network"
+        visible: !root.powerPage && root.currentPage !== "network"
         Card {
             id: pageCard
             stack: parent
@@ -78,14 +105,47 @@ Widget {
             Loader {
                 id: pageLoader
                 anchors.fill: parent
-                active: root.visible && root.currentPage !== "network"
+                active: root.visible && !root.powerPage && root.currentPage !== "network"
                 sourceComponent: root.currentPage === "audio" ? audioPage
-                    : root.currentPage === "performance" ? performancePage
                     : root.currentPage === "network" ? null
-                            : root.currentPage === "bluetooth" ? bluetoothPage
-                            : root.currentPage === "battery" ? batteryPage
-                                : root.currentPage === "screenshot" ? screenshotPage
-                                : root.currentPage === "media" ? mediaPage : notificationsPage
+                    : root.currentPage === "bluetooth" ? bluetoothPage
+                    : root.currentPage === "screenshot" ? screenshotPage
+                    : root.currentPage === "media" ? mediaPage : notificationsPage
+            }
+        }
+    }
+    CardStack {
+        id: powerStack
+        anchors.fill: parent
+        visible: root.powerPage
+        cards: [powerCard, performanceCard]
+        Card {
+            id: powerCard
+            stack: powerStack
+            accessibleName: "Power card"
+            implicitHeight: powerLoader.item?.implicitHeight ?? 0
+            initialFocus: powerLoader.item?.initialFocus ?? selector
+            Loader {
+                id: powerLoader
+                anchors.fill: parent
+                active: root.visible && root.powerPage
+                enabled: powerCard.active
+                sourceComponent: batteryPage
+            }
+        }
+        Card {
+            id: performanceCard
+            stack: powerStack
+            index: 1
+            accessibleName: "Performance card"
+            implicitHeight: performanceLoader.item?.implicitHeight ?? 0
+            initialFocus: performanceLoader.item?.initialFocus ?? selector
+            Loader {
+                id: performanceLoader
+                anchors.fill: parent
+                active: root.visible && root.powerPage
+                enabled: performanceCard.active
+                sourceComponent: performancePage
             }
         }
     }

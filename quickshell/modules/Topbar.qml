@@ -249,7 +249,11 @@ Scope {
                     else if (openingPage === "layout") launcher.openLayout()
                     else launcher.focusInitial()
                 }
-                else statusPopout.focusInitial()
+                else {
+                    if (openingPage === "battery" || openingPage === "performance")
+                        statusPopout.openPowerPage(openingPage)
+                    statusPopout.focusInitial()
+                }
             }
 
             onHoverPageChanged: {

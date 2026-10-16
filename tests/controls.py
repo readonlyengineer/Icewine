@@ -208,7 +208,7 @@ ShellRoot {
             session: session
             player: null
             powerState: root
-            monitorName: "DP-1"
+            monitorName: "performance-only"
             metrics: ({ now: root.now,
                 cpu: { history: [{ time: root.now, values: [25] }] },
                 cpuTemperature: { label: "Package", current: 48 },
@@ -592,6 +592,66 @@ ShellRoot {
                 throw new Error("Single-card constraints added an inset")
         }
         cardWindow.visible = false
+    }
+    function checkPowerCards() {
+        focusWindow.requestActivate()
+        toggleKeys.tryCompare(focusWindow, "active", true)
+        focusPopout.currentPage = "battery"
+        toggleKeys.wait(180)
+        const stack = focusPopout.currentItem
+        const power = stack.cards[0]
+        const perf = stack.cards[1]
+        const body = descendants(power, item => item.brightness !== undefined)[0]
+        const graphPage = descendants(perf, item => item.metrics !== undefined)[0]
+        const lock = root.findAccessible(body, "Lock")
+        const actions = root.sessionAction
+        if (stack.cards.length !== 2 || !power.active || perf.active
+                || !body.brightness.active || !body.enabled || graphPage.enabled)
+            throw new Error(`Power entry: count=${stack.cards.length}, power=${power.active}, performance=${perf.active}, brightness=${body.brightness.active}, body=${body.enabled}, graph=${graphPage.enabled}`)
+        focusPopout.focusInitial()
+        toggleKeys.wait(20)
+        assertRevealed(lock, "Constrained Power initial")
+        toggleKeys.keyClick(Qt.Key_Right)
+        if (!stack.exchanging || body.enabled || graphPage.enabled || body.brightness.active)
+            throw new Error("Power exchange retained interactive/recurring work")
+        toggleKeys.wait(160)
+        if (!perf.active || !graphPage.enabled || !graphPage.activeFocus)
+            throw new Error("Performance exchange did not enter the graph page")
+        toggleKeys.keyClick(Qt.Key_End)
+        if (graphPage.contentY <= 0) throw new Error("Constrained graphs did not scroll")
+        focusPopout.focusInitial()
+        if (stack.selectedCard !== 1) throw new Error("Focus restoration reset Power selection")
+        // Whole rear surface consumes selection without firing the Lock beneath it.
+        toggleKeys.mouseClick(power, 8, 80)
+        toggleKeys.wait(160)
+        if (!power.active || root.sessionAction !== actions || !body.brightness.active)
+            throw new Error("Rear Power surface activated content or lost brightness activity")
+        const slider = descendants(body, item => item.from === 0 && item.to === 100)[0]
+        toggleKeys.tryCompare(slider, "visible", true)
+        slider.value = slider.to
+        slider.forceActiveFocus()
+        toggleKeys.keyClick(Qt.Key_Right)
+        if (stack.selectedCard !== 0) throw new Error("Brightness endpoint escaped to stack")
+        focusPopout.openPowerPage("performance")
+        toggleKeys.wait(160)
+        if (!perf.active || body.brightness.active) throw new Error("Explicit Performance entry failed")
+        focusPopout.shown = false
+        if (body.brightness.active || power.active || perf.active)
+            throw new Error("Closing Power host retained activity")
+        focusPopout.currentPage = "battery"
+        focusPopout.shown = true
+        toggleKeys.wait(180)
+        if (!power.active) throw new Error("Ordinary Power reopen retained rear selection")
+        const touch = toggleKeys.touchEvent(focusWindow)
+        touch.press(0, perf, 8, 12).commit()
+        touch.release(0, perf, 8, 12).commit()
+        toggleKeys.wait(160)
+        if (!perf.active || root.sessionAction !== actions)
+            throw new Error("Touch promotion failed or fired a session action")
+        focusPopout.currentPage = "media"
+        toggleKeys.wait(20)
+        if (power.active || perf.active)
+            throw new Error("Leaving Power retained card work")
     }
     function checkPopoutFocus() {
         focusWindow.requestActivate()
@@ -1259,7 +1319,7 @@ ShellRoot {
             measuredBattery.percentage = 0.03
             chargingBattery.percentage = 0.02
             cancelSleep.start()
-            root.performanceHeightBefore = performance.implicitHeight
+            root.performanceHeightBefore = descendants(performance, item => item.metrics !== undefined && item instanceof Flickable)[0].implicitHeight
             performance.metrics = { now: root.now, cpu: { history: [] },
                 cpuTemperature: null, memory: { current: null, history: [] }, gpus: [] }
             finish.start()
@@ -1303,8 +1363,8 @@ ShellRoot {
                 throw new Error("Battery sleep was missed or repeated after charging")
             if (network.history.length !== 2 || network.history[1].values[0] !== 0)
                 throw new Error("Network sampler did not read counters")
-            if (performance.implicitHeight <= 0
-                    || performance.implicitHeight >= root.performanceHeightBefore)
+            if (descendants(performance, item => item.metrics !== undefined && item instanceof Flickable)[0].implicitHeight <= 0
+                    || descendants(performance, item => item.metrics !== undefined && item instanceof Flickable)[0].implicitHeight >= root.performanceHeightBefore)
                 throw new Error("Performance popup did not shrink after GPU removal")
             if (coldGraph.minimum !== -5 || coldGraph.maximum !== 100)
                 throw new Error("Temperature axis must include negative values and expire old samples")
@@ -1317,7 +1377,7 @@ ShellRoot {
             }
             try {
                 root.checkSharedCards(); root.checkBackgroundCards(); root.checkLayoutCards()
-                root.checkPopoutFocus(); root.checkTailscaleConnection(); root.checkTailscaleLifetime()
+                root.checkPopoutFocus(); root.checkPowerCards(); root.checkTailscaleConnection(); root.checkTailscaleLifetime()
                 root.checkRetainedNetworkFocus()
             }
             catch (error) { console.error(error); Qt.exit(1); return }
@@ -1852,7 +1912,7 @@ with tempfile.TemporaryDirectory() as directory:
     (root / "config").symlink_to(source / "quickshell/config")
     (root / "bin").mkdir()
     mock = root / "bin/icewine-monitor-brightness"
-    mock.write_text("#!" + shutil.which("bash") + '\necho "${2:-37}"\n')
+    mock.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$1" >> "' + str(root / "brightness-calls") + '"\necho "${2:-37}"\n')
     mock.chmod(0o755)
     notify = root / "bin/notify-send"
     notify.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$*" >> "' + str(root / "notifications") + '"\n')
@@ -1948,6 +2008,7 @@ with tempfile.TemporaryDirectory() as directory:
     output = result.stdout + result.stderr
     assert result.returncode == 0 and "CONTROL_CHECK_PASSED" in output, output
     assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
+    assert "performance-only" not in (root / "brightness-calls").read_text().splitlines(), "Performance entry started brightness polling"
     import json
     calls = [json.loads(line) for line in (root / "tailscale-calls").read_text().splitlines()]
     assert [call for call in calls if call[0] == "set"] == [

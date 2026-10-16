@@ -142,6 +142,15 @@ Apps keeps app selection and active menus by item identity through nonempty
 updates, closes menus on inactivity/removal and cancels deferred menu focus
 when inactive.
 
+Power and Performance share a two-card stack in `StatusPopout`, in that order.
+Ordinary Power entry selects Power; dedicated Performance entry selects the graphs.
+Generic focus restoration follows the current card. Both pages keep their existing
+services, scrolling and metrics history; the graph sampler remains owned by Topbar.
+Power controls are enabled only on the settled active card, and monitor brightness
+polling follows that same state, including host dismissal. Pending brightness writes
+retain their existing owner. Use the card selectors to navigate from graph content;
+its Up/Down/Home/End keys retain scrolling, and brightness sliders retain arrows.
+
 ## Register and compose
 
 There is no registry: import the topbar QML directory and explicitly instantiate
