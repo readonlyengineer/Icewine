@@ -87,21 +87,18 @@ vm.runInContext('flushLayoutRequest()', context)
 assert.match(context.layoutProcess.command[2], /select_autofullscreen\(1,"6e6577",false\)/)
 assert.throws(() => Layouts.status(text.replace('"autofullscreen":false', '"autofullscreen":"false"'), 1))
 assert.throws(() => Layouts.request(1, "31", null))
-// Exercise the actual host x binding: only Layout follows its button; all
-// branches retain screen clamps and the generic status right alignment.
+// Layout shares the launcher's clamped placement, with no standalone status page.
 const topbar = fs.readFileSync(path.join(__dirname, "../modules/Topbar.qml"), "utf8")
-const popout = topbar.slice(topbar.indexOf("id: statusPopout"))
-const position = popout.match(/\n                    x: ([\s\S]*?)\n                    y:/)[1]
-const placement = vm.createContext({currentPage: "layout", width: 380, panel: {width: 1920},
-    surface: {x: 500, width: 920}, input: {}, layoutButton: {mapToItem: () => ({x: 700})}})
-assert.equal(vm.runInContext(position, placement), 700)
-placement.currentPage = "audio"
-assert.equal(vm.runInContext(position, placement), 1040)
-placement.currentPage = "layout"
-placement.layoutButton.mapToItem = () => ({x: 1900})
-assert.equal(vm.runInContext(position, placement), 1532)
-placement.layoutButton.mapToItem = () => ({x: -20})
-assert.equal(vm.runInContext(position, placement), 8)
+const launcher = topbar.slice(topbar.indexOf("id: launcher"), topbar.indexOf("id: switcher"))
+const position = launcher.match(/\n                    x: ([^\n]+)/)[1]
+for (const [x, expected] of [[500, 500], [-20, 8]])
+    assert.equal(vm.runInNewContext(position, {surface: {x}}), expected)
+const shown = launcher.match(/shown: ([^\n]+)/)[1]
+for (const page of ["launcher", "layout", "audio", ""])
+    for (const widgetHere of [false, true])
+        assert.equal(vm.runInNewContext(shown, {panel: {widgetHere}, root: {ui: {page}}}),
+            widgetHere && ["launcher", "layout"].includes(page))
+assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../modules/topbar/StatusPopout.qml"), "utf8"), /LayoutPicker|layoutPage/)
 // Event-driven refreshes execute the real adapter functions and handlers.
 const refreshContext = vm.createContext({Layouts, layoutActive: false, layoutWorkspaceId: 1,
     layoutStatus: null, layoutUnavailable: "", layoutRefreshPending: false,
@@ -181,15 +178,20 @@ drain()
 assert.equal(refreshContext.layoutProcess.running, true)
 assert.equal(refreshContext.layoutProcess.workspace, 1)
 complete(state)
-// Both production shells bind activity to actual picker lifetime and feature flag.
+// Activity follows the selected, settled card on the owning monitor, even when
+// it was reached through stack navigation while ui.page still names Launcher.
+const activity = topbar.match(/readonly property bool layoutActive: ([\s\S]*?)\n    readonly property int barHeight/)[1]
+for (const layoutsEnabled of [false, true]) for (const sessionLocked of [false, true])
+    for (const widgetHere of [false, true]) for (const layoutActive of [false, true]) {
+        const panels = {instances: [{widgetHere: false, layoutActive: true}, {widgetHere, layoutActive}]}
+        const actual = vm.runInNewContext(activity, {layoutsEnabled, sessionLocked, panels})
+        assert.equal(actual, layoutsEnabled && !sessionLocked && widgetHere && layoutActive)
+    }
 for (const shell of ["Desktop", "Handheld"]) {
     const source = fs.readFileSync(path.join(__dirname, `../${shell}.qml`), "utf8")
     const binding = source.match(/layoutActive: (.*)/)[1]
-    for (const enabled of [false, true]) for (const locked of [false, true])
-        for (const page of ["", "battery", "layout"]) {
-            const actual = vm.runInNewContext(binding, {topbar: {layoutsEnabled: enabled, ui: {page}}, session: {locked}})
-            assert.equal(actual, enabled && !locked && page === "layout", `${shell}: ${enabled}/${locked}/${page}`)
-        }
+    for (const active of [false, true])
+        assert.equal(vm.runInNewContext(binding, {topbar: {layoutActive: active}}), active)
     if (shell === "Handheld") assert.match(source, /layoutsEnabled: false/)
 }
 console.log("PASS layout refresh: first open, coalesced focus, reopen, hidden completion, mutation and disabled handheld")

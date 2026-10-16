@@ -294,13 +294,172 @@ ShellRoot {
         property int activations: 0
         property int handoffs: 0
         property var trayItems: []
+        property var watchedCard: null
+        property int intermediateActivations: 0
+        Connections {
+            target: backgroundWindow.watchedCard
+            function onActiveChanged() {
+                if (backgroundWindow.watchedCard.active) ++backgroundWindow.intermediateActivations
+            }
+        }
         Bar.Launcher {
             id: backgroundLauncher
+            compositor: layoutCompositor
+            layoutsEnabled: false
             anchors.fill: parent
             engaged: true
             backgroundItems: backgroundWindow.trayItems
             onHandoffRequested: ++backgroundWindow.handoffs
         }
+    }
+    QtObject {
+        id: layoutCompositor
+        property int layoutWorkspaceId: 7
+        property bool layoutAvailable: true
+        property bool layoutPending: false
+        property string layoutError: ""
+        property string layoutUnavailable: ""
+        property var layoutStatus: ({effective: "master", autofullscreen: false})
+        property var calls: []
+        function selectLayout(choice) { calls.push([layoutWorkspaceId, choice]) }
+        function selectAutofullscreen(choice) { calls.push([layoutWorkspaceId, choice]) }
+    }
+    function checkLayoutCards() {
+        backgroundWindow.trayItems = []
+        const host = backgroundLauncher
+        backgroundWindow.visible = true
+        backgroundWindow.requestActivate()
+        toggleKeys.tryCompare(backgroundWindow, "active", true)
+        host.layoutsEnabled = true
+        const stack = descendants(host, item => item.cards !== undefined)[0]
+        const launcher = stack.cards[0]
+        host.openLauncher()
+        toggleKeys.wait(30)
+        if (stack.cards.length !== 2 || host.layoutActive)
+            throw new Error("Layout did not join launcher without tray apps")
+        host.openLayout()
+        toggleKeys.tryCompare(stack, "exchanging", false, 900)
+        const layout = stack.cards[1]
+        let toggle = root.findAccessible(layout, "Autofullscreen")
+        if (!host.layoutActive || !toggle.activeFocus || layoutCompositor.calls.length)
+            throw new Error("Layout entry lost focus or applied a layout")
+        backgroundWindow.height = 150
+        toggleKeys.wait(30)
+        host.focusInitial()
+        const scroll = descendants(layout, item => item instanceof Flickable)[0]
+        const focusY = toggle.mapToItem(scroll, 0, 0).y
+        if (!scroll.clip || scroll.contentHeight <= scroll.height || focusY < 0
+                || focusY + toggle.height > scroll.height)
+            throw new Error("Constrained layout did not reveal focused controls: " + focusY + "/" + scroll.height)
+        backgroundWindow.height = 488
+        toggleKeys.wait(30)
+        layoutCompositor.layoutWorkspaceId = 9
+        toggleKeys.keyClick(Qt.Key_Return)
+        const master = root.findAccessible(layout, "Master layout")
+        toggleKeys.mouseClick(master)
+        if (JSON.stringify(layoutCompositor.calls) !== JSON.stringify([[9, true], [9, "master"]]))
+            throw new Error("Layout controls did not target the current workspace")
+        for (const state of ["layoutPending", "layoutAvailable"]) {
+            layoutCompositor[state] = state === "layoutPending"
+            host.focusInitial()
+            if (toggle.enabled || master.enabled || !layout.selector.activeFocus)
+                throw new Error("Unavailable/pending layout lacks an inert focus target")
+            toggleKeys.mouseClick(master)
+            layoutCompositor[state] = state !== "layoutPending"
+        }
+        if (layoutCompositor.calls.length !== 2) throw new Error("Unavailable layout acted")
+        layoutCompositor.calls = []
+        backgroundWindow.trayItems = [{id: "layout-tray", title: "App", icon: "", status: 0, hasMenu: false}]
+        toggleKeys.wait(30)
+        if (stack.cards.length !== 3 || stack.selectedCard !== 0 || host.layoutActive
+                || stack.cards[1].index !== 1 || stack.cards[2].index !== 2)
+            throw new Error("Three-card arrival failed declared order/reset")
+        toggle = root.findAccessible(stack.cards[2], "Autofullscreen")
+        const cards = Array.from(stack.cards)
+        for (let front = 0; front < 3; ++front) {
+            stack.selectCard(front)
+            toggleKeys.tryCompare(stack, "exchanging", false, 900)
+            const near = cards[(front + 1) % 3], far = cards[(front + 2) % 3]
+            if (cards[front].x !== 26 || cards[front].y !== 56
+                    || near.x !== 17 || near.y !== 32 || far.x !== 8 || far.y !== 8
+                    || !(far.z < near.z && near.z < cards[front].z))
+                throw new Error("Three-card rear exposure/order is incorrect")
+            // Whole exposed strips promote without invoking controls.
+            toggleKeys.mouseClick(far, 40, 8)
+            toggleKeys.tryCompare(stack, "exchanging", false, 900)
+            if (stack.selectedCard !== (front + 2) % 3 || layoutCompositor.calls.length)
+                throw new Error("Rear strip did not promote inertly")
+        }
+        host.openLauncher()
+        launcher.selector.forceActiveFocus()
+        toggleKeys.keyClick(Qt.Key_Right)
+        toggleKeys.wait(25)
+        backgroundWindow.watchedCard = cards[1]
+        backgroundWindow.intermediateActivations = 0
+        const before = cards.map(card => [card.x, card.y])
+        toggleKeys.keyClick(Qt.Key_Right)
+        if (stack.queuedCard !== 2 || stack.motionInitialFocus !== backgroundWindow.activeFocusItem
+                || cards.some((card, i) => card.x !== before[i][0] || card.y !== before[i][1]))
+            throw new Error("Third-card request jumped the running sweep")
+        toggleKeys.tryCompare(stack, "exchanging", false, 900)
+        if (stack.frontCard !== 2 || !toggle.activeFocus || !host.layoutActive
+                || backgroundWindow.intermediateActivations)
+            throw new Error("Queued third-card request failed selected focus/activity")
+        backgroundWindow.watchedCard = null
+        // ScrollView owns content arrows; its endpoint must not change cards.
+        toggleKeys.keyClick(Qt.Key_Right)
+        if (stack.selectedCard !== 2 || stack.exchanging)
+            throw new Error("Layout scroll content leaked an endpoint arrow")
+        cards[2].selector.forceActiveFocus()
+        toggleKeys.keyClick(Qt.Key_Right)
+        toggleKeys.tryCompare(stack, "exchanging", false, 900)
+        if (stack.frontCard !== 0 || !launcher.initialFocus.activeFocus)
+            throw new Error("Three-card arrow wrapping failed")
+        for (const remove of ["tray", "layout"]) {
+            host.openLauncher()
+            stack.selectCard(1)
+            toggleKeys.wait(25)
+            stack.selectCard(2)
+            toggleKeys.keyPress(Qt.Key_Return)
+            if (remove === "tray") backgroundWindow.trayItems = []
+            else host.layoutsEnabled = false
+            toggleKeys.wait(30)
+            toggleKeys.keyRelease(Qt.Key_Return)
+            toggleKeys.wait(160)
+            if (stack.cards.length !== 2 || stack.exchanging || stack.queuedCard !== -1
+                    || stack.selectedCard !== 0 || !launcher.initialFocus.activeFocus)
+                throw new Error("Optional removal kept stale queued motion/focus")
+            backgroundWindow.trayItems = [{id: "layout-tray", title: "App", icon: "", status: 0, hasMenu: false}]
+            host.layoutsEnabled = true
+            toggleKeys.wait(30)
+        }
+        host.openLayout()
+        toggleKeys.wait(25)
+        host.openLauncher()
+        if (stack.exchanging || stack.selectedCard !== 0 || !launcher.initialFocus.activeFocus
+                || layoutCompositor.calls.length)
+            throw new Error("Explicit Launcher entry did not cancel Layout exchange")
+        for (const arriving of ["tray", "layout"]) {
+            host.layoutsEnabled = arriving === "tray"
+            backgroundWindow.trayItems = arriving === "tray" ? []
+                : [{id: "layout-tray", title: "App", icon: "", status: 0, hasMenu: false}]
+            toggleKeys.wait(30)
+            host.openLauncher()
+            stack.selectCard(1)
+            toggleKeys.wait(25)
+            toggleKeys.keyPress(Qt.Key_Space)
+            host.layoutsEnabled = true
+            backgroundWindow.trayItems = [{id: "layout-tray", title: "App", icon: "", status: 0, hasMenu: false}]
+            toggleKeys.wait(30)
+            toggleKeys.keyRelease(Qt.Key_Space)
+            toggleKeys.wait(140)
+            if (stack.cards.length !== 3 || stack.exchanging || stack.selectedCard !== 0
+                    || !launcher.initialFocus.activeFocus || layoutCompositor.calls.length)
+                throw new Error("Optional arrival retained stale motion or activation")
+        }
+        host.layoutsEnabled = false
+        backgroundWindow.trayItems = []
+        backgroundWindow.visible = false
     }
     function checkBackgroundCards() {
         backgroundWindow.visible = true
@@ -752,6 +911,7 @@ ShellRoot {
         const picker = root.findAccessible(networkPages, "Exit node")
         const page = picker.parent.parent.parent
         tailscaleMode.setText("success")
+        networkKeys.tryCompare(connection, "enabled", true)
         connection.click()
         networkKeys.wait(50)
         const pending = page.request
@@ -1155,7 +1315,11 @@ ShellRoot {
                         || value < 0 || value > 100)
                     throw new Error("Live CPU/RAM sampling failed")
             }
-            try { root.checkSharedCards(); root.checkBackgroundCards(); root.checkPopoutFocus(); root.checkTailscaleConnection(); root.checkTailscaleLifetime(); root.checkRetainedNetworkFocus() }
+            try {
+                root.checkSharedCards(); root.checkBackgroundCards(); root.checkLayoutCards()
+                root.checkPopoutFocus(); root.checkTailscaleConnection(); root.checkTailscaleLifetime()
+                root.checkRetainedNetworkFocus()
+            }
             catch (error) { console.error(error); Qt.exit(1); return }
             console.log("CONTROL_CHECK_PASSED")
             Qt.quit()

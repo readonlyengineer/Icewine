@@ -82,7 +82,6 @@ Widget {
                 sourceComponent: root.currentPage === "audio" ? audioPage
                     : root.currentPage === "performance" ? performancePage
                     : root.currentPage === "network" ? null
-                    : root.currentPage === "layout" ? layoutPage
                             : root.currentPage === "bluetooth" ? bluetoothPage
                             : root.currentPage === "battery" ? batteryPage
                                 : root.currentPage === "screenshot" ? screenshotPage
@@ -101,10 +100,6 @@ Widget {
         onLoaded: active = true
     }
 
-    Component {
-        id: layoutPage
-        LayoutPicker { compositor: root.compositor }
-    }
     Component {
         id: performancePage
         Popouts.Performance {

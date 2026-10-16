@@ -24,15 +24,23 @@ Rectangle {
         : 1 - Math.pow(1 - (card.stack.progress - 0.5) * 2, 3)
     width: !stack ? implicitWidth : Math.max(0, card.stack.width - (card.stack.stacked ? 34 : 0))
     height: !stack ? implicitHeight : Math.max(0, card.stack.height - (card.stack.stacked ? 64 : 0))
-    x: !stack || !stack.stacked ? 0 : 8 + (!card.stack.exchanging ? (card.index === card.stack.frontCard ? 18 : 0)
-        : !outgoing ? 18 * advance
-        : card.stack.progress < 0.5 ? 18 + (-width - 30) * sweep : (-width - 12) * (1 - sweep))
-    y: !stack || !stack.stacked ? 0 : 8 + (!card.stack.exchanging ? (card.index === card.stack.frontCard ? 48 : 0)
-        : !outgoing ? 48 * advance
-        : card.stack.progress < 0.5 ? 48 - 24 * sweep : 24 * (1 - sweep))
-    // The outgoing card clears the clipped host before this handoff, also in reverse.
-    z: !stack ? 0 : !card.stack.exchanging ? (card.index === card.stack.frontCard ? 2 : 1)
-        : outgoing === (card.stack.progress < 0.5) ? 2 : 1
+    readonly property real rearStart: stack ? stack.rearOffset(index, stack.outgoingCard) : 0
+    readonly property real rearEnd: stack ? stack.rearOffset(index, stack.incomingCard) : 0
+    readonly property real depth: !stack ? 0 : !stack.exchanging
+        ? (index === stack.frontCard ? 1 : stack.rearOffset(index, stack.frontCard))
+        : index === stack.incomingCard ? rearStart + (1 - rearStart) * advance
+        : rearStart + (rearEnd - rearStart) * advance
+    x: !stack || !stack.stacked ? 0 : 8 + (stack.exchanging && outgoing
+        ? stack.progress < 0.5 ? 18 + (-width - 30) * sweep
+            : -width - 12 + (width + 12 + 18 * rearEnd) * sweep
+        : 18 * depth)
+    y: !stack || !stack.stacked ? 0 : 8 + (stack.exchanging && outgoing
+        ? stack.progress < 0.5 ? 48 - 24 * sweep : 24 + (48 * rearEnd - 24) * sweep
+        : 48 * depth)
+    // The outgoing card clears the clipped host before the incoming card takes front.
+    z: !stack ? 0 : !stack.exchanging ? (index === stack.frontCard ? 2 : 1 + depth)
+        : outgoing ? (stack.progress < 0.5 ? 2 : 1 + rearEnd)
+        : index === stack.incomingCard ? (stack.progress < 0.5 ? 1 + rearStart : 2) : 1 + depth
 
     // Explicit keyboard selection and a plain target for stack arrow navigation.
     Item {

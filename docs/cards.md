@@ -21,19 +21,28 @@ Content keeps its own established margins and scrolling. Card clipping bounds
 children to the card; it does not create a rounded mask.
 
 Set `stack` to the enclosing `CardStack` and list the card in the stack's `cards`
-in index order. `index` defaults to zero; set the second card's index to one.
+in index order. `index` defaults to zero; set subsequent indices to one/two.
 The host supplies the stack's actual width and height. A single card fills it
 at (0, 0), with no geometry deduction. The existing two-card presentation uses
 34px horizontal and 64px vertical allowance, an 18px/48px front offset, and the
 existing 120ms reversible exchange. The stack clips the sweep and draws no
 frame or focus underline.
 
-The supported compositions are one card and a pair. Changing membership cancels
-motion and pending motion-key activation, closes transient menus through
-`selectionChanging()`, and resets selection/front geometry to the first card.
-Focus returns to its `initialFocus` only if the available stack already owns
-focus. Use this for an optional second card; destroy it through its owner Loader.
-Nonempty content updates should retain the same card. Larger decks, reordering
+The supported compositions are one, two or three cards. Three cards keep the
+same outer allowance and front offset; the next card in cyclic declared order
+rests at 9px/24px behind the front and the other at 0px/0px (all inside the
+existing 8px inset). Both rear strips are exposed. Each exchange still moves
+one front/rear pair for 120ms; the third card interpolates its rear position.
+Requesting the outgoing card reverses the sweep. Requesting the third card
+during motion queues the latest intent until the current sweep completes,
+then exchanges again, without jumping moving surfaces. Arrow/motion-key cycles
+advance from the queued intent when present. Content stays inert between sweeps.
+
+Changing membership cancels motion and queued/pending motion-key activation,
+closes transient menus through `selectionChanging()`, and resets selection/front
+geometry to the first card. Focus returns to its `initialFocus` only if the
+available stack already owns focus. Destroy optional cards through their owner
+Loader; nonempty content updates retain the same card. Larger decks, reordering
 and user-configurable groupings require their own interaction design.
 
 Expose `initialFocus` as a control inside the card, or keep the shared
@@ -52,10 +61,10 @@ their own indicators. The stationary motion target uses the same keys to cycle o
 release. Keep a valid focus target even if the card has no enabled controls.
 `selectionChanging()` lets an owner close transient menus before motion.
 
-For the supported fixed pair, unmodified Left selects the previous card and
+For the supported fixed compositions, unmodified Left selects the previous card and
 Right the next in declared `cards` order, wrapping at either end. With two cards
 both directions reach the other card; the existing sweep reverses when selecting
-the outgoing card during motion. This does not add support for larger decks.
+the outgoing card during motion. Three-card requests follow the queue above.
 Navigation runs after child key handling. Plain stack/card/shared-selector/motion
 focus targets and ordinary native buttons/toggles (`AbstractButton` descendants)
 can navigate with an unhandled arrow. Menu items, radio buttons and tab buttons
@@ -110,13 +119,25 @@ reveal. Pages retain responsibility for their constrained Flickable/ListView.
 reach the existing host handoff before application execution; rear/inactive
 launch requests are ignored. `Launcher.qml` owns the existing tray model and
 exposes `backgroundCount`/`backgroundAttention`. It adds a Background Apps card
-only for nonempty tray contents. The single-card host remains 400×424; a pair
-adds the shared 34×64 allowance, constrained by the panel.
+only for nonempty tray contents. Layout joins when `layoutsEnabled`, reusing
+`LayoutPicker` and the supplied compositor in a constrained ScrollView. Declared
+order is Launcher → Background Apps (if any) → Layout (if enabled). The single
+card remains 400×424; two/three cards add the shared 34×64 allowance, constrained
+by the panel. Layout's initial focus is Autofullscreen when available, otherwise
+its selector. Its ScrollView reserves content arrows and reveals focused controls
+when constrained; use the card selector to navigate the stack. Selection alone
+never changes a layout. `Launcher.layoutActive`
+follows the settled card; Topbar aggregates only the owning monitor and passes
+activity to the existing Desktop/Handheld compositor adapter. Feature disablement
+removes Layout, repairs selection, and routes an explicit Layout page back to
+Launcher. No new backend, poller or service is involved.
 
 Ordinary `Launcher.focusInitial()` follows the selected card, including its
 active menu. Explicit launcher requests call `openLauncher()`: this uses
 `CardStack.resetSelection()` to cancel motion, close the tray menu and focus
-search. Do not use that opening intent for generic focus restoration. Background
+search. Explicit Layout entry uses `openLayout()` in the same host; Topbar carries
+the requested page through deferred focus routing. Hidden monitor instances do
+not take focus. Do not use opening intent for generic focus restoration. Background
 Apps keeps app selection and active menus by item identity through nonempty
 updates, closes menus on inactivity/removal and cancels deferred menu focus
 when inactive.
@@ -159,7 +180,9 @@ For a pair, use `cards: [launcher, companion]`, set both cards' `stack`, and set
 shared exchange, selected focus/activity and launcher handoff through a mocked
 `uwsm`. The same check exercises the production launcher's optional tray card,
 identity-preserving updates, removal during motion and explicit-open focus routing.
-Use these fixtures when extending composition.
+It also checks the production Layout grouping, all three rear/front orders,
+queued third-card motion, optional removal, current-workspace controls and
+pending/unavailable focus. Use these fixtures when extending composition.
 
 Run `python3 tests/controls.py .` with the installed `qs` on PATH. This exercises
 real QML geometry, exchange/reversal, keyboard/touch selection, scrolling,

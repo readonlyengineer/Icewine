@@ -7,7 +7,7 @@ import QtQuick.Templates as T
 // Nonvisual arrangement and selection; card surfaces belong to Card.
 FocusScope {
     id: root
-    // Ponytail: fixed one-card/pair compositions; larger decks need a selection design.
+    // Ponytail: fixed one/two/three-card compositions; larger decks need a selection design.
     property list<Card> cards
     onCardsChanged: resetSelection()
     readonly property bool stacked: cards.length > 1
@@ -21,6 +21,8 @@ FocusScope {
     property int selectedCard: 0
     property int frontCard: 0
     property int outgoingCard: 0
+    property int incomingCard: 0
+    property int queuedCard: -1
     property real progress: 0
     property bool exchanging: false
     property bool available: visible && enabled
@@ -29,7 +31,7 @@ FocusScope {
     Keys.onPressed: event => navigate(event)
 
     function navigate(event) {
-        if (!available || cards.length !== 2 || event.modifiers !== Qt.NoModifier
+        if (!available || cards.length < 2 || event.modifiers !== Qt.NoModifier
                 || ![Qt.Key_Left, Qt.Key_Right].includes(event.key)) return
         const target = root.Window.window?.activeFocusItem
         // Owners retain even ignored endpoint keys, including composite groups.
@@ -43,21 +45,27 @@ FocusScope {
                 && !cards.some(card => target === card || target === card.selector)) return
         event.accepted = true
         if (!event.isAutoRepeat)
-            selectCard((selectedCard + (event.key === Qt.Key_Left ? -1 : 1) + cards.length) % cards.length)
+            selectCard(((queuedCard >= 0 ? queuedCard : selectedCard) + (event.key === Qt.Key_Left ? -1 : 1) + cards.length) % cards.length)
     }
 
     function selectCard(index) {
         if (!available || !Number.isInteger(index) || index < 0 || index >= cards.length) return
+        motionFocus.activationKey = 0
+        queuedCard = -1
+        if (exchanging && index !== outgoingCard && index !== incomingCard) {
+            queuedCard = index
+            return
+        }
         if (selectedCard === index) {
             if (exchanging && root.activeFocus) motionFocus.forceActiveFocus()
             return
         }
-        motionFocus.activationKey = 0
         selectionChanging()
         if (root.activeFocus) motionFocus.forceActiveFocus()
         exchange.stop()
         if (!exchanging) {
             outgoingCard = frontCard
+            incomingCard = index
             progress = 0
         }
         selectedCard = index
@@ -68,14 +76,16 @@ FocusScope {
         else exchange.start()
     }
 
-    // A fixed single/pair membership change always returns to the first card.
+    // Membership changes cancel queued intent before optional cards can disappear.
     function resetSelection() {
         motionFocus.activationKey = 0
         selectionChanging()
         exchange.stop()
+        queuedCard = -1
         selectedCard = 0
         frontCard = 0
         outgoingCard = 0
+        incomingCard = 0
         exchanging = false
         progress = 0
         if (available && root.activeFocus) initialFocus?.forceActiveFocus()
@@ -84,9 +94,29 @@ FocusScope {
     function finishExchange() {
         exchange.stop()
         frontCard = selectedCard
+        const queued = queuedCard
+        queuedCard = -1
+        if (available && queued >= 0 && queued !== selectedCard) {
+            // Continue without briefly enabling the intermediate card's content.
+            outgoingCard = frontCard
+            incomingCard = queued
+            selectedCard = queued
+            progress = 0
+            motionFocus.activationKey = 0
+            selectionChanging()
+            exchange.to = 1
+            exchange.duration = 120
+            exchange.start()
+            return
+        }
         exchanging = false
         progress = 0
         if (available && motionFocus.activeFocus) initialFocus?.forceActiveFocus()
+    }
+
+    // The next declared rear card sits halfway between the far rear and front.
+    function rearOffset(index, front) {
+        return cards.length === 3 && (index - front + cards.length) % cards.length === 1 ? 0.5 : 0
     }
 
     function inOutCubic(t) {
@@ -116,7 +146,7 @@ FocusScope {
             if (event.isAutoRepeat || event.key !== activationKey) return
             event.accepted = true
             activationKey = 0
-            root.selectCard((root.selectedCard + 1) % root.cards.length)
+            root.selectCard(((root.queuedCard >= 0 ? root.queuedCard : root.selectedCard) + 1) % root.cards.length)
         }
     }
 

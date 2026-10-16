@@ -12,7 +12,7 @@ ShellRoot {
     }
     Adapters.Hyprland {
         id: hyprlandAdapter
-        layoutActive: topbar.layoutsEnabled && !session.locked && topbar.ui.page === "layout"
+        layoutActive: topbar.layoutActive
     }
     Modules.NotificationService {
         id: notifications

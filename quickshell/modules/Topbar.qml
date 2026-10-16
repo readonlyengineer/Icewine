@@ -24,6 +24,8 @@ Scope {
     property bool fullWidth: false
     property bool excludeSteamApps: false
     property bool layoutsEnabled: true
+    readonly property bool layoutActive: layoutsEnabled && !sessionLocked
+        && panels.instances.some(panel => panel.widgetHere && panel.layoutActive)
     readonly property int barHeight: 38
     readonly property var player: Mpris.players.values.find(candidate => candidate.isPlaying)
         ?? Mpris.players.values[0] ?? null
@@ -49,7 +51,7 @@ Scope {
     property bool instantBarHide: false
 
     signal widgetDismissed()
-    signal focusWidgetRequested(string screenName, bool launcherRequest)
+    signal focusWidgetRequested(string screenName, string openingPage)
     signal rendered()
 
     function focusedScreenName() {
@@ -94,7 +96,7 @@ Scope {
     }
 
     function openWidget(page, engaged, screenName) {
-        if (sessionLocked || !screenName || (page === "switcher" && !Config.Settings.windowSwitcher))
+        if (sessionLocked || !screenName || (page === "layout" && !layoutsEnabled) || (page === "switcher" && !Config.Settings.windowSwitcher))
             return
         const next = State.reduce(ui, { type: "open", page: page, engaged: engaged, screen: screenName })
         if (next === ui) return
@@ -104,7 +106,7 @@ Scope {
         if (engaged)
             Qt.callLater(() => {
                 if (!root.sessionLocked && generation === root.widgetFocusGeneration)
-                    root.focusWidgetRequested(next.screen, page === "launcher")
+                    root.focusWidgetRequested(next.screen, page)
             })
     }
 
@@ -168,6 +170,9 @@ Scope {
         Qt.callLater(() => { if (media?.canRaise) media.raise() })
     }
 
+    onLayoutsEnabledChanged: if (!layoutsEnabled && ui.page === "layout")
+        openWidget("launcher", ui.engaged, ui.screen)
+
     onBarVisibleChanged: if (!barVisible) finishInteraction()
     onSessionLockedChanged: if (sessionLocked) handoff()
 
@@ -227,6 +232,7 @@ Scope {
         PanelWindow {
             id: panel
             required property var modelData
+            readonly property bool layoutActive: launcher.layoutActive
             readonly property bool widgetHere: root.ui.page !== "" && root.ui.screen === screen.name
             readonly property bool modal: root.radialVisible || root.widgetEngaged
             readonly property string keyboardScreen: root.widgetEngaged ? root.ui.screen : root.radial?.monitorName ?? ""
@@ -234,12 +240,13 @@ Scope {
                 : nowPlaying.hovered ? "media" : statusIcons.hoveredPage
             readonly property bool widgetHovered: launcher.hovered || statusPopout.hovered
 
-            function focusWidget(launcherRequest) {
+            function focusWidget(openingPage) {
                 if (!widgetHere || !root.widgetEngaged)
                     return
                 if (switcher.item) switcher.item.forceActiveFocus()
                 else if (launcher.shown) {
-                    if (launcherRequest) launcher.openLauncher()
+                    if (openingPage === "launcher") launcher.openLauncher()
+                    else if (openingPage === "layout") launcher.openLayout()
                     else launcher.focusInitial()
                 }
                 else statusPopout.focusInitial()
@@ -427,8 +434,10 @@ Scope {
                         blurMax: 16
                         shadowVerticalOffset: 4
                     }
+                    compositor: root.compositor
+                    layoutsEnabled: root.layoutsEnabled
                     excludeSteamApps: root.excludeSteamApps
-                    shown: panel.widgetHere && root.ui.page === "launcher"
+                    shown: panel.widgetHere && ["launcher", "layout"].includes(root.ui.page)
                     animateClose: !root.instantBarHide && !root.sessionLocked
                     engaged: root.widgetEngaged
                     x: Math.max(8, surface.x)
@@ -464,7 +473,7 @@ Scope {
                         blurMax: 16
                         shadowVerticalOffset: 4
                     }
-                    shown: panel.widgetHere && root.ui.page !== "launcher" && root.ui.page !== "switcher"
+                    shown: panel.widgetHere && !["launcher", "layout", "switcher"].includes(root.ui.page)
                     animateClose: !root.instantBarHide && !root.sessionLocked
                     engaged: root.widgetEngaged
                     Binding {
@@ -474,8 +483,7 @@ Scope {
                         when: statusPopout.shown
                         restoreMode: Binding.RestoreNone
                     }
-                    x: Math.max(8, Math.min(currentPage === "layout"
-                        ? layoutButton.mapToItem(input, 0, 0).x : surface.x + surface.width - width,
+                    x: Math.max(8, Math.min(surface.x + surface.width - width,
                         panel.width - width - 8))
                     y: root.barHeight + 4
                     width: Math.min(380, panel.width - 16)
@@ -498,8 +506,8 @@ Scope {
             Connections {
                 target: root
                 function onWidgetDismissed() { previewOpen.stop() }
-                function onFocusWidgetRequested(screenName, launcherRequest) {
-                    if (screenName === panel.screen.name) panel.focusWidget(launcherRequest)
+                function onFocusWidgetRequested(screenName, openingPage) {
+                    if (screenName === panel.screen.name) panel.focusWidget(openingPage)
                 }
             }
         }
