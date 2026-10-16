@@ -12,16 +12,27 @@ local ws = {
     { id = -1337, config_name = "name:old" }, { id = -99, config_name = "special:scratch" },
 }
 local default = "scrolling"
+local deferred = false
 local function refresh()
+    if deferred then return end
     for _, workspace in ipairs(ws) do
-        workspace.tiled_layout = default
+        local layout = default
         workspace.gaps_in = 0
         for _, rule in ipairs(native) do
             if rule.enabled and rule.workspace:match("^%s*(.-)%s*$") == workspace.config_name then
-                workspace.tiled_layout = rule.layout
+                layout = rule.layout
                 if rule.gaps_in then workspace.gaps_in = rule.gaps_in end
             end
         end
+        if workspace.tiled_layout == "scrolling" and layout ~= "scrolling" then
+            for _, win in ipairs(workspace.clients or {}) do
+                if win.fullscreen then
+                    win.fullscreen = false
+                    callbacks["window.fullscreen"](win)
+                end
+            end
+        end
+        workspace.tiled_layout = layout
     end
 end
 hl = {
@@ -141,3 +152,76 @@ assert(ws[1].tiled_layout == "master" and ws[3].tiled_layout == "scrolling")
 assert(layouts.autofullscreen(ws[1], false) == false)
 assert(layouts.autofullscreen(ws[2], true) == true)
 print("PASS native layout helpers: fallback, captured IDs, user-rule reset, failure, later-rule reselection/reset, reload and logout")
+
+-- Compose the real preference helper and policy. Native rules schedule layout
+-- updates; props_refreshed runs only after the final effective layout is set.
+os.getenv = getenv
+layouts = dofile(module)
+package.loaded["icewine.modules.Layouts"] = layouts
+local active
+local windows = {}
+local timers = {}
+hl.timer = function(callback, options)
+    assert(options.type == "oneshot" and options.timeout == 1)
+    timers[#timers + 1] = callback
+end
+hl.get_windows = function() return windows end
+hl.get_workspace_windows = function(workspace) return workspace.clients or {} end
+hl.get_active_window = function() return active end
+hl.window_rule = function() end
+hl.dsp = { window = { fullscreen = function(request) return request end },
+    focus = function(request) return { focus = request.window } end,
+    layout = function(command) return command end }
+hl.dispatch = function(request)
+    if request.focus then active = request.focus; return end
+    if type(request) == "string" then assert(request == "fit_into_view"); return end
+    assert(request.layout_aware and request.mode == "fullscreen")
+    request.window.fullscreen = request.action == "set"
+    callbacks["window.fullscreen"](request.window)
+end
+local policy = dofile(module:gsub("Layouts.lua$", "WindowPolicy.lua"))
+package.loaded["icewine.modules.WindowPolicy"] = policy
+for index, workspace in ipairs({ws[1], ws[2]}) do
+    workspace.clients = {}
+    for i = 1, index == 1 and 2 or 1 do
+        local win = { address = #windows + 1, mapped = true, workspace = workspace,
+            monitor = {width = 1920, height = 1080}, size = {w = 1920}, fullscreen = false }
+        workspace.clients[#workspace.clients + 1], windows[#windows + 1] = win, win
+        active, workspace.last_window = win, win
+        callbacks["window.open"](win)
+    end
+end
+local a, b, other = windows[1], windows[2], windows[3]
+active = b
+callbacks["config.props_refreshed"]()
+deferred = true
+local function flush()
+    deferred = false; refresh(); deferred = true
+    callbacks["config.props_refreshed"]()
+    local pending = timers; timers = {}
+    for _, callback in ipairs(pending) do callback() end
+end
+select(1, "scrolling")
+assert(ws[1].tiled_layout == "master" and not a.fullscreen and not b.fullscreen,
+    "selection reconciled before native rules took effect")
+flush()
+assert(a.fullscreen and b.fullscreen and not other.fullscreen and active == b)
+policy.toggle_fullscreen() -- Explicit off must survive selection and reset.
+select(1, "monocle"); select(1, "dwindle"); select(1, "scrolling")
+flush()
+assert(a.fullscreen and not b.fullscreen and active == b, "coalesced choice lost final layout/manual off")
+select(1, "default"); flush()
+assert(ws[1].tiled_layout == "master" and not a.fullscreen and not b.fullscreen)
+-- Both external workspace rules and general.layout use the same refresh event.
+hl.workspace_rule({ workspace = "1", layout = "monocle" }); flush()
+assert(not a.fullscreen and not b.fullscreen and not other.fullscreen)
+local runtime_rule = hl.workspace_rule({ workspace = "1", layout = "scrolling" }); flush()
+assert(a.fullscreen and not b.fullscreen and not other.fullscreen)
+runtime_rule:set_enabled(false)
+default = "master"; flush()
+assert(not a.fullscreen and not b.fullscreen)
+default = "scrolling"; flush()
+assert(a.fullscreen and not b.fullscreen)
+assert(not other.fullscreen and active == b and layouts.autofullscreen(ws[1], false)
+    and not layouts.autofullscreen(ws[2], true), "external configuration changed workspace preferences/focus")
+print("PASS layout selection + real policy: deferred rules, coalesced choices, reset, external rules/config and workspace overrides")

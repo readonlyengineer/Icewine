@@ -5,6 +5,8 @@ local M = {}
 local epsilon = 0.02
 local states = {}
 local pending_fullscreen = {}
+local workspace_layouts = {}
+for _, ws in ipairs(hl.get_workspaces() or {}) do workspace_layouts[ws.id] = ws.tiled_layout end
 local configured_default
 local autofullscreen = false
 
@@ -132,9 +134,15 @@ end
 
 local function window_target(win, singleton)
 	local state, layout = state_for(win), win.workspace.tiled_layout or "scrolling"
+	local off = state.fullscreen_off
+	if off and (win.workspace ~= off.workspace or layout ~= "scrolling" or win.floating) then
+		state.fullscreen = off.fullscreen
+		state.fullscreen_off = nil
+	end
+	if win.floating then return nil, state.fullscreen or false end
 	if layout == "scrolling" then return target_for(state, default_width(win), win.workspace) end
 	if state.fullscreen ~= nil then return nil, state.fullscreen end
-	if not M.autofullscreen(win.workspace) or win.floating then return nil, false end
+	if not M.autofullscreen(win.workspace) then return nil, false end
 	if layout == "monocle" then
 		local focused = hl.get_active_window()
 		return nil, win == (focused and focused.workspace == win.workspace and focused or win.workspace.last_window)
@@ -183,6 +191,7 @@ end
 
 local function with_window_focus(win, fn)
 	local active = hl.get_active_window()
+	local workspace = not active and (hl.get_active_special_workspace() or hl.get_active_workspace())
 	if active == win then
 		fn()
 		return
@@ -198,7 +207,8 @@ local function with_window_focus(win, fn)
 		fn()
 	end, function(trace) return tostring(trace) end)
 
-	focus_window(active)
+	if active then focus_window(active)
+	elseif workspace then hl.dispatch(hl.dsp.focus({ workspace = workspace })) end
 	if animations then hl.config({ animations = { enabled = true } }) end
 	if not no_warps then hl.config({ cursor = { no_warps = false } }) end
 	if not ok then error(err) end
@@ -240,6 +250,7 @@ end
 
 local function reconcile_workspace(ws, exclude)
 	if not ws then return end
+	workspace_layouts[ws.id] = ws.tiled_layout
 
 	local active = hl.get_active_window()
 	local focused = active and active.workspace == ws and active or ws.last_window
@@ -259,7 +270,7 @@ local function reconcile_workspace(ws, exclude)
 		if win ~= exclude then changed = apply_window(win, singleton) or changed end
 	end
 
-	if changed and focused and not focused.hidden then
+	if changed and active and focused and not focused.hidden then
 		if not focus_window(focused) and ws.tiled_layout == "scrolling" then
 			hl.dispatch(hl.dsp.layout("fit_into_view"))
 		end
@@ -300,6 +311,7 @@ function M.adjust_width(delta)
 	if not is_resizable(win) then return end
 
 	local state = state_for(win)
+	state.fullscreen_off = nil
 	state.width = adjusted_width(intended_width(win, state), delta)
 	state.fullscreen = false
 	apply_window(win)
@@ -310,6 +322,7 @@ function M.toggle_width()
 	if not is_resizable(win) then return end
 
 	local state = state_for(win)
+	state.fullscreen_off = nil
 	local fallback = default_width(win)
 	if same_number(fallback, 1.0) then
 		state.width = 1.0
@@ -335,6 +348,7 @@ function M.toggle_fullscreen()
 	end
 
 	local state = state_for(win)
+	state.fullscreen_off = nil
 	state.fullscreen = not select(2, window_target(win))
 	apply_window(win)
 end
@@ -375,6 +389,18 @@ hl.on("config.reloaded", function()
 	read_autofullscreen()
 	adopt_existing_windows()
 	sync_default_width(hl.get_active_monitor())
+end)
+
+hl.on("config.props_refreshed", function()
+	-- Native workspace rules/general.layout take effect during property refresh,
+	-- after config.reloaded or Layouts.select returns. Observe the final layout,
+	-- including external rules and coalesced selections, without polling.
+	local current = {}
+	for _, ws in ipairs(hl.get_workspaces()) do
+		current[ws.id] = ws.tiled_layout
+		if workspace_layouts[ws.id] ~= ws.tiled_layout then reconcile_workspace(ws) end
+	end
+	workspace_layouts = current
 end)
 
 hl.on("monitor.focused", function(mon)
@@ -437,6 +463,7 @@ hl.on("window.fullscreen", function(win)
 	local key = key_for(win)
 	local state = key and states[key]
 	if not state then return end
+	state.fullscreen_off = nil
 
 	local fullscreen = fullscreen_of(win)
 	if pending_fullscreen[key] ~= nil then
@@ -448,6 +475,23 @@ hl.on("window.fullscreen", function(win)
 	-- Mapping another tiled window can clear the compositor's fullscreen
 	-- owner before window.open. Keep a matching automatic target automatic.
 	if state.fullscreen == nil and fullscreen == select(2, window_target(win)) then return end
+	if not fullscreen and is_resizable(win) then
+		-- Scrolling removal emits off before the new layout is published. Keep
+		-- the previous intent until this synchronous migration has completed.
+		-- Otherwise the one-shot confirms a genuine external off; no polling.
+		-- Ponytail: an unlabelled external off batched with a layout change is
+		-- indistinguishable from teardown; a native reason/pre-layout event
+		-- is needed to separate those requests within the same callback turn.
+		local off = { fullscreen = state.fullscreen, workspace = win.workspace }
+		state.fullscreen_off = off
+		hl.timer(function()
+			if states[key] ~= state or state.fullscreen_off ~= off then return end
+			apply_window(win)
+			if state.fullscreen_off == off then state.fullscreen_off = nil end
+		end, { timeout = 1, type = "oneshot" })
+		state.fullscreen = false
+		return
+	end
 	state.fullscreen = fullscreen
 	if not fullscreen then apply_window(win) end
 end)

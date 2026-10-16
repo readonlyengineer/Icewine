@@ -1,10 +1,21 @@
 -- Run: lua hyprland/tests/window-policy.lua hyprland/modules/WindowPolicy.lua
 local events, active, windows, workspaces, configured = {}, nil, {}, {}, nil
+local active_workspace
 local rules, closed, focuses = {}, nil, 0
 local fitted = {}
 local setting = "on\n"
+local timers = {}
+local function settle()
+	local pending = timers
+	timers = {}
+	for _, callback in ipairs(pending) do callback() end
+end
 hl = {
 	on = function(event, callback) events[event] = callback end,
+	timer = function(callback, options)
+		assert(options.type == "oneshot" and options.timeout == 1)
+		timers[#timers + 1] = callback
+	end,
 	window_rule = function(rule)
 		local saved = rules[rule.name] or {}
 		for key, value in pairs(rule) do saved[key] = value end
@@ -13,6 +24,12 @@ hl = {
 		return saved
 	end,
 	get_active_window = function() return active end,
+	get_active_workspace = function() return active and active.workspace or active_workspace end,
+	get_active_special_workspace = function() return nil end,
+	get_config = function(name)
+		assert(name == "animations.enabled" or name == "cursor.no_warps")
+		return name == "cursor.no_warps"
+	end,
 	get_active_monitor = function() return active.monitor end,
 	get_windows = function() return windows end,
 	get_window = function(selector)
@@ -24,7 +41,7 @@ hl = {
 	config = function(config) configured = config.scrolling.column_width end,
 	dsp = {
 		layout = function(command) return command end,
-		focus = function(request) return { focus = request.window } end,
+		focus = function(request) return { focus = request.window, workspace = request.workspace } end,
 		window = {
 			float = function(request) return { float = request.window } end,
 			fullscreen = function(request) return request end,
@@ -40,7 +57,13 @@ hl = {
 			local width = assert(tonumber(request:match("^colresize (.+)$")))
 			active.size = { w = width * active.monitor.width }
 		elseif request.float then
+			if request.float.workspace.tiled_layout == "scrolling" and not request.float.floating and request.float.fullscreen then
+				request.float.fullscreen = false
+				events["window.fullscreen"](request.float)
+			end
 			request.float.floating = not request.float.floating
+		elseif request.workspace then
+			active, active_workspace = nil, request.workspace
 		elseif request.focus then
 			active, focuses = request.focus, focuses + 1
 		elseif request.move then
@@ -83,7 +106,7 @@ local function window(monitor, width, fullscreen)
 	active = {
 		mapped = true,
 		address = #windows + 1, monitor = monitor,
-		workspace = { tiled_layout = "scrolling" },
+		workspace = { id = #windows + 1, tiled_layout = "scrolling" },
 		size = { w = width * (monitor.width or 1) }, fullscreen = fullscreen,
 	}
 	windows[#windows + 1] = active
@@ -216,7 +239,7 @@ print("Steam placeholder: PID identity, reserved workspace, fullscreen/focus, re
 
 -- Exercise the event-driven policy; no polling or native intent tags are needed.
 local function workspace(layout)
-	local ws = { tiled_layout = layout, windows = {}, active = true }
+	local ws = { id = #workspaces + 1, tiled_layout = layout, windows = {}, active = true }
 	workspaces[#workspaces + 1] = ws
 	return ws
 end
@@ -227,7 +250,7 @@ local function tiled(ws, fullscreen)
 	-- Hyprland maps the newcomer, clears the old fullscreen owner, then
 	-- emits openLate (Lua window.open). This is not a manual off request.
 	for _, existing in ipairs(ws.windows) do
-		if existing ~= win and existing.fullscreen then
+		if ws.tiled_layout ~= "scrolling" and existing ~= win and existing.fullscreen then
 			existing.fullscreen = false
 			events["window.fullscreen"](existing)
 		end
@@ -355,3 +378,172 @@ active.workspace.autofullscreen = true
 events["window.open"](active)
 check(1.0, true)
 print("layout policy: singleton open/close/move/float, monocle focus, live toggle and explicit intent pass")
+
+-- Property refresh observes the effective native layout, not the requested one.
+-- Pair transitions distinguish scrolling/monocle from singleton-only layouts.
+local function switch_layout(ws, layout)
+	-- updateTiledAlgo calls old removeTarget (synchronous fullscreen exit)
+	-- before publishing the replacement. Do not move this after assignment.
+	if ws.tiled_layout == "scrolling" and layout ~= "scrolling" then
+		for _, win in ipairs(ws.windows) do
+			if win.fullscreen and not win.floating then
+				win.fullscreen = false
+				events["window.fullscreen"](win)
+			end
+		end
+	end
+	ws.tiled_layout = layout
+	events["config.props_refreshed"]()
+end
+for _, from in ipairs({ "scrolling", "dwindle", "master", "monocle" }) do
+	for _, to in ipairs({ "scrolling", "dwindle", "master", "monocle" }) do
+		for count = 1, 2 do
+			workspaces, windows = {}, {}
+			policy = dofile(arg[1])
+			local ws = workspace(from)
+			local a = tiled(ws)
+			local b = count == 2 and tiled(ws) or a
+			events["config.props_refreshed"]()
+			switch_layout(ws, to)
+			settle()
+			assert(a.fullscreen == (count == 1 or to == "scrolling"), from .. " -> " .. to .. ": wrong first target")
+			assert(b.fullscreen == (count == 1 or to == "scrolling" or to == "monocle"), from .. " -> " .. to .. ": wrong focus target")
+			assert(active == b, "layout reconciliation stole focus")
+		end
+	end
+end
+
+for _, layout in ipairs({ "dwindle", "master", "monocle" }) do
+	for _, intent in ipairs({ "automatic", "manual-on", "manual-off", "external-off" }) do
+		workspaces, windows = {}, {}
+		policy = dofile(arg[1])
+		local ws = workspace("scrolling")
+		local win = tiled(ws)
+		events["config.props_refreshed"]()
+		if intent == "manual-on" then policy.toggle_fullscreen(); policy.toggle_fullscreen()
+		elseif intent == "manual-off" then policy.toggle_fullscreen()
+		elseif intent == "external-off" then
+			win.fullscreen = false
+			events["window.fullscreen"](win)
+			events["workspace.active"](ws) -- Must not undo a pending genuine off.
+			assert(not win.fullscreen)
+			settle()
+		end
+		local expected = intent == "automatic" or intent == "manual-on"
+		switch_layout(ws, layout)
+		assert(win.fullscreen == expected, layout .. ": teardown erased " .. intent)
+		switch_layout(ws, "scrolling")
+		settle() -- Round trip before the old teardown's one-shot may fire.
+		assert(win.fullscreen == expected, layout .. ": round trip erased " .. intent)
+		ws.autofullscreen = false; policy.refresh_autofullscreen()
+		assert(win.fullscreen == (intent == "manual-on"), "automatic intent became explicit")
+	end
+end
+print("native layout teardown: automatic/manual on/off and genuine external off round trips pass")
+
+-- A newer explicit Icewine width/off choice wins even before the one-shot.
+workspaces, windows = {}, {}
+policy = dofile(arg[1])
+local pending_ws = workspace("scrolling")
+local pending_win = tiled(pending_ws)
+events["config.props_refreshed"]()
+pending_win.fullscreen = false; events["window.fullscreen"](pending_win)
+policy.adjust_width(-0.1)
+switch_layout(pending_ws, "master"); switch_layout(pending_ws, "scrolling")
+settle()
+assert(not pending_win.fullscreen and math.abs(pending_win.size.w / normal.width - 0.9) < 0.001,
+	"layout recovery overwrote a newer explicit width/off choice")
+
+-- Scrolling removeTarget is also used by move/float; do not poison those
+-- existing callers while distinguishing layout teardown from a manual off.
+workspaces, windows = {}, {}
+policy = dofile(arg[1])
+local move_from, move_to = workspace("scrolling"), workspace("scrolling")
+local moved_on = tiled(move_from)
+policy.toggle_fullscreen(); policy.toggle_fullscreen()
+events["config.props_refreshed"]()
+moved_on.fullscreen = false; events["window.fullscreen"](moved_on)
+move_from.windows, move_to.windows, moved_on.workspace = {}, { moved_on }, move_to
+events["window.move_to_workspace"](moved_on); settle()
+assert(moved_on.fullscreen, "same-layout move lost explicit on during native removal")
+for _, manual in ipairs({ false, true }) do
+	workspaces, windows = {}, {}
+	policy = dofile(arg[1])
+	local ws = workspace("scrolling")
+	local win = tiled(ws)
+	if manual then policy.toggle_fullscreen(); policy.toggle_fullscreen() end
+	policy.toggle_floating(); settle()
+	assert(win.floating and win.fullscreen == manual, "native float teardown lost intent/exclusion")
+end
+
+workspaces, windows = {}, {}
+policy = dofile(arg[1])
+local switched, untouched = workspace("master"), workspace("scrolling")
+local automatic = tiled(switched)
+local floating = tiled(switched)
+floating.floating = true
+local manual_off, manual_on = tiled(switched), tiled(switched)
+active = manual_off
+policy.toggle_fullscreen(); policy.toggle_fullscreen()
+active = manual_on
+policy.toggle_fullscreen()
+local other = tiled(untouched)
+events["config.props_refreshed"]()
+-- Leave an unrelated workspace deliberately out of policy, to detect accidental
+-- global refresh. Its manual intent has not changed.
+other.fullscreen = false
+local splash = window(normal, 1, true)
+splash.initial_title, splash.workspace = "Icewine Steam launch", switched
+switched.windows[#switched.windows + 1] = splash
+events["window.open"](splash)
+local special = workspace("master")
+special.special = true
+local excluded = tiled(special)
+events["config.props_refreshed"]()
+active = manual_on
+for _, layout in ipairs({ "scrolling", "dwindle", "monocle", "master", "scrolling" }) do
+	switched.tiled_layout = layout
+	events["config.props_refreshed"]()
+	assert(not floating.fullscreen and not excluded.fullscreen and splash.fullscreen, "layout change broke exclusions")
+	assert(not manual_off.fullscreen and manual_on.fullscreen, "layout change erased manual intent")
+	assert(not other.fullscreen and active == manual_on, "layout change affected unrelated workspace/focus")
+end
+local before = focuses
+events["config.props_refreshed"]()
+assert(focuses == before and not other.fullscreen, "unrelated property refresh reconciled windows")
+-- Effective workspace override remains stronger than global on after switches.
+switched.autofullscreen = false
+switched.tiled_layout = "master"; events["config.props_refreshed"]()
+switched.tiled_layout = "scrolling"; events["config.props_refreshed"]()
+assert(not automatic.fullscreen and manual_on.fullscreen and not manual_off.fullscreen)
+-- Empty workspaces, final coalesced choice, and source/destination moves.
+local empty = workspace("scrolling")
+events["config.props_refreshed"]()
+empty.tiled_layout = "monocle"; empty.tiled_layout = "master"
+events["config.props_refreshed"]()
+switched.windows, empty.windows = { floating, manual_off, manual_on, splash }, { automatic }
+automatic.workspace = empty
+events["window.move_to_workspace"](automatic)
+assert(automatic.fullscreen and not manual_off.fullscreen and manual_on.fullscreen)
+-- Reload adoption deliberately treats current on/off states as user choices.
+events["config.reloaded"]()
+empty.tiled_layout = "scrolling"; events["config.props_refreshed"]()
+assert(automatic.fullscreen and not manual_off.fullscreen and manual_on.fullscreen)
+print("layout switches: all pairs, manual intent, overrides, exclusions, focus, empty/coalesced changes and moves pass")
+
+-- Returning a background workspace to scrolling restores its saved width while
+-- the user remains on an empty workspace (there is no active window to restore).
+workspaces, windows = {}, {}
+policy = dofile(arg[1])
+local blank, background = workspace("master"), workspace("scrolling")
+local resized = window(wide, 1, false)
+resized.workspace, background.windows = background, { resized }
+events["window.open"](resized)
+policy.adjust_width(0.2)
+background.tiled_layout = "master"; events["config.props_refreshed"]()
+resized.size.w = wide.width * 0.3
+active, active_workspace = nil, blank
+background.tiled_layout = "scrolling"; events["config.props_refreshed"]()
+assert(math.abs(resized.size.w / wide.width - 0.7) < 0.001 and not resized.fullscreen)
+assert(active == nil and active_workspace == blank, "background resize stole empty-workspace focus")
+print("layout switches: saved scrolling width and empty-workspace focus pass")
