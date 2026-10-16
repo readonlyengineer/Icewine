@@ -13,6 +13,7 @@ Flickable {
     property bool active: false
     property var data: Model.empty("Loading…")
     property string error: ""
+    property bool statusError: false
     property var request: null
     property int generation: 0
     property string confirming: ""
@@ -32,7 +33,12 @@ Flickable {
     }
 
     function selectExit(id) {
-        if (!active || busy || process.running || confirming) return
+        if (!active || confirming) return
+        if (request?.kind === "status") {
+            if (!request.next) request.next = { kind: "set", id: id, self: data.self }
+            return
+        }
+        if (busy || process.running) return
         const command = Model.exitCommand(data, id)
         if (!command || id === data.selected) {
             syncPicker()
@@ -47,7 +53,12 @@ Flickable {
     }
 
     function toggleConnection() {
-        if (!active || busy || process.running || confirming || exitPicker.visible) return
+        if (!active || confirming || exitPicker.visible) return
+        if (request?.kind === "status") {
+            if (!request.next) request.next = { kind: "connection", self: data.self, state: data.state }
+            return
+        }
+        if (busy || process.running) return
         const command = Model.connectionCommand(data)
         if (!command) return
         error = ""
@@ -72,10 +83,13 @@ Flickable {
         if (completed.timedOut || code !== 0 || status !== 0) {
             const denied = /access denied|permission denied|not permitted/i.test(errors)
             error = denied ? "Permission denied. Ask the host administrator to configure a Tailscale operator, then retry."
-                : completed.kind === "connection" ? "Connection request failed or timed out. Refresh to check the current state."
-                : completed.kind === "set" ? "Exit-node request failed or timed out. Refresh to check the current setting."
-                : "Tailscale unavailable. Check the client and service, then refresh."
-            if (completed.kind === "status") data = Model.empty("Unavailable")
+                : completed.kind === "connection" ? "Connection request failed or timed out. Checking the current state automatically."
+                : completed.kind === "set" ? "Exit-node request failed or timed out. The current setting will be checked automatically."
+                : "Tailscale unavailable. Check the client and service; status retries automatically."
+            if (completed.kind === "status") {
+                data = Model.empty("Unavailable")
+                statusError = true
+            }
             if (completed.kind !== "connection") confirming = ""
             else if (active) Qt.callLater(root.refresh)
         } else if (completed.kind === "connection") {
@@ -85,29 +99,43 @@ Flickable {
             if (active) Qt.callLater(root.refresh)
         } else {
             try {
-                data = Model.decode(text)
+                const updated = Model.decode(text)
+                // Retain delegates when only the headline/exit state changes.
+                if (JSON.stringify(updated.peers) === JSON.stringify(data.peers)) updated.peers = data.peers
+                if (JSON.stringify(updated) !== JSON.stringify(data)) data = updated
+                if (statusError) error = ""
+                statusError = false
                 if (confirming) {
                     const selected = JSON.parse(confirming)
                     if (selected.kind === "connection") {
                         error = selected.self && data.self && data.self !== selected.self
                             ? "Tailscale profile changed. Check the current connection."
-                            : data.state === "NeedsLogin" ? "Sign in with Tailscale, then refresh."
-                            : data.state === "NeedsMachineAuth" ? "Device approval required. Ask the tailnet administrator, then refresh."
+                            : data.state === "NeedsLogin" ? "Sign in with Tailscale; status retries automatically."
+                            : data.state === "NeedsMachineAuth" ? "Device approval required. Ask the tailnet administrator; status retries automatically."
                             : data.state !== selected.state || (selected.state === "Running" && !data.connected)
-                                ? (error || "Connection change not confirmed. Refresh and retry.") : ""
+                                ? (error || "Connection change not confirmed. Check the current state and retry.") : ""
                     } else {
                         error = data.self !== selected.self ? "Tailscale profile changed. Check the current exit node."
-                            : data.selected !== selected.id ? "Exit-node change not confirmed. Refresh and retry." : ""
+                            : data.selected !== selected.id ? "Exit-node change not confirmed. Check the current state and retry." : ""
                     }
                     confirming = ""
                 }
             } catch (e) {
                 data = Model.empty("Error")
-                error = "Invalid Tailscale response. Refresh and retry."
+                statusError = true
+                error = "Invalid Tailscale response. Status retries automatically."
                 confirming = ""
             }
         }
         syncPicker()
+        // Keep read-time input responsive without overlapping processes or losing focus.
+        const next = completed.next
+        if (next && !statusError && active && completed.generation === generation) {
+            if (next.self !== data.self || (next.kind === "connection" && next.state !== data.state))
+                error = "Tailscale state changed. Check the current state and retry."
+            else if (next.kind === "set") selectExit(next.id)
+            else toggleConnection()
+        }
     }
 
     function closeMenus() {
@@ -118,7 +146,8 @@ Flickable {
 
     function syncPicker() {
         if (!exitPicker || exitPicker.visible) return
-        menuData = Model.exitMenu(data)
+        const updated = Model.exitMenu(data)
+        if (JSON.stringify(updated) !== JSON.stringify(menuData)) menuData = updated
     }
 
     onActiveChanged: {
@@ -160,7 +189,7 @@ Flickable {
                 Layout.fillWidth: true
                 text: root.data.selfName + " · " + (root.busy
                     ? (root.request.kind === "set" ? "Changing exit node…"
-                        : root.request.kind === "connection" ? "Changing connection…" : "Refreshing…") : root.data.label)
+                        : root.request.kind === "connection" ? "Changing connection…" : root.data.label) : root.data.label)
                 color: root.data.connected ? Theme.Palette.success : Theme.Palette.muted
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 13
@@ -174,7 +203,7 @@ Flickable {
                 Layout.preferredWidth: 44
                 implicitHeight: 44
                 checked: root.data.state === "Running"
-                enabled: root.active && !root.busy && !root.confirming && !exitPicker.visible
+                enabled: root.active && (!root.busy || root.request.kind === "status") && !root.confirming && !exitPicker.visible
                     && Model.connectionCommand(root.data) !== null
                 Accessible.name: "Tailscale connection"
                 Accessible.description: root.data.label
@@ -196,7 +225,7 @@ Flickable {
             id: exitButton
             width: parent.width
             text: root.data.exits.find(peer => peer.id === root.data.selected)?.name ?? "None"
-            enabled: Model.exitCommand(root.data, "") !== null && !root.busy && !root.confirming
+            enabled: Model.exitCommand(root.data, "") !== null && (!root.busy || root.request.kind === "status") && !root.confirming
             Accessible.name: "Exit node"
             onClicked: exitPicker.popup(exitButton, 0, exitButton.height)
 
@@ -284,12 +313,6 @@ Flickable {
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 10
             wrapMode: Text.Wrap
-        }
-        ActionButton {
-            width: parent.width
-            text: "Refresh Tailscale"
-            enabled: !root.busy
-            onClicked: { root.error = ""; root.refresh() }
         }
         Text {
             textFormat: Text.PlainText

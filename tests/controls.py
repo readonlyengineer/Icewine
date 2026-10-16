@@ -1044,6 +1044,22 @@ ShellRoot {
         settleCards(page)
         first.forceActiveFocus()
     }
+    property bool traceNetworkFocus: false
+    property var networkFocusEvents: []
+    Connections {
+        target: networkWindow
+        function onActiveFocusItemChanged() {
+            if (!root.traceNetworkFocus) return
+            root.networkFocusEvents.push("signal:" + networkWindow.activeFocusItem?.Accessible.name)
+            Qt.callLater(() => root.networkFocusEvents.push("later:" + networkWindow.activeFocusItem?.Accessible.name))
+        }
+    }
+    function refreshSnapshot(page) {
+        return {y: page.contentY, width: page.width, height: page.height,
+            contentHeight: page.contentHeight, label: page.data.label, error: page.error,
+            focus: networkWindow.activeFocusItem?.Accessible.name,
+            focusEvents: root.networkFocusEvents.slice()}
+    }
     FileView { id: tailscaleSelection; path: Qt.resolvedUrl("exit-node") }
     function checkTailscaleConnection() {
         networkWindow.requestActivate()
@@ -1071,10 +1087,45 @@ ShellRoot {
                 throw new Error("Status and connection touch target overlap or overflow")
         }
         networkWindow.width = 280
+        const settled = page.data
+        const device = root.findAccessible(page, "Home gateway, online, 100.64.0.2")
+        const title = root.findAccessible(page, "<b>Fixture laptop</b> · Connected")
+        if (!device || !descendants(page, item => item.Accessible.name === "<b>Fixture laptop</b>, online, 100.64.0.3").length)
+            throw new Error("Device identity fixture lost the distinct equal-name remote")
+        if (descendants(page, item => item.Accessible.name === "Local duplicate, online, 100.64.0.4").length)
+            throw new Error("Devices rendered Self.ID")
+        tailscaleMode.setText("status-slow")
+        root.traceNetworkFocus = true
+        connection.forceActiveFocus()
+        networkKeys.waitForRendering(page)
+        // Apply the host's actual reveal after the preceding width/layout changes.
+        networkPages.revealFocus()
+        const before = root.refreshSnapshot(page)
+        const scroll = page.contentY
+        // Observe the existing automatic timer through a deliberately slow synthetic read.
+        networkKeys.tryCompare(page, "busy", true, 6000)
+        if (!connection.enabled || !picker.enabled)
+            throw new Error("Background read disabled mutation controls for presentation")
+        if (title.text !== "<b>Fixture laptop</b> · Connected")
+            throw new Error("Background read replaced the settled headline")
+        networkKeys.tryCompare(page, "busy", false)
+        const after = root.refreshSnapshot(page)
+        root.traceNetworkFocus = false
+        console.log("TAILSCALE_REFRESH", JSON.stringify({before, after}))
+        if (page.data !== settled || root.findAccessible(page, device.Accessible.name) !== device
+                || !connection.activeFocus || after.focusEvents.length !== before.focusEvents.length
+                || Math.abs(page.contentY - scroll) > 1)
+            throw new Error(`Unchanged automatic read: model=${page.data === settled}, delegate=${root.findAccessible(page, device.Accessible.name) === device}, focus=${connection.activeFocus}, scroll=${page.contentY}/${scroll}`)
+        tailscaleMode.setText("")
         for (const input of [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter, "mouse", "touch", "touch"]) {
             connection.forceActiveFocus()
             networkKeys.wait(30) // Let the actual popout reveal the target before pointer/touch delivery.
             const wasChecked = connection.checked
+            if (input === Qt.Key_Space) {
+                tailscaleMode.setText("status-slow")
+                page.refresh()
+                networkKeys.tryCompare(page, "busy", true)
+            }
             if (typeof input === "number") networkKeys.keyClick(input)
             else if (input === "mouse") networkKeys.mouseClick(connection, connection.width - 17, connection.height / 2)
             else {
@@ -1082,7 +1133,12 @@ ShellRoot {
                 touch.press(0, connection, connection.width - 17, connection.height / 2).commit()
                 touch.release(0, connection, connection.width - 17, connection.height / 2).commit()
             }
-            networkKeys.tryCompare(page, "busy", true)
+            if (input === Qt.Key_Space) {
+                if (page.request.kind !== "status" || page.request.next?.kind !== "connection")
+                    throw new Error("Read-time native click was lost or overlapped the status process")
+                networkKeys.tryVerify(() => page.request?.kind === "connection")
+                tailscaleMode.setText("")
+            } else networkKeys.tryCompare(page, "busy", true)
             if (connection.checked !== wasChecked || connection.enabled || picker.enabled)
                 throw new Error("Connection must retain confirmed state and serialize input while busy")
             page.toggleConnection()
@@ -1280,7 +1336,7 @@ ShellRoot {
             const picker = root.findAccessible(networkPages, "Exit node")
             networkKeys.tryCompare(picker, "enabled", true)
             const page = picker.parent.parent.parent
-            networkKeys.tryVerify(() => page.data.peers.length === 2)
+            networkKeys.tryVerify(() => page.data.peers.length === 3)
             const localLabel = root.findAccessible(page, "<b>Fixture laptop</b> · Connected")
             if (!localLabel || localLabel.textFormat !== Text.PlainText)
                 throw new Error("Local device name must appear as plain text in the status title")
@@ -1341,14 +1397,9 @@ ShellRoot {
             picker.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Tab)
             networkKeys.wait(20)
-            const focused = networkWindow.activeFocusItem
-            if (focused.text !== "Refresh Tailscale")
-                throw new Error("Tailscale refresh did not receive keyboard focus")
-            let scroll = focused.parent
-            while (scroll && !(scroll instanceof Flickable)) scroll = scroll.parent
-            const top = focused.mapToItem(scroll, 0, 0).y
-            if (top < -1 || top + focused.height > scroll.height + 1)
-                throw new Error("Current StatusPopout did not reveal the focused Tailscale control")
+            if (descendants(page, item => item.text === "Refresh Tailscale").length
+                    || networkWindow.activeFocusItem === picker)
+                throw new Error("Removed refresh control left a dead focus target")
             page.selectExit("fixture-alt")
             if (page.busy || picker.text !== "Home gateway")
                 throw new Error("Offline new-node choice dispatched or left an unconfirmed selection")
@@ -2103,10 +2154,13 @@ with tempfile.TemporaryDirectory() as directory:
         "log = pathlib.Path(" + repr(str(root / "tailscale-calls")) + ")\n" +
         "with log.open('a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')\n" +
         "if sys.argv[1:] == ['status', '--json']:\n" +
+        " if mode == 'status-slow': time.sleep(0.3)\n" +
         " selection = state.read_text() if state.exists() else ''\n" +
         " selected = selection not in ('', 'cleared')\n" +
         " print(json.dumps({'BackendState': backend.read_text() if backend.exists() else 'Running', 'Self': {'ID': profile.read_text() if profile.exists() else 'fixture-local', 'HostName': '<b>Fixture laptop</b>', 'Online': selection not in ('offline', 'cleared')}, " +
         "'Peer': {'demo': {'ID': 'fixture-exit', 'HostName': 'Home gateway', 'TailscaleIPs': ['100.64.0.2'], 'Online': True, 'ExitNodeOption': True}, " +
+        "'local': {'ID': profile.read_text() if profile.exists() else 'fixture-local', 'HostName': 'Local duplicate', 'TailscaleIPs': ['100.64.0.4'], 'Online': True}, " +
+        "'equal': {'ID': 'fixture-equal', 'HostName': '<b>Fixture laptop</b>', 'TailscaleIPs': ['100.64.0.3'], 'Online': True}, " +
         "'alt': {'ID': 'fixture-alt', 'HostName': 'Remote gateway', 'TailscaleIPs': ['100.64.0.5'], 'Online': True, 'ExitNodeOption': True}, " +
         "'sydney': {'ID': 'fixture-sydney', 'DNSName': 'sydney.mullvad.ts.net.', 'TailscaleIPs': ['100.64.0.6'], 'Online': True, 'ExitNodeOption': True, 'Location': {'Country': 'Australia', 'City': 'Sydney', 'Priority': 1}}, " +
         "'best': {'ID': 'fixture-sydney-best', 'DNSName': 'best.mullvad.ts.net.', 'TailscaleIPs': ['100.64.0.7'], 'Online': True, 'ExitNodeOption': True, 'Location': {'Country': 'Australia', 'City': 'Sydney', 'Priority': 2}}, " +
@@ -2163,10 +2217,13 @@ with tempfile.TemporaryDirectory() as directory:
     (root / "shell.qml").write_text(QML)
     try:
         result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
-                                capture_output=True, text=True, timeout=40)
+                                capture_output=True, text=True, timeout=50)
     except subprocess.TimeoutExpired as error:
         raise AssertionError((error.stdout or b"").decode() + (error.stderr or b"").decode()) from error
     output = result.stdout + result.stderr
+    for line in output.splitlines():
+        if "TAILSCALE_REFRESH" in line:
+            print(line)
     assert result.returncode == 0 and "CONTROL_CHECK_PASSED" in output, output
     assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
     assert "performance-only" not in (root / "brightness-calls").read_text().splitlines(), "Performance entry started brightness polling"

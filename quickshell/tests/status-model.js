@@ -82,6 +82,12 @@ const running = {BackendState: "Running", Self: {ID: "local", Online: true}, Pee
     hidden: peer("hidden", {ShareeNode: true}),
     hostile: peer("hostile", {TailscaleIPs: ["$(touch /tmp/unsafe)"]})}}
 const decoded = tailscaleModel.decode(JSON.stringify(running))
+const sameName = tailscaleModel.decode(JSON.stringify({...running,
+    Self: {...running.Self, HostName: "Laptop"}, Peer: {
+        local: peer("local", {HostName: "Laptop"}),
+        remote: peer("remote", {HostName: "Laptop"})}}))
+assert.deepEqual(sameName.peers.map(peer => peer.id), ["remote"], "Exclude local ID, retain equal remote names")
+assert.deepEqual(sameName.exits.map(peer => peer.id), ["", "remote"])
 assert.equal(decoded.selfName, "This device")
 assert.equal(tailscaleModel.empty("Unavailable").selfName, "This device")
 for (const [names, expected] of [
@@ -156,7 +162,7 @@ assert.deepEqual(tailscaleModel.exitCommand(grouped, "au-best"), ["tailscale", "
 const tailscale = fs.readFileSync(path.join(__dirname, "../modules/topbar/popouts/Tailscale.qml"), "utf8")
 const killed = []
 const context = vm.createContext({Model: tailscaleModel, active: true, data: unavailableExit,
-    error: "", request: null, generation: 1, confirming: "", process: {running: false, signal(value) { killed.push(value) }},
+    error: "", statusError: false, menuData: {devices: [], countries: []}, request: null, generation: 1, confirming: "", process: {running: false, signal(value) { killed.push(value) }},
     deadline: {restart() {}, stop() {}}, exitPicker: {visible: false},
     Qt: {callLater(fn) { later.push(fn) }}})
 const later = []
@@ -352,3 +358,64 @@ assert.equal(context.busy, false)
 assert.equal(context.data.label, "Unavailable")
 assert.deepEqual(killed, [9, 9], "Missing CLI must not signal a nonexistent process")
 console.log("Tailscale connection commands, confirmation, recovery, profile and lifecycle checks passed")
+
+resetConnection()
+context.syncPicker()
+const settled = context.data
+const settledMenu = context.menuData
+context.refresh()
+respond(0, JSON.stringify({...running, Health: [], CurrentTailnet: {Name: "ignored"}}))
+assert.equal(context.data, settled, "Unchanged rendered status retains model identity")
+assert.equal(context.menuData, settledMenu, "Unchanged menu retains native items")
+context.refresh()
+respond(0, JSON.stringify({...running, Health: ["warning"]}))
+assert.match(context.data.label, /needs attention/)
+assert.equal(context.data.peers, settled.peers, "Headline changes must not rebuild devices")
+context.refresh()
+respond(0, JSON.stringify({...running, Peer: {...running.Peer, approved: peer("approved", {Online: false})}}))
+assert.equal(context.data.peers.find(peer => peer.id === "approved").online, false)
+context.refresh()
+respond(1, "", "service unavailable")
+assert.match(context.error, /unavailable/)
+context.refresh()
+respond(0, JSON.stringify(running))
+assert.equal(context.error, "", "Successful automatic recovery clears the read error")
+console.log("Tailscale quiet refresh, changed status, identity and error recovery checks passed")
+
+// Read-time input waits for fresh state; no overlapping command or stale-profile intent.
+resetConnection()
+context.refresh()
+context.toggleConnection()
+context.selectExit("approved")
+assert.equal(context.request.kind, "status")
+assert.equal(context.request.next.kind, "connection", "Only the first read-time action is retained")
+respond(0, JSON.stringify(running))
+assert.equal(context.request.kind, "connection")
+assert.deepEqual(Array.from(context.process.command), ["tailscale", "down"])
+respond(0, "")
+confirmConnection(stopped)
+for (const value of [stopped, {...running, Self: {ID: "other", Online: true}}]) {
+    resetConnection()
+    context.refresh()
+    context.toggleConnection()
+    respond(0, JSON.stringify(value))
+    assert.equal(context.request, null)
+    assert.match(context.error, /state changed/)
+}
+resetConnection()
+context.refresh()
+context.selectExit("approved")
+respond(0, JSON.stringify(running))
+assert.equal(context.request.kind, "set")
+assert.equal(context.request.id, "approved")
+respond(1, "", "failed")
+for (const outcome of ["hidden", "reopened", "error"]) {
+    resetConnection()
+    context.refresh()
+    context.toggleConnection()
+    if (outcome !== "error") { context.generation++; context.active = outcome === "reopened" }
+    respond(outcome === "error" ? 1 : 0, JSON.stringify(running))
+    assert.equal(context.request, null, "Invalidated read must discard pending input")
+    assert.equal(context.process.command[1], "status")
+}
+console.log("Tailscale read-time intent serialization and stale-owner checks passed")
