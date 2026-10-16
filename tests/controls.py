@@ -22,6 +22,7 @@ import "icewine/deck" as Deck
 import "icewine/modules" as Modules
 import "icewine/modules/topbar" as Bar
 import "icewine/modules/topbar/popouts" as Popouts
+import "icewine/theme" as Theme
 ShellRoot {
     id: root
     Component { id: handheldOverlay; Deck.DeckOverlay { compositor: compositor; sessionLocked: false; shell: root } }
@@ -86,7 +87,15 @@ ShellRoot {
         memory.path: Qt.resolvedUrl("memory.txt")
     }
     FileView { id: cpuFixture; path: Qt.resolvedUrl("cpu.txt") }
-    Timer { interval: 1300; running: true; onTriggered: cpuFixture.setText("cpu 300 0 0 700 0 0 0 0\\n") }
+    // Keep synthetic counters advancing throughout the longer interactive checks.
+    Timer {
+        interval: 500; running: true; repeat: true
+        property int busyTicks: 100
+        onTriggered: {
+            busyTicks += 200
+            cpuFixture.setText("cpu " + busyTicks + " 0 0 " + (busyTicks * 2) + " 0 0 0 0\\n")
+        }
+    }
     Bar.SteamShortcuts { id: steamShortcuts }
     Modules.GameLauncher { id: gameLauncher; compositor: compositor }
     Component.onCompleted: steamShortcuts.refresh()
@@ -332,36 +341,165 @@ ShellRoot {
         root.items = []
         root.count = 0
     }
-    function checkNetworkTabs(selected, other, page) {
-        const front = selected.background.children[0]
-        const back = other.background.children[0]
-        const body = descendants(page, item => item instanceof Flickable && !(item instanceof ListView) && item.visible)[0]
-        const card = page.children.find(item => item.bottomLeftRadius === 9)
-        const edge = front.mapToItem(page, 0, front.height).y
-        const top = body.mapToItem(page, 0, 0).y
-        if (Math.abs(edge - top) > 0.5 || !card || Math.abs(card.y - top) > 0.5
-                || front.color.toString() !== card.color.toString())
-            throw new Error(`Selected tab must join the card with no air gap: edge=${edge}, top=${top}, bgY=${selected.background.y}, bgH=${selected.background.height}, tabH=${selected.height}`)
-        if (front.y !== 0 || back.y !== 5 || front.height <= back.height)
-            throw new Error("Tab silhouettes lost their front/back depth")
-        for (const tab of [selected, other]) {
-            const left = tab.mapToItem(page, 0, 0).x
-            if (Math.abs(selected.width - other.width) > 0.5
-                    || tab.contentItem.implicitWidth > tab.contentItem.width
-                    || left < -0.5 || left + tab.width > page.width + 0.5)
-                throw new Error(`Tab label/target overflow: page=${page.width}, left=${left}, width=${tab.width}, label=${tab.contentItem.implicitWidth}/${tab.contentItem.width}`)
+    function checkNetworkCards(selected, other, page) {
+        const front = selected.parent
+        const rear = other.parent
+        const body = descendants(front, item => item instanceof Flickable)[0]
+        if (front.x - rear.x !== 18 || front.y - rear.y !== 48 || front.z <= rear.z
+                || front.color.toString() !== rear.color.toString() || front.opacity !== 1 || rear.opacity !== 1)
+            throw new Error("Cards lost their opaque lower/right stack")
+        for (const card of [front, rear]) {
+            if (card.x < 0 || card.y < 0 || card.x + card.width > page.width
+                    || card.y + card.height > page.height || !card.clip)
+                throw new Error("Resting card exceeds constrained host")
         }
-        const ring = descendants(front, item => item.border?.width === 2)[0]
-        if (!selected.activeFocus || !ring?.visible)
-            throw new Error("Selected tab keyboard focus ring is missing")
-        if (body.height <= 0 || !body.clip || body.contentHeight <= body.height)
-            throw new Error("Constrained network page must retain its scroll viewport")
+        if (!selected.activeFocus || !selected.checked || other.checked
+                || !selected.background.children[0].visible || !body.enabled
+                || descendants(rear, item => item instanceof Flickable)[0].enabled)
+            throw new Error("Card input, selection or focus ownership is incorrect")
+        if (body.height <= 0 || !body.clip)
+            throw new Error("Card must retain its constrained scroll viewport")
+    }
+    function settleCards(page) {
+        networkKeys.tryCompare(page, "exchanging", false, 900)
+    }
+    function checkCardMotion(page, first, second) {
+        const wifi = descendants(first.parent, item => item instanceof Flickable)[0]
+        const tailscale = descendants(second.parent, item => item instanceof Flickable)[0]
+        // Mere hover, keyboard focus and arrow navigation must not select a card.
+        networkKeys.mouseMove(second, 40, 20)
+        second.forceActiveFocus()
+        networkKeys.keyClick(Qt.Key_Right)
+        networkKeys.wait(30)
+        if (page.selectedCard !== 0 || page.exchanging)
+            throw new Error("Hover/focus/arrow selected the alternate card")
+        // Real click and early reversal, with both bodies inert and focus stationary.
+        networkKeys.mouseClick(second, 40, 20)
+        networkKeys.wait(150)
+        const outgoing = first.parent
+        if (!page.exchanging || outgoing.x >= 26 || outgoing.z !== 2
+                || wifi.enabled || tailscale.enabled || first.activeFocus || second.activeFocus)
+            throw new Error("Early sweep did not move the front or remove body/title focus")
+        const stationary = networkWindow.activeFocusItem
+        function checkHostFocus() {
+            // Repeated topbar activation reaches this actual caller while cards are moving.
+            networkPages.focusInitial()
+            const focus = networkWindow.activeFocusItem
+            const point = focus.mapToItem(page, 0, 0)
+            const outline = page.children.find(item => item.z === 3 && item.border?.width === 2)
+            if (focus !== stationary || page.initialFocus !== stationary || !focus.activeFocus
+                    || !focus.visible || !focus.enabled || !outline?.visible
+                    || point.x < 0 || point.y < 0 || point.x + focus.width > page.width
+                    || point.y + focus.height > page.height)
+                throw new Error("Host focus re-entry left the visible stationary motion target")
+        }
+        checkHostFocus()
+        networkKeys.mouseClick(second, 40, 20)
+        if (second.activeFocus) throw new Error("Repeated selection focused a moving title")
+        const x = outgoing.x, y = outgoing.y
+        page.selectCard(0)
+        if (outgoing.x !== x || outgoing.y !== y) throw new Error("Early reversal teleported")
+        checkHostFocus()
+        settleCards(page)
+        checkNetworkCards(first, second, page)
+        // Native keyboard activation and exact off-host handoff through actual bindings.
+        second.forceActiveFocus()
+        networkKeys.keyClick(Qt.Key_Return)
+        const animation = Array.from(page.data).find(item => item.property === "progress")
+        networkKeys.wait(190)
+        animation.pause()
+        page.progress = 0.5
+        if (outgoing.x + outgoing.width >= 0 || outgoing.z !== 1 || second.parent.z !== 2)
+            throw new Error("Stacking changed without clearing the clipped host")
+        checkHostFocus()
+        page.selectCard(0)
+        checkHostFocus() // Requested Networking title is completely clipped at this reversal.
+        settleCards(page)
+        checkNetworkCards(first, second, page)
+        // Late reversal and repeated requests settle on the latest intent.
+        second.forceActiveFocus()
+        networkKeys.keyClick(Qt.Key_Space)
+        networkKeys.wait(420)
+        if (!page.exchanging || outgoing.z !== 1) throw new Error("Late sweep did not tuck behind")
+        const lateX = outgoing.x
+        page.selectCard(0)
+        if (outgoing.x !== lateX) throw new Error("Late reversal teleported")
+        networkKeys.wait(30)
+        page.selectCard(1)
+        settleCards(page)
+        checkNetworkCards(second, first, page)
+        // The exposed rear title also accepts real touch; Enter on the stationary target reverses.
+        const touch = networkKeys.touchEvent(networkWindow)
+        touch.press(0, first, 40, 20).commit()
+        touch.release(0, first, 40, 20).commit()
+        networkKeys.wait(100)
+        networkKeys.keyPress(Qt.Key_Enter)
+        if (page.selectedCard !== 0) throw new Error("Motion reversal acted on key press")
+        networkKeys.keyRelease(Qt.Key_Enter)
+        if (page.selectedCard !== 1) throw new Error("Motion reversal did not act on release")
+        settleCards(page)
+        first.click()
+        settleCards(page)
+        first.forceActiveFocus()
+        checkNetworkCards(first, second, page)
+        // A half-exchanged retained page stops moving/scanning immediately when dismissed.
+        second.click()
+        networkKeys.wait(100)
+        networkPages.shown = false
+        if (page.exchanging || page.wifiDevice.scannerEnabled || tailscale.active)
+            throw new Error("Hidden/closing card kept animation, scanning or polling")
+        networkPages.shown = true
+        networkKeys.wait(30)
+        first.click()
+        settleCards(page)
+        first.forceActiveFocus()
+    }
+    FileView { id: cardDarkPalette; path: Qt.resolvedUrl("palette-dark.json"); blockAllReads: true }
+    FileView { id: cardLightPalette; path: Qt.resolvedUrl("palette-light.json"); blockAllReads: true }
+    function checkCardThemes(page, first, second) {
+        for (const palette of [cardDarkPalette, cardLightPalette]) {
+            Theme.Palette.file.setText(palette.text())
+            if (!Theme.Palette.refresh()) throw new Error("Card theme refresh failed")
+            networkKeys.wait(220)
+            for (const [selected, other] of [[first, second], [second, first]]) {
+                selected.click()
+                settleCards(page)
+                selected.forceActiveFocus()
+                for (const width of [380, 320]) {
+                    networkWindow.width = width
+                    networkKeys.wait(20)
+                    const naturalHeight = page.implicitHeight
+                    for (const height of [550, 360, 150]) {
+                        networkWindow.height = height
+                        networkKeys.wait(20)
+                        checkNetworkCards(selected, other, page)
+                        if (page.implicitHeight !== naturalHeight)
+                            throw new Error("Constrained card height fed back into natural measurement")
+                        if (first.contentItem.color.toString() !== Theme.Palette.success.toString()
+                                || second.contentItem.color.toString() !== Theme.Palette.secondary.toString())
+                            throw new Error("Card titles did not follow theme roles")
+                        const image = networkKeys.grabImage(page)
+                        for (const [card, dy] of [[selected.parent, 48], [other.parent, 46]]) {
+                            if (image.pixel(card.x + 3, card.y + dy).toString() !== Theme.Palette.backgroundDark.toString())
+                                throw new Error("Rendered card surface did not follow backgroundDark")
+                        }
+                    }
+                }
+            }
+        }
+        networkWindow.height = 150
+        Theme.Palette.file.setText(cardDarkPalette.text())
+        if (!Theme.Palette.refresh()) throw new Error("Card theme restore failed")
+        first.click()
+        settleCards(page)
+        first.forceActiveFocus()
     }
     FileView { id: tailscaleSelection; path: Qt.resolvedUrl("exit-node") }
     function checkTailscaleConnection() {
         networkWindow.requestActivate()
         networkKeys.tryCompare(networkWindow, "active", true)
-        root.findAccessible(networkPages, "Tailscale tab").click()
+        root.findAccessible(networkPages, "Tailscale card").click()
+        settleCards(networkPages.currentItem)
         const picker = root.findAccessible(networkPages, "Exit node")
         const page = picker.parent.parent.parent
         tailscaleSelection.setText("city")
@@ -418,6 +556,13 @@ ShellRoot {
         connection.click()
         networkKeys.wait(50)
         const pending = page.request
+        const cards = networkPages.currentItem
+        cards.selectCard(0)
+        networkKeys.wait(60)
+        if (page.request !== pending || !page.busy || page.active)
+            throw new Error("Card selection lost an in-flight mutation or kept rear polling active")
+        cards.selectCard(1)
+        settleCards(cards)
         networkPages.shown = false
         networkKeys.wait(200) // Outlast the real close animation, while the one-second command is pending.
         if (networkPages.visible || page.active || !page.busy || page.request !== pending)
@@ -468,8 +613,9 @@ ShellRoot {
         if (root.findAccessible(networkPages, "Tailscale connection") !== connection
                 || !page.error.includes("profile changed") || page.data.self !== "fixture-other")
             throw new Error("Profile-change confirmation was lost across popout and page replacement")
-        const networking = root.findAccessible(networkPages, "Networking tab")
+        const networking = root.findAccessible(networkPages, "Networking card")
         networking.click()
+        settleCards(networkPages.currentItem)
         let networkPage = networking
         while (networkPage && networkPage.wifiDevice === undefined) networkPage = networkPage.parent
         if (!networkPage.wifiDevice.scannerEnabled || page.active)
@@ -487,7 +633,7 @@ ShellRoot {
         networkWindow.requestActivate()
         networkKeys.tryCompare(networkWindow, "active", true)
         networkPages.currentPage = "network"
-        const networking = root.findAccessible(networkPages, "Networking tab")
+        const networking = root.findAccessible(networkPages, "Networking card")
         let page = networking
         while (page && page.wifiDevice === undefined) page = page.parent
         const password = descendants(page,
@@ -526,10 +672,13 @@ ShellRoot {
         interval: 400
         running: true
         onTriggered: {
+            try {
+            // Sample within the rate model's three-second window, before deliberate motion waits.
+            root.tick()
             networkWindow.requestActivate()
             networkKeys.tryCompare(networkWindow, "active", true)
-            const firstTab = root.findAccessible(networkPages, "Networking tab")
-            const secondTab = root.findAccessible(networkPages, "Tailscale tab")
+            const firstTab = root.findAccessible(networkPages, "Networking card")
+            const secondTab = root.findAccessible(networkPages, "Tailscale card")
             networkPages.focusInitial()
             if (!firstTab.activeFocus || !firstTab.checked || secondTab.checked)
                 throw new Error("Network initial tab/focus is incorrect")
@@ -539,28 +688,39 @@ ShellRoot {
                 item => item instanceof TextInput && item.echoMode === TextInput.Password)[0]
             networkPage.passwordNetwork = {name: "Fixture Wi-Fi"}
             password.text = "fixture secret"
+            networkPages.focusInitial()
+            if (!password.activeFocus) throw new Error("Host initial focus lost password precedence")
             const tabCentre = firstTab.mapToItem(networkPage, firstTab.width / 2, firstTab.height / 2)
             if (networkPage.childAt(tabCentre.x, tabCentre.y) !== password.parent.parent.parent)
-                throw new Error("Password overlay must remain above the file tabs")
+                throw new Error("Password overlay must remain above both cards")
+            firstTab.click()
+            secondTab.click()
+            if (networkPage.selectedCard !== 0 || networkPage.exchanging
+                    || firstTab.enabled || secondTab.enabled || networkPage.wifiDevice.scannerEnabled)
+                throw new Error("Password overlay did not suppress card input/scanning")
             networkPage.closePassword()
             if (password.text || networkPage.passwordNetwork)
                 throw new Error("Password dismissal retained a secret or pending network")
-            for (const width of [380, 280, 200]) {
+            root.checkCardMotion(networkPage, firstTab, secondTab)
+            root.checkCardThemes(networkPage, firstTab, secondTab)
+            for (const width of [380, 320, 280, 200]) {
                 networkWindow.width = width
                 networkKeys.wait(20)
-                root.checkNetworkTabs(firstTab, secondTab, networkPage)
+                root.checkNetworkCards(firstTab, secondTab, networkPage)
             }
             networkWindow.width = 280
             networkKeys.wait(20)
             const wifiPage = descendants(networkPage, item => item instanceof Flickable && !(item instanceof ListView))[0]
+            if (wifiPage.contentHeight <= wifiPage.height) throw new Error("Long Wi-Fi card lost scrolling")
             wifiPage.contentY = 50
             networkPage.errorMessage = "Retained fixture error"
-            firstTab.forceActiveFocus()
-            networkKeys.keyClick(Qt.Key_Right)
+            secondTab.forceActiveFocus()
+            networkKeys.keyClick(Qt.Key_Enter)
+            root.settleCards(networkPage)
             if (!secondTab.checked || !secondTab.activeFocus)
-                throw new Error("Right arrow did not select/focus Tailscale tab")
+                throw new Error("Enter did not select/focus Tailscale card")
             networkKeys.wait(20)
-            root.checkNetworkTabs(secondTab, firstTab, networkPage)
+            root.checkNetworkCards(secondTab, firstTab, networkPage)
             if (!networkPage || networkPage.wifiDevice.scannerEnabled)
                 throw new Error("Tailscale tab left synthetic Wi-Fi scanning active")
             const picker = root.findAccessible(networkPages, "Exit node")
@@ -571,6 +731,19 @@ ShellRoot {
             if (!localLabel || localLabel.textFormat !== Text.PlainText)
                 throw new Error("Local device name must appear as plain text in the status title")
             if (picker.text !== "None") throw new Error("Initial exit-node choice is not None")
+            picker.click()
+            const closureMenu = Array.from(picker.data).find(child => child.title !== undefined && child.count !== undefined)
+            networkKeys.tryCompare(closureMenu, "visible", true)
+            closureMenu.currentIndex = 4
+            networkKeys.keyClick(Qt.Key_Right)
+            const closureCountry = closureMenu.menuAt(4)
+            networkKeys.tryCompare(closureCountry, "visible", true)
+            networkPage.selectCard(0)
+            networkKeys.tryCompare(closureCountry, "visible", false)
+            networkKeys.tryCompare(closureMenu, "visible", false)
+            root.settleCards(networkPage)
+            secondTab.click()
+            root.settleCards(networkPage)
             picker.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Space)
             const menu = Array.from(picker.data).find(child => child.title !== undefined && child.count !== undefined)
@@ -637,14 +810,15 @@ ShellRoot {
             networkKeys.tryCompare(page, "confirming", "")
             if (picker.text !== "None" || picker.enabled || page.data.connected || page.error)
                 throw new Error("Offline clear did not confirm None or guard subsequent choices")
-            secondTab.forceActiveFocus()
-            networkKeys.keyClick(Qt.Key_Left)
-            if (!firstTab.checked || !firstTab.activeFocus || picker.visible || !networkPage.wifiDevice.scannerEnabled)
-                throw new Error("Left arrow did not restore Networking page")
-            root.checkNetworkTabs(firstTab, secondTab, networkPage)
+            firstTab.forceActiveFocus()
+            networkKeys.keyClick(Qt.Key_Space)
+            root.settleCards(networkPage)
+            if (!firstTab.checked || !firstTab.activeFocus || picker.enabled || !networkPage.wifiDevice.scannerEnabled)
+                throw new Error(`Space did not restore Networking card: selected=${networkPage.selectedCard}, front=${networkPage.frontCard}, checked=${firstTab.checked}, focus=${firstTab.activeFocus}, pickerEnabled=${picker.enabled}, scanning=${networkPage.wifiDevice.scannerEnabled}, activeFocus=${networkWindow.activeFocusItem}`)
+            root.checkNetworkCards(firstTab, secondTab, networkPage)
             if (wifiPage.contentY !== 50 || networkPage.errorMessage !== "Retained fixture error"
                     || page.active || page.data.selected !== "")
-                throw new Error("Tab styling reset page state or left Tailscale active")
+                throw new Error("Card exchange reset page state or left Tailscale active")
             networkPage.errorMessage = ""
             networkWindow.width = 380
             if (handheldOverlay.status !== Component.Ready)
@@ -724,11 +898,11 @@ ShellRoot {
             measuredBattery.percentage = 0.03
             chargingBattery.percentage = 0.02
             cancelSleep.start()
-            root.tick()
             root.performanceHeightBefore = performance.implicitHeight
             performance.metrics = { now: root.now, cpu: { history: [] },
                 cpuTemperature: null, memory: { current: null, history: [] }, gpus: [] }
             finish.start()
+            } catch (error) { console.error(error); Qt.exit(1) }
         }
     }
     Timer {
@@ -1139,7 +1313,7 @@ with tempfile.TemporaryDirectory() as directory:
     (root / "shell.qml").write_text(QML)
     try:
         result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
-                                capture_output=True, text=True, timeout=25)
+                                capture_output=True, text=True, timeout=40)
     except subprocess.TimeoutExpired as error:
         raise AssertionError((error.stdout or b"").decode() + (error.stderr or b"").decode()) from error
     output = result.stdout + result.stderr

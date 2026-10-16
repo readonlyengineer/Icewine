@@ -1,22 +1,99 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Controls as Controls
-import QtQuick.Layouts
 import Quickshell
 import Quickshell.Networking
 import "StatusModel.js" as StatusModel
 import ".." as Bar
 import qs.icewine.theme as Theme
 
-Item {
+FocusScope {
     id: root
 
     required property var metrics
-    implicitHeight: Math.max(tabs.y + tabs.height + (tabs.currentIndex === 0 ? content.implicitHeight + 24 : tailscale.implicitHeight),
+    implicitHeight: Math.max(64 + 44 + Math.max(content.implicitHeight + 24, tailscale.implicitHeight),
         passwordNetwork ? passwordContent.implicitHeight + 36 : 0)
+    clip: true
 
-    readonly property Item initialFocus: networkingTab
+    readonly property Item initialFocus: passwordNetwork ? password : exchanging ? motionFocus
+        : selectedCard === 0 ? networkCard.selector : tailscaleCard.selector
+    property int selectedCard: 0
+    property int frontCard: 0
+    property int outgoingCard: 0
+    property real progress: 0
+    property bool exchanging: false
+    readonly property bool available: visible && enabled && !passwordNetwork
+
+    function selectCard(index) {
+        if (!available) return
+        if (selectedCard === index) {
+            if (exchanging && root.activeFocus) motionFocus.forceActiveFocus()
+            return
+        }
+        tailscale.closeMenus()
+        if (root.activeFocus) motionFocus.forceActiveFocus()
+        exchange.stop()
+        if (!exchanging) {
+            outgoingCard = frontCard
+            progress = 0
+        }
+        selectedCard = index
+        exchanging = true
+        exchange.to = index === outgoingCard ? 0 : 1
+        exchange.duration = 560 * Math.abs(exchange.to - progress)
+        if (exchange.duration === 0) finishExchange()
+        else exchange.start()
+    }
+
+    function finishExchange() {
+        exchange.stop()
+        frontCard = selectedCard
+        exchanging = false
+        progress = 0
+        if (available && motionFocus.activeFocus) initialFocus.forceActiveFocus()
+    }
+
+    function inOutCubic(t) {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+    }
+
+    NumberAnimation {
+        id: exchange
+        target: root
+        property: "progress"
+        easing.type: Easing.Linear
+        onFinished: root.finishExchange()
+    }
+
+    // A stationary keyboard target while either title may be clipped by the sweep.
+    Item {
+        id: motionFocus
+        anchors.fill: parent
+        property int activationKey: 0
+        onActiveFocusChanged: if (!activeFocus) activationKey = 0
+        Keys.onPressed: event => {
+            if (![Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space].includes(event.key)) return
+            event.accepted = true
+            if (!event.isAutoRepeat) activationKey = event.key
+        }
+        Keys.onReleased: event => {
+            if (event.isAutoRepeat || event.key !== activationKey) return
+            event.accepted = true
+            activationKey = 0
+            root.selectCard(1 - root.selectedCard)
+        }
+    }
+    Rectangle {
+        anchors.fill: parent
+        anchors.margins: 2
+        z: 3
+        visible: motionFocus.activeFocus
+        radius: 12
+        color: "transparent"
+        border.width: 2
+        border.color: Theme.Palette.secondary
+    }
+
     readonly property var wifiDevice: Networking.devices.values.find(device =>
         device.type === DeviceType.Wifi) ?? null
     readonly property var wifiNetworks: wifiDevice
@@ -30,7 +107,7 @@ Item {
 
     function setScanning(enabled) {
         if (wifiDevice)
-            wifiDevice.scannerEnabled = enabled && visible && tabs.currentIndex === 0 && Networking.wifiEnabled
+            wifiDevice.scannerEnabled = enabled && root.available && selectedCard === 0 && Networking.wifiEnabled
     }
 
     function connectNetwork(network) {
@@ -61,7 +138,18 @@ Item {
         errorMessage = ""
     }
 
-    onVisibleChanged: setScanning(visible)
+    onAvailableChanged: {
+        setScanning(available)
+        if (!available) {
+            scanRestart.stop()
+            tailscale.closeMenus()
+            if (exchanging) finishExchange()
+        }
+    }
+    onSelectedCardChanged: {
+        setScanning(available)
+        if (selectedCard !== 0) scanRestart.stop()
+    }
     onWifiDeviceChanged: setScanning(visible)
     Component.onCompleted: setScanning(visible)
     Component.onDestruction: setScanning(false)
@@ -112,99 +200,89 @@ Item {
         onTriggered: root.setScanning(true)
     }
 
-    // Local file tabs share a bottom edge with the card; only the selected tab joins it.
-    component PageTab: Controls.TabButton {
-        id: tab
-        implicitHeight: 44
-        horizontalPadding: 4
-        opacity: enabled ? 1 : 0.45
-        background: Item {
-            Rectangle {
-                id: silhouette
-                y: tab.checked ? 0 : 5
-                width: parent.width
-                height: parent.height - y - (tab.checked ? 0 : 5)
-                topLeftRadius: 9
-                topRightRadius: 9
-                color: tab.checked ? Theme.Palette.selection : Theme.Palette.surface
-                border.width: 1
-                border.color: tab.hovered ? Theme.Palette.secondary : Theme.Palette.border
-
-                // Cover the shared border so the selected surface joins the card.
-                Rectangle {
-                    visible: tab.checked
-                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                    anchors.bottomMargin: -1
-                    height: 2
-                    color: silhouette.color
-                }
-                Rectangle {
-                    visible: tab.checked
-                    x: 12; y: 5; width: parent.width - 24; height: 2
-                    radius: 1
-                    color: Theme.Palette.secondary
-                }
+    // Two real consumers share geometry locally; page/service ownership stays unchanged.
+    component Card: Rectangle {
+        id: card
+        required property int index
+        required property string title
+        required property color titleColor
+        property alias selector: heading
+        default property alias contentData: body.data
+        readonly property bool outgoing: index === root.outgoingCard
+        readonly property real advance: root.inOutCubic(root.progress)
+        readonly property real sweep: root.progress < 0.5 ? root.inOutCubic(root.progress * 2)
+            : 1 - Math.pow(1 - (root.progress - 0.5) * 2, 3)
+        width: Math.max(0, root.width - 34)
+        height: Math.max(0, root.height - 64)
+        x: 8 + (!root.exchanging ? (index === root.frontCard ? 18 : 0)
+            : !outgoing ? 18 * advance
+            : root.progress < 0.5 ? 18 + (-width - 30) * sweep : (-width - 12) * (1 - sweep))
+        y: 8 + (!root.exchanging ? (index === root.frontCard ? 48 : 0)
+            : !outgoing ? 48 * advance
+            : root.progress < 0.5 ? 48 - 24 * sweep : 24 * (1 - sweep))
+        // The outgoing card clears the clipped host before this handoff, also in reverse.
+        z: !root.exchanging ? (index === root.frontCard ? 2 : 1)
+            : outgoing === (root.progress < 0.5) ? 2 : 1
+        radius: 12
+        color: Theme.Palette.backgroundDark
+        border.width: 1
+        border.color: Theme.Palette.border
+        clip: true
+        enabled: !root.passwordNetwork
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            onWheel: event => event.accepted = true
+        }
+        ActionButton {
+            id: heading
+            width: parent.width
+            height: 44
+            text: card.title
+            checked: root.selectedCard === card.index
+            focusPolicy: root.exchanging ? Qt.ClickFocus : Qt.StrongFocus
+            Accessible.name: card.title + " card"
+            Accessible.checkable: true
+            Accessible.checked: checked
+            font.pixelSize: 15
+            font.bold: true
+            onClicked: root.selectCard(card.index)
+            background: Rectangle {
+                radius: 12
+                color: heading.hovered ? Theme.Palette.surface : Theme.Palette.backgroundDark
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: 4
-                    visible: tab.activeFocus
-                    radius: 5
+                    visible: heading.activeFocus
+                    radius: 8
                     color: "transparent"
                     border.width: 2
                     border.color: Theme.Palette.secondary
                 }
             }
+            contentItem: Text {
+                text: heading.text
+                color: card.titleColor
+                font: heading.font
+                leftPadding: 12
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
         }
-        contentItem: Text {
-            text: tab.text
-            color: Theme.Palette.foreground
-            font.family: "JetBrainsMono Nerd Font"
-            font.pixelSize: 11
-            font.bold: tab.checked
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-    }
-
-    Rectangle {
-        anchors.fill: pages
-        bottomLeftRadius: 9
-        bottomRightRadius: 9
-        color: Theme.Palette.selection
-        border.width: 1
-        border.color: Theme.Palette.border
-    }
-
-    Controls.TabBar {
-        id: tabs
-        width: parent.width - 24
-        x: 12
-        y: 8
-        height: 44
-        spacing: 3
-        onCurrentIndexChanged: {
-            root.setScanning(root.visible)
-            if (currentIndex !== 0) scanRestart.stop()
-        }
-        background: Rectangle { color: "transparent" }
-        PageTab {
-            id: networkingTab
-            text: "Networking"
-            Accessible.name: "Networking tab"
-        }
-        PageTab {
-            id: tailscaleTab
-            text: "Tailscale"
-            Accessible.name: "Tailscale tab"
+        Item {
+            id: body
+            anchors { top: heading.bottom; bottom: parent.bottom; left: parent.left; right: parent.right }
+            enabled: !root.exchanging && root.selectedCard === card.index
         }
     }
 
-    StackLayout {
-        id: pages
-        anchors { top: tabs.bottom; bottom: parent.bottom; left: parent.left; right: parent.right; leftMargin: 12; rightMargin: 12 }
-        currentIndex: tabs.currentIndex
-
+    Card {
+        id: networkCard
+        index: 0
+        title: "Networking"
+        titleColor: Theme.Palette.success
     Flickable {
+        anchors.fill: parent
         contentHeight: content.implicitHeight + 24
         clip: true
         boundsBehavior: Flickable.StopAtBounds
@@ -216,14 +294,6 @@ Item {
             y: 12
             width: parent.width - 24
             spacing: 7
-
-            Text {
-                text: "Network"
-                color: Theme.Palette.success
-                font.family: "JetBrainsMono Nerd Font"
-                font.pixelSize: 15
-                font.bold: true
-            }
 
             Bar.HistoryGraph {
                 width: parent.width
@@ -307,17 +377,30 @@ Item {
         }
     }
 
+    }
+    Card {
+        id: tailscaleCard
+        index: 1
+        title: "Tailscale"
+        titleColor: Theme.Palette.secondary
         Tailscale {
             id: tailscale
-            active: root.visible && tabs.currentIndex === 1
+            anchors.fill: parent
+            active: root.available && root.selectedCard === 1
         }
     }
 
     Rectangle {
         anchors.fill: parent
+        z: 4
         visible: root.passwordNetwork !== null
         color: Theme.Palette.backgroundDark
         radius: 10
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            onWheel: event => event.accepted = true
+        }
 
         Column {
             id: passwordContent

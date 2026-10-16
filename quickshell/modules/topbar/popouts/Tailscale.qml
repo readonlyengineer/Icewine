@@ -110,6 +110,12 @@ Flickable {
         syncPicker()
     }
 
+    function closeMenus() {
+        // Native submenus are separate popups; close them before their parent card recedes.
+        for (let i = 0; i < exitPicker.count; ++i) exitPicker.menuAt(i)?.close()
+        exitPicker.close()
+    }
+
     function syncPicker() {
         if (!exitPicker || exitPicker.visible) return
         menuData = Model.exitMenu(data)
@@ -118,6 +124,7 @@ Flickable {
     onActiveChanged: {
         ++generation
         if (active) refresh()
+        else closeMenus()
     }
     Component.onCompleted: if (active) refresh()
     onDataChanged: syncPicker()
