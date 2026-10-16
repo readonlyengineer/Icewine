@@ -341,16 +341,18 @@ with tempfile.TemporaryDirectory() as temporary:
                WAYLAND_DISPLAY="wayland-test", HYPRLAND_INSTANCE_SIGNATURE="test",
                XDG_RUNTIME_DIR=str(runtime), ICEWINE_TEST_COMMANDS=str(command_log))
     yazi_command = (fake_bin / "ya").read_text()
-    (fake_bin / "ya").write_text(yazi_command + "exit 2\n")
-    for app, expected in (("bash", ""), ("hypr", "hyprctl reload\n"),
-                          ("quickshell", "qs ipc call theme refresh\n"),
-                          ("kitty", ""), ("nvim", ""),
-                          ("yazi", "ya emit-to 0 app:theme\n")):
+    for failure in (None, "kitty", "nvim", "yazi"):
+        (fake_bin / "ya").write_text(yazi_command + ("exit 2\n" if failure == "yazi" else ""))
         command_log.write_text("")
-        with mock.patch.dict(os.environ, env):
-            failed = module.reload_session(config, app)
-        assert failed == (app == "yazi"), app
-        assert command_log.read_text() == expected, app
+        with mock.patch.dict(os.environ, env), \
+             mock.patch.object(module, "signal_reload",
+                               side_effect=[failure == "kitty", failure == "nvim"]) as reload:
+            failed = module.reload_session(config)
+        assert failed == (failure is not None), failure
+        assert reload.call_args_list == [mock.call("kitty", config, str(runtime)),
+                                         mock.call("nvim", config, str(runtime))]
+        assert command_log.read_text().splitlines() == [
+            "hyprctl reload", "ya emit-to 0 app:theme", "qs ipc call theme refresh"], failure
     (fake_bin / "ya").write_text(yazi_command)
     command_log.write_text("")
     result = run("apply")
