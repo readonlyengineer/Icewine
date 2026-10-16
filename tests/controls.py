@@ -394,6 +394,9 @@ ShellRoot {
             networkKeys.tryCompare(picker, "enabled", true)
             const page = picker.parent.parent.parent
             networkKeys.tryVerify(() => page.data.peers.length === 2)
+            const localLabel = root.findAccessible(page, "<b>Fixture laptop</b> · Connected")
+            if (!localLabel || localLabel.textFormat !== Text.PlainText)
+                throw new Error("Local device name must appear as plain text in the status title")
             if (picker.text !== "None") throw new Error("Initial exit-node choice is not None")
             picker.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Space)
@@ -705,7 +708,7 @@ with tempfile.TemporaryDirectory() as directory:
         "if sys.argv[1:] == ['status', '--json']:\n" +
         " selection = state.read_text() if state.exists() else ''\n" +
         " selected = selection not in ('', 'cleared')\n" +
-        " print(json.dumps({'BackendState': 'Running', 'Self': {'ID': 'fixture-local', 'Online': selection not in ('offline', 'cleared')}, " +
+        " print(json.dumps({'BackendState': 'Running', 'Self': {'ID': 'fixture-local', 'HostName': '<b>Fixture laptop</b>', 'Online': selection not in ('offline', 'cleared')}, " +
         "'Peer': {'demo': {'ID': 'fixture-exit', 'HostName': 'Home gateway', 'TailscaleIPs': ['100.64.0.2'], 'Online': True, 'ExitNodeOption': True}, " +
         "'alt': {'ID': 'fixture-alt', 'HostName': 'Remote gateway', 'TailscaleIPs': ['100.64.0.5'], 'Online': True, 'ExitNodeOption': True}, " +
         "'sydney': {'ID': 'fixture-sydney', 'DNSName': 'sydney.mullvad.ts.net.', 'TailscaleIPs': ['100.64.0.6'], 'Online': True, 'ExitNodeOption': True, 'Location': {'Country': 'Australia', 'City': 'Sydney', 'Priority': 1}}, " +

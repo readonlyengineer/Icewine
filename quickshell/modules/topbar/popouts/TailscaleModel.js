@@ -1,5 +1,5 @@
 function empty(label) {
-    return { label, connected: false, self: "", peers: [], exits: [{ id: "", name: "None", address: "" }], selected: "" }
+    return { label, connected: false, self: "", selfName: "This device", peers: [], exits: [{ id: "", name: "None", address: "" }], selected: "" }
 }
 
 function decode(text) {
@@ -9,6 +9,9 @@ function decode(text) {
     if (!status || !Object.hasOwnProperty.call(labels, status.BackendState))
         throw new Error("Invalid Tailscale status")
     const result = empty(labels[status.BackendState])
+    result.selfName = (typeof status.Self?.HostName === "string" && status.Self.HostName.trim())
+        || (typeof status.Self?.DNSName === "string" && status.Self.DNSName.trim().replace(/\.$/, ""))
+        || result.selfName
     if (status.BackendState !== "Running") return result
     if (!status.Self || typeof status.Self.ID !== "string" || status.Self.ID.length === 0 || typeof status.Self.Online !== "boolean"
             || (status.Peer != null && (typeof status.Peer !== "object" || Array.isArray(status.Peer))))

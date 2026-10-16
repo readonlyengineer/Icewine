@@ -77,6 +77,22 @@ const running = {BackendState: "Running", Self: {ID: "local", Online: true}, Pee
     hidden: peer("hidden", {ShareeNode: true}),
     hostile: peer("hostile", {TailscaleIPs: ["$(touch /tmp/unsafe)"]})}}
 const decoded = tailscaleModel.decode(JSON.stringify(running))
+assert.equal(decoded.selfName, "This device")
+assert.equal(tailscaleModel.empty("Unavailable").selfName, "This device")
+for (const [names, expected] of [
+    [{HostName: "  laptop  ", DNSName: "other.tailnet.ts.net."}, "laptop"],
+    [{HostName: " ", DNSName: " laptop.tailnet.ts.net. "}, "laptop.tailnet.ts.net"],
+    [{HostName: 42, DNSName: "dns.tailnet.ts.net."}, "dns.tailnet.ts.net"],
+    [{HostName: null, DNSName: []}, "This device"],
+    [{HostName: "", DNSName: "."}, "This device"],
+    [{HostName: "<b>laptop</b>"}, "<b>laptop</b>"]
+]) {
+    const named = tailscaleModel.decode(JSON.stringify({...running, Self: {...running.Self, ...names}}))
+    assert.equal(named.selfName, expected)
+    assert.equal(named.self, "local", "Display names must not replace stable node identity")
+}
+assert.equal(tailscaleModel.decode(JSON.stringify({BackendState: "Stopped",
+    Self: {HostName: "stopped-laptop"}})).selfName, "stopped-laptop")
 assert.deepEqual(decoded.exits.map(peer => peer.id), ["", "approved"])
 assert.equal(decoded.peers.some(peer => peer.id === "hidden"), false)
 assert.deepEqual(tailscaleModel.exitCommand(decoded, "approved"), ["tailscale", "set", "--exit-node=100.64.0.2"])
@@ -192,10 +208,12 @@ context.data = decoded
 context.selectExit("approved")
 respond(0, "")
 later.shift()()
-respond(0, JSON.stringify({...running, Self: {ID: "other-profile", Online: true}}))
+respond(0, JSON.stringify({...running, Self: {ID: "other-profile", Online: true, HostName: "New profile"}}))
 assert.match(context.error, /profile changed/)
+assert.equal(context.data.selfName, "New profile")
 context.refresh()
-respond(0, JSON.stringify(running))
+respond(0, JSON.stringify({...running, Self: {...running.Self, HostName: "Renamed device"}}))
+assert.equal(context.data.selfName, "Renamed device")
 context.selectExit("approved")
 respond(0, "")
 later.shift()()

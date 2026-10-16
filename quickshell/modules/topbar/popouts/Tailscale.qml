@@ -117,7 +117,8 @@ Flickable {
         Text {
             textFormat: Text.PlainText
             width: parent.width
-            text: root.busy ? (root.request.kind === "set" ? "Changing exit node…" : "Refreshing…") : root.data.label
+            text: root.data.selfName + " · " + (root.busy
+                ? (root.request.kind === "set" ? "Changing exit node…" : "Refreshing…") : root.data.label)
             color: root.data.connected ? Theme.Palette.success : Theme.Palette.muted
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 13
