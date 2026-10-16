@@ -150,6 +150,8 @@ FocusScope {
                                 sourceComponent: ScreencopyView {
                                     captureSource: card.modelData.wayland
                                     live: true
+                                    // Composite captured alpha over the existing card surface.
+                                    layer.enabled: true
                                     constraintSize: Qt.size(preview.width, preview.height)
                                     anchors.centerIn: parent
                                     width: implicitWidth
