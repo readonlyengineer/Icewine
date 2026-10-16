@@ -61,13 +61,6 @@ Rectangle {
             if (card.stack) card.stack.selectCard(card.index)
         }
     }
-    Rectangle {
-        x: 12; y: selector.height - height
-        width: 24; height: 3
-        z: 101
-        visible: selector.activeFocus
-        color: Theme.Palette.secondary
-    }
     // Above rear/moving content; below front controls, catching blank-surface clicks.
     MouseArea {
         anchors.fill: parent

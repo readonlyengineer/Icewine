@@ -25,8 +25,8 @@ in index order. `index` defaults to zero; set the second card's index to one.
 The host supplies the stack's actual width and height. A single card fills it
 at (0, 0), with no geometry deduction. The existing two-card presentation uses
 34px horizontal and 64px vertical allowance, an 18px/48px front offset, and the
-existing 120ms reversible exchange. The stack clips the sweep and draws only a
-short stationary keyboard focus mark during exchange, never a frame.
+existing 120ms reversible exchange. The stack clips the sweep and draws no
+frame or focus underline.
 
 The current supported compositions are one card and a pair, matching the
 existing desktop. Larger decks, dynamic removal/reordering during exchange,
@@ -44,8 +44,8 @@ content; front controls keep normal input and front title clicks do nothing.
 Keep content below that selection interception (`z: 100`). Hover and
 focus alone do not select cards. The shared
 `selector` remains a Tab-accessible radio target: Return, Enter and Space select
-its card on release. Its short underline marks keyboard focus without framing
-the title or card. The stationary motion target uses the same keys to cycle on
+its card on release. Card selection draws no underline; focused controls retain
+their own indicators. The stationary motion target uses the same keys to cycle on
 release. Keep a valid focus target even if the card has no enabled controls.
 `selectionChanging()` lets an owner close transient menus before motion.
 
@@ -73,7 +73,7 @@ No reservation is needed for ordinary non-owning `ActionButton`/`Toggle` callers
 The first press selects immediately; auto-repeat presses are consumed without
 further selection and release does nothing. A fresh opposite press during motion
 can reverse selection. Focus moves through the stationary target to the selected
-card's `initialFocus`, preserving its visible focus mark. Hidden, disabled and
+card's `initialFocus`. Hidden, disabled and
 single-card stacks do not consume or navigate with arrows. Return, Enter and
 Space still activate on release; a superseding selection change cancels pending
 motion-target activation even when focus stays stationary.

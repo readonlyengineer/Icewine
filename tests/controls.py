@@ -447,7 +447,7 @@ ShellRoot {
                 || other.Accessible.checked !== other.checked)
             throw new Error("Shared card selection lost accessible state")
         if (!selected.activeFocus || !selected.checked || other.checked
-                || !front.children.find(item => item.z === 101)?.visible || !body.enabled
+                || !body.enabled
                 || front.border.width !== 0 || rear.border.width !== 0
                 || descendants(rear, item => item instanceof Flickable)[0].enabled)
             throw new Error("Card input, selection or focus ownership is incorrect")
@@ -489,9 +489,8 @@ ShellRoot {
             networkPages.focusInitial()
             const focus = networkWindow.activeFocusItem
             const point = focus.mapToItem(page, 0, 0)
-            const outline = page.children.find(item => item.z === 3 && item.height === 3)
             if (focus !== stationary || page.initialFocus !== stationary || !focus.activeFocus
-                    || !focus.visible || !focus.enabled || !outline?.visible
+                    || !focus.visible || !focus.enabled
                     || point.x < 0 || point.y < 0 || point.x + focus.width > page.width
                     || point.y + focus.height > page.height)
                 throw new Error("Host focus re-entry left the visible stationary motion target")

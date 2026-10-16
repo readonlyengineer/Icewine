@@ -3,7 +3,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Window
 import QtQuick.Templates as T
-import qs.icewine.theme as Theme
 
 // Nonvisual arrangement and selection; card surfaces belong to Card.
 FocusScope {
@@ -105,13 +104,6 @@ FocusScope {
             activationKey = 0
             root.selectCard((root.selectedCard + 1) % root.cards.length)
         }
-    }
-    Rectangle {
-        x: 12; y: 41
-        width: 24; height: 3
-        z: 3
-        visible: motionFocus.activeFocus
-        color: Theme.Palette.secondary
     }
 
 }
