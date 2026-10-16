@@ -23,18 +23,19 @@ Widget {
         active: root.visible && root.currentPage === "battery"
     }
     property string currentPage: "audio"
+    readonly property Item currentItem: currentPage === "network" ? networkLoader.item : pageLoader.item
     signal mediaRequested()
     signal instantHandoffRequested()
 
     function focusInitial() {
         root.forceActiveFocus(Qt.ShortcutFocusReason)
-        pageLoader.item?.initialFocus?.forceActiveFocus(Qt.ShortcutFocusReason)
+        root.currentItem?.initialFocus?.forceActiveFocus(Qt.ShortcutFocusReason)
     }
 
     function revealFocus() {
         const item = root.Window.window?.activeFocusItem
         let page = item
-        while (page && page !== pageLoader.item) page = page.parent
+        while (page && page !== root.currentItem) page = page.parent
         if (!root.visible || !root.enabled || !page || item === page)
             return
         for (let scroll = item.parent; scroll; scroll = scroll.parent) {
@@ -46,7 +47,7 @@ Widget {
                 scroll.contentY = Math.max(scroll.originY, Math.min(target,
                     scroll.originY + Math.max(0, scroll.contentHeight - scroll.height)))
             }
-            if (scroll === pageLoader.item) break
+            if (scroll === root.currentItem) break
         }
     }
 
@@ -63,7 +64,7 @@ Widget {
     }
 
     width: 380
-    implicitHeight: Math.min(620, pageLoader.item?.implicitHeight ?? 0)
+    implicitHeight: Math.min(620, root.currentItem?.implicitHeight ?? 0)
 
     Rectangle {
         anchors.fill: parent
@@ -73,15 +74,25 @@ Widget {
         Loader {
             id: pageLoader
             anchors.fill: parent
-            active: root.visible
+            active: root.visible && root.currentPage !== "network"
             sourceComponent: root.currentPage === "audio" ? audioPage
                 : root.currentPage === "performance" ? performancePage
-                : root.currentPage === "network" ? networkPage
+                : root.currentPage === "network" ? null
                 : root.currentPage === "layout" ? layoutPage
                         : root.currentPage === "bluetooth" ? bluetoothPage
                         : root.currentPage === "battery" ? batteryPage
                             : root.currentPage === "screenshot" ? screenshotPage
                             : root.currentPage === "media" ? mediaPage : notificationsPage
+        }
+        // Network owns asynchronous mutations and their feedback across popout/page changes.
+        Loader {
+            id: networkLoader
+            anchors.fill: parent
+            active: root.visible && root.currentPage === "network"
+            visible: root.currentPage === "network"
+            sourceComponent: networkPage
+            // Replace the visibility binding after first load to retain the operation owner.
+            onLoaded: active = true
         }
     }
 

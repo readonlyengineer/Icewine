@@ -89,7 +89,9 @@ Item {
                 } else {
                     root.passwordNetwork = root.connectingNetwork
                     root.errorMessage = ""
-                    Qt.callLater(() => password.forceActiveFocus())
+                    Qt.callLater(() => {
+                        if (password.visible && password.enabled) password.forceActiveFocus()
+                    })
                 }
             } else {
                 root.errorMessage = `Connection failed: ${ConnectionFailReason.toString(reason)}`

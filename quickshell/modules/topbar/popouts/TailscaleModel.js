@@ -1,5 +1,5 @@
 function empty(label) {
-    return { label, connected: false, self: "", selfName: "This device", peers: [], exits: [{ id: "", name: "None", address: "" }], selected: "" }
+    return { label, state: "", connected: false, self: "", selfName: "This device", peers: [], exits: [{ id: "", name: "None", address: "" }], selected: "" }
 }
 
 function decode(text) {
@@ -9,6 +9,8 @@ function decode(text) {
     if (!status || !Object.hasOwnProperty.call(labels, status.BackendState))
         throw new Error("Invalid Tailscale status")
     const result = empty(labels[status.BackendState])
+    result.state = status.BackendState
+    result.self = typeof status.Self?.ID === "string" ? status.Self.ID : ""
     result.selfName = (typeof status.Self?.HostName === "string" && status.Self.HostName.trim())
         || (typeof status.Self?.DNSName === "string" && status.Self.DNSName.trim().replace(/\.$/, ""))
         || result.selfName
@@ -61,6 +63,12 @@ function decode(text) {
     return result
 }
 
+function connectionCommand(data) {
+    if (data.state === "Stopped") return ["tailscale", "up"]
+    if (data.state === "Running" && data.self) return ["tailscale", "down"]
+    return null
+}
+
 function exitCommand(data, id) {
     if (!data.self || (!data.connected && (id !== "" || !data.selected))) return null
     const peer = data.exits.find(peer => peer.id === id)
@@ -92,4 +100,4 @@ function exitMenu(data) {
     })).sort((a, b) => a.name.localeCompare(b.name)) }
 }
 
-if (typeof module !== "undefined") module.exports = { empty, decode, exitCommand, exitMenu }
+if (typeof module !== "undefined") module.exports = { empty, decode, connectionCommand, exitCommand, exitMenu }

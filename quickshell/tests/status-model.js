@@ -149,14 +149,15 @@ assert.equal(offlineCity.selected, true)
 assert.deepEqual(tailscaleModel.exitCommand(grouped, "au-best"), ["tailscale", "set", "--exit-node=100.64.0.2"])
 
 const tailscale = fs.readFileSync(path.join(__dirname, "../modules/topbar/popouts/Tailscale.qml"), "utf8")
+const killed = []
 const context = vm.createContext({Model: tailscaleModel, active: true, data: unavailableExit,
-    error: "", request: null, generation: 1, confirming: "", process: {running: false},
+    error: "", request: null, generation: 1, confirming: "", process: {running: false, signal(value) { killed.push(value) }},
     deadline: {restart() {}, stop() {}}, exitPicker: {visible: false},
     Qt: {callLater(fn) { later.push(fn) }}})
 const later = []
 context.root = context
 Object.defineProperty(context, "busy", {get: () => context.request !== null})
-for (const name of ["refresh", "selectExit", "finish", "syncPicker"])
+for (const name of ["refresh", "selectExit", "toggleConnection", "finish", "syncPicker"])
     vm.runInContext(tailscale.match(new RegExp(`    function ${name}\\([^)]*\\) \\{[\\s\\S]*?^    \\}`, "m"))[0], context)
 function respond(code, text, errors = "") {
     context.process.running = false
@@ -200,6 +201,12 @@ context.refresh()
 assert.equal(context.busy, true)
 const deadlineBody = tailscale.match(/id: deadline[\s\S]*?onTriggered: \{([\s\S]*?)^        \}/m)[1]
 vm.runInContext(deadlineBody, context)
+assert.deepEqual(killed, [9])
+assert.equal(context.busy, true, "Keep the slot until the killed process exits")
+const timedOutRead = context.request
+context.refresh()
+assert.equal(context.request, timedOutRead)
+respond(0, JSON.stringify(running)) // Even a successful exit after timeout is discarded.
 assert.equal(context.busy, false)
 assert.equal(context.data.label, "Unavailable")
 respond(0, JSON.stringify(running)) // A response after the deadline cannot restore stale state.
@@ -220,3 +227,123 @@ later.shift()()
 respond(0, JSON.stringify(running))
 assert.match(context.error, /not confirmed/)
 console.log("Tailscale eligibility, offline clear, captured requests and asynchronous failure checks passed")
+
+// Toggle policy uses backend state: an offline Running daemon can still be stopped.
+const stopped = {BackendState: "Stopped", Self: {ID: "local", HostName: "Laptop"}}
+for (const [value, command] of [[running, ["tailscale", "down"]],
+    [offlineStatus, ["tailscale", "down"]], [stopped, ["tailscale", "up"]],
+    [{BackendState: "Stopped"}, ["tailscale", "up"]]]) {
+    const valueDecoded = tailscaleModel.decode(JSON.stringify(value))
+    assert.deepEqual(tailscaleModel.connectionCommand(valueDecoded), command)
+}
+for (const state of ["NeedsLogin", "NeedsMachineAuth", "Starting", "NoState"])
+    assert.equal(tailscaleModel.connectionCommand(tailscaleModel.decode(JSON.stringify({BackendState: state}))), null)
+assert.equal(tailscaleModel.connectionCommand(tailscaleModel.empty("Unavailable")), null)
+
+function resetConnection(value = running) {
+    context.data = tailscaleModel.decode(JSON.stringify(value))
+    context.active = true
+    context.error = context.confirming = ""
+    context.request = null
+    context.process.running = false
+    context.exitPicker.visible = false
+    later.length = 0
+}
+function confirmConnection(value) {
+    assert.ok(context.confirming)
+    later.shift()()
+    respond(0, JSON.stringify(value))
+    assert.equal(context.confirming, "")
+}
+resetConnection()
+context.toggleConnection()
+const disconnect = context.request
+assert.deepEqual(Array.from(context.process.command), ["tailscale", "down"])
+assert.equal(context.data.connected, true, "Do not optimistically disconnect")
+context.toggleConnection()
+context.selectExit("approved")
+context.refresh()
+assert.equal(context.request, disconnect, "All callers serialize with a connection mutation")
+respond(0, "")
+context.toggleConnection()
+assert.equal(context.request, null, "Confirmation serializes a second mutation")
+confirmConnection(stopped)
+assert.equal(context.error, "")
+assert.equal(context.data.self, "local", "Stopped identity is retained when supplied")
+context.toggleConnection()
+assert.deepEqual(Array.from(context.process.command), ["tailscale", "up"])
+respond(0, "")
+confirmConnection({...running, ExitNodeStatus: {ID: "approved", Online: true}})
+assert.equal(context.data.selected, "approved")
+assert.equal(context.error, "")
+
+for (const [code, errors, value, message] of [
+    [1, "permission denied", running, /Permission denied/],
+    [1, "unknown error", running, /request failed/],
+    [0, "", running, /not confirmed/],
+    [0, "", {...stopped, Self: {ID: "other", HostName: "Other"}}, /profile changed/],
+    [1, "login required", {BackendState: "NeedsLogin"}, /Sign in/],
+    [1, "approval required", {BackendState: "NeedsMachineAuth"}, /approval required/]
+]) {
+    resetConnection()
+    context.toggleConnection()
+    respond(code, "", errors)
+    confirmConnection(value)
+    assert.match(context.error, message)
+}
+resetConnection(stopped)
+context.toggleConnection()
+vm.runInContext(deadlineBody, context)
+assert.equal(context.busy, true)
+const timedOutMutation = context.request
+context.toggleConnection()
+assert.equal(context.request, timedOutMutation)
+respond(0, "")
+confirmConnection({...running, Self: {...running.Self, Online: false}})
+assert.equal(context.data.connected, false)
+assert.match(context.error, /timed out/)
+context.toggleConnection() // Running/offline can be stopped, never accidentally reconnected.
+assert.deepEqual(Array.from(context.process.command), ["tailscale", "down"])
+respond(0, "")
+confirmConnection(stopped)
+assert.equal(context.error, "")
+
+resetConnection()
+context.toggleConnection()
+context.active = false
+context.generation++
+respond(0, "")
+assert.ok(context.confirming, "Hidden mutation waits for a fresh read on reopening")
+assert.equal(later.length, 0)
+context.active = true
+context.generation++
+context.refresh()
+respond(0, JSON.stringify(stopped))
+assert.equal(context.error, "")
+assert.equal(context.confirming, "")
+resetConnection()
+context.exitPicker.visible = true
+context.toggleConnection()
+assert.equal(context.request, null)
+context.exitPicker.visible = false
+context.selectExit("approved")
+const exitRequest = context.request
+context.toggleConnection()
+assert.equal(context.request, exitRequest)
+respond(1, "", "failed")
+resetConnection()
+context.toggleConnection()
+respond(127, "", "missing CLI")
+later.shift()()
+respond(127, "", "missing CLI")
+assert.equal(context.data.label, "Unavailable")
+assert.equal(context.confirming, "")
+assert.equal(tailscaleModel.connectionCommand(context.data), null)
+resetConnection()
+context.refresh()
+context.process.running = false // Failed-to-start has no child to deliver an exit signal.
+vm.runInContext(deadlineBody, context)
+assert.equal(context.busy, false)
+assert.equal(context.data.label, "Unavailable")
+assert.deepEqual(killed, [9, 9], "Missing CLI must not signal a nonexistent process")
+console.log("Tailscale connection commands, confirmation, recovery, profile and lifecycle checks passed")

@@ -17,6 +17,7 @@ import QtTest
 import Quickshell
 import Quickshell.Services.UPower
 import Quickshell.Io
+import ControlFixtures as Fixtures
 import "icewine/deck" as Deck
 import "icewine/modules" as Modules
 import "icewine/modules/topbar" as Bar
@@ -48,6 +49,13 @@ ShellRoot {
         function requestSleep() { root.sessionAction = "sleep"; ++root.sleepCalls; return true }
         function requestReboot() { root.sessionAction = "reboot" }
         function requestShutdown() { root.sessionAction = "shutdown" }
+    }
+    QtObject {
+        id: delayedWifi
+        property bool connected: false
+        property bool stateChanging: false
+        signal connectionFailed(int reason)
+        function connect() {}
     }
     QtObject {
         id: unavailableBrightness
@@ -349,6 +357,171 @@ ShellRoot {
         if (body.height <= 0 || !body.clip || body.contentHeight <= body.height)
             throw new Error("Constrained network page must retain its scroll viewport")
     }
+    FileView { id: tailscaleSelection; path: Qt.resolvedUrl("exit-node") }
+    function checkTailscaleConnection() {
+        networkWindow.requestActivate()
+        networkKeys.tryCompare(networkWindow, "active", true)
+        root.findAccessible(networkPages, "Tailscale tab").click()
+        const picker = root.findAccessible(networkPages, "Exit node")
+        const page = picker.parent.parent.parent
+        tailscaleSelection.setText("city")
+        page.refresh()
+        networkKeys.tryCompare(picker, "text", "Australia · Sydney")
+        networkKeys.tryCompare(picker, "enabled", true)
+        const connection = root.findAccessible(page, "Tailscale connection")
+        if (!connection || !connection.checked || !connection.Accessible.checked || !connection.Accessible.checkable
+                || connection.focusPolicy !== Qt.StrongFocus)
+            throw new Error("Connection switch is missing confirmed state or keyboard/accessibility support")
+        for (const width of [380, 280, 200]) {
+            networkWindow.width = width
+            networkKeys.wait(20)
+            const title = root.findAccessible(page, "<b>Fixture laptop</b> · Connected")
+            const titleEnd = title.mapToItem(page, title.width, 0).x
+            const switchStart = connection.mapToItem(page, 0, 0).x
+            if (titleEnd > switchStart || switchStart + connection.width > page.width
+                    || connection.width < 44 || connection.height < 44)
+                throw new Error("Status and connection touch target overlap or overflow")
+        }
+        networkWindow.width = 280
+        for (const input of [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter, "mouse", "touch", "touch"]) {
+            connection.forceActiveFocus()
+            networkKeys.wait(30) // Let the actual popout reveal the target before pointer/touch delivery.
+            const wasChecked = connection.checked
+            if (typeof input === "number") networkKeys.keyClick(input)
+            else if (input === "mouse") networkKeys.mouseClick(connection, connection.width - 17, connection.height / 2)
+            else {
+                const touch = networkKeys.touchEvent(networkWindow)
+                touch.press(0, connection, connection.width - 17, connection.height / 2).commit()
+                touch.release(0, connection, connection.width - 17, connection.height / 2).commit()
+            }
+            networkKeys.tryCompare(page, "busy", true)
+            if (connection.checked !== wasChecked || connection.enabled || picker.enabled)
+                throw new Error("Connection must retain confirmed state and serialize input while busy")
+            page.toggleConnection()
+            page.selectExit("")
+            networkKeys.tryCompare(page, "busy", false)
+            networkKeys.tryCompare(page, "confirming", "")
+            networkKeys.tryCompare(connection, "enabled", true)
+            if (connection.checked === wasChecked || connection.Accessible.checked !== connection.checked || page.error)
+                throw new Error("Connection input did not confirm a state change: " + input + " / " + page.error)
+            if (connection.checked && (page.data.selected !== "fixture-sydney-best"
+                    || picker.text !== "Australia · Sydney"))
+                throw new Error("Reconnection lost the saved exit-node preference")
+        }
+    }
+    FileView { id: tailscaleMode; path: Qt.resolvedUrl("tailscale-mode") }
+    function checkTailscaleLifetime() {
+        const connection = root.findAccessible(networkPages, "Tailscale connection")
+        const picker = root.findAccessible(networkPages, "Exit node")
+        const page = picker.parent.parent.parent
+        tailscaleMode.setText("success")
+        connection.click()
+        networkKeys.wait(50)
+        const pending = page.request
+        networkPages.shown = false
+        networkKeys.wait(200) // Outlast the real close animation, while the one-second command is pending.
+        if (networkPages.visible || page.active || !page.busy || page.request !== pending)
+            throw new Error("Closing StatusPopout discarded or continued polling its pending network page")
+        networkPages.shown = true
+        networkKeys.wait(30)
+        if (root.findAccessible(networkPages, "Tailscale connection") !== connection
+                || page.request !== pending || connection.enabled)
+            throw new Error("Reopening StatusPopout replaced the request owner or allowed a duplicate mutation")
+        page.toggleConnection()
+        networkKeys.tryCompare(page, "busy", false)
+        networkKeys.tryCompare(page, "confirming", "")
+        if (page.data.state !== "Stopped" || page.error)
+            throw new Error("Connection completion was lost through actual popout close/reopen")
+        tailscaleMode.setText("")
+        connection.click()
+        networkKeys.tryCompare(connection, "checked", true)
+        networkKeys.tryCompare(connection, "enabled", true)
+
+        tailscaleMode.setText("failure")
+        connection.click()
+        networkKeys.wait(50)
+        networkPages.shown = false
+        networkKeys.wait(1100) // Command fails while hidden; its error and pending confirmation must survive.
+        if (page.busy || !page.confirming || !page.error.includes("request failed") || page.active)
+            throw new Error("Hidden StatusPopout lost connection failure/confirmation ownership")
+        networkPages.shown = true
+        networkKeys.tryCompare(page, "busy", false)
+        networkKeys.tryCompare(page, "confirming", "")
+        if (!page.error.includes("request failed") || !connection.checked)
+            throw new Error("Reopened StatusPopout lost the failed connection feedback")
+
+        tailscaleMode.setText("profile")
+        connection.click()
+        networkKeys.wait(50)
+        networkPages.shown = false
+        networkPages.currentPage = "media"
+        networkKeys.wait(1100)
+        if (page.busy || !page.confirming || page.active)
+            throw new Error("Changing status pages discarded the hidden mutation owner")
+        networkPages.shown = true
+        networkKeys.wait(30)
+        if (page.active || !page.confirming)
+            throw new Error("Another status page restarted hidden Tailscale polling/confirmation")
+        networkPages.currentPage = "network"
+        networkKeys.tryCompare(page, "busy", false)
+        networkKeys.tryCompare(page, "confirming", "")
+        if (root.findAccessible(networkPages, "Tailscale connection") !== connection
+                || !page.error.includes("profile changed") || page.data.self !== "fixture-other")
+            throw new Error("Profile-change confirmation was lost across popout and page replacement")
+        const networking = root.findAccessible(networkPages, "Networking tab")
+        networking.click()
+        let networkPage = networking
+        while (networkPage && networkPage.wifiDevice === undefined) networkPage = networkPage.parent
+        if (!networkPage.wifiDevice.scannerEnabled || page.active)
+            throw new Error("Retained Network did not restore ordinary tab activity")
+        networkPages.shown = false
+        networkKeys.tryCompare(networkPages, "visible", false)
+        if (networkPage.wifiDevice.scannerEnabled || page.active)
+            throw new Error(`Retained Network left background scanning/polling active while hidden: networkVisible=${networkPage.visible}, scanning=${networkPage.wifiDevice.scannerEnabled}, tailscaleActive=${page.active}`)
+        networkPages.shown = true
+        networkKeys.wait(30)
+        if (!networkPage.wifiDevice.scannerEnabled || page.active)
+            throw new Error("Retained Network did not resume scanning on reopening its Networking tab")
+    }
+    function checkRetainedNetworkFocus() {
+        networkWindow.requestActivate()
+        networkKeys.tryCompare(networkWindow, "active", true)
+        networkPages.currentPage = "network"
+        const networking = root.findAccessible(networkPages, "Networking tab")
+        let page = networking
+        while (page && page.wifiDevice === undefined) page = page.parent
+        const password = descendants(page,
+            item => item instanceof TextInput && item.echoMode === TextInput.Password)[0]
+        page.connectNetwork(delayedWifi)
+        networkPages.currentPage = "audio"
+        networkPages.focusInitial()
+        const mute = root.findVisible(networkPages, item => item.text === "Output muted")
+        networkKeys.tryCompare(mute, "activeFocus", true)
+        delayedWifi.connectionFailed(Fixtures.ConnectionFailReason.NoSecrets)
+        networkKeys.wait(30)
+        if (!mute.activeFocus || password.activeFocus || page.passwordNetwork !== delayedWifi)
+            throw new Error("Hidden retained Network stole Audio focus or lost delayed auth feedback")
+        networkPages.currentPage = "network"
+        networkKeys.wait(20)
+        if (!password.visible || page.passwordNetwork !== delayedWifi)
+            throw new Error("Returning to Network lost the pending password prompt")
+        page.closePassword()
+
+        // Still focus a visible prompt; then cover hiding after queuing that same deferred callback.
+        page.connectNetwork(delayedWifi)
+        delayedWifi.connectionFailed(Fixtures.ConnectionFailReason.NoSecrets)
+        networkKeys.tryCompare(password, "activeFocus", true)
+        page.closePassword()
+        page.connectNetwork(delayedWifi)
+        delayedWifi.connectionFailed(Fixtures.ConnectionFailReason.NoSecrets)
+        networkPages.currentPage = "audio"
+        networkPages.focusInitial()
+        const nextMute = root.findVisible(networkPages, item => item.text === "Output muted")
+        networkKeys.tryCompare(nextMute, "activeFocus", true)
+        networkKeys.wait(30)
+        if (!nextMute.activeFocus || password.activeFocus || page.passwordNetwork !== delayedWifi)
+            throw new Error("Deferred auth focus ignored a page change before callback delivery")
+    }
     Timer {
         interval: 400
         running: true
@@ -607,7 +780,7 @@ ShellRoot {
                         || value < 0 || value > 100)
                     throw new Error("Live CPU/RAM sampling failed")
             }
-            try { root.checkPopoutFocus() }
+            try { root.checkPopoutFocus(); root.checkTailscaleConnection(); root.checkTailscaleLifetime(); root.checkRetainedNetworkFocus() }
             catch (error) { console.error(error); Qt.exit(1); return }
             console.log("CONTROL_CHECK_PASSED")
             Qt.quit()
@@ -701,14 +874,18 @@ with tempfile.TemporaryDirectory() as directory:
     capabilities.chmod(0o755)
     tailscale = root / "bin/tailscale"
     tailscale.write_text("#!" + shutil.which("python3") + "\n" +
-        "import json, pathlib, sys\n" +
+        "import json, pathlib, sys, time\n" +
         "state = pathlib.Path(" + repr(str(root / "exit-node")) + ")\n" +
+        "backend = pathlib.Path(" + repr(str(root / "backend-state")) + ")\n" +
+        "profile = pathlib.Path(" + repr(str(root / "tailscale-profile")) + ")\n" +
+        "mode_file = pathlib.Path(" + repr(str(root / "tailscale-mode")) + ")\n" +
+        "mode = mode_file.read_text() if mode_file.exists() else ''\n" +
         "log = pathlib.Path(" + repr(str(root / "tailscale-calls")) + ")\n" +
         "with log.open('a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')\n" +
         "if sys.argv[1:] == ['status', '--json']:\n" +
         " selection = state.read_text() if state.exists() else ''\n" +
         " selected = selection not in ('', 'cleared')\n" +
-        " print(json.dumps({'BackendState': 'Running', 'Self': {'ID': 'fixture-local', 'HostName': '<b>Fixture laptop</b>', 'Online': selection not in ('offline', 'cleared')}, " +
+        " print(json.dumps({'BackendState': backend.read_text() if backend.exists() else 'Running', 'Self': {'ID': profile.read_text() if profile.exists() else 'fixture-local', 'HostName': '<b>Fixture laptop</b>', 'Online': selection not in ('offline', 'cleared')}, " +
         "'Peer': {'demo': {'ID': 'fixture-exit', 'HostName': 'Home gateway', 'TailscaleIPs': ['100.64.0.2'], 'Online': True, 'ExitNodeOption': True}, " +
         "'alt': {'ID': 'fixture-alt', 'HostName': 'Remote gateway', 'TailscaleIPs': ['100.64.0.5'], 'Online': True, 'ExitNodeOption': True}, " +
         "'sydney': {'ID': 'fixture-sydney', 'DNSName': 'sydney.mullvad.ts.net.', 'TailscaleIPs': ['100.64.0.6'], 'Online': True, 'ExitNodeOption': True, 'Location': {'Country': 'Australia', 'City': 'Sydney', 'Priority': 1}}, " +
@@ -716,6 +893,12 @@ with tempfile.TemporaryDirectory() as directory:
         "'mel': {'ID': 'fixture-melbourne', 'DNSName': 'mel.mullvad.ts.net.', 'TailscaleIPs': ['100.64.0.8'], 'Online': True, 'ExitNodeOption': True, 'Location': {'Country': 'Australia', 'City': 'Melbourne'}}, " +
         "'de': {'ID': 'fixture-berlin', 'DNSName': 'berlin.mullvad.ts.net.', 'TailscaleIPs': ['100.64.0.9'], 'Online': True, 'ExitNodeOption': True, 'Location': {'Country': 'Germany', 'City': 'Berlin'}}}, " +
         "'ExitNodeStatus': {'ID': 'fixture-sydney-best' if selection == 'city' else 'fixture-exit', 'Online': True} if selected else None}))\n" +
+        "elif sys.argv[1:] == ['up']: time.sleep(0.1); backend.write_text('Running')\n" +
+        "elif sys.argv[1:] == ['down']:\n" +
+        " time.sleep(1 if mode else 0.1)\n" +
+        " if mode == 'failure': print('request failed', file=sys.stderr); sys.exit(1)\n" +
+        " backend.write_text('Stopped')\n" +
+        " if mode == 'profile': profile.write_text('fixture-other')\n" +
         "elif sys.argv[1:] == ['set', '--exit-node=100.64.0.7']: state.write_text('city')\n" +
         "elif sys.argv[1:] == ['set', '--exit-node=100.64.0.2']: state.write_text('offline')\n" +
         "elif sys.argv[1:] == ['set', '--exit-node=']: state.write_text('cleared')\n" +
@@ -742,11 +925,12 @@ with tempfile.TemporaryDirectory() as directory:
         raise AssertionError((error.stdout or b"").decode() + (error.stderr or b"").decode()) from error
     output = result.stdout + result.stderr
     assert result.returncode == 0 and "CONTROL_CHECK_PASSED" in output, output
-    assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
+    assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
     import json
     calls = [json.loads(line) for line in (root / "tailscale-calls").read_text().splitlines()]
     assert [call for call in calls if call[0] == "set"] == [
         ["set", "--exit-node=100.64.0.7"], ["set", "--exit-node=100.64.0.2"], ["set", "--exit-node="]], calls
+    assert [call for call in calls if call[0] in ("up", "down")] == [["down"], ["up"]] * 4 + [["down"], ["down"]], calls
     notifications = (root / "notifications").read_text().splitlines()
     assert len(notifications) == 4, notifications
     assert any("-u normal Battery Low 20%" in call for call in notifications), notifications

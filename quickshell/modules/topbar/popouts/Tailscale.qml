@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Layouts
 import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Io
@@ -45,6 +46,18 @@ Flickable {
         process.running = true
     }
 
+    function toggleConnection() {
+        if (!active || busy || process.running || confirming || exitPicker.visible) return
+        const command = Model.connectionCommand(data)
+        if (!command) return
+        error = ""
+        request = { generation: generation, kind: "connection", self: data.self,
+            state: data.state === "Stopped" ? "Running" : "Stopped" }
+        process.command = command
+        deadline.restart()
+        process.running = true
+    }
+
     function finish(code, status, text, errors) {
         const completed = request
         if (!completed) return
@@ -54,13 +67,19 @@ Flickable {
             if (active) Qt.callLater(root.refresh)
             return
         }
-        if (code !== 0 || status !== 0) {
+        // Even a failed/timed-out command may have changed the daemon's state.
+        if (completed.kind === "connection") confirming = JSON.stringify(completed)
+        if (completed.timedOut || code !== 0 || status !== 0) {
             const denied = /access denied|permission denied|not permitted/i.test(errors)
             error = denied ? "Permission denied. Ask the host administrator to configure a Tailscale operator, then retry."
+                : completed.kind === "connection" ? "Connection request failed or timed out. Refresh to check the current state."
                 : completed.kind === "set" ? "Exit-node request failed or timed out. Refresh to check the current setting."
                 : "Tailscale unavailable. Check the client and service, then refresh."
             if (completed.kind === "status") data = Model.empty("Unavailable")
-            confirming = ""
+            if (completed.kind !== "connection") confirming = ""
+            else if (active) Qt.callLater(root.refresh)
+        } else if (completed.kind === "connection") {
+            if (active) Qt.callLater(root.refresh)
         } else if (completed.kind === "set") {
             confirming = JSON.stringify({ id: completed.id, self: completed.self })
             if (active) Qt.callLater(root.refresh)
@@ -69,8 +88,17 @@ Flickable {
                 data = Model.decode(text)
                 if (confirming) {
                     const selected = JSON.parse(confirming)
-                    error = data.self !== selected.self ? "Tailscale profile changed. Check the current exit node."
-                        : data.selected !== selected.id ? "Exit-node change not confirmed. Refresh and retry." : ""
+                    if (selected.kind === "connection") {
+                        error = selected.self && data.self && data.self !== selected.self
+                            ? "Tailscale profile changed. Check the current connection."
+                            : data.state === "NeedsLogin" ? "Sign in with Tailscale, then refresh."
+                            : data.state === "NeedsMachineAuth" ? "Device approval required. Ask the tailnet administrator, then refresh."
+                            : data.state !== selected.state || (selected.state === "Running" && !data.connected)
+                                ? (error || "Connection change not confirmed. Refresh and retry.") : ""
+                    } else {
+                        error = data.self !== selected.self ? "Tailscale profile changed. Check the current exit node."
+                            : data.selected !== selected.id ? "Exit-node change not confirmed. Refresh and retry." : ""
+                    }
                     confirming = ""
                 }
             } catch (e) {
@@ -99,8 +127,11 @@ Flickable {
         id: deadline
         interval: 8000
         onTriggered: {
-            process.running = false
-            root.finish(1, 1, "", "timeout")
+            if (process.running) {
+                // Keep the request locked until this process exits; no late result can finish a retry.
+                root.request.timedOut = true
+                process.signal(9)
+            } else root.finish(1, 1, "", "timeout") // Includes a missing CLI that never started.
         }
     }
     Process {
@@ -114,18 +145,38 @@ Flickable {
         id: content
         x: 12; y: 12; width: root.width - 24
         spacing: 7
-        Text {
-            textFormat: Text.PlainText
+        RowLayout {
             width: parent.width
-            text: root.data.selfName + " · " + (root.busy
-                ? (root.request.kind === "set" ? "Changing exit node…" : "Refreshing…") : root.data.label)
-            color: root.data.connected ? Theme.Palette.success : Theme.Palette.muted
-            font.family: "JetBrainsMono Nerd Font"
-            font.pixelSize: 13
-            font.bold: true
-            wrapMode: Text.Wrap
-            Accessible.role: Accessible.StaticText
-            Accessible.name: text
+            spacing: 8
+            Text {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                text: root.data.selfName + " · " + (root.busy
+                    ? (root.request.kind === "set" ? "Changing exit node…"
+                        : root.request.kind === "connection" ? "Changing connection…" : "Refreshing…") : root.data.label)
+                color: root.data.connected ? Theme.Palette.success : Theme.Palette.muted
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: 13
+                font.bold: true
+                wrapMode: Text.Wrap
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+            }
+            Toggle {
+                id: connectionToggle
+                Layout.preferredWidth: 44
+                implicitHeight: 44
+                checked: root.data.state === "Running"
+                enabled: root.active && !root.busy && !root.confirming && !exitPicker.visible
+                    && Model.connectionCommand(root.data) !== null
+                Accessible.name: "Tailscale connection"
+                Accessible.description: root.data.label
+                // The switch shows daemon state, never an optimistic click result.
+                checkable: false
+                Accessible.checkable: true
+                Accessible.checked: checked
+                onClicked: root.toggleConnection()
+            }
         }
         Text {
             textFormat: Text.PlainText
