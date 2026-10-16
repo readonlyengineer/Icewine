@@ -263,8 +263,16 @@ Scope {
             color: "transparent"
             WlrLayershell.namespace: "quickshell:topbar"
             WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.keyboardFocus: modal && screen.name === keyboardScreen && !root.sessionLocked
+            WlrLayershell.keyboardFocus: modal && root.ui.page !== "switcher"
+                && screen.name === keyboardScreen && !root.sessionLocked
                 ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+
+            HyprlandFocusGrab {
+                windows: [panel]
+                active: panel.widgetHere && root.ui.page === "switcher"
+                    && root.widgetEngaged && !root.sessionLocked
+                onCleared: if (root.ui.page === "switcher") root.handoff()
+            }
 
             // Hidden means no input region, including at the top edge.
             mask: Region {
