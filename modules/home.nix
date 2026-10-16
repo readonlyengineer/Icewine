@@ -160,7 +160,7 @@ let
   };
   icewineCli = pkgs.symlinkJoin {
     name = "icewine";
-    paths = [ icewineDispatcher manager managerBackend themeCli wallpaperSelector ];
+    paths = [ icewineDispatcher manager managerBackend themeCli wallpaperSelector monitorBrightness ];
   };
   monitorCapabilities = pkgs.writeShellApplication {
     name = "icewine-monitor-capabilities";

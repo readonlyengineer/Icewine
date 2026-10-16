@@ -189,6 +189,11 @@ in {
       export XDG_RUNTIME_DIR=$TMPDIR/runtime XDG_CACHE_HOME=$TMPDIR/cache
       mkdir -m700 -p "$XDG_RUNTIME_DIR"
       mkdir -p "$HOME"
+      # Compositor callers must resolve the helper without Quickshell's private PATH.
+      for cli in ${icewineCli} ${handheldCli}; do
+        if PATH=$cli/bin icewine-monitor-brightness ../eDP-1 2>"$TMPDIR/brightness-error"; then exit 1; fi
+        grep -Fx 'Invalid monitor name' "$TMPDIR/brightness-error"
+      done
       grep -F 'Before=icewine.service' ${handheld.systemd.user.units."icewine-inputplumber-hyprland.service".unit}/icewine-inputplumber-hyprland.service
       grep -F 'ExecStart=' ${handheld.systemd.user.units."icewine-keyboard.service".unit}/icewine-keyboard.service
       grep -F 'ExecStart=' ${handheld.systemd.user.units."icewine-controller-idle.service".unit}/icewine-controller-idle.service
