@@ -432,10 +432,9 @@ Scope {
                 Loader {
                     id: switcher
                     active: Config.Settings.windowSwitcher === true && panel.widgetHere && root.ui.page === "switcher" && !root.sessionLocked
-                    x: 8
-                    y: root.barHeight + 4
-                    width: panel.width - 16
-                    height: panel.height - y - 8
+                    anchors.centerIn: parent
+                    width: Math.max(0, Math.min(1000, panel.width - 2 * Math.min(24, panel.width / 20), implicitWidth))
+                    height: Math.max(0, Math.min(720, panel.height - 2 * Math.min(24, panel.height / 20), implicitHeight))
                     onLoaded: item.forceActiveFocus()
                     sourceComponent: WindowSwitcher {
                         compositor: root.compositor

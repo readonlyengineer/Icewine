@@ -14,8 +14,12 @@ FocusScope {
     property var selected: null
     property var pendingWindow: null
     property int actionKey: 0
-    readonly property int cardWidth: Math.max(100, Math.min(240, width - 32))
-    readonly property int cardHeight: Math.max(70, Math.min(170, height - 72))
+    implicitWidth: Math.max(360, 32 + Math.max(0, ...rows.map(row => row.windows.length * (240 + 12) - 12)))
+    implicitHeight: Math.max(140, 32 + rows.length * (workspaceFont.height + 6 + 170 + 12)
+        + Math.max(0, rows.length - 1) * 16)
+    readonly property int cardWidth: Math.max(0, Math.min(240, width - 32))
+    readonly property int cardHeight: Math.max(0, Math.min(170, height - 72))
+    FontMetrics { id: workspaceFont; font.pixelSize: 16 }
     signal dismissRequested()
     signal activateRequested(var window)
 
@@ -26,17 +30,18 @@ FocusScope {
     function ensureVisible() {
         const position = Model.locate(rows, selected)
         if (!position) return
+        // callLater can precede the positioner's polish after model/size changes.
+        contents.forceLayout()
         const rowItem = rowViews.itemAt(position.row)
         if (!rowItem) return
-        const top = rowItem.y
-        const bottom = top + rowItem.height
-        if (top < viewport.contentY) viewport.contentY = top
-        else if (bottom > viewport.contentY + viewport.height)
-            viewport.contentY = bottom - viewport.height
-        const left = position.column * (cardWidth + 12)
-        if (left < rowItem.list.contentX) rowItem.list.contentX = left
-        else if (left + cardWidth > rowItem.list.contentX + rowItem.list.width)
-            rowItem.list.contentX = left + cardWidth - rowItem.list.width
+        const top = rowItem.y + rowItem.list.y
+        const bottom = top + cardHeight
+        let target = viewport.contentY
+        if (top < target) target = top
+        else if (bottom > target + viewport.height) target = bottom - viewport.height
+        viewport.contentY = Math.max(0, Math.min(target, viewport.contentHeight - viewport.height))
+        rowItem.list.forceLayout()
+        rowItem.list.positionViewAtIndex(position.column, ListView.Contain)
     }
 
     onRowsChanged: {
@@ -86,6 +91,7 @@ FocusScope {
         clip: true
         contentWidth: width
         contentHeight: contents.height
+        onContentHeightChanged: Qt.callLater(root.ensureVisible)
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
         Column {
