@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Window
+import QtQuick.Effects
 
 // Nonvisual arrangement and selection; card surfaces belong to Card.
 FocusScope {
@@ -10,6 +11,9 @@ FocusScope {
     property list<Card> cards
     onCardsChanged: resetSelection()
     readonly property bool stacked: cards.length > 1
+    property int shadowDrop: 4
+    property Item shadowHost: null
+    readonly property int shadowGap: Math.floor(shadowDrop / Math.max(1, cards.length))
     property Item initialFocus: exchanging ? motionFocus : cards[selectedCard]?.initialFocus ?? null
     readonly property Item motionInitialFocus: motionFocus
     signal selectionChanging()
@@ -25,6 +29,78 @@ FocusScope {
     property real progress: 0
     property bool exchanging: false
     property bool available: visible && enabled
+
+    // Each receiving plane gets its own projection. Receiver children remain below
+    // every higher sibling card; the window plane sits below all card surfaces.
+    Repeater {
+        model: root.stacked ? [null].concat(root.cards) : []
+        delegate: Item {
+            id: receiverDelegate
+            required property var modelData
+            Item {
+                id: plane
+                readonly property Card receiver: receiverDelegate.modelData
+                parent: receiver ?? root.shadowHost ?? root
+                visible: root.visible
+                x: receiver ? -receiver.x : root.shadowHost ? root.x + root.parent.mapToItem(root.shadowHost, 0, 0).x : 0
+                y: receiver ? -receiver.y : root.shadowHost ? root.y + root.parent.mapToItem(root.shadowHost, 0, 0).y : 0
+                width: root.width
+                height: root.height
+                z: receiver ? 1000 : -1
+                Repeater {
+                    model: root.cards
+                    delegate: MultiEffect {
+                        id: projection
+                        required property Card modelData
+                        readonly property Card caster: modelData
+                        readonly property int casterRank: root.cards.filter(card => card && caster && card.z < caster.z).length
+                        readonly property int receiverRank: plane.receiver
+                            ? root.cards.filter(card => card && plane.receiver && card.z < plane.receiver.z).length : 0
+                        anchors.fill: parent
+                        visible: caster !== null && caster.visible && (!plane.receiver || caster.z > plane.receiver.z)
+                        source: silhouette
+                        // Fixed stack coordinates keep the mask and caster aligned during motion.
+                        autoPaddingEnabled: plane.receiver === null && root.shadowHost !== null
+                        shadowEnabled: true
+                        shadowColor: "#000000"
+                        shadowOpacity: 0.35
+                        shadowBlur: 0.6
+                        blurMax: 16
+                        shadowVerticalOffset: plane.receiver
+                            ? root.shadowGap * (casterRank - receiverRank)
+                            : root.shadowDrop - root.shadowGap * (root.cards.length - 1 - casterRank)
+                        maskEnabled: plane.receiver !== null
+                        maskSource: receiverMask
+                        Item {
+                            id: silhouette
+                            clip: true
+                            width: root.width; height: root.height
+                            visible: false
+                            layer.enabled: true
+                            Rectangle {
+                                x: projection.caster?.x ?? 0; y: projection.caster?.y ?? 0
+                                width: projection.caster?.width ?? 0; height: projection.caster?.height ?? 0
+                                radius: projection.caster?.radius ?? 0
+                                color: projection.caster?.color ?? "transparent"
+                            }
+                        }
+                        Item {
+                            id: receiverMask
+                            width: root.width; height: root.height
+                            visible: false
+                            layer.enabled: true
+                            Rectangle {
+                                x: plane.receiver?.x ?? 0; y: plane.receiver?.y ?? 0
+                                width: plane.receiver?.width ?? 0; height: plane.receiver?.height ?? 0
+                                radius: plane.receiver?.radius ?? 0
+                                color: "white"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     readonly property bool ownsFocus: {
         const target = root.Window.window?.activeFocusItem

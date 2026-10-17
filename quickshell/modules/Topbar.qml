@@ -27,6 +27,7 @@ Scope {
     readonly property bool layoutActive: layoutsEnabled && !sessionLocked
         && panels.instances.some(panel => panel.widgetHere && panel.layoutActive)
     readonly property int barHeight: 38
+    readonly property int shadowDrop: 4
     readonly property var player: Mpris.players.values.find(candidate => candidate.isPlaying)
         ?? Mpris.players.values[0] ?? null
 
@@ -373,7 +374,7 @@ Scope {
                         shadowOpacity: 0.35
                         shadowBlur: 0.6
                         blurMax: 16
-                        shadowVerticalOffset: 4
+                        shadowVerticalOffset: root.shadowDrop
                     }
                     bottomLeftRadius: root.radialVisible ? 0 : 10
                     bottomRightRadius: root.radialVisible ? 0 : 10
@@ -431,14 +432,15 @@ Scope {
 
                 Bar.Launcher {
                     id: launcher
+                    shadowDrop: root.shadowDrop
                     layer.enabled: visible
                     layer.effect: MultiEffect {
-                        shadowEnabled: true
+                        shadowEnabled: !launcher.floatingCards
                         shadowColor: "#000000"
                         shadowOpacity: 0.35
                         shadowBlur: 0.6
                         blurMax: 16
-                        shadowVerticalOffset: 4
+                        shadowVerticalOffset: root.shadowDrop
                     }
                     compositor: root.compositor
                     layoutsEnabled: root.layoutsEnabled
@@ -470,14 +472,15 @@ Scope {
                 }
                 Bar.StatusPopout {
                     id: statusPopout
+                    shadowDrop: root.shadowDrop
                     layer.enabled: visible
                     layer.effect: MultiEffect {
-                        shadowEnabled: true
+                        shadowEnabled: !statusPopout.floatingCards
                         shadowColor: "#000000"
                         shadowOpacity: 0.35
                         shadowBlur: 0.6
                         blurMax: 16
-                        shadowVerticalOffset: 4
+                        shadowVerticalOffset: root.shadowDrop
                     }
                     shown: panel.widgetHere && !["launcher", "layout", "switcher"].includes(root.ui.page)
                     animateClose: !root.instantBarHide && !root.sessionLocked

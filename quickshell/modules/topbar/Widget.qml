@@ -6,6 +6,9 @@ FocusScope {
     id: root
 
     property bool shown: true
+    property bool floatingCards: false
+    property int shadowDrop: 4
+    readonly property alias cardShadowHost: cardShadowHost
     property bool animateClose: true
     property real reveal: 0
     property bool engaged: false
@@ -37,6 +40,18 @@ FocusScope {
         easing.type: root.shown ? Easing.OutCubic : Easing.InCubic
     }
     clip: true
+
+    // Window-plane shadows escape the clipped widget without adding an input area.
+    Item {
+        id: cardShadowHost
+        parent: root.parent
+        x: root.x; y: root.y
+        width: root.width; height: root.height
+        z: root.z - 0.001
+        visible: root.visible
+        opacity: root.opacity
+        transform: Translate { y: -12 * (1 - root.reveal) }
+    }
 
     HoverHandler { id: hover }
 

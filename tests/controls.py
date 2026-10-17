@@ -2077,6 +2077,155 @@ ShellRoot {
 }
 """
 
+# Compare real stack pixels against an independent native single-caster reference.
+SHADOW_QML = """import QtQuick
+import QtQuick.Window
+import QtQuick.Effects
+import QtTest
+import Quickshell
+import "icewine/modules/topbar" as Bar
+ShellRoot {
+    Window {
+        id: window
+        visible: true
+        width: 800; height: 280
+        color: "white"
+        Bar.Widget {
+            id: widget
+            width: 320; height: 240
+            Bar.CardStack {
+                id: stack
+                shadowHost: widget.cardShadowHost
+                width: 320; height: 240
+                cards: [front, rear]
+                Bar.Card { id: front; stack: stack; color: "white" }
+                Bar.Card { id: rear; index: 1; stack: stack; color: "white" }
+                Bar.Card { id: third; index: 2; stack: stack; color: "white"; visible: stack.cards.length === 3 }
+            }
+        }
+        Item {
+            id: reference
+            x: 400; width: stack.width; height: stack.height
+            property int drop: 2
+            property var caster: front
+            Rectangle { anchors.fill: parent; color: "white" }
+            Rectangle {
+                id: shape
+                x: reference.caster.x; y: reference.caster.y
+                width: reference.caster.width; height: reference.caster.height
+                radius: reference.caster.radius
+                color: "white"
+                visible: false
+            }
+            MultiEffect {
+                source: shape
+                anchors.fill: shape
+                shadowEnabled: true
+                shadowColor: "black"; shadowOpacity: 0.35
+                shadowBlur: 0.6; blurMax: 16
+                shadowVerticalOffset: reference.drop
+            }
+        }
+        TestCase { id: keys; when: false }
+        function comparePixel(caster, drop, x, y, label) {
+            if (window.GraphicsInfo.api === GraphicsInfo.Software) return
+            reference.caster = caster
+            reference.drop = drop
+            keys.wait(40)
+            const actual = keys.grabImage(window.contentItem).pixel(x, y)
+            const expected = keys.grabImage(reference).pixel(x, y)
+            if (expected.r > 0.995) throw new Error("Reference shadow did not render: " + label)
+            if (Math.abs(actual.r - expected.r) > 2 / 255)
+                throw new Error(label + ": actual=" + actual + " expected=" + expected)
+        }
+        function descendants(item) {
+            return Array.from(item.children).reduce((items, child) => items.concat([child], descendants(child)), [])
+        }
+        function checkProjections(expected) {
+            const effects = descendants(window.contentItem).filter(item => item.casterRank !== undefined && item.visible)
+            const drops = effects.map(item => item.shadowVerticalOffset).sort().join(",")
+            if (drops !== expected) throw new Error("Receiver drops: " + drops + " expected " + expected)
+            for (const effect of effects) {
+                if (!effect.source || effect.width !== stack.width || effect.height !== stack.height
+                        || !effect.shadowEnabled || !effect.source.clip)
+                    throw new Error("Projection lost common stack coordinates")
+                if (effect.maskEnabled === effect.autoPaddingEnabled
+                        || (effect.maskEnabled && !effect.maskSource.layer.enabled))
+                    throw new Error("Card receiver lost its surface mask")
+            }
+        }
+        function checkPair(label) {
+            checkProjections("2,2,4")
+            const top = stack.cards.find(card => card.z === 2)
+            const lower = stack.cards.find(card => card !== top)
+            comparePixel(top, 2, 160, top.y - 2, label + " onto card")
+            comparePixel(top, 4, 160, top.y + top.height + 2, label + " onto windows")
+            comparePixel(lower, 2, 160, lower.y - 2, label + " lower onto windows")
+            const image = keys.grabImage(window.contentItem)
+            if (image.pixel(160, top.y + 20).r !== 1 || image.pixel(360, 120).r !== 1)
+                throw new Error("Shadow occlusion or constrained clip regressed")
+            const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
+            if (directory) image.save(directory + "/shadow-" + label + ".png")
+        }
+        Timer {
+            interval: 250; running: true
+            onTriggered: {
+                try {
+                    window.checkPair("pair")
+                    widget.shadowDrop = 6
+                    stack.shadowDrop = Qt.binding(() => widget.shadowDrop)
+                    window.checkProjections("3,3,6")
+                    widget.shadowDrop = 4
+                    stack.selectCard(1)
+                    keys.wait(40)
+                    stack.selectCard(0)
+                    keys.tryCompare(stack, "exchanging", false, 900)
+                    window.checkPair("reversed")
+                    stack.selectCard(1)
+                    keys.tryCompare(stack, "exchanging", false, 900)
+                    window.checkPair("selected")
+                    stack.cards = [front, rear, third]
+                    keys.wait(60)
+                    window.checkProjections("1,1,2,2,3,4")
+                    window.comparePixel(rear, 1, 160, rear.y - 2, "middle onto bottom")
+                    window.comparePixel(front, 1, 160, front.y - 2, "top onto middle")
+                    window.comparePixel(front, 4, 160, front.y + front.height + 2, "triple top onto windows")
+                    window.comparePixel(third, 2, 160, third.y - 2, "bottom onto windows")
+                    const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
+                    if (directory) keys.grabImage(window.contentItem).save(directory + "/shadow-triple.png")
+                    stack.selectCard(1)
+                    keys.wait(30)
+                    stack.selectCard(2)
+                    keys.tryCompare(stack, "exchanging", false, 900)
+                    window.checkProjections("1,1,2,2,3,4")
+                    widget.animateClose = false
+                    widget.shown = false
+                    keys.wait(20)
+                    window.checkProjections("")
+                    widget.shown = true
+                    keys.wait(200)
+                    stack.visible = false
+                    keys.wait(20)
+                    window.checkProjections("")
+                    stack.visible = true
+                    stack.cards = [front]
+                    third.visible = false
+                    rear.visible = false
+                    keys.wait(60)
+                    if (front.x !== 0 || front.y !== 0 || front.width !== stack.width
+                            || keys.grabImage(stack).pixel(160, 1).r !== 1)
+                        throw new Error("Single-card appearance changed")
+                    if (window.GraphicsInfo.api === GraphicsInfo.Software)
+                        console.log("SHADOW_PIXELS_UNAVAILABLE: software scene graph does not render MultiEffect; native preview required")
+                    console.log("SHADOW_CHECK_PASSED")
+                    Qt.quit()
+                } catch (error) { console.error(error); Qt.exit(1) }
+            }
+        }
+    }
+}
+"""
+
 SERVICE_FIXTURES = {
     "Pipewire": """
         property var nodes: ({values: Array.from({length: 2}, (_, id) => ({
@@ -2247,6 +2396,18 @@ with tempfile.TemporaryDirectory() as directory:
                XDG_STATE_HOME=str(root / "state"), ICEWINE_WIDGET_POLICY="{}",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
     env["XDG_CONFIG_HOME"] = fixture_config
+    (root / "shell.qml").write_text(SHADOW_QML)
+    result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                            capture_output=True, text=True, timeout=15)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0 and "SHADOW_CHECK_PASSED" in output, output
+    assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign|Cannot stack", output), output
+    for line in output.splitlines():
+        if "SHADOW_PIXELS_UNAVAILABLE" in line:
+            print(line)
+    if "--shadows-only" in sys.argv:
+        print("receiver-relative shadow scene checks pass; pixel checks run only on an effect-capable scene graph")
+        sys.exit(0)
     (root / "shell.qml").write_text(ARROW_QML)
     result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
                             capture_output=True, text=True, timeout=25)

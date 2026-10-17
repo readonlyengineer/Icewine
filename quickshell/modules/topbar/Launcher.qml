@@ -8,6 +8,7 @@ import qs.icewine.theme as Theme
 
 Widget {
     id: root
+    floatingCards: stack.stacked
     required property var compositor
     property bool layoutsEnabled: true
     readonly property bool layoutActive: layout.item?.active ?? false
@@ -35,6 +36,8 @@ Widget {
     height: implicitHeight
     CardStack {
         id: stack
+        shadowDrop: root.shadowDrop
+        shadowHost: root.cardShadowHost
         anchors.fill: parent
         cards: [card].concat(background.item ? [background.item] : [], layout.item ? [layout.item] : [])
         onSelectionChanging: background.item?.closeMenu()

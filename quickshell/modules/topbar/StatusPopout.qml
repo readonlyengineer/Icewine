@@ -8,6 +8,7 @@ import qs.icewine.theme as Theme
 
 Widget {
     id: root
+    floatingCards: currentItem?.stacked ?? false
 
     required property var compositor
     required property var notificationService
@@ -108,6 +109,8 @@ Widget {
     implicitHeight: Math.min(620, root.currentItem?.implicitHeight ?? 0)
 
     CardStack {
+        shadowDrop: root.shadowDrop
+        shadowHost: root.cardShadowHost
         anchors.fill: parent
         cards: [pageCard]
         visible: !root.audioPage && !root.powerPage && root.currentPage !== "network"
@@ -127,6 +130,8 @@ Widget {
         }
     }
     CardStack {
+        shadowDrop: root.shadowDrop
+        shadowHost: root.cardShadowHost
         id: audioStack
         anchors.fill: parent
         visible: root.audioPage
@@ -164,6 +169,8 @@ Widget {
         }
     }
     CardStack {
+        shadowDrop: root.shadowDrop
+        shadowHost: root.cardShadowHost
         id: powerStack
         anchors.fill: parent
         visible: root.powerPage
@@ -222,6 +229,8 @@ Widget {
     Component {
         id: networkPage
         Popouts.Network {
+            shadowDrop: root.shadowDrop
+            shadowHost: root.cardShadowHost
             metrics: root.metrics
         }
     }
