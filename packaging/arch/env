@@ -11,3 +11,4 @@ case " $selections " in *" gamescope=true "*) export ICEWINE_GAMESCOPE_ENABLED=t
 case " $selections " in *" handheld=true "*) export ICEWINE_HANDHELD_ENABLED=true ;; esac
 export ICEWINE_BATTERY_ENABLED=${ICEWINE_BATTERY_ENABLED:-true}
 export QT_IM_MODULE=qtvirtualkeyboard
+export QT_VIRTUALKEYBOARD_DESKTOP_DISABLE=1

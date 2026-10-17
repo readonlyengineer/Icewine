@@ -60,6 +60,7 @@ in {
     python3 ${self}/tests/controls.py ${self}
     python3 ${self}/tests/layouts.py --qml
     python3 ${self}/tests/render-ready.py ${self}
+    python3 ${self}/tests/keyboard.py ${self}
     python3 ${self}/tests/breeze-lock.py ${self}
     ICEWINE_TEST_QS=quickshell ICEWINE_THEME_TRANSITION=off python3 ${self}/tests/breeze-lock.py ${self}
     python3 ${self}/tests/window-switcher.py ${self}
@@ -158,6 +159,8 @@ in {
     assert !(hasPackage "gamescope" flatpakOnly.environment.systemPackages);
     assert builtins.elem "icewine.service" handheld.systemd.user.services.icewine-inputplumber-hyprland.before;
     assert handheld.services.inputplumber.enable && handheld.programs.steam.enable;
+    assert !(handheld.systemd.user.services ? icewine-keyboard);
+    assert hasPackage "wtype" optIn.environment.systemPackages;
     assert handheld.services.icewine.applications.steam == [ "steam" "-gamepadui" ];
     pkgs.runCommand "icewine-module-checks" { nativeBuildInputs = [ pkgs.lua pkgs.python3 ]; } ''
       export HOME=$TMPDIR/home XDG_CONFIG_HOME=$TMPDIR/home/.config XDG_DATA_HOME=$TMPDIR/home/.local/share XDG_STATE_HOME=$TMPDIR/home/.local/state
@@ -170,7 +173,6 @@ in {
         grep -Fx 'Invalid monitor name' "$TMPDIR/brightness-error"
       done
       grep -F 'Before=icewine.service' ${handheld.systemd.user.units."icewine-inputplumber-hyprland.service".unit}/icewine-inputplumber-hyprland.service
-      grep -F 'ExecStart=' ${handheld.systemd.user.units."icewine-keyboard.service".unit}/icewine-keyboard.service
       grep -F 'ExecStart=' ${handheld.systemd.user.units."icewine-controller-idle.service".unit}/icewine-controller-idle.service
       grep -F 'ExecStopPost=' ${handheld.systemd.user.units."icewine-inputplumber-hyprland.service".unit}/icewine-inputplumber-hyprland.service
       grep -F 'ExecStart=' ${optIn.systemd.user.units."icewine.service".unit}/icewine.service

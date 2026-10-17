@@ -44,7 +44,7 @@ if os.environ.get('FAIL_MATCH') and os.environ['FAIL_MATCH'] in ' '.join(args): 
     result, calls = run('inputplumber-restore.sh', FAIL_MATCH='profile load')
     assert result.returncode != 0 and not any(call[-1] == 'pass' for call in calls)
     result, calls = run('keyboard-toggle.sh')
-    assert result.returncode == 0 and calls[-1] == ['qs', 'ipc', 'call', 'topbar', 'osk', 'true']
-    result, calls = run('keyboard-toggle.sh', VISIBLE='unexpected')
-    assert result.returncode != 0 and not any('SetVisible' in call for call in calls)
+    assert result.returncode == 0 and calls == [['qs', 'ipc', 'call', 'keyboard', 'toggle']]
+    result, calls = run('keyboard-toggle.sh', FAIL_MATCH='keyboard toggle')
+    assert result.returncode != 0 and calls == [['qs', 'ipc', 'call', 'keyboard', 'toggle']]
 print('PASS: shared Handheld bootstrap, failed-start restore and keyboard visibility validation')

@@ -121,11 +121,10 @@ print("PASS: real python-vdf shortcut binary API and literal command filtering")
 if len(sys.argv) == 2:
     sys.exit(0)
 
-desktop, session, handheld, keyboard, idle = map(Path, sys.argv[2:7])
-assert sorted(str(p.relative_to(keyboard)) for p in keyboard.rglob("*") if p.is_file() and not p.name.startswith(".")) == ["usr/lib/icewine/squeekboard"]
+desktop, session, handheld, idle = map(Path, sys.argv[2:6])
 assert sorted(str(p.relative_to(idle)) for p in idle.rglob("*") if p.is_file() and not p.name.startswith(".")) == ["usr/lib/icewine/wljoywake"]
 assert {p.name for p in (handheld / "usr/lib/systemd/user").iterdir()} == {
-    "icewine-inputplumber-hyprland.service", "icewine-keyboard.service", "icewine-controller-idle.service"}
+    "icewine-inputplumber-hyprland.service", "icewine-controller-idle.service"}
 assert "Before=icewine.service" in (handheld / "usr/lib/systemd/user/icewine-inputplumber-hyprland.service").read_text()
 assert "ExecStopPost=" in (handheld / "usr/lib/systemd/user/icewine-inputplumber-hyprland.service").read_text()
 assert not (session / "usr/lib/systemd/user/icewine-keyboard.service").exists()

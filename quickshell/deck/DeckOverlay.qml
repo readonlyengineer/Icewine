@@ -15,6 +15,14 @@ Scope {
     required property var compositor
     required property bool sessionLocked
 
+    property var keyboard: null
+    property bool keyboardReady: false
+    readonly property bool keyboardVisible: keyboard?.visible ?? false
+    onKeyboardVisibleChanged: {
+        keyboardReady = false
+        if (!keyboardVisible) drainInput()
+        reconcile()
+    }
     property bool opened: false
     required property var shell
     property bool draining: false
@@ -37,9 +45,13 @@ Scope {
     property string inputError: ""
     readonly property string wantedRoute: Menu.inputRoute(
         gamescopeFocused, opened || shell.widgetEngaged, sessionLocked, draining, streamReady,
-        shell.oskVisible)
+        keyboardVisible)
     readonly property bool captured: appliedRoute === "overlay" && !gate.running && wantedRoute === "overlay"
 
+    Connections {
+        target: root.keyboard
+        function onHiding() { root.drainInput() }
+    }
     Bar.SteamShortcuts { id: steamShortcuts }
 
     onMenuPagesChanged: {
@@ -58,6 +70,7 @@ Scope {
     function open() {
         if (opened || sessionLocked)
             return
+        keyboard?.hide()
         page = "root"
         selected = 0
         acceptArmed = false
@@ -141,7 +154,7 @@ Scope {
 
     function activate(entry, launchWorkspace) {
         if (entry.action === "keyboard") {
-            Quickshell.execDetached(["icewine-keyboard-toggle"])
+            keyboard?.toggle()
             return
         }
         shell.handoff()
@@ -183,6 +196,11 @@ Scope {
         const accept = acceptArmed && result.command === "accept"
         if (event.action === "ui_accept")
             acceptArmed = opened && captured && event.pressed
+        if (keyboardVisible && captured && !draining) {
+            if (keyboardReady) keyboard.controller(event)
+            else if (Menu.neutral(held)) keyboardReady = true
+            return
+        }
         if (draining) {
             finishClose()
         } else if (opened && captured) {
@@ -196,6 +214,8 @@ Scope {
         stderr: SplitParser { onRead: data => console.warn("Deck input:", data) }
         onExited: function(code) {
             root.appliedRoute = code === 0 ? root.requestedRoute : ""
+            if (code === 0 && root.keyboardVisible && root.requestedRoute === "overlay")
+                root.keyboardReady = Menu.neutral(root.held)
             root.inputError = code === 0 ? "" : "Controller capture failed; check the Quickshell journal."
             if (code !== 0)
                 gateRetry.restart()
@@ -212,6 +232,8 @@ Scope {
         stderr: SplitParser { onRead: data => console.warn("Deck events:", data) }
         // Ponytail: stream-retirement changes await a demonstrated stale action; then cancel pending work while preserving held-input safety.
         onExited: {
+            root.keyboard?.view.cancel()
+            root.keyboardReady = false
             root.streamReady = false
             root.eventTarget = ""
             root.appliedRoute = ""

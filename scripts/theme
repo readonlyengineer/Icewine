@@ -217,6 +217,7 @@ def render_theme(assets, palette_file, level="high"):
     files = {name: render((templates / template).read_text(encoding="utf-8"), values)
              for name, template in TEMPLATES.items()}
     files["palette.json"] = json.dumps({
+        "keyboardOpacity": float(values["kittyOpacity"]),
         "themeId": palette_file.stem,
         "osGlyph": values["osGlyph"],
         "dark": values["appearance"] != "light",

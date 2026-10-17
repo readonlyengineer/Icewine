@@ -25,12 +25,20 @@ Scope {
     // For simultaneous graphical sessions, supply an explicit XDG_SESSION_ID.
     readonly property string logindSessionId: Quickshell.env("XDG_SESSION_ID") || "auto"
     property string logindSessionPath: ""
+    property var keyboardController: null
+    readonly property bool externalKeyboardBusy: keyboardController?.busy ?? false
+    property alias keyboardView: sharedKeyboard
     property var keyboardHost: null
     property bool keyboardEnabled: false
-    readonly property bool keyboardVisible: keyboard.visible
-    property real keyboardHeight: keyboard.height
+    readonly property bool keyboardVisible: sharedKeyboard.visible
+    property real keyboardHeight: sharedKeyboard.height
+    onKeyboardHostChanged: sharedKeyboard.cancel()
+    onLockedChanged: { keyboardEnabled = false; sharedKeyboard.cancel(); Qt.inputMethod.hide() }
 
     function toggleKeyboard(host) {
+        if (!host || externalKeyboardBusy) return
+        if (keyboardEnabled && keyboardHost === host && typeof keyboardController?.prepareHide === "function")
+            keyboardController.prepareHide()
         keyboardEnabled = !(keyboardEnabled && keyboardHost === host)
         keyboardHost = host
         if (keyboardEnabled) Qt.inputMethod.show()
@@ -112,6 +120,7 @@ Scope {
     function releaseLock(notifyLogind) {
         if (!sessionLock.locked)
             return
+        if (typeof keyboardController?.prepareHide === "function") keyboardController.prepareHide()
         password = ""
         failed = false
         lockState.acquired = false
@@ -202,18 +211,26 @@ Scope {
         }
     }
 
+    // Initialises Qt's native input method; the shared visual supplies the keys.
     InputPanel {
         id: keyboard
         parent: root.keyboardHost
-        width: Math.min(parent?.width ?? 0, 900, (parent?.height ?? 0) * 1.5)
-        x: ((parent?.width ?? 0) - width) / 2
-        y: (parent?.height ?? 0) - height
+        width: 900
+        visible: false
+    }
+    KeyboardView {
+        id: sharedKeyboard
+        parent: root.keyboardHost
+        locked: true
         z: 100
-        visible: active && root.keyboardEnabled && parent !== null
-        onActiveChanged: if (!active) root.keyboardEnabled = false
-        opacity: visible ? 1 : 0
-        Behavior on opacity {
-            NumberAnimation { duration: root.keyboardHost?.animationsEnabled === false ? 0 : 140 }
+        visible: root.locked && root.keyboardEnabled && parent !== null
+        enabled: !root.authenticating && !root.externalKeyboardBusy
+        onHideRequested: root.toggleKeyboard(root.keyboardHost)
+        onActivated: action => {
+            const field = root.keyboardHost?.passwordInput
+            if (!root.locked || root.authenticating || root.externalKeyboardBusy || !field) return
+            field.forceActiveFocus()
+            InputContext.inputEngine.virtualKeyClick(action.key, action.text, action.modifiers)
         }
     }
 

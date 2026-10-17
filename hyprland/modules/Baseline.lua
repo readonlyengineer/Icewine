@@ -90,3 +90,7 @@ hl.window_rule({
 	},
 	no_focus = true,
 })
+
+-- wtype owns finite OSK chords; interrupted clients must release their keys.
+-- Keep their synthetic modifiers separate from physical keyboard state.
+hl.device({ name = "hl-virtual-keyboard-wtype", release_pressed_on_close = true, share_states = 0 })

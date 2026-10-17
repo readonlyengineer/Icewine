@@ -122,14 +122,30 @@ Your original file can then be moved or deleted. The desktop and lockscreen shar
 this wallpaper. The lockscreen blurs and dims it behind a large clock and date;
 missing images fall back to an opaque dark background. Password input stays
 concealed; edits briefly pulse the clock (colour only with motion disabled).
-Press Enter to submit, or Escape/Ctrl+U to clear. The keyboard button uses Qt's
-native on-screen keyboard. When authentication is explicitly disabled, tap or
-press Enter to unlock.
+Press Enter to submit, or Escape/Ctrl+U to clear. The keyboard button opens the
+shared Icewine keyboard, with input kept inside the lock surface. When
+authentication is explicitly disabled, tap or press Enter to unlock.
 
 Tuigreet uses declarative colours; it does not read or publish user theme state.
 The old authentication wallpaper override and custom greeter are retired. Existing
 user files are left in place. Keyboard/touch and real login/unlock behavior still
 need validation on each supported device and distribution.
+
+### On-screen keyboard
+
+Use the topbar **Keyboard** button, or L5/the handheld radial's Keyboard action.
+The shared 84-key US keyboard opens pinned at the bottom of the active output;
+**Unpin** enables header dragging, and **Pin** restores its standard position.
+Small screens scroll the key grid. D-pad/stick selects a key, A activates and B
+hides; touch and pointer work alongside controller selection. Shift, Ctrl, Alt
+and Super are one-shot latches; Caps changes letter case. Hold a typing/editing
+key to repeat, and release or move away to stop further activations.
+
+Ordinary applications use unprivileged `wtype` seat input; retain the intended
+application's focus. Already emitted input cannot be retracted by hiding the
+keyboard. Wayland/Xwayland, nested Gamescope, touch/controller hardware and
+focus/lock transitions still need real-session validation. Locked entry uses
+Qt locally and disables application/window shortcuts; authentication is unchanged.
 
 ### Theme and transparency
 

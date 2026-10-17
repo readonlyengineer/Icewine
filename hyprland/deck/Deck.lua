@@ -26,6 +26,7 @@ hl.bind("F14", hl.dsp.global("quickshell:deckRadial"), {
 	transparent = true, dont_inhibit = true, ignore_mods = true, submap_universal = true,
 }) -- R5
 hl.bind("F16", hl.dsp.exec_cmd("icewine-keyboard-toggle"), {
+	locked = true,
 	dont_inhibit = true, ignore_mods = true, submap_universal = true,
 }) -- L5
 

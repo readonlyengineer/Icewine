@@ -133,7 +133,7 @@ in {
     fonts.packages = with pkgs; [ dejavu_fonts nerd-fonts.jetbrains-mono noto-fonts-color-emoji ];
     environment.systemPackages = (with pkgs; [ quickshell glib jq systemd libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl xdg-utils gtk3 ]) ++ launchers
-      ++ lib.optionals cfg.desktop.enable (with pkgs; [ hyprshutdown hyprpolkitagent flameshot hypridle xdg-terminal-exec ])
+      ++ lib.optionals cfg.desktop.enable (with pkgs; [ hyprshutdown hyprpolkitagent flameshot hypridle xdg-terminal-exec wtype ])
       ++ lib.optional (cfg.steam != "none" && cfg.gamescope.enable) pkgs.gamescope
       ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
     users.users.${cfg.user}.packages = lib.optional cfg.terminal.enable pkgs.kitty

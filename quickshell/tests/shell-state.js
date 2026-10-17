@@ -105,7 +105,7 @@ function controller(file, properties) {
 
 const callbacks = [], focused = [], focusRequests = []
 const shell = controller("../modules/Topbar.qml", {
-    State, focusWidgetRequested: (...args) => focusRequests.push(args), ui: State.initial(), hoveredScreen: "", sessionLocked: false,
+    keyboard: null, State, focusWidgetRequested: (...args) => focusRequests.push(args), ui: State.initial(), hoveredScreen: "", sessionLocked: false,
     interactionActive: false, previousWindow: "", previousToplevel: null, focusGeneration: 0, widgetFocusGeneration: 0,
     layoutsEnabled: true, barVisible: false, radial: {dismiss() {}, drainInput() {}}, widgetDismissed() {},
     compositor: {activeWindowAddress: "original", toplevels: [{address: "original"}],
@@ -245,9 +245,17 @@ shell.handoff()
 shell.finishInteraction()
 flush()
 
+let keyboardToggles = 0
+shell.keyboard = {hide() {}, toggle() { keyboardToggles++ }}
+shell.beginInteraction(); shell.toggleKeyboard(); flush()
+assert.equal(keyboardToggles, 1, "Keyboard entry restores prior focus before opening")
+shell.beginInteraction(); shell.toggleKeyboard(); shell.beginInteraction(); flush()
+assert.equal(keyboardToggles, 1, "Superseded keyboard entry cannot reopen")
+shell.handoff(); shell.finishInteraction(); flush(); shell.keyboard = null
+
 const target = "/org/shadowblip/InputPlumber/devices/target/dbus0"
 const deck = controller("../deck/DeckOverlay.qml", {
-    Menu, opened: true, draining: false, held: {}, acceptArmed: false,
+    keyboard: null, keyboardVisible: false, keyboardReady: false, Menu, opened: true, draining: false, held: {}, acceptArmed: false,
     captured: true, entries: [{action: "screenshot"}], selected: 0,
     workspace: 1, pendingEntry: null, eventTarget: target,
     sessionLocked: false, shell, inputError: "",
@@ -289,6 +297,25 @@ input("ui_accept", true)
 deck.captured = true
 input("ui_accept", false)
 assert.equal(choices, 1, "Press before capture confirmation cannot select an action")
+
+// The same receiver routes captured OSK events to the grid, never radial actions.
+const keyboardEvents = []
+deck.keyboard = {controller: event => keyboardEvents.push(event), hide() {}}
+deck.keyboardVisible = true; deck.keyboardReady = false
+deck.opened = false; deck.captured = true; deck.held = {}
+input("ui_accept", true); input("ui_accept", false)
+assert.equal(keyboardEvents.length, 0, "opening controls must reach neutral first")
+assert.equal(deck.keyboardReady, true)
+input("ui_right", true); input("ui_right", false)
+assert.deepEqual(keyboardEvents.map(event=>event.action), ["ui_right","ui_right"])
+assert.equal(choices, 1, "OSK selection cannot choose a radial action")
+input("ui_accept", true)
+deck.drainInput()
+assert.equal(deck.draining, true, "hide retains capture until activation releases")
+deck.keyboardVisible = false
+input("ui_accept", false)
+assert.equal(deck.draining, false)
+deck.keyboard = null
 
 const captures = []
 deck.Quickshell.execDetached = command => captures.push(Array.from(command))

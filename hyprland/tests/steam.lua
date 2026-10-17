@@ -2,9 +2,10 @@
 local launches, guide = 0, nil
 local radialOptions
 local touchpad = {}
-local baselineMaster
+local baselineMaster, virtualKeyboard
 hl = {
 	monitor=function() end, env=function() end, window_rule=function() end,
+	device=function(config) virtualKeyboard = config end,
 	config=function(config)
 		if config.general then baselineMaster = config.master end
 		for key, value in pairs(config.input and config.input.touchpad or {}) do
@@ -23,6 +24,9 @@ hl = {
 }
 package.loaded["icewine.modules.Layouts"] = { default = function() return "scrolling" end, autofullscreen = function(_, fallback) return fallback end }
 dofile("hyprland/modules/Baseline.lua")
+assert(virtualKeyboard and virtualKeyboard.name == "hl-virtual-keyboard-wtype"
+	and virtualKeyboard.release_pressed_on_close == true and virtualKeyboard.share_states == 0,
+	"wtype must release keys on close and keep synthetic modifier state separate")
 assert(baselineMaster and baselineMaster.mfact == 0.8,
 	"Master layout should start with an 80/20 native master/stack split")
 assert(touchpad.natural_scroll and touchpad.disable_while_typing and touchpad.tap_to_click)

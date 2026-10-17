@@ -9,6 +9,7 @@ QtObject {
 
     property var snapshot: ({})
     readonly property string osGlyph: snapshot.osGlyph || "\uf31a"
+    readonly property real keyboardOpacity: Math.max(0.4, Math.min(1, Number(snapshot.keyboardOpacity ?? 1)))
     readonly property bool dark: snapshot.dark !== false
     readonly property bool animate: Quickshell.env("ICEWINE_THEME_TRANSITION") !== "off"
 
@@ -66,6 +67,8 @@ QtObject {
                     return false
             if (next.highlightedText !== undefined && (typeof next.highlightedText !== "string"
                     || !/^[0-9a-fA-F]{6}$/.test(next.highlightedText))) return false
+            if (next.keyboardOpacity !== undefined && (typeof next.keyboardOpacity !== "number"
+                    || !Number.isFinite(next.keyboardOpacity) || next.keyboardOpacity < 0.4 || next.keyboardOpacity > 1)) return false
             if (typeof next.themeId !== "string" || typeof next.dark !== "boolean")
                 return false
             snapshot = next

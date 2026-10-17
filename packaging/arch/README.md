@@ -69,7 +69,7 @@ Icewine keeps host `EDITOR`/`VISUAL` values. Selecting Yazi makes it the directo
 default on Apply, using the host terminal through `xdg-terminal-exec`. Other MIME
 defaults are preserved; disabling Yazi leaves the current association alone.
 
-For Handheld, build the optional private keyboard and controller-idle packages
+For Handheld, build the optional private controller-idle package
 as your normal user before Apply:
 
 ```sh
@@ -80,14 +80,16 @@ cp dependencies/*.pkg.tar.zst .
 ICEWINE_PACKAGE_DIR="$PWD" icewine manage
 ```
 
-The private keyboard applies the fullscreen overlay patch and uses the distro
-Squeekboard resources; it does not replace the distro executable or data.
+The shared QS keyboard uses distro `wtype`; no Squeekboard service is needed.
+Before upgrading an existing Squeekboard-based Handheld session, stop its old
+unit with `systemctl --user disable --now icewine-keyboard.service`, then restart
+Icewine after the package update.
 InputPlumber, controller device access and its normal host service must be
 available. Apply installs only a named-user InputPlumber permission rule and
 Icewine's helpers; it adds no kernel, driver or hardware permission policy.
 Use **Overwrite existing dotfiles** to adopt the Handheld entry point when a
 preserved desktop entry already exists. Deselection stops Icewine's controller
-idle, keyboard and routing units before removing its own permission rule; it
+idle and routing units before removing its own permission rule; it
 leaves InputPlumber and unrelated services installed.
 
 After selecting Desktop session and applying, select **Icewine** in your host's

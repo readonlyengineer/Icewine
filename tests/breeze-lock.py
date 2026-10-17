@@ -21,6 +21,7 @@ import Quickshell
 import "icewine/modules" as Modules
 import qs.icewine.theme as Theme
 import "icewine/modules/Wallpaper.js" as Wallpaper
+import "icewine/modules/KeyboardModel.js" as KeyboardModel
 ShellRoot {
     id: root
     property string phase: "startup"
@@ -33,7 +34,8 @@ ShellRoot {
         property string dataHome: Quickshell.env("XDG_DATA_HOME")
         readonly property url sourceUrl: Wallpaper.source(dataHome, selectionAvailable, revision)
     }
-    Modules.SessionControl { id: keyboardOwner; authenticationRequired: true }
+    QtObject { id: external; property bool busy: false }
+    Modules.SessionControl { id: keyboardOwner; authenticationRequired: true; lockRequested: true; keyboardController: external }
     QtObject {
         id: session
         property var wallpaper: wallpaperOwner
@@ -44,6 +46,8 @@ ShellRoot {
         property bool failed: false
         property alias keyboardHost: keyboardOwner.keyboardHost
         property alias keyboardVisible: keyboardOwner.keyboardVisible
+        readonly property bool externalKeyboardBusy: keyboardOwner.externalKeyboardBusy
+        readonly property var keyboardView: keyboardOwner.keyboardView
         property alias keyboardHeight: keyboardOwner.keyboardHeight
         property int submissions: 0
         function submit() {
@@ -161,6 +165,13 @@ ShellRoot {
                 win.requestActivate()
                 keys.tryCompare(win, "active", true)
                 field.forceActiveFocus()
+                root.phase = "external chord crossing lock acquisition"
+                external.busy = true
+                keys.verify(!field.enabled, "password disabled until external chord settles")
+                keys.keyClick(Qt.Key_X)
+                keys.compare(session.password, "ab", "external input cannot edit lock response")
+                external.busy = false
+                keys.tryCompare(field, "activeFocus", true)
                 root.phase = "Tab and native keyboard activation"
                 keys.keyClick(Qt.Key_Tab)
                 const footer = find(view, item => item.objectName === "lockKeyboard")
@@ -190,27 +201,125 @@ ShellRoot {
                 keys.verify(session.locked && session.failed && !field.text, "failed retry preserves lock and clears secret")
                 const toggle = find(view, item => item.text === "Virtual Keyboard")
                 for (const size of [[1920,1080], [1280,800], [800,600], [320,480]]) {
-                    root.phase = "native keyboard " + size.join("x")
+                    root.phase = "shared keyboard " + size.join("x")
                     win.width = size[0]; win.height = size[1]
                     keys.wait(100)
                     field.forceActiveFocus()
                     keys.mouseClick(toggle)
                     keys.tryCompare(keyboardOwner, "keyboardVisible", true, 2000)
-                    const panel = find(view, item => item.active !== undefined && item.externalLanguageSwitchEnabled !== undefined)
-                    keys.verify(panel && panel.width <= Math.min(win.width, 900, win.height * 1.5)
-                        && panel.height > 0 && panel.y + panel.height <= win.height, "native keyboard bounds")
+                    const panel = find(view, item => item.objectName === "sharedKeyboard")
+                    keys.verify(panel && panel.width <= Math.min(1040, win.width - 24)
+                        && panel.height > 0 && panel.y + panel.height <= win.height, "shared keyboard bounds")
                     keys.wait(250)
                     const mapped = field.mapToItem(view, 0, 0)
                     keys.verify(mapped.y >= 0 && mapped.y + field.height <= win.height - panel.height, "field above keyboard")
-                    const letter = find(panel, item => item.keyType === QtVirtualKeyboard.KeyType.Key && item.text === "a")
-                    const backspace = find(panel, item => item.key === Qt.Key_Backspace && item.keyType !== undefined)
-                    keys.verify(letter && backspace, "native keys loaded")
+                    const letter = find(panel, item => item.objectName === "oskKey" + KeyboardModel.keys.find(key => key.text === "a").index)
+                    const backspace = find(panel, item => item.objectName === "oskKey" + KeyboardModel.keys.find(key => key.symbol === "BackSpace").index)
+                    keys.verify(letter && backspace, "shared keys loaded")
                     field.text = "secret"
+                    panel.selected = KeyboardModel.keys.find(key => key.text === "a").index
+                    panel.move("left"); panel.move("right")
                     keys.mouseClick(letter)
                     keys.tryCompare(field, "text", "secreta")
+                    panel.selected = KeyboardModel.keys.find(key => key.symbol === "BackSpace").index
+                    panel.move("left"); panel.move("right")
                     keys.mouseClick(backspace)
                     keys.tryCompare(field, "text", "secret")
                     const before = field.text
+                    keys.compare(KeyboardModel.keys.length, 84)
+                    keys.compare(KeyboardModel.keys.filter(key => find(panel, item => item.objectName === "oskKey" + key.index)).length, 84, "all 84 keys rendered")
+                    if (size[0] === 1280) {
+                        field.forceActiveFocus()
+                        keys.keyClick(Qt.Key_Tab); keys.keyClick(Qt.Key_Tab)
+                        const accessiblePin = find(panel, item => item.objectName === "keyboardPin")
+                        keys.verify(accessiblePin.activeFocus, "Tab reaches the visible pin control")
+                        keys.keyClick(Qt.Key_Space); keys.verify(!panel.pinned, "keyboard can unpin")
+                        keys.keyClick(Qt.Key_Space); keys.verify(panel.pinned, "keyboard can repin")
+                        field.forceActiveFocus()
+                        const a = KeyboardModel.keys.find(key => key.text === "a").index
+                        const shift = KeyboardModel.keys.find(key => key.modifier === KeyboardModel.shift).index
+                        const caps = KeyboardModel.keys.find(key => key.caps).index
+                        panel.arm(shift); panel.release(shift)
+                        keys.compare(panel.modifiers, KeyboardModel.shift, "shift is a UI latch")
+                        panel.arm(a); panel.release(a)
+                        keys.compare(field.text, before + "A", "Shift legend/action agree")
+                        keys.compare(panel.modifiers, 0, "one-shot modifier clears")
+                        panel.arm(caps); panel.release(caps)
+                        panel.arm(shift); panel.release(shift)
+                        panel.arm(a); panel.release(a)
+                        keys.compare(field.text, before + "Aa", "Shift XOR Caps")
+                        panel.cancel()
+                        field.text = before
+                        // Actual pointer cancellation and timer repeat exercise the shared view.
+                        for (const touch of [false, true]) {
+                            const sequence = touch ? keys.touchEvent(letter) : null
+                            const press = () => touch ? sequence.press(0, letter, letter.width/2, 22).commit() : keys.mousePress(letter)
+                            const leave = () => touch ? sequence.move(0, letter, -10, -10).commit() : keys.mouseMove(letter, -10, -10)
+                            const release = (outside) => touch ? sequence.release(0, letter, outside ? -10 : letter.width/2, outside ? -10 : 22).commit() : keys.mouseRelease(letter, outside ? -10 : letter.width/2, outside ? -10 : 22)
+                            root.phase = (touch ? "touch" : "pointer") + " exit before repeat"
+                            press(); leave(); keys.wait(600)
+                            keys.compare(field.text, before, "held outside before delay does not type")
+                            keys.compare(panel.armed, -1, "exit cancels arm immediately")
+                            release(true)
+                            root.phase = (touch ? "touch" : "pointer") + " exit during repeat"
+                            press(); keys.wait(560)
+                            keys.verify(field.text.length > before.length, "inside hold repeats")
+                            leave(); const atLeave = field.text; keys.wait(220)
+                            keys.compare(field.text, atLeave, "exit stops future repeat")
+                            release(true); keys.compare(field.text, atLeave, "outside release adds no click")
+                            field.text = before
+                            press(); release(false)
+                            keys.compare(field.text, before + "a", "inside release commits once")
+                            field.text = before
+                        }
+                        panel.selected = a
+                        panel.controller({action:"ui_accept", pressed:true})
+                        keys.wait(560)
+                        panel.controller({action:"ui_accept", pressed:false})
+                        keys.verify(field.text.length > before.length, "controller hold schedules finite repeats")
+                        const afterRepeat = field.text
+                        keys.wait(120)
+                        keys.compare(field.text, afterRepeat, "release stops future repeat without duplicate click")
+                        field.text = before
+                        Theme.Palette.snapshot = Object.assign({}, Theme.Palette.snapshot, {keyboardOpacity:0.4})
+                        keys.fuzzyCompare(panel.color.a, 0.4, 0.01, "live transparency")
+                    }
+                    panel.arm(KeyboardModel.keys.find(key => key.text === "a").index)
+                    panel.cancelGesture()
+                    panel.release(KeyboardModel.keys.find(key => key.text === "a").index)
+                    keys.compare(field.text, before, "cancelled gesture does not type")
+                    const pin = find(panel, item => item.objectName === "keyboardPin")
+                    keys.mouseClick(pin)
+                    keys.verify(!panel.pinned, "accessible pin toggle")
+                    if (size[0] === 1280) {
+                        const oldX = panel.x, oldY = panel.y
+                        keys.mouseDrag(panel, panel.width/2, 20, -70, -60)
+                        keys.verify(panel.x < oldX && panel.y < oldY, "unpinned header drag moves the keyboard")
+                    }
+                    panel.x = -100; panel.y = -100; panel.place()
+                    keys.verify(panel.x >= 0 && panel.y >= 0, "unpinned position clamped")
+                    keys.mouseClick(pin)
+                    keys.verify(panel.pinned && panel.x === (win.width-panel.width)/2, "repin restores standard placement")
+                    if (size[0] === 320) {
+                        root.phase = "small-screen selection visibility"
+                        function visibleSelection() {
+                            const selectedKey = find(panel, item => item.objectName === "oskKey" + panel.selected)
+                            const pos = selectedKey.mapToItem(panel, 0, 0)
+                            return pos.x >= 7 && pos.y >= 47
+                                && pos.x + selectedKey.width <= panel.width - 7
+                                && pos.y + selectedKey.height <= panel.height - 7
+                        }
+                        panel.selected = 83
+                        keys.tryVerify(visibleSelection)
+                        keyboardOwner.toggleKeyboard(view); keyboardOwner.toggleKeyboard(view)
+                        keys.compare(panel.selected, 0)
+                        keys.tryVerify(visibleSelection, 2000, "reopen reveals reset selection")
+                        panel.selected = 83
+                        win.width = 280; win.height = 400
+                        keys.tryVerify(visibleSelection, 2000, "geometry change preserves visible selection")
+                        win.width = size[0]; win.height = size[1]
+                        keys.tryVerify(visibleSelection)
+                    }
                     root.phase = "live theme with keyboard " + size.join("x")
                     Theme.Palette.snapshot = JSON.parse(Quickshell.env("ICEWINE_LIGHT_PALETTE"))
                     keys.wait(250)
@@ -224,8 +333,10 @@ ShellRoot {
                 root.phase = "successful response"
                 field.forceActiveFocus()
                 session.password = "correct-fixture-response"
-                keys.keyClick(Qt.Key_Return)
-                keys.compare(session.submissions, 2)
+                keyboardOwner.toggleKeyboard(view)
+                const enter = KeyboardModel.keys.find(key => key.symbol === "Return").index
+                keyboardOwner.keyboardView.arm(enter); keyboardOwner.keyboardView.release(enter)
+                keys.compare(session.submissions, 2, "shared keyboard Enter delegates to guarded submit")
                 session.complete(true)
                 keys.verify(!session.locked && !session.password && !field.text, "success clears response")
                 session.locked = true
@@ -291,4 +402,4 @@ with tempfile.TemporaryDirectory() as directory:
     assert result.returncode == 0 and "CLOCK_LOCK_PASSED" in output, output
     assert re.search(r'libqtvirtualkeyboardplugin\.so[^\n]*loaded library', output), output
     assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign|is not installed|not a type", output), output
-print("PASS: actual clock lock surface, failure/retry/busy/clearing, policy, focus, native OSK, theme and small screens")
+print("PASS: actual clock lock surface, failure/retry/busy/clearing, policy, focus, shared 84-key OSK, arm/cancel/repeat/modifiers/pin/transparency and small screens")

@@ -27,7 +27,7 @@ APPS = {
 PACKAGES = {
     "desktop": ("icewine-session",), "terminal": ("kitty",),
     "filemanager": ("yazi", "xdg-terminal-exec", "ffmpegthumbnailer", "7zip", "gvfs", "udisks2"),
-    "steam": (), "gamescope": ("gamescope",), "handheld": ("icewine-handheld", "icewine-keyboard", "icewine-controller-idle", "inputplumber"),
+    "steam": (), "gamescope": ("gamescope",), "handheld": ("icewine-handheld", "icewine-controller-idle", "inputplumber"),
     "login": (), "shellExtras": ("starship", "fastfetch"),
 }
 
@@ -145,7 +145,7 @@ def retire(config, data, state, feature):
 
 
 HANDHELD_RULES = Path("/etc/polkit-1/rules.d/90-icewine-handheld.rules")
-HANDHELD_UNITS = ["icewine-controller-idle.service", "icewine-keyboard.service", "icewine-inputplumber-hyprland.service"]
+HANDHELD_UNITS = ["icewine-controller-idle.service", "icewine-inputplumber-hyprland.service"]
 
 
 def handheld_policy(state, enabled):

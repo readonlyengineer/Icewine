@@ -14,12 +14,13 @@ FocusScope {
         ? session.keyboardHeight : 0
     readonly property Item passwordInput: password
     focus: true
-    Keys.forwardTo: !session.authenticating && session.authenticationRequired
+    readonly property bool inputBusy: session.authenticating || (session.externalKeyboardBusy ?? false)
+    Keys.forwardTo: !root.inputBusy && session.authenticationRequired
         && root.Window.window?.activeFocusItem === root ? [password] : []
-    Keys.onReturnPressed: if (!session.authenticationRequired) session.submit()
-    Keys.onEnterPressed: if (!session.authenticationRequired) session.submit()
+    Keys.onReturnPressed: if (!root.inputBusy && !session.authenticationRequired) session.submit()
+    Keys.onEnterPressed: if (!root.inputBusy && !session.authenticationRequired) session.submit()
     Component.onCompleted: Qt.callLater(() => {
-        if (session.authenticationRequired) password.forceActiveFocus()
+        if (session.authenticationRequired) { if (!session.keyboardHost) session.keyboardHost = root; password.forceActiveFocus() }
     })
 
     Rectangle {
@@ -57,7 +58,7 @@ FocusScope {
     Timer { id: editFeedback; interval: 180 }
     Column {
         anchors.horizontalCenter: parent.horizontalCenter
-        y: Math.max(16, (root.height - root.keyboardInset - height) / 2)
+        y: Math.max(8, (root.height - root.keyboardInset - height) / 2)
         width: Math.max(0, parent.width - 32)
         spacing: 8
         Text {
@@ -65,7 +66,7 @@ FocusScope {
             objectName: "lockClock"
             anchors.horizontalCenter: parent.horizontalCenter
             text: Qt.formatTime(time.date, Qt.locale().timeFormat(Locale.ShortFormat))
-            font.pixelSize: Math.min(112, root.width / 5)
+            font.pixelSize: Math.min(112, root.width / 5, Math.max(28, (root.height-root.keyboardInset)/3))
             font.weight: Font.Light
             // A pale accent keeps the large clock readable over any dimmed image.
             color: editFeedback.running
@@ -89,8 +90,8 @@ FocusScope {
             height: 1
             opacity: 0
             visible: root.session.authenticationRequired
-            enabled: !root.session.authenticating
-            focus: root.session.authenticationRequired
+            enabled: !root.inputBusy
+            focus: root.session.authenticationRequired && !root.inputBusy
             echoMode: TextInput.NoEcho
             inputMethodHints: Qt.ImhHiddenText | Qt.ImhSensitiveData
                 | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
@@ -134,7 +135,7 @@ FocusScope {
         }
     }
     TapHandler {
-        enabled: !root.session.authenticationRequired
+        enabled: !root.inputBusy && !root.session.authenticationRequired
         onTapped: root.session.submit()
     }
     ToolButton {
@@ -148,14 +149,25 @@ FocusScope {
         Accessible.name: text
         focusPolicy: Qt.TabFocus
         visible: root.session.authenticationRequired
-        enabled: !root.session.authenticating
-        KeyNavigation.tab: password
+        enabled: !root.inputBusy
+        KeyNavigation.tab: root.session.keyboardVisible ? root.session.keyboardView.firstControl : password
         KeyNavigation.backtab: password
         onClicked: {
             password.forceActiveFocus()
             root.session.toggleKeyboard(root)
         }
     }
+    onInputBusyChanged: {
+        // A finite external chord can overlap lock acquisition. Keep all lock
+        // text fields unfocused until its final roundtrip/exit has settled.
+        if (inputBusy) { root.forceActiveFocus(); session.keyboardView?.cancel() }
+        else if (session.authenticationRequired) password.forceActiveFocus()
+    }
+    Connections {
+        target: root.Window.window
+        function onActiveChanged() { if (root.Window.window.active && root.session.locked) root.session.keyboardHost = root }
+    }
+    onActiveFocusChanged: if (activeFocus && session.locked) session.keyboardHost = root
     Connections {
         target: root.session
         function onPasswordChanged() {
@@ -165,7 +177,7 @@ FocusScope {
         function onAuthenticatingChanged() {
             // PAM consumes the shared response; conceal and clear local copies now.
             password.text = root.session.authenticating ? "" : root.session.password
-            if (!root.session.authenticating && root.session.authenticationRequired)
+            if (!root.inputBusy && root.session.authenticationRequired)
                 password.forceActiveFocus()
         }
     }

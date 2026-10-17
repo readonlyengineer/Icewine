@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Effects
+import QtQuick.Controls as Controls
 import Quickshell
 import qs.config as Config
 import Quickshell.Hyprland
@@ -48,7 +49,8 @@ Scope {
     property int focusGeneration: 0
     property int widgetFocusGeneration: 0
     property bool reportedRender: false
-    property bool oskVisible: false
+    property var keyboard: null
+    readonly property bool oskVisible: keyboard?.desktopVisible ?? false
     property bool instantBarHide: false
 
     signal widgetDismissed()
@@ -63,6 +65,7 @@ Scope {
     function beginInteraction() {
         if (interactionActive || sessionLocked)
             return
+        keyboard?.hide()
         ++focusGeneration
         previousWindow = compositor.activeWindowAddress
         previousToplevel = compositor.toplevels.find(window => window.address === previousWindow) ?? null
@@ -161,6 +164,16 @@ Scope {
         instantBarHide = true
         handoff()
         Qt.callLater(() => instantBarHide = false)
+    }
+
+    function toggleKeyboard() {
+        dismiss()
+        finishInteraction()
+        const generation = focusGeneration
+        Qt.callLater(() => {
+            if (generation === root.focusGeneration && !root.sessionLocked && !root.barVisible)
+                root.keyboard?.toggle()
+        })
     }
 
     function raiseMedia() {
@@ -401,6 +414,13 @@ Scope {
                     Row {
                         anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
                         spacing: 4
+                        Controls.ToolButton {
+                            text: qsTr("Keyboard")
+                            Accessible.name: qsTr("Toggle on-screen keyboard")
+                            focusPolicy: Qt.TabFocus
+                            height: 29
+                            onClicked: root.toggleKeyboard()
+                        }
                         Bar.NowPlaying {
                             id: nowPlaying
                             player: root.player
@@ -521,7 +541,6 @@ Scope {
         function mediaNext(): void { if (root.player?.canGoNext) root.player.next() }
         function mediaPrevious(): void { if (root.player?.canGoPrevious) root.player.previous() }
         function mediaToggle(): void { if (root.player?.canTogglePlaying) root.player.togglePlaying() }
-        function osk(visible: bool): void { root.oskVisible = visible }
         function press(): void { root.pressBar() }
         function release(): void { root.releaseBar() }
         function hide(): void { root.dismiss() }

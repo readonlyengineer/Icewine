@@ -212,7 +212,8 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         apply(("desktop", "gamescope", "handheld"), steam="native")
         calls = [call.args[0] for call in commands.call_args_list]
         transaction = next(call for call in calls if call[:3] == ["sudo", "pacman", "-S"])
-        assert {"icewine-handheld", "icewine-keyboard", "icewine-controller-idle"} <= set(transaction[4:])
+        assert {"icewine-handheld", "icewine-controller-idle"} <= set(transaction[4:])
+        assert "icewine-keyboard" not in transaction
         assert ["sudo", "pacman", "-U", str(session_archive)] in calls
     # Without prepared archives, retain installed checks/repository acquisition.
     with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=""), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)) as commands:
@@ -332,13 +333,13 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     assert json.loads(client_log.read_text()) == ["literal argument"]
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
         apply()
-    # A real policy install is simulated in a private path. The keyboard failure
+    # A real policy install is simulated in a private path. The idle-helper failure
     # leaves no enabled/running helpers or owned policy; a following none Apply
     # retains those actual clean outcomes rather than merely preserving JSON.
     rules = root / "failure-handheld.rules"
     enabled, running = set(), set()
     session.clear()
-    def fail_keyboard(argv):
+    def fail_handheld_start(argv):
         if argv[:3] == ["sudo", "install", "-Dm644"]:
             shutil.copyfile(argv[3], argv[4])
         elif argv[:2] == ["sudo", "unlink"]:
@@ -349,19 +350,19 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             enabled.update(argv[3:])
         elif argv[:4] == ["systemctl", "--user", "disable", "--now"]:
             enabled.difference_update(argv[4:]); running.difference_update(argv[4:])
-        elif argv[:3] == ["systemctl", "--user", "start"] and "icewine-keyboard.service" in argv:
+        elif argv[:3] == ["systemctl", "--user", "start"] and "icewine-controller-idle.service" in argv:
             running.add("icewine-inputplumber-hyprland.service")
             raise subprocess.CalledProcessError(1, argv)
     with patch.object(manage, "HANDHELD_RULES", rules), \
          patch.dict(os.environ, ICEWINE_INPUTPLUMBER_ASSETS=str(source / "inputplumber"), ICEWINE_HANDHELD_DEFAULT_FILES=str(defaults)), \
          patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
-         patch.object(manage, "run", side_effect=fail_keyboard):
+         patch.object(manage, "run", side_effect=fail_handheld_start):
         try:
             apply(("desktop", "gamescope", "handheld"), steam="native")
         except subprocess.CalledProcessError:
             pass
         else:
-            raise AssertionError("Failed keyboard start reported success")
+            raise AssertionError("Failed idle-helper start reported success")
         assert not enabled and not running and not rules.exists()
         assert not (state / "handheld-rules.sha256").exists()
         assert session["ICEWINE_STEAM_CLIENT"] == "none"
@@ -376,7 +377,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     def interrupted_teardown(argv):
         if fail_stop and argv[:4] == ["systemctl", "--user", "disable", "--now"]:
             raise subprocess.CalledProcessError(1, argv)
-        fail_keyboard(argv)
+        fail_handheld_start(argv)
     with patch.object(manage, "HANDHELD_RULES", rules), \
          patch.dict(os.environ, ICEWINE_INPUTPLUMBER_ASSETS=str(source / "inputplumber"), ICEWINE_HANDHELD_DEFAULT_FILES=str(defaults)), \
          patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \

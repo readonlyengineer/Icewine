@@ -11,8 +11,10 @@ ShellRoot {
         id: session
         wallpaper: wallpaperOwner
         authenticationRequired: Config.Settings.authenticationRequired
+        keyboardController: keyboard
     }
 
+    Modules.KeyboardController { id: keyboard; compositor: hyprlandAdapter; session: session }
     Adapters.Hyprland {
         id: hyprlandAdapter
         layoutActive: topbar.layoutActive
@@ -36,6 +38,7 @@ ShellRoot {
         compositor: hyprlandAdapter
         notificationService: notifications
         session: session
+        keyboard: keyboard
         sessionLocked: session.locked
     }
 

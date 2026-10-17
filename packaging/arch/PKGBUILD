@@ -19,7 +19,7 @@ build() {
 }
 
 package_icewine() {
-  depends=(quickshell qt6-svg qt6-wayland qt6-virtualkeyboard bash coreutils grep glib2 jq
+  depends=(quickshell wtype qt6-svg qt6-wayland qt6-virtualkeyboard bash coreutils grep glib2 jq
     systemd util-linux python python-vdf procps-ng xdg-utils libnotify libcanberra
     brightnessctl ddcutil v4l-utils upower ttf-dejavu ttf-jetbrains-mono-nerd
     noto-fonts-emoji adwaita-icon-theme adwaita-cursors papirus-icon-theme dconf
@@ -117,7 +117,7 @@ package_icewine-session() {
 
 package_icewine-handheld() {
   pkgdesc='Optional Icewine userspace Steam Deck interface'
-  depends=(icewine-session inputplumber icewine-keyboard icewine-controller-idle)
+  depends=(icewine-session inputplumber icewine-controller-idle)
   cd "$srcdir/icewine"
   for unit in packaging/arch/handheld/*.service; do
     install -Dm644 "$unit" "$pkgdir/usr/lib/systemd/user/${unit##*/}"

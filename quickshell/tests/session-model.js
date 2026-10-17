@@ -60,7 +60,7 @@ assert.deepEqual(events, ["lock", "lock", "wake"])
 const handlers = ["writeLockHint", "restoreLock", "lockFromLogind", "finishLockHint", "releaseLock"]
     .map(name => source.match(new RegExp("    function " + name + "\\([^)]*\\) \\{[\\s\\S]*?^    \\}", "m"))[0]).join("\n")
 const recovery = vm.createContext({
-    lockState: { acquired: false }, lockRequested: false,
+    lockState: { acquired: false }, lockRequested: false, keyboardController: null,
     lockHint: { running: false, value: false }, logindSessionPath: path, logindSessionId: "2",
     password: "secret", failed: true, console: { warn: () => {} },
     wakeDisplay: () => {}, Quickshell: { execDetached: () => {} }
