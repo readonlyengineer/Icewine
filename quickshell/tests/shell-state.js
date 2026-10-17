@@ -107,6 +107,7 @@ const callbacks = [], focused = [], focusRequests = []
 const shell = controller("../modules/Topbar.qml", {
     keyboard: null, State, focusWidgetRequested: (...args) => focusRequests.push(args), ui: State.initial(), hoveredScreen: "", sessionLocked: false,
     interactionActive: false, previousWindow: "", previousToplevel: null, focusGeneration: 0, widgetFocusGeneration: 0,
+    clipboardPaste: null,
     layoutsEnabled: true, barVisible: false, radial: {dismiss() {}, drainInput() {}}, widgetDismissed() {},
     compositor: {activeWindowAddress: "original", toplevels: [{address: "original"}],
         activateWindow: address => focused.push(address), activateToplevel: window => focused.push(window)},
@@ -360,3 +361,63 @@ deck.sessionLocked = true
 flush()
 assert.equal(launches, 0, "Lock cancels deferred launches")
 console.log("shell state: visibility, touch engagement, release drain, stale actions and focus handoffs pass")
+
+// Clipboard uses the existing retained-window handoff; platform I/O is mocked.
+shell.clipboardHistory = {selection: ["text/plain;charset=utf-8", "a".repeat(64)], error: "",
+    request(action, id) { assert.equal(action, "load"); this.entry = id; return ++this.serial }, serial: 0}
+shell.pasteWait = {attempts: 0, start() {this.running = true}, stop() {this.running = false}}
+shell.pasteDelivery = {running: false}
+shell.Quickshell = {execDetached() {}}
+const originalPasteWindow = {address: "paste-target", lastIpcObject: {stableId: "1abc"}}
+shell.compositor.toplevels = [originalPasteWindow]
+shell.compositor.activeWindowAddress = originalPasteWindow.address
+const preparePaste = () => {
+    shell.clipboardPaste = null
+    shell.sessionLocked = false
+    shell.interactionActive = false
+    shell.openWidget("screenshot", true, "external")
+    flush()
+    shell.pasteClipboard("epoch:7")
+    assert.equal(shell.clipboardPaste.phase, "loading")
+    return shell.clipboardPaste.request
+}
+let pasteRequest = preparePaste()
+assert.equal(shell.pasteDelivery.running, false, "No paste before clipboard load confirmation")
+shell.clipboardLoaded(pasteRequest)
+assert.equal(shell.ui.page, "", "Paste releases the panel through ordinary handoff")
+flush()
+assert.equal(focused.at(-1), originalPasteWindow)
+shell.deliverClipboardPaste()
+assert.equal(shell.pasteDelivery.running, true)
+assert.deepEqual(Array.from(shell.pasteDelivery.command), ["icewine-clipboard", "paste", "1abc", ...shell.clipboardHistory.selection])
+shell.pasteDelivery.running = false
+shell.deliverClipboardPaste()
+assert.equal(shell.pasteDelivery.running, false, "A duplicate completion/timer cannot paste twice")
+shell.clipboardLoaded(pasteRequest)
+assert.equal(shell.pasteDelivery.running, false)
+for (const invalidate of [
+    () => {shell.sessionLocked = true},
+    () => {shell.focusGeneration++},
+    () => {shell.compositor.toplevels = [{address: "paste-target", lastIpcObject: {stableId: "1abc"}}]},
+    () => {shell.widgetFocusGeneration++}
+]) {
+    shell.compositor.toplevels = [originalPasteWindow]
+    pasteRequest = preparePaste()
+    invalidate()
+    shell.clipboardLoaded(pasteRequest)
+    flush()
+    assert.equal(shell.clipboardPaste, null, "Stale/locked/replaced target must cancel before input")
+    assert.equal(shell.pasteDelivery.running, false)
+}
+shell.compositor.toplevels = [originalPasteWindow]
+pasteRequest = preparePaste()
+shell.openWidget("audio", true, "external")
+shell.clipboardLoaded(pasteRequest)
+flush()
+assert.equal(shell.clipboardPaste, null, "Changing widgets cancels pending paste")
+console.log("clipboard focus: confirmed load, retained live target, handoff, single delivery and cancellation pass")
+shell.clipboardPaste = null
+shell.ui.held = true
+shell.pasteClipboard("epoch:7")
+assert.equal(shell.clipboardPaste, null, "Held opening modifiers cannot reach paste delivery")
+shell.ui.held = false

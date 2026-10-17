@@ -345,6 +345,21 @@ Flameshot's own settings can change save/copy behavior, including save-after-cop
 Icewine leaves those settings intact. Cancelling the save dialog discards the
 unsaved edit, so choose the destination before closing it.
 
+The Clipboard card is behind Screenshot (Tab switches cards). Click an entry to
+load it; its accent outline follows the current clipboard. The ↑ action loads
+and sends one Ctrl+V to the retained original app. Release the opening shortcut
+first; terminals with a different paste binding need manual paste. A last-moment
+clipboard/focus change can race delivery; it is not an atomic transaction.
+
+History holds up to 50 plain UTF-8 text/PNG entries, at most 5 MB each, in private
+runtime storage. It resets on lock, shell restart and logout; sensitive hints are
+respected but do not identify every secret. X and **Clear history** remove stored
+entries while keeping the current clipboard. Original multi-format selections
+and other content types are not retained. The regular single-seat Wayland
+clipboard (including Xwayland bridging) is used; primary selection is not recorded.
+Crash remnants stay private until
+logout; history is never reloaded from them.
+
 ### Automatic fullscreen
 
 ```sh

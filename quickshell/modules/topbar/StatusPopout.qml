@@ -17,6 +17,8 @@ Widget {
     required property var powerState
     required property var metrics
     required property string monitorName
+    property var clipboardHistory: null
+    property bool pasteBusy: false
 
     MonitorBrightness {
         id: monitorBrightness
@@ -27,19 +29,32 @@ Widget {
     readonly property bool powerPage: currentPage === "battery" || currentPage === "performance"
     readonly property bool audioPage: currentPage === "audio" || currentPage === "bluetooth"
     readonly property Item currentItem: audioPage ? audioStack : powerPage ? powerStack
+        : currentPage === "screenshot" ? captureStack
         : currentPage === "network" ? networkLoader.item : pageLoader.item
     property bool powerEntryPending: true
     onCurrentPageChanged: {
         powerEntryPending = true
         if (powerEntry) powerEntry.restart()
         if (audioEntry) audioEntry.restart()
+        if (captureEntry) captureEntry.restart()
     }
     onShownChanged: if (shown && powerEntry) {
         powerEntryPending = true
         powerEntry.restart()
         audioEntry.restart()
+        captureEntry.restart()
     }
-    Component.onCompleted: { powerEntry.restart(); audioEntry.restart() }
+    Component.onCompleted: { powerEntry.restart(); audioEntry.restart(); captureEntry.restart() }
+
+    Timer {
+        id: captureEntry
+        interval: 0
+        onTriggered: root.openCapturePage()
+    }
+
+    function openCapturePage() {
+        if (root.currentPage === "screenshot" && root.shown) captureStack.resetSelection()
+    }
 
     // Wait for page visibility/enabled bindings before selecting; never poll.
     Timer {
@@ -68,6 +83,7 @@ Widget {
     }
     signal mediaRequested()
     signal instantHandoffRequested()
+    signal pasteRequested(string entry)
 
     function focusInitial() {
         root.forceActiveFocus(Qt.ShortcutFocusReason)
@@ -113,7 +129,7 @@ Widget {
         shadowHost: root.cardShadowHost
         anchors.fill: parent
         cards: [pageCard]
-        visible: !root.audioPage && !root.powerPage && root.currentPage !== "network"
+        visible: !root.audioPage && !root.powerPage && !["network", "screenshot"].includes(root.currentPage)
         Card {
             id: pageCard
             stack: parent
@@ -122,10 +138,50 @@ Widget {
             Loader {
                 id: pageLoader
                 anchors.fill: parent
-                active: root.visible && !root.audioPage && !root.powerPage && root.currentPage !== "network"
-                sourceComponent: root.currentPage === "screenshot" ? screenshotPage
-                    : root.currentPage === "media" ? mediaPage
+                active: root.visible && !root.audioPage && !root.powerPage && !["network", "screenshot"].includes(root.currentPage)
+                sourceComponent: root.currentPage === "media" ? mediaPage
                     : root.currentPage === "notifications" ? notificationsPage : null
+            }
+        }
+    }
+    CardStack {
+        id: captureStack
+        shadowDrop: root.shadowDrop
+        shadowHost: root.cardShadowHost
+        anchors.fill: parent
+        visible: root.currentPage === "screenshot"
+        cards: [screenshotCard, clipboardCard]
+        Card {
+            id: screenshotCard
+            stack: captureStack
+            accessibleName: "Screenshot card"
+            implicitHeight: screenshotLoader.item?.implicitHeight ?? 0
+            initialFocus: screenshotLoader.item?.initialFocus ?? selector
+            Loader {
+                id: screenshotLoader
+                anchors.fill: parent
+                active: root.visible && root.currentPage === "screenshot"
+                enabled: screenshotCard.active
+                sourceComponent: screenshotPage
+            }
+        }
+        Card {
+            id: clipboardCard
+            stack: captureStack
+            index: 1
+            accessibleName: "Clipboard card"
+            implicitHeight: clipboardLoader.item?.implicitHeight ?? 0
+            initialFocus: clipboardLoader.item?.initialFocus?.enabled ? clipboardLoader.item.initialFocus : selector
+            Loader {
+                id: clipboardLoader
+                anchors.fill: parent
+                active: root.visible && root.currentPage === "screenshot" && root.clipboardHistory !== null
+                enabled: clipboardCard.active
+                sourceComponent: Popouts.Clipboard {
+                    history: root.clipboardHistory
+                    pasteBusy: root.pasteBusy
+                    onPasteRequested: entry => root.pasteRequested(entry)
+                }
             }
         }
     }

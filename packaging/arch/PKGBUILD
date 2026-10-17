@@ -23,7 +23,7 @@ package_icewine() {
     systemd util-linux python python-vdf procps-ng xdg-utils libnotify libcanberra
     brightnessctl ddcutil v4l-utils upower ttf-dejavu ttf-jetbrains-mono-nerd
     noto-fonts-emoji adwaita-icon-theme adwaita-cursors papirus-icon-theme dconf
-    gsettings-desktop-schemas)
+    gsettings-desktop-schemas cliphist wl-clipboard)
   optdepends=('networkmanager: network controls' 'bluez: Bluetooth controls' 'hyprmon: optional monitor configuration (requires Lua live IPC support)')
   cd "$srcdir/icewine"
   local share="$pkgdir/usr/share/icewine" defaults="$pkgdir/usr/share/icewine/defaults/config"
@@ -46,7 +46,7 @@ package_icewine() {
   printf '\nrequire("icewine.modules.Deck")\n' >> "$share/hyprland-handheld/icewine.lua"
   cp -r kitty gtk hypridle session "$share/"
   # Native implementation contains no Bash preset or Nix-generated wrappers.
-  cp scripts/theme scripts/manage scripts/wallpaper scripts/inputplumber-*.sh scripts/keyboard-toggle.sh "$pkgdir/usr/lib/icewine/"
+  cp scripts/theme scripts/manage scripts/wallpaper scripts/clipboard scripts/inputplumber-*.sh scripts/keyboard-toggle.sh "$pkgdir/usr/lib/icewine/"
   install -d "$share/inputplumber"
   cp inputplumber/polkit.rules.in "$share/inputplumber/"
   for name in hyprland desktop; do
@@ -55,7 +55,7 @@ package_icewine() {
   install -m755 manager/target/release/icewine-manage "$pkgdir/usr/bin/icewine-manage"
   install -m755 scripts/icewine "$pkgdir/usr/bin/icewine"
   install -m755 packaging/arch/command "$pkgdir/usr/lib/icewine/command"
-  for name in shell theme wallpaper manage-backend steam inputplumber-intercept inputplumber-hyprland inputplumber-restore keyboard-toggle; do
+  for name in shell theme wallpaper clipboard manage-backend steam inputplumber-intercept inputplumber-hyprland inputplumber-restore keyboard-toggle; do
     ln -s ../lib/icewine/command "$pkgdir/usr/bin/icewine-$name"
   done
   install -m755 quickshell/tools/steam-shortcuts "$pkgdir/usr/bin/icewine-steam-shortcuts"

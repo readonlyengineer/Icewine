@@ -18,6 +18,8 @@ case ${0##*/} in
     export ICEWINE_THEME_ASSETS=/usr/share/icewine/theme
     export ICEWINE_WALLPAPER_VALIDATOR=/usr/share/icewine/quickshell/modules/WallpaperValidator.qml
     exec python3 /usr/lib/icewine/wallpaper "$@" ;;
+  icewine-clipboard)
+    exec python3 /usr/lib/icewine/clipboard "$@" ;;
   icewine-inputplumber-intercept)
     if [[ ${1:-} != device ]]; then
       if [[ -n ${ICEWINE_HANDHELD_ENABLED+x} ]]; then

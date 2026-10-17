@@ -162,6 +162,41 @@ ShellRoot {
             onCaptureRequested: command => screenshotWindow.command = command
         }
     }
+    QtObject {
+        id: clipboardFixture
+        property var entries: []
+        property string activeEntry: ""
+        property bool available: true
+        property bool busy: false
+        property string error: ""
+        property var calls: []
+        function request(action, entry) { calls.push([action, entry]); return 1 }
+    }
+    Bar.ClipboardHistory {
+        id: clipboardAdapter
+        locked: true
+        property var confirmations: []
+        onLoaded: request => confirmations.push(request)
+    }
+    Window {
+        id: clipboardWindow
+        width: 380; height: 454
+        property var pastes: []
+        Bar.StatusPopout {
+            id: clipboardPages
+            anchors.fill: parent
+            currentPage: "screenshot"
+            compositor: ({})
+            notificationService: ({})
+            session: ({})
+            player: null
+            powerState: ({})
+            monitorName: "fixture-no-screen"
+            metrics: ({})
+            clipboardHistory: clipboardFixture
+            onPasteRequested: entry => clipboardWindow.pastes.push(entry)
+        }
+    }
     Window {
         id: networkWindow
         visible: true
@@ -1304,6 +1339,7 @@ ShellRoot {
         running: true
         onTriggered: {
             try {
+            root.checkClipboard()
             if (root.screenshotsOnly) {
                 root.checkScreenshot()
                 console.log("SCREENSHOT_CHECK_PASSED")
@@ -1577,6 +1613,73 @@ ShellRoot {
             }
         }
         screenshotWindow.visible = false
+    }
+
+    function checkClipboard() {
+        clipboardWindow.visible = true
+        clipboardWindow.requestActivate()
+        toggleKeys.tryCompare(clipboardWindow, "active", true)
+        clipboardPages.openCapturePage()
+        const stack = clipboardPages.currentItem
+        if (stack.cards.length !== 2 || stack.selectedCard !== 0)
+            throw new Error("Screenshot must initially front the two-card stack")
+        clipboardPages.focusInitial()
+        toggleKeys.keyClick(Qt.Key_Tab)
+        toggleKeys.tryCompare(stack, "selectedCard", 1)
+        toggleKeys.tryCompare(stack, "exchanging", false)
+        const page = descendants(clipboardPages, item => item.history === clipboardFixture)[0]
+        if (!page || !root.findVisible(page, item => item.text === "No clipboard history"))
+            throw new Error("Clipboard empty state missing")
+        clipboardFixture.entries = Array.from({length: 12}, (_, i) => ({id: "epoch:" + i,
+            preview: i === 0 ? "<b>literal</b> & fixture" : "Entry " + i}))
+        clipboardFixture.activeEntry = "epoch:0"
+        toggleKeys.wait(30)
+        const rows = descendants(page, item => item.modelData?.id !== undefined)
+        if (rows.length !== 12 || rows.filter(item => item.border.width === 2).length !== 1)
+            throw new Error("Clipboard active-selection border missing")
+        const load = root.findAccessible(page, "Load clipboard entry: <b>literal</b> & fixture")
+        if (!load || load.contentItem.textFormat !== Text.PlainText)
+            throw new Error("Clipboard preview accepted markup")
+        load.forceActiveFocus()
+        toggleKeys.keyPress(Qt.Key_Return)
+        if (clipboardFixture.calls.length) throw new Error("Clipboard load ran before release")
+        toggleKeys.keyRelease(Qt.Key_Return)
+        const paste = root.findAccessible(page, "Paste clipboard entry: <b>literal</b> & fixture")
+        paste.click()
+        const remove = root.findAccessible(page, "Remove clipboard entry: <b>literal</b> & fixture")
+        remove.click()
+        if (JSON.stringify(clipboardFixture.calls) !== JSON.stringify([["load", "epoch:0"], ["remove", "epoch:0"]])
+                || JSON.stringify(clipboardWindow.pastes) !== JSON.stringify(["epoch:0"]))
+            throw new Error("Clipboard row actions bubbled or used an unstable identity")
+        const scroll = descendants(page, item => item instanceof Flickable)[0]
+        if (!scroll || scroll.contentHeight <= scroll.height)
+            throw new Error("Clipboard history does not scroll inside its card")
+        const last = root.findAccessible(page, "Remove clipboard entry: Entry 11")
+        last.forceActiveFocus()
+        clipboardPages.revealFocus()
+        toggleKeys.wait(30)
+        if (scroll.contentY <= scroll.originY) throw new Error("Focused clipboard action was not revealed")
+        clipboardFixture.activeEntry = ""
+        toggleKeys.wait(20)
+        if (rows.some(item => item.border.width)) throw new Error("Unknown clipboard kept a stale accent")
+        clipboardFixture.error = "Fixture operation failed"
+        toggleKeys.wait(20)
+        if (!root.findVisible(page, item => item.text === clipboardFixture.error))
+            throw new Error("Clipboard operation failure is hidden")
+        clipboardPages.openCapturePage()
+        toggleKeys.tryCompare(stack, "selectedCard", 0)
+        clipboardWindow.visible = false
+        clipboardAdapter.locked = false
+        toggleKeys.tryCompare(clipboardAdapter, "available", true)
+        const request = clipboardAdapter.request("load", "fixture:1")
+        toggleKeys.tryCompare(clipboardAdapter, "busy", false)
+        if (clipboardAdapter.confirmations.join(",") !== String(request)
+                || clipboardAdapter.activeEntry !== "fixture:1")
+            throw new Error("Clipboard adapter lost request confirmation/current selection")
+        clipboardAdapter.locked = true
+        clipboardAdapter.receive(JSON.stringify({entries: [{id: "stale", preview: "fixture"}], active: "stale"}))
+        if (clipboardAdapter.entries.length || clipboardAdapter.activeEntry || clipboardAdapter.available)
+            throw new Error("Locked clipboard accepted late state")
     }
 
     function findAccessible(item, name) {
@@ -2434,6 +2537,16 @@ with tempfile.TemporaryDirectory() as directory:
     (root / "palette-light.json").write_text(render_theme(assets, assets / "themes/catppuccin-latte.json")["palette.json"])
     (root / "config").symlink_to(source / "quickshell/config")
     (root / "bin").mkdir()
+    clipboard_command = root / "bin/icewine-clipboard"
+    clipboard_command.write_text("#!" + sys.executable + "\n" + '''import json, sys
+state = dict(entries=[dict(id="fixture:1", preview="<b>fixture</b>")], active="", selection=None, error="", request=0, loaded=False)
+print(json.dumps(state), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    state.update(request=request["request"], loaded=request["action"] == "load", active="fixture:1", selection=["text/plain;charset=utf-8", "a" * 64])
+    print(json.dumps(state), flush=True)
+''')
+    clipboard_command.chmod(0o755)
     mock = root / "bin/icewine-monitor-brightness"
     mock.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$1" >> "' + str(root / "brightness-calls") + '"\necho "${2:-37}"\n')
     mock.chmod(0o755)
@@ -2513,7 +2626,7 @@ with tempfile.TemporaryDirectory() as directory:
         output = result.stdout + result.stderr
         assert result.returncode == 0 and "SCREENSHOT_CHECK_PASSED" in output, output
         assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
-        print("screenshot Region/Monitor entries, native commands, delay and keyboard-release checks pass")
+        print("clipboard card/adapter state, scrolling/actions/plain previews and screenshot native-mode/release checks pass")
         sys.exit(0)
     status_icons = root / "icewine/modules/topbar/StatusIcons.qml"
     native_status_icons = status_icons.read_text()

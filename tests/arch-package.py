@@ -29,9 +29,9 @@ with open(os.environ["ICEWINE_TEST_ENV"], "w") as log:
 sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
 ''')
     fake.chmod(0o755)
-    for name in ("steam", "flatpak", "icewine", "uwsm"):
+    for name in ("steam", "flatpak", "icewine", "uwsm", "python3"):
         (commands / name).symlink_to(fake)
-    for name in ("steam", "shell"):
+    for name in ("steam", "shell", "clipboard"):
         (commands / ("icewine-" + name)).symlink_to(native / "command")
     env = dict(os.environ, PATH=str(commands) + ":" + os.environ["PATH"],
                HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), ICEWINE_TEST_LOG=str(log), ICEWINE_TEST_ENV=str(root / "editor-env"))
@@ -45,6 +45,7 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
                               capture_output=True, text=True)
     for name, expected in {
         "steam": ["steam"],
+        "clipboard": ["python3", "/usr/lib/icewine/clipboard"],
     }.items():
         argument = "literal argument; $(must-not-run)"
         result = run("icewine-" + name, argument)

@@ -52,6 +52,108 @@ Scope {
     property var keyboard: null
     readonly property bool oskVisible: keyboard?.desktopVisible ?? false
     property bool instantBarHide: false
+    property var clipboardPaste: null
+
+    Bar.ClipboardHistory {
+        id: clipboardHistory
+        locked: root.sessionLocked
+        onLoaded: request => root.clipboardLoaded(request)
+        onBusyChanged: if (!busy && root.clipboardPaste?.phase === "loading" && error)
+            root.cancelClipboardPaste()
+        onAvailableChanged: if (!available) root.cancelClipboardPaste()
+        onActiveEntryChanged: if (root.clipboardPaste && root.clipboardPaste.phase !== "loading"
+                && activeEntry !== root.clipboardPaste.entry) root.cancelClipboardPaste()
+    }
+
+    function cancelClipboardPaste() {
+        if (!clipboardPaste) return
+        const dismissed = clipboardPaste.phase !== "loading"
+        clipboardPaste = null
+        pasteWait.stop()
+        pasteDelivery.running = false
+        clipboardHistory.error = "Paste cancelled: original app or session changed"
+        if (dismissed)
+            Quickshell.execDetached(["notify-send", "--app-name=Icewine", "Clipboard paste", clipboardHistory.error])
+    }
+
+    function pasteClipboard(entry) {
+        const window = previousToplevel
+        const stableId = String(window?.lastIpcObject?.stableId ?? "")
+        if (sessionLocked || ui.held || clipboardPaste || !previousWindow || !window
+                || !compositor.toplevels.includes(window) || !/^[0-9a-fA-F]{1,16}$/.test(stableId)) {
+            clipboardHistory.error = ui.held ? "Release the opening shortcut before paste"
+                : "Paste unavailable: no original application"
+            return
+        }
+        const request = clipboardHistory.request("load", entry)
+        if (request) clipboardPaste = {window: window, stableId: stableId, request: request, entry: entry,
+            generation: focusGeneration, widgetGeneration: widgetFocusGeneration, phase: "loading"}
+    }
+
+    function clipboardPasteValid() {
+        const intent = clipboardPaste
+        return intent && !sessionLocked && intent.generation === focusGeneration
+            && intent.widgetGeneration === widgetFocusGeneration
+            && compositor.toplevels.includes(intent.window)
+            && String(intent.window.lastIpcObject?.stableId ?? "") === intent.stableId
+    }
+
+    function clipboardLoaded(request) {
+        const intent = clipboardPaste
+        if (!intent || intent.phase !== "loading" || intent.request !== request) return
+        if (!clipboardPasteValid() || ui.page !== "screenshot"
+                || previousWindow !== intent.window.address) {
+            cancelClipboardPaste()
+            return
+        }
+        intent.phase = "handoff"
+        intent.selection = clipboardHistory.selection
+        instantHandoff()
+        intent.phase = "restoring"
+        intent.generation = focusGeneration
+        intent.widgetGeneration = widgetFocusGeneration
+        Qt.callLater(() => {
+            if (!root.clipboardPasteValid()) { root.cancelClipboardPaste(); return }
+            root.compositor.activateToplevel(intent.window)
+            pasteWait.attempts = 0
+            pasteWait.start()
+        })
+    }
+
+    function deliverClipboardPaste() {
+        if (clipboardPaste?.phase !== "restoring") return
+        if (!clipboardPasteValid() || ui.page || ++pasteWait.attempts > 30) {
+            cancelClipboardPaste()
+            return
+        }
+        if (compositor.activeWindowAddress !== clipboardPaste.window.address) return
+        pasteWait.stop()
+        clipboardPaste.phase = "sending"
+        // The helper independently checks native lock state and stable focus before
+        // finite virtual-keyboard input. The compositor retains input/lock policy.
+        pasteDelivery.command = ["icewine-clipboard", "paste", clipboardPaste.stableId,
+            clipboardPaste.selection[0], clipboardPaste.selection[1]]
+        pasteDelivery.running = true
+    }
+
+    Timer {
+        id: pasteWait
+        property int attempts: 0
+        interval: 30; repeat: true
+        onTriggered: root.deliverClipboardPaste()
+    }
+    Process {
+        id: pasteDelivery
+        stdout: StdioCollector {}
+        onExited: (code, status) => {
+            if (!root.clipboardPaste) return
+            root.clipboardPaste = null
+            if (code !== 0 || status !== 0 || stdout.text.trim() !== "ok") {
+                clipboardHistory.error = "Paste failed; clipboard remains available for manual paste"
+                Quickshell.execDetached(["notify-send", "--app-name=Icewine", "Clipboard paste", clipboardHistory.error])
+            }
+        }
+    }
 
     signal widgetDismissed()
     signal focusWidgetRequested(string screenName, string openingPage)
@@ -74,6 +176,7 @@ Scope {
 
     function pressBar() {
         if (sessionLocked) return
+        cancelClipboardPaste()
         beginInteraction()
         ui = State.reduce(ui, { type: "press" })
     }
@@ -102,6 +205,7 @@ Scope {
     function openWidget(page, engaged, screenName) {
         if (sessionLocked || !screenName || (page === "layout" && !layoutsEnabled) || (page === "switcher" && !Config.Settings.windowSwitcher))
             return
+        cancelClipboardPaste()
         const next = State.reduce(ui, { type: "open", page: page, engaged: engaged, screen: screenName })
         if (next === ui) return
         beginInteraction()
@@ -135,6 +239,7 @@ Scope {
     }
 
     function dismissWidget() {
+        if (clipboardPaste?.phase !== "handoff") cancelClipboardPaste()
         ++widgetFocusGeneration
         if (ui.engaged) radial?.drainInput()
         widgetDismissed()
@@ -142,6 +247,7 @@ Scope {
     }
 
     function dismiss() {
+        if (clipboardPaste?.phase !== "handoff") cancelClipboardPaste()
         ++widgetFocusGeneration
         if (ui.engaged) radial?.drainInput()
         widgetDismissed()
@@ -188,7 +294,7 @@ Scope {
         openWidget("launcher", ui.engaged, ui.screen)
 
     onBarVisibleChanged: if (!barVisible) finishInteraction()
-    onSessionLockedChanged: if (sessionLocked) handoff()
+    onSessionLockedChanged: if (sessionLocked) { cancelClipboardPaste(); handoff() }
 
     Connections {
         target: Config.Settings
@@ -200,9 +306,11 @@ Scope {
 
     Connections {
         target: root.compositor
-        function onNavigationRequested() { root.handoff() }
+        function onNavigationRequested() { root.cancelClipboardPaste(); root.handoff() }
         function onActiveWindowAddressChanged() {
             const address = root.compositor.activeWindowAddress
+            if (root.clipboardPaste && address && address !== root.clipboardPaste.window.address)
+                root.cancelClipboardPaste()
             // Never undo an application launch or an explicit focus change.
             if (root.interactionActive && address && address !== root.previousWindow)
                 root.previousWindow = ""
@@ -268,6 +376,7 @@ Scope {
                         statusPopout.openPowerPage(openingPage)
                     else if (openingPage === "audio" || openingPage === "bluetooth")
                         statusPopout.openAudioPage(openingPage)
+                    else if (openingPage === "screenshot") statusPopout.openCapturePage()
                     statusPopout.focusInitial()
                 }
             }
@@ -518,6 +627,9 @@ Scope {
                     metrics: metrics
                     monitorName: panel.screen.name
                     player: root.player
+                    clipboardHistory: clipboardHistory
+                    pasteBusy: root.clipboardPaste !== null
+                    onPasteRequested: entry => root.pasteClipboard(entry)
                     onEngageRequested: root.engageWidget()
                     onDismissRequested: root.dismissWidget()
                     onHandoffRequested: root.handoff()

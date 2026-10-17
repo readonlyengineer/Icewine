@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+"""Private session adapter for cliphist; stdout is the shell's data pipe, never a log."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import selectors
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import re
+
+LIMIT = 5_000_000
+TYPES = ("text/plain;charset=utf-8", "text/plain", "image/png")
+
+
+def run(argv, data=None):
+    try:
+        process = subprocess.Popen(argv, stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True,
+            env={key: value for key, value in os.environ.items() if not key.startswith("CLIPHIST_")
+                 and key not in ("CLIPBOARD_STATE", "CLIPBOARD_TYPE")})
+        try:
+            output, _ = process.communicate(input=data, timeout=3)
+            if process.returncode:
+                raise ValueError("Clipboard command failed")
+            return output
+        finally:
+            # A cancelled shell request must also close its finite input client.
+            stop(process)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError("Clipboard operation failed") from error
+
+
+def read_selection(argv, limit=LIMIT):
+    """Bound untrusted clipboard output before retaining it in memory."""
+    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                               start_new_session=True)
+    data = bytearray()
+    try:
+        with selectors.DefaultSelector() as ready:
+            ready.register(process.stdout, selectors.EVENT_READ)
+            deadline = time.monotonic() + 2
+            while True:
+                if not ready.select(max(0, deadline - time.monotonic())):
+                    raise ValueError("Clipboard read timed out")
+                chunk = os.read(process.stdout.fileno(), min(65536, limit + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+                if len(data) > limit:
+                    raise ValueError("Clipboard item exceeds 5 MB")
+            if process.wait(timeout=1) != 0:
+                raise ValueError("Clipboard unavailable")
+        return bytes(data)
+    finally:
+        stop(process)
+        process.stdout.close()
+
+
+def stop(process):
+    """Stop an owned session/group, even if its waiter has already exited."""
+    if process is None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        # wl-paste forks cat; reaping only the waiter leaves stalled readers.
+        # Each Popen owns a new session, excluding the external offer provider.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+
+
+def current_selection():
+    offered = read_selection(["wl-paste", "--list-types"], 65536).decode("utf-8").splitlines()
+    if "x-kde-passwordManagerHint" in offered:
+        return None
+    mime = next((mime for mime in TYPES if mime in offered), None)
+    if mime is None:
+        return None
+    data = read_selection(["wl-paste", "--no-newline", "--type", mime])
+    if mime.startswith("text/"):
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        if not text.strip() or "\0" in text:
+            return None
+        mime = TYPES[0]
+    elif not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    return mime, data
+
+
+def fingerprint(mime, data):
+    return mime, hashlib.sha256(data).hexdigest()
+
+
+class History:
+    def __init__(self, directory):
+        self.directory = Path(directory)
+        self.epoch = self.directory.name
+        self.command = ["cliphist", "-db-path", str(self.directory / "db"),
+                        "-config-path", "/dev/null", "-max-items", "50",
+                        "-max-dedupe-search", "50", "-preview-width", "160"]
+        self.rows = []
+        self.metadata = {}
+        self.current = None
+        self.observed = None
+        self.owner = None
+        self.error = ""
+
+    def snapshot(self, request=0, loaded=False):
+        active = next((row["id"] for row in self.rows
+                       if self.metadata[row["id"]][0] == self.current), "")
+        return dict(entries=self.rows, active=active, error=self.error,
+                    selection=self.current, request=request, loaded=loaded)
+
+    def observe(self, remember=True, state="data"):
+        self.current = None
+        if state in ("nil", "clear", "sensitive"):
+            if remember:
+                self.observed = None
+            return
+        selection = current_selection()
+        if selection is None:
+            if remember:
+                self.observed = None
+            return
+        mime, data = selection
+        identity = fingerprint(mime, data)
+        self.current = identity
+        if remember and identity != self.observed:
+            run(self.command + ["store"], data)
+            listing = run(self.command + ["list"]).decode("utf-8", errors="replace").splitlines()
+            rows = []
+            for index, line in enumerate(listing):
+                ident, preview = line.split("\t", 1)
+                key = self.epoch + ":" + ident
+                if index == 0:
+                    self.metadata[key] = (identity, mime)
+                if key not in self.metadata:
+                    raise ValueError("Clipboard history identity unavailable")
+                # Preview is plain data: suppress control/bidi formatting, bound after decoding.
+                preview = "".join(c for c in preview if c.isprintable())[:160]
+                rows.append(dict(id=key, preview=preview, image=self.metadata[key][1] == "image/png"))
+            self.rows = rows
+            self.metadata = {row["id"]: self.metadata[row["id"]] for row in rows}
+        # Ponytail: identical events cannot recreate an X/Cleared item until the
+        # content changes. Native offer serials would distinguish recopy from a
+        # delayed own-copy event; wl-paste's callback does not expose them.
+        if remember:
+            self.observed = identity
+
+    def change(self, request):
+        self.error = ""
+        action, ident = request.get("action"), request.get("id")
+        if action == "clear":
+            run(self.command + ["wipe"])
+            self.rows = []
+            self.metadata = {}
+        elif action in ("remove", "load"):
+            if ident not in self.metadata:
+                raise ValueError("Clipboard entry is no longer available")
+            raw_id = ident.split(":", 1)[1].encode()
+            if action == "remove":
+                run(self.command + ["delete"], raw_id)
+                self.rows = [row for row in self.rows if row["id"] != ident]
+                del self.metadata[ident]
+            else:
+                identity, mime = self.metadata[ident]
+                data = run(self.command + ["decode"], raw_id)
+                if len(data) > LIMIT or fingerprint(mime, data) != identity:
+                    raise ValueError("Clipboard entry changed")
+                stop(self.owner)
+                # The bounded payload goes through a private runtime file, never argv or logs.
+                with tempfile.TemporaryFile(dir=self.directory) as payload:
+                    payload.write(data)
+                    payload.seek(0)
+                    self.owner = subprocess.Popen(["wl-copy", "--foreground", "--type", mime],
+                        stdin=payload, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        start_new_session=True)
+                    deadline = time.monotonic() + 1
+                    while time.monotonic() < deadline:
+                        try:
+                            self.observe(False)
+                        except ValueError:
+                            # The offer can change between listing types and reading it.
+                            self.current = None
+                        if self.current == identity and self.owner.poll() is None:
+                            # Suppress only the confirmed own copy, never competing
+                            # external bytes encountered during confirmation polls.
+                            self.observed = identity
+                            return True
+                        if self.owner.poll() is not None:
+                            break
+                        time.sleep(0.02)
+                raise ValueError("Clipboard load was not confirmed")
+        else:
+            raise ValueError("Unknown clipboard action")
+        return False
+
+
+def emit(value):
+    print(json.dumps(value, ensure_ascii=True), flush=True)
+
+
+def paste(stable_id, mime, digest):
+    if (not re.fullmatch(r"[0-9a-fA-F]{1,16}", stable_id) or mime not in TYPES
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+        raise ValueError("Invalid paste target")
+    selection = current_selection()
+    if selection is None or fingerprint(*selection) != (mime, digest):
+        raise ValueError("Clipboard changed before paste")
+    # Independent native checks, in addition to the shell's lock/intent guards.
+    if json.loads(run(["hyprctl", "-j", "locked"])) != {"locked": False}:
+        raise ValueError("Session locked")
+    active = json.loads(run(["hyprctl", "-j", "activewindow"]))
+    if not isinstance(active, dict) or active.get("stableId") != stable_id:
+        raise ValueError("Paste target changed")
+    if json.loads(run(["hyprctl", "-j", "locked"])) != {"locked": False}:
+        raise ValueError("Session locked")
+    # Ponytail: focus check and virtual input are separate requests. A last-moment
+    # user focus change can race this finite chord; no atomic delivery is claimed.
+    # Ordinary virtual-keyboard input stays under compositor lock policy, unlike
+    # send_shortcut, which can explicitly refocus a normal surface behind a lock.
+    run(["wtype", "-M", "ctrl", "-P", "v", "-p", "v", "-m", "ctrl"])
+
+
+def serve():
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if not runtime or not Path(runtime).is_dir():
+        raise ValueError("Private runtime directory unavailable")
+    info = Path(runtime).stat()
+    if info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("Runtime directory is not private")
+    os.umask(0o077)
+    watcher = None
+    with tempfile.TemporaryDirectory(prefix="icewine-clipboard-", dir=runtime) as directory:
+        history = History(directory)
+        try:
+            watcher = subprocess.Popen(["wl-paste", "--watch", sys.executable, __file__, "changed"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True, bufsize=0)
+            with selectors.DefaultSelector() as ready:
+                ready.register(sys.stdin, selectors.EVENT_READ)
+                ready.register(watcher.stdout, selectors.EVENT_READ)
+                emit(history.snapshot())
+                while True:
+                    for key, _ in ready.select():
+                        line = key.fileobj.readline()
+                        if not line:
+                            if key.fileobj is sys.stdin:
+                                return
+                            raise ValueError("Clipboard watcher unavailable")
+                        request = 0
+                        try:
+                            if key.fileobj is sys.stdin:
+                                message = json.loads(line)
+                                request = message.get("request", 0)
+                                loaded = history.change(message)
+                            else:
+                                history.observe(state=line.decode().strip())
+                                loaded = False
+                            history.error = ""
+                        except (ValueError, OSError, subprocess.SubprocessError):
+                            history.current = None
+                            history.error = "Clipboard operation failed; try copying again"
+                            loaded = False
+                        emit(history.snapshot(request, loaded))
+        finally:
+            stop(watcher)
+            stop(history.owner)
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    try:
+        if sys.argv[1:] == ["changed"]:
+            # This callback only invalidates; serve() reads the current offer
+            # through bounded read_selection(). Never wait for a provider's EOF:
+            # wl-paste waits for this child before handling its next offer.
+            print(os.environ.get("CLIPBOARD_STATE", "data"), flush=True)
+        elif not sys.argv[1:]:
+            serve()
+        elif len(sys.argv) == 5 and sys.argv[1] == "paste":
+            paste(*sys.argv[2:])
+            print("ok", flush=True)
+        else:
+            raise ValueError("Unknown clipboard command")
+    except (ValueError, OSError, subprocess.SubprocessError):
+        emit(dict(entries=[], active="", error="Clipboard backend unavailable", request=0, loaded=False))
+        sys.exit(1)

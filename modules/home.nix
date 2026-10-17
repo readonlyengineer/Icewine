@@ -173,6 +173,11 @@ let
     runtimeInputs = [ pkgs.coreutils pkgs.brightnessctl pkgs.ddcutil pkgs.hyprland pkgs.jq pkgs.util-linux ];
     text = builtins.readFile ../quickshell/tools/monitor-brightness;
   };
+  clipboard = pkgs.writeShellApplication {
+    name = "icewine-clipboard";
+    runtimeInputs = [ pkgs.python3 pkgs.cliphist pkgs.wl-clipboard pkgs.wtype pkgs.hyprland ];
+    text = ''exec python3 ${../scripts/clipboard} "$@"'';
+  };
 in {
   config = lib.mkIf cfg.enable {
     users.users.${cfg.user}.packages = [ icewineCli ];
@@ -202,7 +207,7 @@ in {
         "ICEWINE_STEAM_ENABLED=${if cfg.steam != "none" then "true" else "false"}"
         "ICEWINE_GAMESCOPE_ENABLED=${if cfg.steam != "none" && cfg.gamescope.enable then "true" else "false"}"
         "ICEWINE_BATTERY_ENABLED=${if cfg.battery.enable then "true" else "false"}"
-        "PATH=/run/wrappers/bin:/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd pkgs.wtype pkgs.coreutils monitorCapabilities monitorBrightness steamShortcuts ]}"
+        "PATH=/run/wrappers/bin:/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd pkgs.wtype pkgs.coreutils monitorCapabilities monitorBrightness steamShortcuts clipboard ]}"
         "QML_IMPORT_PATH=${implementation}/quickshell"
         "QT_IM_MODULE=qtvirtualkeyboard"
         "QT_VIRTUALKEYBOARD_DESKTOP_DISABLE=1"
