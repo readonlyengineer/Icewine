@@ -23,7 +23,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: "Clipboard"
             textFormat: Text.PlainText
-            color: Theme.Palette.secondary
+            color: Theme.Palette.tertiary
             font { family: "JetBrainsMono Nerd Font"; pixelSize: 15; bold: true }
         }
         ActionButton {
