@@ -2,6 +2,7 @@
 """Direct native launcher checks; pass makepkg roots to also check built payloads."""
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,6 +13,18 @@ import vdf
 
 source = Path(sys.argv[1]).resolve()
 native = source / "packaging/arch"
+
+# Check the dependency contract without makepkg or compiling the manager.
+pkgbuild = (native / "PKGBUILD").read_text()
+base_dependencies = re.search(r"package_icewine\(\) \{\s+depends=\((.*?)\)", pkgbuild, re.S).group(1).split()
+assert "libcanberra" in base_dependencies
+kitty_defaults = (source / "theme/assets/templates/kitty-base.conf").read_text()
+assert "window_alert_on_bell no\n" in kitty_defaults
+assert "bell_path /usr/share/sounds/freedesktop/stereo/bell.oga\n" in kitty_defaults
+assert "/nix/store/" not in kitty_defaults
+assert (source / "kitty/kitty.conf").read_text().splitlines()[1:] == [
+    "include icewine/defaults.conf", "include ../icewine/current/kitty.conf"]
+print("PASS: shared Kitty attention/sound defaults, native sound dependencies and include precedence")
 
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
@@ -134,6 +147,8 @@ assert (desktop / "usr/bin/icewine-shell").is_file()
 assert not (desktop / "usr/share/icewine/no-animations").exists()
 payload = desktop / "usr/share/icewine"
 defaults = payload / "defaults"
+assert (payload / "kitty/defaults.conf").read_text() == kitty_defaults
+assert (defaults / "config/kitty/kitty.conf").read_bytes() == (source / "kitty/kitty.conf").read_bytes()
 deck = payload / "quickshell/deck"
 assert {path.name for path in deck.iterdir()} == {"DeckOverlay.qml", "DeckMenu.js"}
 for name in ("DeckOverlay.qml", "DeckMenu.js"):

@@ -37,6 +37,9 @@ let
       printf '\nrequire("icewine.modules.Deck")\n' >> $out/hyprland/icewine.lua
     ''}
     cp ${../theme/assets/templates}/kitty-base.conf $out/kitty/defaults.conf
+    substituteInPlace $out/kitty/defaults.conf \
+      --replace-fail /usr/share/sounds/freedesktop/stereo/bell.oga \
+        ${pkgs.sound-theme-freedesktop}/share/sounds/freedesktop/stereo/bell.oga
     cp ${../session}/env $out/uwsm/env
     cp ${../hypridle}/defaults.conf $out/hypridle/defaults.conf
     cp ${../gtk}/defaults.css $out/gtk/defaults.css

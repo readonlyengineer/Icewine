@@ -29,14 +29,20 @@ If acquisition or compilation fails, fix the prerequisite and rerun; incomplete
 preparation never launches the manager. Keep the prepared directory for later
 optional Apply, or reopen with `ICEWINE_PACKAGE_DIR=/path/to/build icewine manage`.
 
-From a committed local checkout, the existing manual path also works:
+The base package already requires `libcanberra`, which brings
+`sound-theme-freedesktop` for Kitty's native audible bell at
+`/usr/share/sounds/freedesktop/stereo/bell.oga`. Keep audio output enabled; later
+overrides in `~/.config/kitty/kitty.conf` take precedence.
+
+From a committed local checkout, the existing manual path also works. Install
+its declared runtime dependencies with `makepkg -s` before installing the archive:
 
 ```sh
 mkdir -p build
 git archive --format=tar.gz --prefix=icewine/ HEAD -o build/icewine.tar.gz
 cp packaging/arch/PKGBUILD build/
 cd build
-makepkg
+makepkg -s
 sudo pacman -U ./icewine-0.1-1-x86_64.pkg.tar.zst
 ICEWINE_PACKAGE_DIR="$PWD" icewine manage
 ```

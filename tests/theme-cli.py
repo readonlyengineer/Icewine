@@ -34,6 +34,11 @@ for theme_id, palette in theme.installed(assets).items():
     for level in theme.TRANSPARENCY:
         rendered = theme.render_theme(assets, palette, level)
         assert json.loads(rendered["palette.json"])["themeId"] == theme_id
+        assert "window_alert_on_bell no\n" in rendered["kitty-base.conf"]
+        assert "bell_path /usr/share/sounds/freedesktop/stereo/bell.oga\n" in rendered["kitty-base.conf"]
+        assert "/nix/store/" not in rendered["kitty-base.conf"]
+        assert not any(line.startswith(("window_alert_on_bell ", "bell_path "))
+                       for line in rendered["kitty.conf"].splitlines())
         assert json.loads(rendered["palette.json"])["keyboardOpacity"] == {"off":1.0,"low":0.8,"med":0.6,"high":0.4}[level]
         btop = dict(re.findall(r'^theme\[(\w+)\]="(#[0-9a-fA-F]{6})"$', rendered["btop.theme"], re.M))
         colours = json.loads(palette.read_text())

@@ -195,6 +195,10 @@ in {
       test -L "$XDG_CONFIG_HOME/hypr/icewine"
       test "$(readlink "$XDG_CONFIG_HOME/quickshell/icewine")" = /etc/icewine/implementation/quickshell
       implementation=${optIn.environment.etc."icewine/implementation".source}
+      grep -Fx 'window_alert_on_bell no' "$implementation/kitty/defaults.conf"
+      grep -Fx 'bell_path ${pkgs.sound-theme-freedesktop}/share/sounds/freedesktop/stereo/bell.oga' "$implementation/kitty/defaults.conf"
+      ! grep -q '/usr/share/sounds/' "$implementation/kitty/defaults.conf"
+      test -s ${pkgs.sound-theme-freedesktop}/share/sounds/freedesktop/stereo/bell.oga
       ln -sfn "$implementation/quickshell" "$XDG_CONFIG_HOME/quickshell/icewine"
       ln -sfn "$implementation/hyprland" "$XDG_CONFIG_HOME/hypr/icewine"
       test -f "$XDG_CONFIG_HOME/quickshell/icewine/Desktop.qml"
