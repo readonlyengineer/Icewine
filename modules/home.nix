@@ -97,6 +97,8 @@ let
     name = "icewine-wallpaper";
     runtimeInputs = [ pkgs.python3 quickshell ];
     text = ''
+      export ICEWINE_THEME_SCRIPT=${../scripts/theme}
+      export ICEWINE_THEME_ASSETS=${../theme/assets}
       export ICEWINE_WALLPAPER_VALIDATOR=${../quickshell/modules}/WallpaperValidator.qml
       export ICEWINE_WALLPAPER_DATA_HOME=''${ICEWINE_WALLPAPER_DATA_HOME:-''${XDG_DATA_HOME:-${dataHome}}}
       exec python3 ${../scripts/wallpaper} "$@"

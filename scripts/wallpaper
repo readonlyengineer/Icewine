@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate and atomically select the desktop wallpaper without changing its source."""
 import fcntl
+import importlib.machinery
 import os
 from pathlib import Path
 import shutil
@@ -8,6 +9,11 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
+
+theme = types.ModuleType("icewine_theme")
+theme.__file__ = os.environ.get("ICEWINE_THEME_SCRIPT", str(Path(__file__).with_name("theme")))
+importlib.machinery.SourceFileLoader(theme.__name__, theme.__file__).exec_module(theme)
 
 
 def validate(path):
@@ -32,8 +38,11 @@ def select(args):
     if not source.is_file():
         raise ValueError("image path is not a readable regular file")
     directory = data / "icewine/wallpapers"
+    theme.writable(directory / "selection.img")
+    theme.writable(directory / ".selection.lock")
     directory.mkdir(parents=True, exist_ok=True)
-    with (directory / ".selection.lock").open("a") as lock:
+    fd = os.open(directory / ".selection.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "r+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         fd, name = tempfile.mkstemp(prefix=".wallpaper-", dir=directory)
         os.close(fd)
@@ -42,6 +51,7 @@ def select(args):
             shutil.copyfile(source, temporary)
             temporary.chmod(0o600)
             validate(temporary)
+            theme.writable(directory / "selection.img")
             os.replace(temporary, directory / "selection.img")
         finally:
             temporary.unlink(missing_ok=True)

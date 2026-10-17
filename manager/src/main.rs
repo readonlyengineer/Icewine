@@ -32,7 +32,7 @@ fn appearance_command(args: &[&str]) -> io::Result<String> {
 
 struct Appearance {
     themes: Vec<String>, theme: usize, policy: bool, transparency: usize,
-    layout: usize, wallpaper: PathBuf,
+    layout: usize, wallpaper: PathBuf, readonly: [bool; 5],
 }
 
 impl Appearance {
@@ -63,7 +63,21 @@ impl Appearance {
         let directory = data.join("icewine/wallpapers");
         let wallpaper = if directory.join("selection.img").is_file() { directory.join("selection.img") }
             else { data.join("wallpapers/default.jpg") };
-        Ok(Self { themes, theme, policy, transparency, layout, wallpaper })
+        let ownership = widget_command(&["file-state".into()])?;
+        let mut fields = BTreeMap::new();
+        for field in ownership.split_whitespace() {
+            let (name, value) = field.split_once('=').ok_or_else(|| io::Error::other("Invalid file ownership"))?;
+            if fields.insert(name, value).is_some() { return Err(io::Error::other("Duplicate file ownership")); }
+        }
+        let mut readonly = [false; 5];
+        for (index, name) in ["theme", "transparency", "wallpaper", "monitors", "layout"].iter().enumerate() {
+            readonly[index] = match fields.remove(name) {
+                Some("true") => true, Some("false") => false,
+                _ => return Err(io::Error::other("Missing file ownership")),
+            };
+        }
+        if !fields.is_empty() { return Err(io::Error::other("Unknown file ownership")); }
+        Ok(Self { themes, theme, policy, transparency, layout, wallpaper, readonly })
     }
 }
 
@@ -73,7 +87,7 @@ const WIDGETS: &[(&str, &str, &str)] = &[
 ];
 
 struct Widgets {
-    enabled: [bool; 2], policy: [bool; 2], supported: bool, revision: String,
+    enabled: [bool; 2], policy: [bool; 2], linked: [bool; 2], supported: bool, revision: String,
 }
 
 fn widget_command(args: &[String]) -> io::Result<String> {
@@ -101,15 +115,17 @@ impl Widgets {
             .ok_or_else(|| io::Error::other("Invalid widget revision"))?.to_owned();
         let mut enabled = [true; 2];
         let mut policy = [false; 2];
+        let mut linked = [false; 2];
         for (index, (id, _, _)) in WIDGETS.iter().enumerate() {
             let (value, owner) = fields.remove(id).and_then(|value| value.split_once(':'))
                 .ok_or_else(|| io::Error::other("Missing widget state"))?;
             enabled[index] = boolean(Some(value))?;
-            policy[index] = match owner { "policy" => true, "user" => false,
+            policy[index] = match owner { "policy" | "symlink" => true, "user" => false,
                 _ => return Err(io::Error::other("Invalid widget ownership")) };
+            linked[index] = owner == "symlink";
         }
         if !fields.is_empty() { return Err(io::Error::other("Unknown widget state")); }
-        Ok(Self { enabled, policy, supported, revision })
+        Ok(Self { enabled, policy, linked, supported, revision })
     }
 
     fn save(&mut self) -> io::Result<String> {
@@ -153,7 +169,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     let mut appearance = Appearance::load()?;
     let (mut widgets, mut widget_message) = match Widgets::load() {
         Ok(value) => (value, String::new()),
-        Err(error) => (Widgets { enabled: [true; 2], policy: [false; 2], supported: false, revision: String::new() }, error.to_string()),
+        Err(error) => (Widgets { enabled: [true; 2], policy: [false; 2], linked: [false; 2], supported: false, revision: String::new() }, error.to_string()),
     };
     let mut message = String::new();
     let mut page = 0;
@@ -167,14 +183,15 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 (readonly || *id != "login") && (*steam != 0 || !matches!(*id, "gamescope" | "handheld"))).collect();
             let controls: Vec<_> = if page == 1 {
                 let mut controls = Vec::new();
-                if !appearance.policy { controls.push(Control::Theme); }
-                controls.extend([Control::Transparency, Control::Wallpaper]);
-                controls.extend([Control::Monitors, Control::Layout, Control::Apply, Control::Cancel]);
+                for (index, control) in [Control::Theme, Control::Transparency, Control::Wallpaper, Control::Monitors, Control::Layout].into_iter().enumerate() {
+                    if !appearance.readonly[index] && !(control == Control::Theme && appearance.policy) { controls.push(control); }
+                }
+                controls.extend([Control::Apply, Control::Cancel]);
                 controls
             } else if page == 2 {
                 WIDGETS.iter().enumerate().filter(|(index, _)| widgets.supported && !widgets.policy[*index])
                     .map(|(index, _)| Control::Widget(index))
-                    .chain(widgets.supported.then_some(Control::Apply)).chain([Control::Cancel]).collect()
+                    .chain((widgets.supported && widgets.policy.iter().any(|locked| !locked)).then_some(Control::Apply)).chain([Control::Cancel]).collect()
             } else { rows.iter().filter(|(id, _, _)| !readonly
                 && (*id != "handheld" || handheld_available(*steam, selected)))
                 .map(|(id, _, _)| if *id == "steam" { Control::Steam } else { Control::Utility(*id) })
@@ -219,8 +236,8 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         (Control::Layout, "Desktop layout default", format!("< {} >", LAYOUTS[appearance.layout])),
                     ];
                     frame.render_widget(Table::new(settings.into_iter().map(|(control, label, value)|
-                        Row::new([Cell::from(label), Cell::from(value)]).bottom_margin(u16::from(control != Control::Layout)).style(if controls[focus] == control { focused }
-                            else if control == Control::Theme && appearance.policy { muted } else { Style::default() })),
+                        Row::new([Cell::from(label), Cell::from(value + if !controls.contains(&control) && !(control == Control::Theme && appearance.policy) { " (symlink/read-only)" } else { "" })]).bottom_margin(u16::from(control != Control::Layout)).style(if controls[focus] == control { focused }
+                            else if !controls.contains(&control) { muted } else { Style::default() })),
                         [Constraint::Length(23), Constraint::Min(20)]).column_spacing(2), utilities);
                     frame.render_widget(Paragraph::new(message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
                 } else if page == 2 {
@@ -228,13 +245,14 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         Line::from("First-party widgets; no plugin loading.").style(accent),
                         Line::from("Save commits widgets only; Cancel/Esc discards drafts.").style(muted),
                         Line::from("Installer drafts stay pending; appearance stays live.").style(muted),
-                        Line::from(if widgets.supported { "Saved preferences apply live and survive session restart." }
+                        Line::from(if widgets.linked.iter().any(|linked| *linked) { "Symlinked preferences are read-only." }
+                            else if widgets.supported { "Saved preferences apply live and survive session restart." }
                             else { "Unavailable: restore shipped settings/entry via Installer." }).style(muted),
                     ]), intro);
                     frame.render_widget(Table::new(WIDGETS.iter().enumerate().map(|(index, (_, label, description))| {
                         Row::new([Cell::from(Text::from(vec![Line::from(*label), Line::from(*description).style(if controls[focus] == Control::Widget(index) { focused } else { muted })])),
                             Cell::from(format!("[{}]{}", if !widgets.supported { "?" } else if widgets.enabled[index] { "x" } else { " " },
-                                if widgets.policy[index] { " Nix policy" } else if !widgets.supported { " unavailable" } else { "" }))]).height(2).top_margin(u16::from(index == 0)).bottom_margin(1)
+                                if widgets.linked[index] { " symlink" } else if widgets.policy[index] { " Nix policy" } else if !widgets.supported { " unavailable" } else { "" }))]).height(2).top_margin(u16::from(index == 0)).bottom_margin(1)
                             .style(if controls[focus] == Control::Widget(index) { focused }
                                 else if widgets.policy[index] || !widgets.supported { muted } else { Style::default() })
                     }), [Constraint::Min(36), Constraint::Length(16)]).column_spacing(2), utilities);
@@ -244,7 +262,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     Line::from("Optional utilities, configured for Icewine.").style(accent),
                     Line::from("Selected utilities are installed and configured.").style(muted),
                     Line::from(if readonly {
-                        "NixOS: utility selections are read-only."
+                        "Utility selections are read-only (host policy or symlink)."
                     } else {
                         "Deselecting removes Icewine configuration; packages stay installed."
                     }).style(muted),
@@ -271,7 +289,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     .style(if controls[focus] == Control::Overwrite { focused } else { Style::default() }), reset);
                 }
                 frame.render_widget(Paragraph::new(Line::from(vec![
-                    Span::styled(if page == 2 { "[ Save ]" } else { "[ Apply ]" }, if controls[focus] == Control::Apply { focused } else if page == 2 && !widgets.supported { muted } else { accent }),
+                    Span::styled(if page == 2 { "[ Save ]" } else { "[ Apply ]" }, if controls[focus] == Control::Apply { focused } else if page == 2 && (!widgets.supported || widgets.policy.iter().all(|locked| *locked)) { muted } else { accent }),
                     Span::raw("   "),
                     Span::styled("[ Cancel ]", if controls[focus] == Control::Cancel { focused } else { muted }),
                 ])), buttons);
@@ -308,6 +326,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                             appearance.policy = updated.policy;
                             appearance.transparency = updated.transparency;
                             appearance.layout = updated.layout;
+                            appearance.readonly = updated.readonly;
                         }
                         Err(error) => message.push_str(&format!("\nCould not refresh appearance state: {error}")),
                     }
@@ -350,6 +369,11 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         message = match result { Ok(text) => text, Err(error) => error.to_string() };
                     }
                     Control::Monitors => {
+                        appearance = Appearance::load()?;
+                        if appearance.readonly[3] {
+                            message = "Monitor configuration is now symlinked/read-only.".into();
+                            continue;
+                        }
                         ratatui::restore();
                         let result = Command::new("hyprmon").status();
                         terminal = ratatui::init();
@@ -480,13 +504,13 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     if let Some(overwrite) = choose(readonly, &mut selected, &mut steam)? {
         let choices = ROWS.iter().map(|(id, label, _)| format!("{label}: {}",
             if *id == "steam" { STEAM[steam].to_owned() } else { selected[id].to_string() })).collect::<Vec<_>>();
-        let mut plan = vec![if readonly { "NixOS: host packages/services remain declarative; deploy selected user defaults.".into() }
+        let mut plan = vec![if readonly { "Host packages/services remain unchanged; deploy selected user defaults.".into() }
             else { "Install selected packages; configure selected utilities; deselection keeps packages.".into() }];
         plan.push("Create missing shared Quickshell/wallpaper defaults and publish theme outputs.".into());
         plan.extend(choices);
         plan.push(if overwrite { "Overwrite selected defaults WITHOUT backups.".into() }
             else { "Preserve existing dotfiles; create missing defaults. btop selects the Icewine theme in regular configs.".into() });
-        plan.push(if readonly { "Host services and device permissions remain in your NixOS configuration.".into() }
+        plan.push(if readonly { "Host services and device permissions remain host policy.".into() }
             else { "Host prerequisites: services/device permissions; Multilib for native Steam; private packages for Handheld.".into() });
         plan.push("Earlier package/file changes can remain after failure or interruption. Retry Apply after resolving the error.".into());
         plan.push("Cancel leaves utility choices unapplied; earlier Appearance changes remain.".into());

@@ -68,7 +68,22 @@ def xdg(name, fallback):
     return Path(value if value else Path.home() / fallback).expanduser()
 
 
+def symlinked(path, target=None):
+    """Find an external link without traversing a linked parent, including dangling links."""
+    for part in reversed((path, *path.parents)):
+        if part.is_symlink() and not (part == path and target is not None and os.readlink(part) == str(target)):
+            return part
+    return None
+
+
+def writable(path, target=None):
+    link = symlinked(path, target)
+    if link is not None:
+        raise ValueError(f"read-only symlink: {path} (via {link})")
+
+
 def atomic_text(path, contents, mode=None, *, root=None, signature=None):
+    writable(path)
     if root is not None and not still_current(path, root, signature):
         raise ValueError(f"default changed before atomic write: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +96,7 @@ def atomic_text(path, contents, mode=None, *, root=None, signature=None):
             if mode is not None:
                 os.fchmod(stream.fileno(), mode)
             os.fsync(stream.fileno())
+        writable(path)
         if root is not None and not still_current(path, root, signature):
             raise ValueError(f"default changed during atomic write: {path}")
         try:
@@ -103,14 +119,16 @@ def atomic_text(path, contents, mode=None, *, root=None, signature=None):
             os.unlink(temporary)
 
 
-def atomic_link(path, target, *, root=None, signature=None):
-    if root is not None and not still_current(path, root, signature):
+def atomic_link(path, target, *, root=None, signature=None, previous_target=None):
+    writable(path, previous_target)
+    if root is not None and not still_current(path, root, signature, previous_target):
         raise ValueError(f"default changed before atomic link: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.parent / (".icewine-" + secrets.token_hex(8))
     try:
         temporary.symlink_to(target)
-        if root is not None and not still_current(path, root, signature):
+        writable(path, previous_target)
+        if root is not None and not still_current(path, root, signature, previous_target):
             raise ValueError(f"default changed during atomic link: {path}")
         os.replace(temporary, path)
     finally:
@@ -256,20 +274,37 @@ def effective(state, themes):
     raise AssertionError("unreachable")
 
 
+def current_target(config):
+    current = config / "icewine/current"
+    if symlinked(current.parent) is None and current.is_symlink():
+        target = Path(os.readlink(current))
+        if target.parent == config / "icewine/rendered" and re.fullmatch(r"[0-9a-f]{64}", target.name):
+            return target
+    return None
+
+
+def render_readonly(config):
+    return symlinked(config / "icewine/rendered") or symlinked(config / "icewine/current", current_target(config))
+
+
 # Ponytail: cross-request freshness is deferred without a reproduced stale render; reuse ordering on the existing publication lock if demonstrated.
 def publish(config, files):
     root = config / "icewine/rendered"
-    if any(parent.is_symlink() for parent in (root, *root.parents)):
-        raise ValueError(f"refusing symlinked render directory: {root}")
+    writable(root)
+    current = config / "icewine/current"
+    previous_target = current_target(config)
+    writable(current, previous_target)
     root.mkdir(parents=True, exist_ok=True)
     fd = os.open(root / ".publish.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "r+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        current = config / "icewine/current"
+        previous_target = current_target(config)
+        writable(current, previous_target)
         if current.exists() and not current.is_symlink():
             raise ValueError(f"refusing to replace non-link: {current}")
         digest = hashlib.sha256("".join(f"{name}\0{files[name]}\0" for name in sorted(files)).encode()).hexdigest()
         destination = root / digest
+        writable(destination)
         if not destination.exists():
             temporary = Path(tempfile.mkdtemp(prefix=".render-", dir=root))
             try:
@@ -287,7 +322,7 @@ def publish(config, files):
         if not destination.is_dir() or any((destination / name).read_text(encoding="utf-8") != contents
                                             for name, contents in files.items()):
             raise ValueError(f"rendered theme files were modified: {destination}")
-        atomic_link(current, destination)
+        atomic_link(current, destination, previous_target=previous_target)
         for previous in root.iterdir():
             if (previous != destination and re.fullmatch(r"[0-9a-f]{64}", previous.name)
                     and previous.is_dir() and not previous.is_symlink()):
@@ -304,17 +339,17 @@ def install_links(config, state, replace, app=None):
         if defaults and (Path(defaults) / "config" / relative).is_file():
             continue
         path = config / relative
-        signature = default_signature(path)
-        if not still_current(path, config, signature):
-            continue
         target = config / "icewine/current" / name
+        signature = default_signature(path)
+        if not still_current(path, config, signature, target):
+            continue
         if signature == "link:" + str(target):
             continue
         if signature is not None and not replace:
             continue
         if path.exists() and not path.is_file() and not path.is_symlink():
             raise ValueError(f"refusing to replace non-file: {path}")
-        atomic_link(path, target, root=config, signature=signature)
+        atomic_link(path, target, root=config, signature=signature, previous_target=target)
         entry["files"][relative] = "link:" + str(target)
         atomic_text(state / "default-files.json", json.dumps(records, sort_keys=True) + "\n")
 
@@ -340,7 +375,10 @@ def default_signature(path):
     return None
 
 
-def still_current(path, root, signature):
+def still_current(path, root, signature, link_target=None):
+    if symlinked(path, link_target) is not None:
+        print(f"read-only symlink: preserved {path}", file=sys.stderr)
+        return False
     if (default_signature(path) != signature
             or (signature is None and path.exists())
             or any(parent.is_symlink() or (parent.exists() and not parent.is_dir())
@@ -352,8 +390,7 @@ def still_current(path, root, signature):
 
 def default_records(state):
     manifest = state / "default-files.json"
-    if manifest.is_symlink():
-        raise ValueError(f"refusing symlinked defaults ownership record: {manifest}")
+    writable(manifest)
     records = json.loads(manifest.read_text()) if manifest.exists() else {}
     if not isinstance(records, dict) or set(records) - {"config", "data", "home"}:
         raise ValueError(f"invalid defaults ownership record: {manifest}")
@@ -386,11 +423,13 @@ def install_defaults(defaults, config, data, state, replace, app):
             if app and static_app(root_name, relative) != app:
                 continue
             path = root / relative
-            signature = default_signature(path)
-            if not still_current(path, root, signature):
-                continue
             implementation = shipped.is_symlink()
             target = config / os.readlink(shipped) if implementation else None
+            signature = default_signature(path)
+            previous_target = signature[5:] if (implementation and signature is not None
+                and signature.startswith("link:") and signature == entry["files"].get(relative.as_posix())) else target
+            if not still_current(path, root, signature, previous_target):
+                continue
             expected = "link:" + str(target) if implementation else default_signature(shipped)
             if signature == expected:
                 continue
@@ -409,7 +448,7 @@ def install_defaults(defaults, config, data, state, replace, app):
             if path.exists() and not path.is_file() and not path.is_symlink():
                 raise ValueError(f"refusing to replace non-file: {path}")
             if implementation:
-                atomic_link(path, target, root=root, signature=signature)
+                atomic_link(path, target, root=root, signature=signature, previous_target=previous_target)
             else:
                 contents = shipped.read_bytes()
                 atomic_text(path, contents, 0o644, root=root, signature=signature)
@@ -420,6 +459,9 @@ def install_defaults(defaults, config, data, state, replace, app):
 def install_gtk_theme(config, theme_id):
     path = xdg("XDG_DATA_HOME", ".local/share") / "themes" / ("Icewine-" + theme_id) / "gtk-3.0/gtk.css"
     target = config / "icewine/current/gtk3-theme.css"
+    if symlinked(path, target) is not None:
+        print(f"read-only symlink: preserved {path}", file=sys.stderr)
+        return
     if path.is_symlink() and os.readlink(path) == str(target):
         return
     if path.exists() or path.is_symlink():
@@ -605,6 +647,10 @@ def dispatch(argv):
         raise ValueError("unexpected arguments")
     config = xdg("XDG_CONFIG_HOME", ".config")
     state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    if args and not (command == "theme" and args == ["status"]):
+        writable(state / command)
+        if command in {"theme", "transparency"} and render_readonly(config):
+            raise ValueError("read-only symlink: generated theme configuration")
     if command == "layout":
         path = state / "layout"
         layouts = ("scrolling", "dwindle", "master", "monocle")
@@ -655,7 +701,7 @@ def dispatch(argv):
         print(f"Transparency: {transparency_level(state)} (off, low, med, high)")
         return 0
     if command == "theme" and args == ["status"]:
-        if os.environ.get("WAYLAND_DISPLAY"):
+        if os.environ.get("WAYLAND_DISPLAY") and os.environ.get("ICEWINE_THEME_FROM_SHELL") != "1":
             try:
                 result = subprocess.run(["qs", "ipc", "call", "theme", "status"],
                                         check=True, capture_output=True, text=True, timeout=10)
@@ -677,7 +723,7 @@ def dispatch(argv):
         requested = args[0]
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", requested) or requested not in themes:
             raise ValueError(f"theme is not installed: {requested}")
-        if os.environ.get("WAYLAND_DISPLAY"):
+        if os.environ.get("WAYLAND_DISPLAY") and os.environ.get("ICEWINE_THEME_FROM_SHELL") != "1":
             try:
                 result = subprocess.run(["qs", "ipc", "call", "theme", "select", requested],
                                         capture_output=True, text=True, timeout=10)
@@ -692,6 +738,8 @@ def dispatch(argv):
                 pass
             print("Pending: Quickshell is unavailable; saving selection for next login.", file=sys.stderr)
         atomic_text(state / "theme", requested + "\n")
+        if os.environ.get("ICEWINE_THEME_FROM_SHELL") == "1":
+            print("Saved selection: " + requested, flush=True)
     elif command == "transparency":
         if args[0] not in TRANSPARENCY:
             raise ValueError("invalid transparency; choose off, low, med or high")

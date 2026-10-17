@@ -57,10 +57,8 @@ def selections(state):
     if platform.freedesktop_os_release().get("ID") not in {"arch", "cachyos"}:
         raise ValueError("Icewine manager supports Arch/CachyOS or the NixOS module")
     path = state / "manage.json"
-    if path.is_symlink():
-        raise ValueError("refusing symlinked manager state")
     saved = validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, False) | {"steam": "none"}
-    return False, saved | {"login": False}
+    return theme.symlinked(path) is not None, saved | {"login": False}
 
 
 WIDGETS = ("notificationToasts", "windowSwitcher")
@@ -72,8 +70,6 @@ def widget_state(config, state):
             or any(value is not None and type(value) is not bool for value in policy.values())):
         raise ValueError("invalid widget policy")
     path = state / "widgets.json"
-    if path.is_symlink():
-        raise ValueError("refusing symlinked widget state")
     contents = path.read_bytes() if path.exists() else None
     saved = json.loads(contents) if contents is not None else {}
     revision = hashlib.sha256(contents or b"").hexdigest()
@@ -97,11 +93,13 @@ def widget_state(config, state):
 
 def widgets(argv, config, state):
     saved, policy, supported, revision = widget_state(config, state)
+    linked = theme.symlinked(state / "widgets.json") is not None
     if argv == ["widgets-state"]:
         print("supported=" + str(supported).lower(), "revision=" + revision, *[
-            f"{name}={str(policy.get(name) if policy.get(name) is not None else saved.get(name, True)).lower()}:{'policy' if policy.get(name) is not None else 'user'}"
+            f"{name}={str(policy.get(name) if policy.get(name) is not None else saved.get(name, True)).lower()}:{'policy' if policy.get(name) is not None else 'symlink' if linked else 'user'}"
             for name in WIDGETS])
         return
+    theme.writable(state / "widgets.json")
     if len(argv) != 4 or argv[1] != "revision=" + revision:
         raise ValueError("Widget preferences changed; reopen the manager before saving")
     fields = {}
@@ -121,9 +119,9 @@ def widgets(argv, config, state):
     print("Widget preferences saved; the shipped shell watches this file.")
 
 
-def run(argv):
+def run(argv, **kwargs):
     print("Running: " + " ".join(argv), flush=True)
-    subprocess.run(argv, check=True)
+    subprocess.run(argv, check=True, **kwargs)
 
 
 def retire(config, data, state, feature):
@@ -140,7 +138,7 @@ def retire(config, data, state, feature):
             if not matches:
                 continue
             path = root / name
-            if theme.still_current(path, root, signature):
+            if theme.still_current(path, root, signature, signature[5:] if signature.startswith("link:") else None):
                 path.unlink(missing_ok=True)
                 del entry["files"][name]
     theme.atomic_text(state / "default-files.json", json.dumps(records, sort_keys=True) + "\n")
@@ -181,7 +179,11 @@ def session_environment(selected):
 
 def apply(selected, overwrite, readonly, previous, config, data, state):
     if readonly and selected != previous:
-        raise ValueError("NixOS utility selections are read-only")
+        raise ValueError("utility selections are read-only (host policy or symlink)")
+    if not readonly and platform.freedesktop_os_release().get("ID") not in {"arch", "cachyos"}:
+        raise ValueError("host package/service changes are supported only on Arch/CachyOS")
+    for name in ("applied.json", "default-files.json", "handheld-rules.sha256", *(() if readonly else ("manage.json",))):
+        theme.writable(state / name)
     # Read the previous explicit Apply on NixOS too: rebuilds never touch dotfiles.
     applied_path = state / "applied.json"
     if applied_path.is_symlink():
@@ -240,7 +242,10 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         themes = theme.installed(assets)
         theme_id, _ = theme.effective(state, themes)
         files = theme.render_theme(assets, themes[theme_id], theme.transparency_level(state))
-        theme.publish(config, files)
+        if theme.render_readonly(config):
+            print("read-only symlink: preserved generated theme configuration", file=sys.stderr)
+        else:
+            theme.publish(config, files)
         for feature in FEATURES:
             if applied[feature] and not selected[feature]:
                 retire(config, data, state, feature)
@@ -255,7 +260,12 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
                 if app in theme.APPS and theme.APPS[app]:
                     theme.install_links(config, state, overwrite, app)
         if selected["filemanager"] and not readonly:
-            run(["xdg-mime", "default", "icewine-yazi.desktop", "inode/directory"])
+            if any(theme.symlinked(config / name) for name in ("mimeapps.list", "mimeapps.list.new")):
+                print(f"read-only symlink: preserved {config / 'mimeapps.list'}", file=sys.stderr)
+            else:
+                # Set the generic XDG file, independent of the onboarding desktop.
+                run(["xdg-mime", "default", "icewine-yazi.desktop", "inode/directory"],
+                    env=dict(os.environ, XDG_CURRENT_DESKTOP="X-Generic", DE="generic", XDG_UTILS_INSTALL_MODE="user"))
         if selected["desktop"] and os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false":
             theme.install_gtk_theme(config, theme_id)
         if not readonly and changed:
@@ -302,11 +312,22 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
 def main(argv):
     config, data = theme.xdg("XDG_CONFIG_HOME", ".config"), theme.xdg("XDG_DATA_HOME", ".local/share")
     state = theme.xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    if argv == ["file-state"]:
+        render = theme.render_readonly(config)
+        wallpaper_data = Path(os.environ.get("ICEWINE_WALLPAPER_DATA_HOME") or data)
+        print(" ".join(f"{name}={str(bool(link)).lower()}" for name, link in {
+            "theme": theme.symlinked(state / "theme") or render,
+            "transparency": theme.symlinked(state / "transparency") or render,
+            "wallpaper": theme.symlinked(wallpaper_data / "icewine/wallpapers/selection.img"),
+            "monitors": theme.symlinked(config / "hypr/hyprland.lua") or theme.symlinked(config / "hypr/hyprmon.lua"),
+            "layout": theme.symlinked(state / "layout"),
+        }.items()))
+        return
     if argv == ["widgets-state"]:
         widgets(argv, config, state)
         return
     widget_request = bool(argv) and argv[0] == "widgets-apply"
-    readonly, previous = selections(state)
+    readonly, previous = selections(state) if not widget_request else (False, {})
     if argv == ["state"]:
         print(" ".join(f"{name}={str(bit).lower()}" for name, bit in {"readonly": readonly, **previous}.items()))
         return
@@ -325,10 +346,7 @@ def main(argv):
         selected = validate(fields)
     if os.getuid() == 0:
         raise ValueError("run icewine manage as your desktop user")
-    # Never follow symlinked manager/configuration roots into someone else's files.
-    for root in (Path.home(), config, data, state):
-        if any(parent.is_symlink() for parent in (root, *root.parents)):
-            raise ValueError(f"refusing symlinked deployment root: {root}")
+    theme.writable(state / "defaults.lock")
     state.mkdir(parents=True, exist_ok=True)
     fd = os.open(state / "defaults.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "r+") as lock:

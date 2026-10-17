@@ -40,6 +40,7 @@ from unittest.mock import patch
 script, source, selection = map(Path, sys.argv[1:])
 os.environ['ICEWINE_WALLPAPER_VALIDATOR'] = str(script.resolve().parent.parent / 'quickshell/modules/WallpaperValidator.qml')
 selector = types.ModuleType('wallpaper_selector')
+selector.__file__ = str(script)
 importlib.machinery.SourceFileLoader(selector.__name__, str(script)).exec_module(selector)
 previous = selection.read_bytes()
 with patch.object(selector.os, 'replace', side_effect=PermissionError('test commit failure')):
@@ -60,5 +61,27 @@ for error in (subprocess.TimeoutExpired('qs ipc', 10), FileNotFoundError('qs una
         selector.select([str(source)])
     assert selection.read_bytes() == source.read_bytes()
     assert len(calls) == 1 and 'saved' in warning.getvalue() and 'next launch' in warning.getvalue()
+# Leaf and parent links are preserved before validation or image publication.
+external = selection.parent.parent / 'declared-wallpaper'
+external.write_bytes(previous)
+selection.unlink()
+selection.symlink_to(external)
+for dangling in (False, True):
+    if dangling: external.unlink()
+    with patch.object(selector, 'validate', side_effect=AssertionError('validated read-only selection')):
+        try: selector.select([str(source)])
+        except ValueError as error: assert 'read-only symlink' in str(error)
+        else: raise AssertionError('replaced linked wallpaper')
+    assert selection.is_symlink()
+    assert not external.exists() if dangling else external.read_bytes() == previous
+selection.unlink()
+directory = selection.parent
+external_directory = directory.with_name('external-wallpapers')
+directory.rename(external_directory)
+directory.symlink_to(external_directory)
+try: selector.select([str(source)])
+except ValueError as error: assert 'read-only symlink' in str(error)
+else: raise AssertionError('followed linked wallpaper directory')
+assert not (external_directory / 'selection.img').exists()
 PY
 echo 'PASS: desktop selection, private mode, validation, atomic failure recovery and retired auth commands'

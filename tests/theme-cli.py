@@ -221,6 +221,58 @@ with tempfile.TemporaryDirectory() as temporary:
         else:
             raise AssertionError("publication must propagate non-collision errors")
     assert current.resolve() == previous and (current / "palette.json").is_file()
+    # File ownership is action-specific, independent of the host distribution.
+    for name, old, new in (("theme", "catppuccin-mocha", "dracula"),
+                           ("transparency", "high", "low"),
+                           ("layout", "scrolling", "master"),
+                           ("autofullscreen", "off", "on")):
+        path = state / "icewine" / name
+        original = path.read_bytes() if path.exists() else None
+        path.unlink(missing_ok=True)
+        declared = root / ("declared-" + name)
+        declared.write_text(old + "\n")
+        path.symlink_to(declared)
+        assert run(name).returncode == 0
+        rejected = run(name, new)
+        assert rejected.returncode == 1 and "read-only symlink" in rejected.stderr
+        assert path.is_symlink() and declared.read_text() == old + "\n"
+        if name == "theme":
+            assert run("transparency", "low").returncode == 0
+        declared.unlink()
+        assert run(name, new).returncode == 1
+        assert path.is_symlink() and not declared.exists()
+        path.unlink()
+        if original is not None: path.write_bytes(original)
+    directory = state / "icewine"
+    external_state = root / "external-state"
+    directory.rename(external_state)
+    directory.symlink_to(external_state)
+    assert run("layout", "master").returncode == 1
+    assert not (external_state / "layout").exists()
+    directory.unlink()
+    external_state.rename(directory)
+    # A link introduced during an atomic write is preserved too.
+    race = directory / "layout"
+    outside = root / "race-target"
+    outside.write_text("preserve\n")
+    def link_during_write(fd):
+        race.symlink_to(outside)
+    with mock.patch.object(module.os, "fsync", side_effect=link_during_write):
+        try: module.atomic_text(race, "master\n")
+        except ValueError: pass
+        else: raise AssertionError("atomic write replaced a newly introduced link")
+    assert race.is_symlink() and outside.read_text() == "preserve\n"
+    race.unlink()
+    assert not list(directory.glob(".icewine-*"))
+    protected_config = root / "protected-config"
+    protected_current = protected_config / "icewine/current"
+    protected_current.parent.mkdir(parents=True)
+    protected_current.symlink_to(external)
+    try: module.publish(protected_config, {"palette.json": "changed"})
+    except ValueError: pass
+    else: raise AssertionError("publication replaced an external current link")
+    assert protected_current.is_symlink() and os.readlink(protected_current) == str(external)
+    assert (external / "keep").read_text() == "user data"
     # Every shipped palette renders app-native files, including light mode.
     kitty_entry.write_text("user Kitty theme edit\n")
     for theme_id, background, appearance in [

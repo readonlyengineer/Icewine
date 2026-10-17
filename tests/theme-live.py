@@ -49,8 +49,8 @@ ShellRoot {
 ''')
     current = root / "config/icewine/current"
     current.parent.mkdir(parents=True)
-    initial = root / "initial"
-    initial.mkdir()
+    initial = current.parent / "rendered" / ("0" * 64)
+    initial.mkdir(parents=True)
     current.symlink_to(initial)
     (current / "palette.json").write_text(json.dumps(palette("tokyo-night")))
     (root / "state/icewine").mkdir(parents=True)
@@ -59,11 +59,14 @@ ShellRoot {
     for theme in ("tokyo-night", "dracula", "nord"):
         (root / (theme + ".json")).write_text(json.dumps(palette(theme)))
     renderer = root / "bin/icewine-theme"
-    renderer.write_text(shell_header +
-                        "sleep 0.15\n"
-                        'test ! -e "$TEST_ROOT/fail" || exit 2\n'
-                        'theme=$(cat "$XDG_STATE_HOME/icewine/theme")\n'
-                        'cp "$TEST_ROOT/$theme.json" "$XDG_CONFIG_HOME/icewine/current/palette.json"\n')
+    renderer.write_text("#!" + sys.executable + "\n" +
+        "import importlib.machinery, os, shutil, sys, time\nfrom pathlib import Path\n" +
+        "theme = importlib.machinery.SourceFileLoader('fixture_theme', " + repr(str(source / "scripts/theme")) + ").load_module()\n" +
+        "time.sleep(0.15)\n" +
+        "theme.atomic_text(Path(os.environ['XDG_STATE_HOME']) / 'icewine/theme', sys.argv[2] + '\\n')\n" +
+        "print('Saved selection: ' + sys.argv[2], flush=True)\n" +
+        "root = Path(os.environ['TEST_ROOT'])\nif (root / 'fail').exists(): sys.exit(2)\n" +
+        "shutil.copyfile(root / (sys.argv[2] + '.json'), Path(os.environ['XDG_CONFIG_HOME']) / 'icewine/current/palette.json')\n")
     renderer.chmod(0o755)
     env = dict(os.environ, HOME=str(root), QT_QPA_PLATFORM="offscreen", WAYLAND_DISPLAY="icewine-test",
                XDG_CONFIG_HOME=str(root / "config"),
@@ -152,6 +155,23 @@ ShellRoot {
             until("applied: nord")
             assert (state_dir / "theme").read_text() == "nord\n"
             assert json.loads((current / "palette.json").read_text())["themeId"] == "nord"
+        # Direct IPC uses the same guarded writer as the CLI, including links
+        # whose readable target already contains the requested theme.
+        selected = state_dir / "theme"
+        selected.unlink()
+        declared = root / "declared-theme"
+        declared.write_text("nord\n")
+        selected.symlink_to(declared)
+        call("select", "nord")
+        until("failed: selection could not be saved")
+        assert selected.is_symlink() and declared.read_text() == "nord\n"
+        call("select", "dracula")
+        until("failed: selection could not be saved")
+        assert selected.is_symlink() and declared.read_text() == "nord\n"
+        declared.unlink()
+        call("select", "dracula")
+        until("failed: selection could not be saved")
+        assert selected.is_symlink() and not declared.exists()
     finally:
         shell.terminate()
         try:

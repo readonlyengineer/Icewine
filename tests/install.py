@@ -130,10 +130,44 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         else: raise AssertionError("accepted malformed widget preference")
         (widget_saved / "widgets.json").unlink()
         (widget_saved / "widgets.json").symlink_to(root / "other.json")
-        try: widget_status()
+        assert widget_status()["windowSwitcher"] == "true:symlink"
+        try: save_widgets(widget_status()["revision"])
+        except ValueError as error: assert "read-only symlink" in str(error)
+        else: raise AssertionError("replaced dangling widget link")
+        assert (widget_saved / "widgets.json").is_symlink() and not (root / "other.json").exists()
+        (root / "other.json").write_text('{"windowSwitcher":false}')
+        assert widget_status()["windowSwitcher"] == "false:symlink"
+        try: save_widgets(widget_status()["revision"])
         except ValueError: pass
-        else: raise AssertionError("followed symlinked widget state")
+        else: raise AssertionError("replaced declarative widget preferences")
+        assert (root / "other.json").read_text() == '{"windowSwitcher":false}'
         (widget_saved / "widgets.json").unlink()
+        # Widget saves do not depend on host package support or utility state.
+        with patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "nixos"}):
+            save_widgets(widget_status()["revision"])
+            assert widget_status()["windowSwitcher"] == "false:user"
+        outside_state = root / "outside-widget-state"
+        widget_saved.rename(outside_state)
+        widget_saved.symlink_to(outside_state)
+        before = (outside_state / "widgets.json").read_bytes()
+        assert widget_status()["windowSwitcher"] == "false:symlink"
+        try: save_widgets(widget_status()["revision"], "true", "true")
+        except ValueError: pass
+        else: raise AssertionError("saved widgets through linked state directory")
+        assert (outside_state / "widgets.json").read_bytes() == before
+        widget_saved.unlink()
+        outside_state.rename(widget_saved)
+        # A linked theme locks only that appearance action; queries never write.
+        (widget_saved / "theme").symlink_to(root / "absent-declared-theme")
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            manage.main(["file-state"])
+        assert dict(field.split("=") for field in output.getvalue().split()) == {
+            "theme": "true", "transparency": "false", "wallpaper": "false", "monitors": "false", "layout": "false"}
+        # Backend host policy cannot be bypassed by directly invoking Apply.
+        with patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "nixos"}):
+            try: manage.apply(false, False, False, false, widget_config, data, widget_saved)
+            except ValueError as error: assert "Arch/CachyOS" in str(error)
+            else: raise AssertionError("NixOS reached native package operations")
     if sys.argv[2:] == ["--widgets-only"]:
         print("PASS: focused widget state/Save, absent versus empty, failed-write preservation and policy")
         sys.exit(0)
@@ -223,9 +257,10 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         kitty.unlink()
         kitty.symlink_to(target)
         apply(("terminal",), overwrite=True)
-        assert not kitty.is_symlink() and kitty.read_text() == "kitty\n"
+        assert kitty.is_symlink() and kitty.read_text() == "keep me\n"
         assert target.read_text() == "keep me\n"
         # An edited deselected entry remains; untouched Icewine files retire.
+        kitty.unlink()
         kitty.write_text("keep user edits\n")
         apply()
         assert kitty.read_text() == "keep user edits\n"
@@ -374,13 +409,8 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     locale.unlink()
     locale.symlink_to(target)
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), patch.object(manage.theme.os, "replace", side_effect=busy):
-        try:
-            apply(("desktop",), overwrite=True)
-        except OSError as error:
-            assert error.errno == errno.EBUSY
-        else:
-            raise AssertionError("Busy symlink reached unrelated target")
-    assert target.read_text() == "keep me\n"
+        apply(("desktop",), overwrite=True)
+    assert locale.is_symlink() and target.read_text() == "keep me\n"
     locale.unlink()
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
         apply()
@@ -397,11 +427,15 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
         apply(("filemanager",))
         assert commands.call_args_list[-1].args[0] == ["xdg-mime", "default", "icewine-yazi.desktop", "inode/directory"]
+        assert commands.call_args_list[-1].kwargs["env"]["XDG_CURRENT_DESKTOP"] == "X-Generic"
     mime_source = root / "home-manager-mimeapps.list"
     mime_source.write_text("[Default Applications]\nimage/png=imv.desktop;\n")
     mime = config / "mimeapps.list"
     mime.symlink_to(mime_source)
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+        apply(("filemanager",))
+        assert not any(call.args[0][0] == "xdg-mime" for call in commands.call_args_list)
+        commands.reset_mock()
         apply(("filemanager", "shellExtras"), readonly=True)
         assert not commands.called
         assert not (config / "nano/nanorc").exists()
@@ -544,7 +578,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             assert "read-only" in str(error)
         else:
             raise AssertionError("NixOS choices were editable")
-    # Overwrite may replace a leaf symlink but cannot traverse a symlinked parent.
+    # Overwrite preserves linked leaves and parents while unrelated files work.
     unrelated = root / "outside kitty"
     unrelated.mkdir()
     (unrelated / "kitty.conf").write_text("outside\n")
@@ -597,21 +631,18 @@ with tempfile.TemporaryDirectory() as temporary:
     home.symlink_to(outside)
     declared = dict.fromkeys(manage.FEATURES, False) | {"steam": "none"}
     declared["shellExtras"] = True
+    defaults = root / "defaults"
+    for name in ("config", "data", "home"):
+        (defaults / name).mkdir(parents=True)
+    (defaults / "home/.bashrc").write_text("default shell\n")
     env = dict(HOME=str(home), XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"),
-               XDG_STATE_HOME=str(root / "state"), ICEWINE_MANAGE_SELECTIONS=json.dumps(declared))
+               XDG_STATE_HOME=str(root / "state"), ICEWINE_MANAGE_SELECTIONS=json.dumps(declared),
+               ICEWINE_DEFAULT_FILES=str(defaults), ICEWINE_THEME_ASSETS=str(source / "theme/assets"), ICEWINE_GTK_ENABLE="false")
     with patch.dict(os.environ, env), patch.object(manage.subprocess, "run", side_effect=AssertionError("host operation before root validation")):
-        try:
-            manage.main(["apply", *[f"{name}={str(bit).lower()}" for name, bit in declared.items()], "overwrite=true"])
-        except ValueError as error:
-            assert "symlinked deployment root" in str(error)
-        else:
-            raise AssertionError("Apply followed symlinked HOME")
-    request = [f"{name}={str(value).lower()}" for name, value in declared.items()]
-    failed = subprocess.run([sys.executable, str(source / "scripts/manage"), "apply", *request, "overwrite=false"],
-                            env=dict(os.environ, **env), capture_output=True, text=True)
-    assert failed.returncode == 1
+        manage.main(["apply", *[f"{name}={str(bit).lower()}" for name, bit in declared.items()], "overwrite=true"])
     assert (outside / ".bashrc").read_text() == "external shell config\n"
-    assert not (root / "state").exists() and not (root / "config").exists()
+    assert (root / "state/icewine/applied.json").is_file()
+    assert (root / "config/icewine/current").is_symlink()
 
 # Manager routes unchanged literal arguments.
 with tempfile.TemporaryDirectory() as temporary:

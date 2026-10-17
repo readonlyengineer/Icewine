@@ -73,10 +73,11 @@ with tempfile.TemporaryDirectory() as temporary:
     backend.write_text('#!' + sys.executable + '\n' + '''import json,os,sys
 with open(os.environ["TUI_LOG"],"a") as stream: stream.write(json.dumps(sys.argv[1:])+"\\n")
 if sys.argv[1:] == ["state"]: print(os.environ["TUI_STATE"])
+elif sys.argv[1:] == ["file-state"]: print(os.environ["TUI_FILE_STATE"])
 elif sys.argv[1:] == ["widgets-state"]:
  with open(os.environ["TUI_WIDGETS"]) as stream: saved=json.load(stream)
  print("supported="+os.environ["TUI_WIDGET_SUPPORTED"], "revision="+"a"*64, *[
-  name+"="+str(saved[name]).lower()+":"+("policy" if name in os.environ["TUI_WIDGET_POLICY"].split(",") else "user")
+  name+"="+str(saved[name]).lower()+":"+("symlink" if os.environ["TUI_WIDGET_LINKED"] == "1" else "policy" if name in os.environ["TUI_WIDGET_POLICY"].split(",") else "user")
   for name in ("notificationToasts","windowSwitcher")])
 elif sys.argv[1] == "widgets-apply":
  if os.environ["TUI_WIDGET_FAIL"] == "1":
@@ -120,7 +121,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, incomplete=False):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, incomplete=False, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False):
         global last_output, last_frames, last_widget_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.unlink(missing_ok=True)
@@ -136,6 +137,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
                    TUI_APPLY_EXIT=str(apply_exit), TUI_WIDGETS=str(widgets_state), TUI_WIDGET_SUPPORTED=str(widget_supported).lower(),
+                   TUI_FILE_STATE=file_state, TUI_WIDGET_LINKED=str(int(widget_linked)),
                    TUI_WIDGET_POLICY=widget_policy, TUI_WIDGET_FAIL=str(int(widget_fail)), TUI_TOOLS=str(tool_log), TUI_POLICY=str(int(policy)),
                    TUI_PICK=pick, TUI_PICK_EXIT=str(pick_exit), TUI_HYPRMON_EXIT=str(hyprmon_exit),
                    TUI_COMMAND_FAIL=str(int(command_fail)), TUI_DELIVERY_FAIL=str(int(delivery_fail)),
@@ -226,10 +228,10 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert b"Icewine Installer" in rendered
             assert b"Overwrite existing dotfiles" in rendered
             assert b"[ Apply ]" in rendered and b"[ Cancel ]" in rendered
-            assert (b"NixOS: utility selections are read-only." in rendered) == ("readonly=true" in state.split())
+            assert (b"Utility selections are read-only" in rendered) == ("readonly=true" in state.split())
         all_calls = [json.loads(line) for line in log.read_text().splitlines()]
         last_widget_calls = [call for call in all_calls if call[0].startswith("widgets-")]
-        return [call for call in all_calls if not call[0].startswith("widgets-")]
+        return [call for call in all_calls if not call[0].startswith("widgets-") and call[0] != "file-state"]
     ids = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras")
     visible = 5 # Arch hides Login; Steam none hides its two children.
     def state(readonly=False, **selected):
@@ -375,6 +377,14 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert run(tab+b"\x1b[C\x1b", state(readonly=True), policy=True) == [["state"]]
     assert ["icewine", "transparency", "high"] in tools()
     assert not any(call[:2] == ["icewine", "theme"] and len(call) == 3 for call in tools())
+    # Linked controls are skipped individually; a regular layout remains live.
+    assert run(tab+b"\x1b[C\x1b", state(readonly=True),
+               file_state="theme=true transparency=true wallpaper=true monitors=true layout=false") == [["state"]]
+    assert [call for call in tools() if len(call) == 3] == [["icewine", "layout", "dwindle"]]
+    assert b"symlink/read-only" in last_output
+    assert run(tab*2+b" \r\x1b", state(), widget_linked=True) == [["state"]]
+    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+    assert b"symlink" in last_output
     # A committed fallback is read back after failed delivery, even with utility
     # controls read-only; the next cycle and Cancel follow the saved selection.
     assert run(tab + down*4 + b"\x1b[C\x1b[C\x1b", state(readonly=True), delivery_fail=True) == [["state"]]

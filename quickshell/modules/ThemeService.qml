@@ -8,35 +8,29 @@ QtObject {
 
     property string requested: ""
     property string activeRequest: ""
+    property bool selectionSaved: false
     property string result: Theme.Palette.refresh
         ? "applied: " + Theme.Palette.snapshot.themeId
         : "pending: user-owned Palette.qml does not support live reload"
     readonly property string policy: Quickshell.env("ICEWINE_THEME_POLICY")
     readonly property var installed: Quickshell.env("ICEWINE_THEME_IDS").split(":")
 
-    property FileView selectionFile: FileView {
-        path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state")
-              + "/icewine/theme"
-        blockWrites: true
-        onSaved: {
-            if (root.policy) {
-                root.result = "saved: " + root.requested + "; Nix policy keeps " + root.policy
-            } else if (!renderer.running) {
-                root.start()
-            }
-        }
-        onSaveFailed: {
-            root.requested = root.activeRequest
-            root.result = "failed: selection could not be saved"
-        }
-    }
-
     property Process renderer: Process {
         id: renderer
-        command: ["icewine-theme", "apply"]
+        command: ["icewine-theme", "theme", root.activeRequest]
         environment: ({ ICEWINE_THEME_FROM_SHELL: "1" })
+        stdout: SplitParser {
+            onRead: data => {
+                if (data === "Saved selection: " + root.activeRequest)
+                    root.selectionSaved = true
+            }
+        }
         onExited: (code, status) => {
-            if (!Theme.Palette.refresh || !Theme.Palette.refresh()) {
+            if (!root.selectionSaved) {
+                root.result = "failed: selection could not be saved"
+            } else if (root.policy) {
+                root.result = "saved: " + root.activeRequest + "; Nix policy keeps " + root.policy
+            } else if (!Theme.Palette.refresh || !Theme.Palette.refresh()) {
                 root.result = "failed: theme saved, but shell palette could not be applied"
             } else if (!root.policy && Theme.Palette.snapshot.themeId !== root.activeRequest
                        && root.requested === root.activeRequest) {
@@ -46,13 +40,14 @@ QtObject {
             } else {
                 root.result = "applied: " + Theme.Palette.snapshot.themeId
             }
-            if (!root.policy && root.requested !== root.activeRequest)
+            if (root.requested !== root.activeRequest)
                 Qt.callLater(root.start)
         }
     }
 
     function start(): void {
         activeRequest = requested
+        selectionSaved = false
         result = "pending: applying " + requested
         renderer.running = true
     }
@@ -63,19 +58,10 @@ QtObject {
         function select(theme: string): string {
             if (!/^[a-z0-9][a-z0-9-]*$/.test(theme) || root.installed.indexOf(theme) < 0)
                 return "failed: theme is not installed: " + theme
-            // CLI reset or another writer may have changed the saved selection.
-            root.selectionFile.reload()
-            root.selectionFile.waitForJob()
             root.requested = theme
-            if (root.selectionFile.text().trim() === theme) {
-                if (root.policy)
-                    root.result = "saved: " + theme + "; Nix policy keeps " + root.policy
-                else if (!renderer.running)
-                    root.start()
-                return root.result
-            }
-            root.result = "pending: saving " + theme
-            root.selectionFile.setText(theme + "\n")
+            root.result = "pending: applying " + theme
+            if (!renderer.running)
+                root.start()
             return root.result
         }
 

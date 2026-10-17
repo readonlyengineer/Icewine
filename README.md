@@ -177,7 +177,30 @@ NixOS utility selections reflect the module options and are read-only. Apply
 creates missing dotfiles; **Overwrite existing dotfiles** replaces selected defaults
 without backups. It starts unchecked each time. Existing editable files are otherwise
 preserved, including on rebuild, login and reboot. Explicitly host-managed files
-are reclaimed by the host on activation. Host persistence remains host policy.
+and symlinked parent directories are preserved even with overwrite enabled,
+including dangling links. Apply reports each skipped path. Host persistence
+remains host policy; package, service and login choices remain host-owned on NixOS.
+
+Appearance and Widgets use file ownership on every supported distribution:
+linked preferences are shown read-only, while unrelated ordinary files remain
+editable. Icewine's generated theme and implementation links keep working.
+Theme policy and widget policy still take precedence. Configure monitors is
+disabled when its main entry or HyprMon sidecar is linked; HyprMon otherwise
+owns its own live/save behaviour.
+
+Home Manager may supply ordinary configuration or preference links without any
+Icewine Home Manager module. For example, with the normal XDG state directory:
+
+```nix
+home.file.".local/state/icewine/layout".text = "master\n";
+home.file.".local/state/icewine/widgets.json".text = ''{"windowSwitcher":false}'';
+```
+
+Use the effective XDG path if you change it. Linking a shipped Settings.qml or
+shell entry does not lock the separate widgets.json preference file when the
+contents still match the shipped version. Install Icewine and enable host
+services separately: installation remains through the NixOS module or the
+experimental Arch/CachyOS packages; this adds no other distribution installer.
 
 ## Basic hotkeys
 
