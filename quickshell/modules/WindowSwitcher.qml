@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 import Quickshell.Wayland
 import "WindowSwitcherModel.js" as Model
 import qs.icewine.theme as Theme
@@ -82,7 +83,22 @@ FocusScope {
         if (Model.locate(rows, window)) activateRequested(window)
     }
 
-    Rectangle { anchors.fill: parent; color: Theme.Palette.backgroundDark; radius: 10 }
+    Rectangle {
+        anchors.fill: parent
+        color: Theme.Palette.backgroundDark
+        radius: 10
+        border.width: 1
+        border.color: Theme.Palette.border
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: "#000000"
+            shadowOpacity: 0.35
+            shadowBlur: 0.6
+            blurMax: 16
+            shadowVerticalOffset: 4
+        }
+    }
     MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
     Flickable {
         id: viewport
