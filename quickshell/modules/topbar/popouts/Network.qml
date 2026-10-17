@@ -377,8 +377,6 @@ Bar.CardStack {
         Keys.onReturnPressed: networkRow.activated()
         Keys.onEnterPressed: networkRow.activated()
         Keys.onSpacePressed: networkRow.activated()
-        Keys.onDownPressed: networkRow.nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocusReason)
-        Keys.onUpPressed: networkRow.nextItemInFocusChain(false).forceActiveFocus(Qt.BacktabFocusReason)
 
         Text {
             anchors.left: parent.left
@@ -441,8 +439,6 @@ Bar.CardStack {
         Keys.onReturnPressed: root.connectNetwork(wiredRow.network)
         Keys.onEnterPressed: root.connectNetwork(wiredRow.network)
         Keys.onSpacePressed: root.connectNetwork(wiredRow.network)
-        Keys.onDownPressed: wiredRow.nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocusReason)
-        Keys.onUpPressed: wiredRow.nextItemInFocusChain(false).forceActiveFocus(Qt.BacktabFocusReason)
 
         Text {
             anchors.left: parent.left

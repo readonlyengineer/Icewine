@@ -212,33 +212,33 @@ Rectangle {
             Repeater {
                 model: root.notification?.actions ?? []
 
-                Rectangle {
+                Controls.Button {
                     id: action
 
                     required property var modelData
 
                     width: Math.min(actions.width, actionText.implicitWidth + 16)
                     height: 26
-                    radius: 8
-                    color: actionHover.hovered ? Theme.Palette.selection
-                        : Theme.Palette.backgroundDark
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
+                    Accessible.name: action.modelData.text
+                    onClicked: action.modelData.invoke()
+                    background: Rectangle {
+                        radius: 8
+                        color: action.down || action.hovered ? Theme.Palette.selection : Theme.Palette.backgroundDark
+                        border.width: action.activeFocus ? 1 : 0
+                        border.color: Theme.Palette.primary
+                    }
 
-                    Text {
+                    contentItem: Text {
                         id: actionText
 
-                        anchors.centerIn: parent
-                        width: Math.min(implicitWidth, parent.width - 16)
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
                         text: action.modelData.text
                         color: Theme.Palette.foreground
                         font.family: "JetBrainsMono Nerd Font"
                         font.pixelSize: 9
                         elide: Text.ElideRight
-                    }
-
-                    HoverHandler { id: actionHover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler {
-                        gesturePolicy: TapHandler.WithinBounds
-                        onTapped: action.modelData.invoke()
                     }
                 }
             }

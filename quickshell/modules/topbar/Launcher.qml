@@ -53,7 +53,6 @@ Widget {
                 stack: stack
                 index: background.item ? 2 : 1
                 accessibleName: "Workspace layout"
-                arrowKeyOwners: [layoutScroll]
                 function revealFocus() {
                     const item = layoutCard.Window.window?.activeFocusItem
                     let owner = item
@@ -76,6 +75,8 @@ Widget {
                 initialFocus: picker.available && layoutCard.active ? picker.initialFocus : selector
                 ScrollView {
                     id: layoutScroll
+                    // Let ordinary controls navigate before ScrollView consumes arrows to scroll.
+                    Keys.onPressed: event => layoutCard.navigate(event)
                     anchors.fill: parent
                     enabled: layoutCard.active
                     clip: true

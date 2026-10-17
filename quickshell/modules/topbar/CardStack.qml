@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Window
-import QtQuick.Templates as T
 
 // Nonvisual arrangement and selection; card surfaces belong to Card.
 FocusScope {
@@ -27,29 +26,50 @@ FocusScope {
     property bool exchanging: false
     property bool available: visible && enabled
 
-    Keys.priority: Keys.AfterItem
-    Keys.onPressed: event => navigate(event)
-
-    function navigate(event) {
-        if (!available || cards.length < 2 || event.modifiers !== Qt.NoModifier
-                || ![Qt.Key_Left, Qt.Key_Right].includes(event.key)) return
+    readonly property bool ownsFocus: {
         const target = root.Window.window?.activeFocusItem
-        // Owners retain even ignored endpoint keys, including composite groups.
-        for (let item = target; item && item !== root; item = item.parent)
-            if (cards.some(card => card.arrowKeyOwners.includes(item))) return
-        const plainButton = target instanceof T.AbstractButton
-            && !(target instanceof T.MenuItem || target instanceof T.RadioButton
-                || target instanceof T.TabButton)
-        // Other controls (text, sliders, scrollbars, etc.) never opt in by bubbling.
-        if (!plainButton && target !== root && target !== motionFocus
-                && !cards.some(card => target === card || target === card.selector)) return
-        event.accepted = true
-        if (!event.isAutoRepeat)
-            selectCard(((queuedCard >= 0 ? queuedCard : selectedCard) + (event.key === Qt.Key_Left ? -1 : 1) + cards.length) % cards.length)
+        // Modal/popup focus outside this stack stays native.
+        for (let item = target; item; item = item.parent)
+            if (item === root) return available
+        return false
+    }
+    readonly property bool ownsTab: ownsFocus
+        && !(root.Window.window?.activeFocusItem instanceof TextEdit
+            && !root.Window.window.activeFocusItem.tabChangesFocus)
+    // Explicit traversal escapes controls whose native semantics own every arrow.
+    Shortcut {
+        sequence: "Ctrl+Tab"
+        enabled: root.ownsFocus && !root.exchanging
+        autoRepeat: false
+        onActivated: root.cards[root.selectedCard]?.moveFocus(root.Window.window.activeFocusItem, true)
+    }
+    Shortcut {
+        sequences: ["Ctrl+Shift+Tab", "Ctrl+Backtab"]
+        enabled: root.ownsFocus && !root.exchanging
+        autoRepeat: false
+        onActivated: root.cards[root.selectedCard]?.moveFocus(root.Window.window.activeFocusItem, false)
+    }
+    Shortcut {
+        sequence: "Tab"
+        enabled: root.ownsTab
+        autoRepeat: false
+        onActivated: root.cycleCard(1)
+    }
+    Shortcut {
+        sequences: ["Shift+Tab", "Backtab"]
+        enabled: root.ownsTab
+        autoRepeat: false
+        onActivated: root.cycleCard(-1)
+    }
+
+    function cycleCard(direction) {
+        if (available && cards.length)
+            selectCard(((queuedCard >= 0 ? queuedCard : selectedCard) + direction + cards.length) % cards.length)
     }
 
     function selectCard(index) {
         if (!available || !Number.isInteger(index) || index < 0 || index >= cards.length) return
+        for (const card of cards) card.selector.activationKey = 0
         motionFocus.activationKey = 0
         queuedCard = -1
         if (exchanging && index !== outgoingCard && index !== incomingCard) {
@@ -78,6 +98,7 @@ FocusScope {
 
     // Membership changes cancel queued intent before optional cards can disappear.
     function resetSelection() {
+        for (const card of cards) card.selector.activationKey = 0
         motionFocus.activationKey = 0
         selectionChanging()
         exchange.stop()

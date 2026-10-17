@@ -1,6 +1,8 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Window
+import QtQuick.Templates as T
 import qs.icewine.theme as Theme
 
 Rectangle {
@@ -42,12 +44,52 @@ Rectangle {
         : outgoing ? (stack.progress < 0.5 ? 2 : 1 + rearEnd)
         : index === stack.incomingCard ? (stack.progress < 0.5 ? 1 + rearStart : 2) : 1 + depth
 
-    // Explicit keyboard selection and a plain target for stack arrow navigation.
+    // Bounded native focus-chain order: Right/Down forward, Left/Up backward.
+    Keys.priority: Keys.AfterItem
+    Keys.onPressed: event => navigate(event)
+
+    function navigate(event) {
+        if (!active || event.modifiers !== Qt.NoModifier
+                || ![Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down].includes(event.key)) return
+        const target = card.Window.window?.activeFocusItem
+        for (let item = target; item && item !== card; item = item.parent)
+            if (arrowKeyOwners.includes(item)) return
+        // Native text, sliders, lists, scrollbars, radio/tab buttons and menus own endpoints.
+        if (target !== card && target !== selector
+                && !(target instanceof T.AbstractButton
+                    && !(target instanceof T.MenuItem || target instanceof T.RadioButton || target instanceof T.TabButton))
+                && !(target?.activeFocusOnTab && !(target instanceof T.Control)
+                    && !(target instanceof TextInput || target instanceof TextEdit || target instanceof Flickable))) return
+        event.accepted = true
+        moveFocus(target, event.key === Qt.Key_Right || event.key === Qt.Key_Down)
+    }
+
+    function moveFocus(target, forward) {
+        if (target === selector && initialFocus !== selector && initialFocus?.visible && initialFocus.enabled) {
+            initialFocus.forceActiveFocus(forward ? Qt.TabFocusReason : Qt.BacktabFocusReason)
+            return
+        }
+        const first = target.nextItemInFocusChain(forward)
+        if (!first) return
+        let next = first
+        do {
+            let owner = next
+            while (owner && owner !== card) owner = owner.parent
+            if (owner && next !== selector && next.visible && next.enabled
+                    && (next.activeFocusOnTab || next === initialFocus)) {
+                next.forceActiveFocus(forward ? Qt.TabFocusReason : Qt.BacktabFocusReason)
+                return
+            }
+            next = next.nextItemInFocusChain(forward)
+        } while (next && next !== first)
+    }
+
+    // Accessible explicit selection; ordinary Tab belongs to the stack.
     Item {
         id: selector
         width: parent.width
         height: Math.min(44, parent.height)
-        activeFocusOnTab: card.stack !== null && card.stack.stacked && !card.stack.exchanging
+        activeFocusOnTab: card.active
         readonly property bool checked: card.selected
         property int activationKey: 0
         Accessible.ignored: !card.stack || !card.stack.stacked

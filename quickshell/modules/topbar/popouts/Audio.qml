@@ -159,8 +159,6 @@ Flickable {
         Keys.onReturnPressed: deviceRow.activated()
         Keys.onEnterPressed: deviceRow.activated()
         Keys.onSpacePressed: deviceRow.activated()
-        Keys.onDownPressed: deviceRow.nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocusReason)
-        Keys.onUpPressed: deviceRow.nextItemInFocusChain(false).forceActiveFocus(Qt.BacktabFocusReason)
 
         Text {
             anchors.left: parent.left

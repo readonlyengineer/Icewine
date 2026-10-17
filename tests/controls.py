@@ -392,12 +392,12 @@ ShellRoot {
         }
         host.openLauncher()
         launcher.selector.forceActiveFocus()
-        toggleKeys.keyClick(Qt.Key_Right)
+        toggleKeys.keyClick(Qt.Key_Tab)
         toggleKeys.wait(25)
         backgroundWindow.watchedCard = cards[1]
         backgroundWindow.intermediateActivations = 0
         const before = cards.map(card => [card.x, card.y])
-        toggleKeys.keyClick(Qt.Key_Right)
+        toggleKeys.keyClick(Qt.Key_Tab)
         if (stack.queuedCard !== 2 || stack.motionInitialFocus !== backgroundWindow.activeFocusItem
                 || cards.some((card, i) => card.x !== before[i][0] || card.y !== before[i][1]))
             throw new Error("Third-card request jumped the running sweep")
@@ -406,15 +406,15 @@ ShellRoot {
                 || backgroundWindow.intermediateActivations)
             throw new Error("Queued third-card request failed selected focus/activity")
         backgroundWindow.watchedCard = null
-        // ScrollView owns content arrows; its endpoint must not change cards.
+        // Layout uses the bounded shared focus chain, never arrow stack selection.
         toggleKeys.keyClick(Qt.Key_Right)
-        if (stack.selectedCard !== 2 || stack.exchanging)
-            throw new Error("Layout scroll content leaked an endpoint arrow")
+        if (stack.selectedCard !== 2 || stack.exchanging || toggle.activeFocus)
+            throw new Error("Layout arrow did not move focus within its card")
         cards[2].selector.forceActiveFocus()
-        toggleKeys.keyClick(Qt.Key_Right)
+        toggleKeys.keyClick(Qt.Key_Tab)
         toggleKeys.tryCompare(stack, "exchanging", false, 900)
         if (stack.frontCard !== 0 || !launcher.initialFocus.activeFocus)
-            throw new Error("Three-card arrow wrapping failed")
+            throw new Error("Three-card Tab wrapping failed")
         for (const remove of ["tray", "layout"]) {
             host.openLauncher()
             stack.selectCard(1)
@@ -611,7 +611,7 @@ ShellRoot {
         focusPopout.focusInitial()
         toggleKeys.wait(20)
         assertRevealed(lock, "Constrained Power initial")
-        toggleKeys.keyClick(Qt.Key_Right)
+        toggleKeys.keyClick(Qt.Key_Tab)
         if (!stack.exchanging || body.enabled || graphPage.enabled || body.brightness.active)
             throw new Error("Power exchange retained interactive/recurring work")
         toggleKeys.wait(240)
@@ -820,8 +820,8 @@ ShellRoot {
         rows[0].forceActiveFocus()
         toggleKeys.wait(10)
         assertRevealed(rows[0], "Audio first")
-        for (const [key, index] of [[Qt.Key_Down, 1], [Qt.Key_Backtab, 0],
-                [Qt.Key_Tab, 1], [Qt.Key_Up, 0]]) {
+        for (const [key, index] of [[Qt.Key_Down, 1], [Qt.Key_Left, 0],
+                [Qt.Key_Right, 1], [Qt.Key_Up, 0]]) {
             const before = audio.contentY
             toggleKeys.keyClick(key)
             toggleKeys.wait(10)
@@ -833,7 +833,7 @@ ShellRoot {
         focusWindow.height = 150
         root.items = Array.from({length: 3}, (_, index) => ({
             summary: "Notification " + index, appName: "Fixture", appIcon: "", body: "",
-            urgency: 1, actions: [], dismiss: function() {} }))
+            urgency: 1, actions: [{text: "Fixture action", invoke: function() { ++root.buttonCalls }}], dismiss: function() {} }))
         root.count = root.items.length
         focusPopout.currentPage = "notifications"
         toggleKeys.wait(30)
@@ -846,6 +846,13 @@ ShellRoot {
         first.forceActiveFocus()
         toggleKeys.wait(10)
         assertRevealed(first, "Notifications first")
+        const actionCount = root.buttonCalls
+        toggleKeys.keyClick(Qt.Key_Right)
+        if (focusWindow.activeFocusItem.Accessible.name !== "Fixture action" || root.buttonCalls !== actionCount)
+            throw new Error("Notification action is not reachable without activation")
+        toggleKeys.keyClick(Qt.Key_Space)
+        if (root.buttonCalls !== actionCount + 1) throw new Error("Keyboard notification action failed")
+        first.forceActiveFocus()
         const before = list.contentY
         last.forceActiveFocus()
         toggleKeys.wait(10)
@@ -916,8 +923,11 @@ ShellRoot {
         if (page.selectedCard !== 0 || page.exchanging)
             throw new Error("Focus interruption activated a stale selection key")
         first.forceActiveFocus()
-        for (let i = 0; i < 30 && !second.activeFocus; ++i) networkKeys.keyClick(Qt.Key_Tab)
-        if (!second.activeFocus) throw new Error("Rear card is missing from keyboard focus traversal")
+        networkKeys.keyClick(Qt.Key_Tab)
+        settleCards(page)
+        if (!second.activeFocus || page.selectedCard !== 1) throw new Error("Tab did not select the next card")
+        networkKeys.keyClick(Qt.Key_Backtab)
+        settleCards(page)
         // Mere hover and keyboard focus must not select a card.
         networkKeys.mouseMove(second, 40, 20)
         second.forceActiveFocus()
@@ -1303,6 +1313,8 @@ ShellRoot {
             const tabCentre = firstTab.mapToItem(networkPage, firstTab.width / 2, firstTab.height / 2)
             if (networkPage.childAt(tabCentre.x, tabCentre.y) !== password.parent.parent.parent)
                 throw new Error("Password overlay must remain above both cards")
+            networkKeys.keyClick(Qt.Key_Tab)
+            networkKeys.keyClick(Qt.Key_Backtab)
             selectCardTarget(firstTab)
             selectCardTarget(secondTab)
             if (networkPage.selectedCard !== 0 || networkPage.exchanging
@@ -1395,7 +1407,7 @@ ShellRoot {
             if (page.data.connected || page.data.selected !== "fixture-exit")
                 throw new Error("Expected confirmed Running/offline selected-node fixture")
             picker.forceActiveFocus()
-            networkKeys.keyClick(Qt.Key_Tab)
+            networkKeys.keyClick(Qt.Key_Down)
             networkKeys.wait(20)
             if (descendants(page, item => item.text === "Refresh Tailscale").length
                     || networkWindow.activeFocusItem === picker)
@@ -1607,6 +1619,8 @@ ShellRoot {
                     Button { id: button; y: 300; text: "Native button"; onClicked: ++window.activations }
                     Popouts.ActionButton { id: action; y: 350; text: "Real action"; onClicked: ++window.activations }
                     Popouts.Toggle { id: toggle; y: 400; text: "Real toggle"; onToggled: ++window.activations }
+                    Button { id: disabled; enabled: false }
+                    Button { id: hidden; visible: false }
                     ToolButton { id: tool; text: "Tool" }
                     ButtonGroup { id: nativeGroup }
                     Button { id: grouped; checkable: true; checked: true; ButtonGroup.group: nativeGroup }
@@ -1644,7 +1658,10 @@ ShellRoot {
                         MenuItem { text: "Last" }
                     }
                 }
-                Bar.Card { id: second; stack: stack; index: 1 }
+                Bar.Card { id: second; stack: stack; index: 1
+                    Button { id: rear; enabled: second.active }
+                    TextInput { id: nonTab; text: "no Tab focus policy" }
+                }
             }
         }
         TestCase { id: keys; when: false }
@@ -1683,30 +1700,45 @@ ShellRoot {
                         unchanged(text, endpoint ? Qt.Key_Right : Qt.Key_Left, Qt.ControlModifier)
                     }
                 }
-                // Ordinary native and production buttons/toggles navigate without activation.
-                for (const item of [button, action, toggle, tool, grouped]) {
-                    for (const key of [Qt.Key_Left, Qt.Key_Right]) {
-                        item.forceActiveFocus()
-                        keys.keyClick(key)
-                        if (stack.selectedCard !== 1 || !stack.exchanging)
-                            throw new Error("Ordinary button/toggle arrow did not navigate: " + item + " selected=" + stack.selectedCard + " focus=" + window.activeFocusItem)
-                        keys.tryCompare(stack, "exchanging", false, 900)
-                        keys.keyClick(key)
-                        keys.tryCompare(stack, "exchanging", false, 900)
-                        if (stack.selectedCard !== 0) throw new Error("Button navigation failed cyclic return")
-                    }
+                // Literal tabs stay in multiline editing; ordinary text fields switch cards.
+                edit.forceActiveFocus()
+                keys.keyClick(Qt.Key_Tab)
+                if (stack.selectedCard !== 0 || !edit.text.includes("\t"))
+                    throw new Error("Multiline literal Tab escaped")
+                field.forceActiveFocus()
+                keys.keyClick(Qt.Key_Tab)
+                keys.tryCompare(stack, "exchanging", false, 900)
+                if (stack.selectedCard !== 1) throw new Error("Text field Tab did not switch cards")
+                keys.keyClick(Qt.Key_Tab, Qt.ShiftModifier)
+                keys.tryCompare(stack, "exchanging", false, 900)
+                if (stack.selectedCard !== 0) throw new Error("Shift+Tab did not return")
+                toggle.forceActiveFocus()
+                keys.keyClick(Qt.Key_Right)
+                if (!tool.activeFocus) throw new Error("Hidden/disabled controls were not skipped")
+                slider.forceActiveFocus()
+                keys.keyClick(Qt.Key_Tab, Qt.ControlModifier)
+                if (!field.activeFocus) throw new Error("Native arrow owner has no explicit traversal escape")
+                keys.keyClick(Qt.Key_Tab, Qt.ControlModifier | Qt.ShiftModifier)
+                if (!slider.activeFocus) throw new Error("Reverse explicit traversal failed")
+                // Ordinary controls follow native focus-chain order without activation.
+                for (const [item, key, expected] of [[button, Qt.Key_Right, action],
+                        [action, Qt.Key_Down, toggle], [toggle, Qt.Key_Left, action],
+                        [action, Qt.Key_Up, button]]) {
+                    item.forceActiveFocus()
+                    keys.keyClick(key)
+                    if (!expected.activeFocus || stack.selectedCard !== 0 || stack.exchanging)
+                        throw new Error("Bounded control focus failed: " + item + " -> " + window.activeFocusItem)
                 }
                 if (window.activations !== 0 || toggle.checked || !grouped.checked)
                     throw new Error("Arrow navigation activated content")
-                // Arrow selection cancels a pending ActionButton release through focus loss.
                 action.forceActiveFocus()
                 keys.keyPress(Qt.Key_Return)
-                keys.keyClick(Qt.Key_Right)
+                keys.keyClick(Qt.Key_Tab)
                 keys.keyRelease(Qt.Key_Return)
                 keys.tryCompare(stack, "exchanging", false, 900)
                 if (window.activations !== 0 || action.activationKey !== 0)
-                    throw new Error("Arrow selection released a stale button activation")
-                keys.keyClick(Qt.Key_Left)
+                    throw new Error("Tab released a stale button activation")
+                keys.keyClick(Qt.Key_Backtab)
                 keys.tryCompare(stack, "exchanging", false, 900)
                 for (const item of [radio, tab, entry]) {
                     unchanged(item, Qt.Key_Left)
@@ -1745,73 +1777,94 @@ ShellRoot {
                 menu.itemAt(1).forceActiveFocus()
                 keys.keyClick(Qt.Key_Right)
                 if (stack.selectedCard !== 0 || stack.exchanging) throw new Error("Nested menu arrow escaped")
+                keys.keyClick(Qt.Key_Tab)
+                if (stack.selectedCard !== 0 || stack.exchanging) throw new Error("Menu Tab escaped to stack")
                 menu.close()
                 keys.tryCompare(menu, "visible", false)
 
+                // Resetting the selected card cancels release activation without focus loss.
+                for (const key of [Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space]) {
+                    first.selector.forceActiveFocus()
+                    keys.keyPress(key)
+                    stack.resetSelection()
+                    keys.keyRelease(key)
+                    if (stack.selectedCard !== 0 || stack.exchanging || first.selector.activationKey !== 0)
+                        throw new Error("Selector retained stale activation after reset")
+                }
+                // A one-control card wraps locally; arrows never walk into the rear card.
+                keys.keyClick(Qt.Key_Tab)
+                keys.tryCompare(stack, "exchanging", false, 900)
+                keys.keyClick(Qt.Key_Down)
+                if (!rear.activeFocus) throw new Error("Selector did not enter the card")
+                for (const key of [Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down]) {
+                    keys.keyClick(key)
+                    if (!rear.activeFocus || stack.selectedCard !== 1)
+                        throw new Error("Single-control focus escaped its card")
+                }
+                // A non-Tab focus target with no other controls must terminate traversal.
+                rear.enabled = false
+                nonTab.forceActiveFocus()
+                keys.keyClick(Qt.Key_Tab, Qt.ControlModifier)
+                if (!nonTab.activeFocus) throw new Error("Empty control chain lost its native target")
+                rear.enabled = true
+                keys.keyClick(Qt.Key_Backtab)
+                keys.tryCompare(stack, "exchanging", false, 900)
                 // A superseding selection cancels a pending motion key without focus loss.
                 for (const key of [Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space]) {
                     first.selector.forceActiveFocus()
-                    keys.keyClick(Qt.Key_Right)
+                    keys.keyClick(Qt.Key_Tab)
                     keys.wait(30)
                     const motion = window.activeFocusItem
                     if (motion !== stack.motionInitialFocus || !stack.exchanging)
-                        throw new Error("Expected stationary motion focus before pending activation")
+                        throw new Error("Expected stationary motion focus before pending activation selected=" + stack.selectedCard + " motion=" + stack.exchanging + " focus=" + motion)
                     keys.keyPress(key)
                     if (motion.activationKey !== key) throw new Error("Motion activation was not armed")
-                    keys.keyClick(Qt.Key_Left)
+                    keys.keyClick(Qt.Key_Backtab)
                     if (stack.selectedCard !== 0 || window.activeFocusItem !== motion)
-                        throw new Error("Arrow reversal lost selection or stationary focus")
+                        throw new Error("Tab reversal lost selection or stationary focus")
                     keys.keyRelease(key)
                     if (stack.selectedCard !== 0 || motion.activationKey !== 0)
-                        throw new Error("Stale motion activation undid arrow reversal: " + key)
+                        throw new Error("Stale motion activation undid Tab reversal: " + key)
                     keys.tryCompare(stack, "exchanging", false, 900)
                     if (!first.selector.activeFocus) throw new Error("Reversal lost selected focus")
                 }
                 // Real presses, reversal, and fresh repeated presses use the shared path.
                 first.selector.forceActiveFocus()
-                keys.keyPress(Qt.Key_Right)
-                if (stack.selectedCard !== 1 || !stack.exchanging) throw new Error("Right did not select next")
-                keys.keyRelease(Qt.Key_Right)
+                keys.keyPress(Qt.Key_Tab)
+                if (stack.selectedCard !== 1 || !stack.exchanging) throw new Error("Tab did not select next")
+                keys.keyRelease(Qt.Key_Tab)
                 keys.wait(20)
-                keys.keyClick(Qt.Key_Left)
-                if (stack.selectedCard !== 0) throw new Error("Left did not reverse to previous")
+                keys.keyClick(Qt.Key_Backtab)
+                if (stack.selectedCard !== 0) throw new Error("Backtab did not reverse to previous")
                 keys.tryCompare(stack, "exchanging", false, 900)
-                for (const key of [Qt.Key_Left, Qt.Key_Right, Qt.Key_Right, Qt.Key_Left]) {
+                for (const key of [Qt.Key_Backtab, Qt.Key_Tab, Qt.Key_Tab, Qt.Key_Backtab]) {
                     const expected = 1 - stack.selectedCard
                     keys.keyClick(key)
                     if (stack.selectedCard !== expected) throw new Error("Cyclic pair endpoint failed")
                     keys.tryCompare(stack, "exchanging", false, 900)
                     if (!stack.initialFocus.activeFocus) throw new Error("Navigation lost visible selector focus")
                 }
-                // QtTest has no auto-repeat flag; exercise the same event entry explicitly.
-                first.selector.forceActiveFocus()
-                const repeat = { key: Qt.Key_Right, modifiers: Qt.NoModifier, isAutoRepeat: true, accepted: false }
-                stack.navigate(repeat)
-                if (!repeat.accepted || stack.selectedCard !== 0 || stack.exchanging)
-                    throw new Error("Held arrow repeated selection")
                 first.selector.focus = false
                 stack.forceActiveFocus()
                 if (window.activeFocusItem !== stack) throw new Error("Fixture did not focus stack itself")
-                keys.keyClick(Qt.Key_Right)
+                keys.keyClick(Qt.Key_Tab)
                 keys.tryCompare(stack, "exchanging", false, 900)
                 second.forceActiveFocus()
                 if (window.activeFocusItem !== second) throw new Error("Fixture did not focus card itself")
-                keys.keyClick(Qt.Key_Left)
+                keys.keyClick(Qt.Key_Backtab)
                 keys.tryCompare(stack, "exchanging", false, 900)
                 stack.cards = [first]
                 first.selector.forceActiveFocus()
-                const singleBefore = boundary.bubbled
-                keys.keyClick(Qt.Key_Left); keys.keyClick(Qt.Key_Right)
-                if (boundary.bubbled !== singleBefore + 2 || stack.selectedCard !== 0 || stack.exchanging)
-                    throw new Error("Single card consumed or navigated")
+                keys.keyClick(Qt.Key_Tab); keys.keyClick(Qt.Key_Backtab)
+                if (stack.selectedCard !== 0 || stack.exchanging || !first.selector.activeFocus)
+                    throw new Error("Single-card Tab lost bounded focus")
                 stack.cards = [first, second]
                 for (const property of ["visible", "enabled"]) {
                     first.selector.forceActiveFocus()
                     stack[property] = false
-                    const event = { key: Qt.Key_Right, modifiers: Qt.NoModifier, isAutoRepeat: false, accepted: false }
-                    stack.navigate(event)
-                    keys.keyClick(Qt.Key_Right)
-                    if (event.accepted || stack.selectedCard !== 0 || stack.exchanging)
+                    stack.cycleCard(1)
+                    keys.keyClick(Qt.Key_Tab)
+                    if (stack.selectedCard !== 0 || stack.exchanging)
                         throw new Error("Unavailable stack navigated or consumed")
                     stack[property] = true
                 }
@@ -2201,7 +2254,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert result.returncode == 0 and "ARROW_CHECK_PASSED" in output, output
     assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
     if "--arrows-only" in sys.argv:
-        print("native control ownership and stack arrow checks pass")
+        print("native control ownership and stack keyboard checks pass")
         sys.exit(0)
     (root / "shell.qml").write_text(MENU_QML)
     # The offscreen platform has no desktop hover capability unless supplied explicitly.

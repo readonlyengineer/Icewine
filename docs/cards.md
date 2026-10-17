@@ -35,7 +35,7 @@ existing 8px inset). Both rear strips are exposed. Each exchange still moves
 one front/rear pair for 200ms; the third card interpolates its rear position.
 Requesting the outgoing card reverses the sweep. Requesting the third card
 during motion queues the latest intent until the current sweep completes,
-then exchanges again, without jumping moving surfaces. Arrow/motion-key cycles
+then exchanges again, without jumping moving surfaces. Tab/motion-key cycles
 advance from the queued intent when present. Content stays inert between sweeps.
 
 Changing membership cancels motion and queued/pending motion-key activation,
@@ -55,40 +55,52 @@ without activating content. The shared card intercepts rear/moving input above
 content; front controls keep normal input and front title clicks do nothing.
 Keep content below that selection interception (`z: 100`). Hover and
 focus alone do not select cards. The shared
-`selector` remains a Tab-accessible radio target: Return, Enter and Space select
+`selector` remains an accessible radio target: Return, Enter and Space select
 its card on release. Card selection draws no underline; focused controls retain
 their own indicators. The stationary motion target uses the same keys to cycle on
 release. Keep a valid focus target even if the card has no enabled controls.
 `selectionChanging()` lets an owner close transient menus before motion.
+A superseding selection or membership change cancels pending selector/motion
+activation, including when the focus target stays the same.
 
-For the supported fixed compositions, unmodified Left selects the previous card and
-Right the next in declared `cards` order, wrapping at either end. With two cards
-both directions reach the other card; the existing sweep reverses when selecting
-the outgoing card during motion. Three-card requests follow the queue above.
-Navigation runs after child key handling. Plain stack/card/shared-selector/motion
-focus targets and ordinary native buttons/toggles (`AbstractButton` descendants)
-can navigate with an unhandled arrow. Menu items, radio buttons and tab buttons
-remain reserved contexts. Other focused controls, including text editing,
-sliders and scrollbars, retain arrows even when ignoring an endpoint event.
-Native nested menus retain their own key routing.
+Tab selects the next card in declared `cards` order, wrapping; Shift+Tab selects
+the previous. A fresh opposite press reverses the existing sweep; a third-card
+request queues as described above. Held Tab does not repeat selection. Selection
+moves focus through the stationary motion target to the selected card's
+`initialFocus`. In a one-card stack, Tab keeps the card selected. Escape still
+belongs to the host's existing dismissal/menu-back handling.
 
-Set a card's `arrowKeyOwners` to custom controls or composite groups that own
-Left/Right when their focus target could otherwise navigate. This reserves each
-listed item and its descendants, including ignored endpoint keys. For example,
-`arrowKeyOwners: [directionalButton, horizontalGroup]` protects a custom button
-and a group containing buttons whose arrows move focus. Authors must declare
-such owners; an ignored event cannot reveal that a custom control owns a key.
-This also applies to native directional containers with focusable button children.
-Plain `ButtonGroup` membership alone does not handle arrows in the installed Qt;
-unhandled arrows from those buttons navigate without changing their checked state.
-No reservation is needed for ordinary non-owning `ActionButton`/`Toggle` callers.
-The first press selects immediately; auto-repeat presses are consumed without
-further selection and release does nothing. A fresh opposite press during motion
-can reverse selection. Focus moves through the stationary target to the selected
-card's `initialFocus`. Hidden, disabled and
-single-card stacks do not consume or navigate with arrows. Return, Enter and
-Space still activate on release; a superseding selection change cancels pending
-motion-target activation even when focus stays stationary.
+For ordinary buttons, toggles, device rows and accessible plain focus targets,
+Right/Down advances and Left/Up reverses through Qt's existing focus chain,
+wrapping within the active card. This is declaration/focus-chain order, not
+geometric nearest-neighbour navigation. Disabled, hidden, rear and selector
+items are skipped; an empty card retains its selector. Arrowing from the selector
+enters `initialFocus` when supplied. Existing host scrolling reveals focus.
+Native `KeyNavigation` links run first. No arrow selects another card.
+
+Native text editing, sliders, lists, scrollbars, radio/tab buttons and menus
+retain their meaningful arrows, including ignored endpoints. Ctrl+Tab and
+Ctrl+Shift+Tab explicitly traverse the same bounded control chain, allowing
+keyboard users to leave a control that owns every arrow. This does not activate
+controls. Ordinary Tab in single-line editing switches cards; multiline
+`TextEdit`/`TextArea` with `tabChangesFocus: false` keeps literal Tab input.
+
+Stack shortcuts are enabled only when its own descendants hold window focus
+and `available` is true. Native popup menus reparent focus outside that subtree
+and retain their own Tab/arrows; unrelated windows are excluded. Network's
+password overlay makes the stack unavailable and retains native editing/Tab
+and its existing Escape handling. No application/window-wide key interception
+is installed outside those focus boundaries.
+
+Set `arrowKeyOwners` to custom controls or composite groups that own arrows.
+This reserves each listed item and its descendants even at ignored endpoints;
+for example, `arrowKeyOwners: [directionalButton, horizontalGroup]`.
+Declare these owners explicitly: ignored events cannot identify custom semantics.
+Background Apps reserves its list/menu group. Do not reserve an ordinary
+container merely because it scrolls: Layout's buttons use shared navigation,
+with focus reveal handling constrained scrolling. Native `ButtonGroup` membership
+alone does not handle arrows in the installed Qt; ordinary grouped buttons use
+the shared focus chain without changing checked state.
 
 ## Visibility, services and host ownership
 
@@ -124,8 +136,8 @@ only for nonempty tray contents. Layout joins when `layoutsEnabled`, reusing
 order is Launcher → Background Apps (if any) → Layout (if enabled). The single
 card remains 400×424; two/three cards add the shared 34×64 allowance, constrained
 by the panel. Layout's initial focus is Autofullscreen when available, otherwise
-its selector. Its ScrollView reserves content arrows and reveals focused controls
-when constrained; use the card selector to navigate the stack. Selection alone
+its selector. Its ScrollView reveals focused controls
+when constrained; Tab switches cards from its controls. Selection alone
 never changes a layout. `Launcher.layoutActive`
 follows the settled card; Topbar aggregates only the owning monitor and passes
 activity to the existing Desktop/Handheld compositor adapter. Feature disablement
