@@ -326,6 +326,30 @@ Icewine reserves workspace selector spellings starting with a tab and a space
 for its removable native picker rules; use ordinary selectors in user rules.
 Desktop controls support scrolling, dwindle, master and monocle.
 
+### SSH identities
+
+The network stack's third card is SSH (Tab cycles cards). Import reads an
+explicit existing private-key path with owner-only permissions and a concealed
+passphrase; it keeps the original file. Generate offers Temporary (agent only)
+or Permanent (an absolute new file path and passphrase confirmation). Permanent
+files are saved for later import, without automatic loading. Public keys can be
+displayed/copied; private keys are never displayed or copied.
+
+X unloads only a temporary identity added by the card. It preserves files,
+remote authorisation and existing SSH connections. Reboot removes temporary
+identities; shell/card reopening keeps them. Ordinary platform memory policy
+(including swap, hibernation and core dumps) still applies.
+
+The card manages the native local `ssh-agent.service` at
+`$XDG_RUNTIME_DIR/ssh-agent`, shared with ordinary SSH clients. Configure
+`programs.ssh.startAgent = true;` in your NixOS host and run its native unit as
+`Type=simple` with `ssh-agent -D -a %t/ssh-agent` so socket credentials match
+the service PID. The paired Nixos common core supplies this foreground mode;
+other distributions use the native package instructions. Session defaults preserve an
+existing `SSH_AUTH_SOCK`; the card refuses mutations when it points elsewhere.
+Discovery covers conventional client filenames and static `IdentityFile` paths;
+host-dependent paths or unavailable public metadata may require explicit import.
+
 ### Screenshots
 
 Open Screenshot from the topbar or with Super+Print. **Region** opens Flameshot:

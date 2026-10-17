@@ -11,13 +11,13 @@ Bar.CardStack {
     id: root
 
     required property var metrics
-    implicitHeight: Math.max(64 + 44 + Math.max(content.implicitHeight + 24, tailscale.implicitHeight),
+    implicitHeight: Math.max(64 + 44 + Math.max(content.implicitHeight + 24, tailscale.implicitHeight, ssh.implicitHeight),
         passwordNetwork ? passwordContent.implicitHeight + 36 : 0)
     clip: true
 
-    initialFocus: passwordNetwork ? password : exchanging ? motionInitialFocus : selectedCard === 0 ? networkCard.selector : tailscaleCard.selector
+    initialFocus: passwordNetwork ? password : exchanging ? motionInitialFocus : cards[selectedCard]?.selector ?? null
     available: visible && enabled && !passwordNetwork
-    cards: [networkCard, tailscaleCard]
+    cards: [networkCard, tailscaleCard, sshCard]
     onSelectionChanging: tailscale.closeMenus()
     readonly property var wifiDevice: Networking.devices.values.find(device =>
         device.type === DeviceType.Wifi) ?? null
@@ -266,6 +266,18 @@ Bar.CardStack {
         }
     }
 
+    NetworkCard {
+        id: sshCard
+        index: 2
+        title: "SSH"
+        titleColor: Theme.Palette.primary
+        Ssh {
+            id: ssh
+            anchors.fill: parent
+            active: root.available && root.selectedCard === 2 && !root.exchanging
+        }
+    }
+
     Rectangle {
         anchors.fill: parent
         z: 4
@@ -315,6 +327,7 @@ Bar.CardStack {
                     font.family: "JetBrainsMono Nerd Font"
                     font.pixelSize: 11
                     echoMode: TextInput.Password
+                    Accessible.name: "Wi-Fi password"
                     clip: true
 
                     Keys.onReturnPressed: root.submitPassword()

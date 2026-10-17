@@ -20,6 +20,9 @@ case ${0##*/} in
     exec python3 /usr/lib/icewine/wallpaper "$@" ;;
   icewine-clipboard)
     exec python3 /usr/lib/icewine/clipboard "$@" ;;
+  icewine-ssh)
+    export ICEWINE_SSH_ASKPASS=/usr/bin/icewine-ssh
+    exec python3 /usr/lib/icewine/ssh "$@" ;;
   icewine-inputplumber-intercept)
     if [[ ${1:-} != device ]]; then
       if [[ -n ${ICEWINE_HANDHELD_ENABLED+x} ]]; then

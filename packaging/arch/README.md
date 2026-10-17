@@ -104,6 +104,29 @@ PipeWire/WirePlumber, logind, polkit, UDisks, UPower and power profiles availabl
 Device/backlight/i2c permissions remain host policy. Keep Quickshell and Qt
 coherent with normal full distribution upgrades.
 
+For SSH controls, use OpenSSH's native per-user service with the same socket as
+the Icewine session. The card requires current OpenSSH including `ssh-add -Q`.
+If you use the packaged socket unit, disable it before selecting this service
+contract. Save this as `~/.config/systemd/user/ssh-agent.service`:
+
+```ini
+[Unit]
+Description=Local OpenSSH agent
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh-agent -D -a %t/ssh-agent
+
+[Install]
+WantedBy=default.target
+```
+
+Run `systemctl --user daemon-reload` and
+`systemctl --user enable --now ssh-agent.service`, then start a fresh Icewine
+session. Icewine sets `SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/ssh-agent` only when unset;
+external/forwarded agent choices are preserved and the card refuses to modify
+them. The installer does not replace agent services or load keys automatically.
+
 The developer Nix target builds the same makepkg archives with `--nodeps` and
 an honest empty Arch package database. It checks packaging and manager behavior,
 not target dependency transactions, Qt ABI compatibility or hardware.

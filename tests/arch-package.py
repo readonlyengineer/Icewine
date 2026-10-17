@@ -18,6 +18,8 @@ native = source / "packaging/arch"
 pkgbuild = (native / "PKGBUILD").read_text()
 base_dependencies = re.search(r"package_icewine\(\) \{\s+depends=\((.*?)\)", pkgbuild, re.S).group(1).split()
 assert "libcanberra" in base_dependencies
+assert "openssh" in base_dependencies
+assert "scripts/ssh" in pkgbuild
 kitty_defaults = (source / "theme/assets/templates/kitty-base.conf").read_text()
 assert "window_alert_on_bell no\n" in kitty_defaults
 assert "bell_path /usr/share/sounds/freedesktop/stereo/bell.oga\n" in kitty_defaults
@@ -44,7 +46,7 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
     fake.chmod(0o755)
     for name in ("steam", "flatpak", "icewine", "uwsm", "python3"):
         (commands / name).symlink_to(fake)
-    for name in ("steam", "shell", "clipboard"):
+    for name in ("steam", "shell", "clipboard", "ssh"):
         (commands / ("icewine-" + name)).symlink_to(native / "command")
     env = dict(os.environ, PATH=str(commands) + ":" + os.environ["PATH"],
                HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), ICEWINE_TEST_LOG=str(log), ICEWINE_TEST_ENV=str(root / "editor-env"))
@@ -59,6 +61,7 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
     for name, expected in {
         "steam": ["steam"],
         "clipboard": ["python3", "/usr/lib/icewine/clipboard"],
+        "ssh": ["python3", "/usr/lib/icewine/ssh"],
     }.items():
         argument = "literal argument; $(must-not-run)"
         result = run("icewine-" + name, argument)

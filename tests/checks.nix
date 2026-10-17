@@ -46,6 +46,12 @@ let
     (package: lib.getName package == "mimeapps.list") optIn.users.users.demo.packages);
   hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
 in {
+  ssh = pkgs.runCommand "icewine-ssh-checks" {
+    nativeBuildInputs = [ pkgs.python3 pkgs.openssh pkgs.util-linux ];
+  } ''
+    python3 ${self}/tests/ssh.py
+    touch "$out"
+  '';
   brightness = pkgs.runCommand "icewine-brightness-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.python3 pkgs.shellcheck pkgs.jq pkgs.util-linux ];
   } ''
@@ -122,6 +128,8 @@ in {
     assert !(hasPackage "mimeapps.list" optIn.users.users.other.packages);
     assert !desktop.networking.networkmanager.enable;
     assert !desktop.services.openssh.enable;
+    assert !desktop.programs.ssh.startAgent; # Native agent policy belongs to the host.
+    assert lib.hasInfix "icewine-ssh" (builtins.concatStringsSep ":" optIn.systemd.user.services.icewine.serviceConfig.Environment);
     assert !(desktop.systemd.services ? icewine-init);
     assert !(optIn.systemd.services ? icewine-init);
     assert !(optIn.systemd.user.services.icewine.serviceConfig ? ExecStartPre);

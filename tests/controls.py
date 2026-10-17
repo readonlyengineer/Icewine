@@ -27,6 +27,7 @@ ShellRoot {
     id: root
     Component { id: handheldOverlay; Deck.DeckOverlay { compositor: compositor; sessionLocked: false; shell: root } }
     property bool screenshotsOnly: false
+    property bool sshOnly: false
     property bool keepAwake: false
     property bool doNotDisturb: false
     property int count: 0
@@ -936,7 +937,8 @@ ShellRoot {
         const front = selected.parent
         const rear = other.parent
         const body = descendants(front, item => item instanceof Flickable)[0]
-        if (front.x - rear.x !== 18 || front.y - rear.y !== 48 || front.z <= rear.z
+        const rearDepth = page.rearOffset(rear.index, front.index)
+        if (front.x - rear.x !== 18 * (1 - rearDepth) || front.y - rear.y !== 48 * (1 - rearDepth) || front.z <= rear.z
                 || front.color.toString() !== rear.color.toString() || front.opacity !== 1 || rear.opacity !== 1)
             throw new Error("Cards lost their opaque lower/right stack")
         for (const card of [front, rear]) {
@@ -957,6 +959,63 @@ ShellRoot {
     }
     function settleCards(page) {
         networkKeys.tryCompare(page, "exchanging", false, 900)
+    }
+    function checkSsh(page, first, second) {
+        const third = root.findAccessible(networkPages, "SSH card")
+        if (!third || page.cards.length !== 3) throw new Error("SSH is not the third network card")
+        networkWindow.height = 550
+        first.forceActiveFocus()
+        networkKeys.keyClick(Qt.Key_Tab)
+        settleCards(page)
+        networkKeys.keyClick(Qt.Key_Tab)
+        settleCards(page)
+        if (!third.checked || !third.activeFocus || page.wifiDevice.scannerEnabled)
+            throw new Error("Keyboard entry did not select SSH and stop background Wi-Fi scanning")
+        const ssh = descendants(third.parent, item => typeof item.openForm === "function")[0]
+        networkKeys.tryCompare(ssh, "busy", false)
+        networkKeys.tryCompare(ssh, "available", true)
+        root.findAccessible(ssh, "Import SSH key").click()
+        const path = root.findAccessible(ssh, "SSH key path")
+        const phrase = root.findAccessible(ssh, "SSH key passphrase")
+        path.text = "/synthetic/private-key"
+        phrase.text = "fixture secret"
+        if (phrase.echoMode !== TextInput.Password) throw new Error("SSH passphrase is visible")
+        page.selectCard(0)
+        settleCards(page)
+        if (path.text || phrase.text || ssh.form || ssh.active)
+            throw new Error("Leaving SSH retained private form state")
+        page.selectCard(2)
+        settleCards(page)
+        networkKeys.tryCompare(ssh, "busy", false)
+        root.findAccessible(ssh, "Generate SSH key").click()
+        phrase.text = "fixture secret"
+        root.findAccessible(ssh, "Confirm SSH passphrase").text = "fixture secret"
+        root.findAccessible(ssh, "Confirm SSH key action").click()
+        if (phrase.text || path.text || ssh.form) throw new Error("Submitting SSH retained UI secrets")
+        networkKeys.tryCompare(ssh, "busy", true)
+        networkPages.shown = false
+        networkKeys.tryCompare(ssh, "busy", false)
+        if (ssh.pending || phrase.text || ssh.form) throw new Error("Dismissed SSH kept pending/private input")
+        networkPages.shown = true
+        networkKeys.tryCompare(ssh, "active", true)
+        networkKeys.tryCompare(ssh, "busy", false)
+        networkKeys.tryCompare(ssh, "available", true)
+        if (ssh.entries.length !== 1) throw new Error("Reopened SSH did not refresh public inventory")
+        root.findAccessible(ssh, "Import SSH key").click()
+        phrase.text = "fixture secret"
+        networkPages.currentPage = "audio"
+        networkKeys.wait(30)
+        if (phrase.text || ssh.form || ssh.active) throw new Error("Page change retained SSH secret fields")
+        networkPages.currentPage = "network"
+        networkKeys.tryCompare(networkPages, "enabled", true)
+        networkKeys.wait(220)
+        page.selectCard(0)
+        settleCards(page)
+        networkWindow.requestActivate()
+        networkKeys.tryCompare(networkWindow, "active", true)
+        first.forceActiveFocus()
+        networkKeys.tryCompare(first, "activeFocus", true)
+        networkWindow.height = 150
     }
     function checkCardMotion(page, first, second) {
         const wifi = descendants(first.parent, item => item instanceof Flickable)[0]
@@ -1302,8 +1361,7 @@ ShellRoot {
         const networking = root.findAccessible(networkPages, "Networking card")
         let page = networking
         while (page && page.wifiDevice === undefined) page = page.parent
-        const password = descendants(page,
-            item => item instanceof TextInput && item.echoMode === TextInput.Password)[0]
+        const password = root.findAccessible(page, "Wi-Fi password")
         page.connectNetwork(delayedWifi)
         networkPages.currentPage = "audio"
         networkPages.focusInitial()
@@ -1357,8 +1415,9 @@ ShellRoot {
                 throw new Error("Network initial tab/focus is incorrect")
             let networkPage = firstTab
             while (networkPage && networkPage.wifiDevice === undefined) networkPage = networkPage.parent
-            const password = descendants(networkPage,
-                item => item instanceof TextInput && item.echoMode === TextInput.Password)[0]
+            root.checkSsh(networkPage, firstTab, secondTab)
+            if (root.sshOnly) { console.log("SSH_UI_CHECK_PASSED"); Qt.quit(); return }
+            const password = root.findAccessible(networkPage, "Wi-Fi password")
             networkPage.passwordNetwork = {name: "Fixture Wi-Fi"}
             password.text = "fixture secret"
             networkPages.focusInitial()
@@ -2547,6 +2606,15 @@ for line in sys.stdin:
     print(json.dumps(state), flush=True)
 ''')
     clipboard_command.chmod(0o755)
+    ssh_command = root / "bin/icewine-ssh"
+    ssh_command.write_text("#!" + sys.executable + "\n" + '''import json, sys, time
+request = json.load(sys.stdin)
+if request["action"] == "generate": time.sleep(2)
+print(json.dumps(dict(available=True, error="", entries=[dict(public="ssh-ed25519 fixture-public",
+    paths=[], loaded=True, temporary=True, origin="Generated temporarily", type="ssh-ed25519",
+    fingerprint="SHA256:fixture")], message="")))
+''')
+    ssh_command.chmod(0o755)
     mock = root / "bin/icewine-monitor-brightness"
     mock.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$1" >> "' + str(root / "brightness-calls") + '"\necho "${2:-37}"\n')
     mock.chmod(0o755)
@@ -2618,6 +2686,15 @@ for line in sys.stdin:
                XDG_STATE_HOME=str(root / "state"), ICEWINE_WIDGET_POLICY="{}",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
     env["XDG_CONFIG_HOME"] = fixture_config
+    if "--ssh-only" in sys.argv:
+        (root / "shell.qml").write_text(QML.replace("property bool sshOnly: false", "property bool sshOnly: true"))
+        result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                                capture_output=True, text=True, timeout=20)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0 and "SSH_UI_CHECK_PASSED" in output, output
+        assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
+        print("three-card SSH keyboard entry, concealed input, cancel/dismiss/reopen/page lifecycle pass")
+        sys.exit(0)
     if "--screenshots-only" in sys.argv:
         (root / "shell.qml").write_text(QML.replace("property bool screenshotsOnly: false",
                                                    "property bool screenshotsOnly: true"))

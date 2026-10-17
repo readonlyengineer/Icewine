@@ -1,0 +1,529 @@
+#!/usr/bin/env python3
+"""Local SSH card operations. OpenSSH owns all key parsing and cryptography."""
+import contextlib
+import fcntl
+import glob
+import itertools
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import signal
+import socket
+import stat
+import struct
+import subprocess
+import sys
+import tempfile
+
+LIMIT = 256 * 1024
+
+
+class Unavailable(Exception):
+    pass
+
+
+class Cancelled(Unavailable):
+    pass
+
+
+def cancelled(*_):
+    raise Cancelled("Cancelled")
+
+
+@contextlib.contextmanager
+def defer_cancellation():
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+
+
+@contextlib.contextmanager
+def memory(data):
+    fd = os.memfd_create("icewine-ssh", os.MFD_CLOEXEC)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(os.dup(fd), "wb") as stream:
+            stream.write(data)
+        os.lseek(fd, 0, os.SEEK_SET)
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def native(args, *, phrase="", repeats=1, stdin=None, descriptors=()):
+    # Only descriptor numbers and the executable path enter the environment.
+    with memory((phrase + "\n").encode() * repeats) as fd:
+        env = dict(os.environ, LC_ALL="C", SSH_ASKPASS_REQUIRE="force",
+                   SSH_ASKPASS=os.environ.get("ICEWINE_SSH_ASKPASS", str(Path(__file__).resolve())),
+                   ICEWINE_SSH_PHRASE_FD=str(fd))
+        with subprocess.Popen(args, stdin=stdin if stdin is not None else subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                              pass_fds=(*descriptors, fd), start_new_session=True) as process:
+            try:
+                output, errors = process.communicate(timeout=15)
+            finally:
+                # Also stop askpass descendants on timeout, cancellation or shell reload.
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+        if process.returncode:
+            raise Unavailable("OpenSSH rejected the request. Check the key, passphrase and agent.")
+        if len(output) > LIMIT:
+            raise Unavailable("OpenSSH response too large")
+        return output.decode("utf-8", "replace").strip()
+
+
+def public_fields(public):
+    fields = public.split()
+    if len(fields) < 2 or len(public) > 16384:
+        raise Unavailable("Invalid public identity")
+    return " ".join(fields[:2])
+
+
+def fingerprint(public):
+    with memory(public.encode()) as fd:
+        text = native(["ssh-keygen", "-l", "-E", "sha256", "-f", "-"], stdin=fd)
+    fields = text.split()
+    if len(fields) < 2 or not fields[1].startswith("SHA256:"):
+        raise Unavailable("Invalid public identity")
+    return fields[1]
+
+
+def identity_files(home):
+    """Bounded static discovery, never evaluating Host/Match exec or running ssh."""
+    ssh = home / ".ssh"
+    result = [ssh / ("id_" + name) for name in
+              ("rsa", "ecdsa", "ecdsa_sk", "ed25519", "ed25519_sk", "mldsa44_ed25519")]
+    pending, seen = [ssh / "config"], set()
+    while pending and len(seen) < 32 and len(result) < 128:
+        config = pending.pop(0)
+        if config in seen:
+            continue
+        seen.add(config)
+        try:
+            with config.open("r") as stream:
+                text = stream.read(65537)
+            if len(text) > 65536:
+                continue
+        except (OSError, UnicodeError):
+            continue
+        for line in text.splitlines():
+            if len(result) >= 128:
+                break
+            try:
+                words = shlex.split(re.sub(r"^(\s*\w+)\s*=", r"\1 ", line, count=1), comments=True)
+            except ValueError:
+                continue
+            if len(words) < 2 or words[0].lower() not in ("identityfile", "include"):
+                continue
+            for value in words[1:]:
+                value = value.replace("%d", str(home)).replace("${HOME}", str(home))
+                if "%" in value or "$" in value or value == "none":
+                    continue
+                if value == "~" or value.startswith("~/"):
+                    value = str(home) + value[1:]
+                path = Path(value)
+                if not path.is_absolute():
+                    path = ssh / path
+                if words[0].lower() == "include":
+                    pending.extend(Path(p) for p in itertools.islice(glob.iglob(str(path)), 32))
+                    pending = pending[:32]
+                else:
+                    result.append(path)
+                if len(result) >= 128:
+                    break
+    return list(dict.fromkeys(result))[:128]
+
+
+class Backend:
+    def __init__(self, home, runtime, service_pid):
+        self.home, self.runtime = Path(home), Path(runtime)
+        self.path = self.runtime / "ssh-agent"
+        self.service_pid = service_pid
+        self.instance = None
+        self.records = {}
+        self.added = None
+        self.saved = ""
+        self.generated_public = ""
+
+    def agent(self):
+        if self.service_pid <= 0:
+            raise Unavailable("Configure the native local ssh-agent.service for this session")
+        if os.environ.get("SSH_AUTH_SOCK") != str(self.path):
+            raise Unavailable("SSH uses another agent. This card only manages the local ssh-agent service.")
+        st = self.path.lstat()
+        if not stat.S_ISSOCK(st.st_mode) or st.st_uid != os.getuid():
+            raise Unavailable("Local SSH agent unavailable")
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(2)
+            connection.connect(str(self.path))
+            pid, uid, _ = struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        if uid != os.getuid() or pid != self.service_pid or pid <= 0:
+            raise Unavailable("SSH agent is not the supported local service")
+        instance = [st.st_dev, st.st_ino, pid, Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]]
+        if self.instance is not None and instance != self.instance:
+            raise Unavailable("SSH agent changed. Refresh before retrying.")
+        self.instance = instance
+
+    @contextlib.contextmanager
+    def ownership(self):
+        # Public provenance only; no secrets or automatic key restoration.
+        directory = self.runtime / "icewine-ssh"
+        directory.mkdir(mode=0o700, exist_ok=True)
+        dirfd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        fd = None
+        try:
+            st = os.fstat(dirfd)
+            if st.st_uid != os.getuid() or st.st_mode & 0o077:
+                raise Unavailable("Unsafe SSH runtime directory")
+            fd = os.open("public.json", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=dirfd)
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077 or st.st_nlink != 1:
+                raise Unavailable("Unsafe SSH public metadata")
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            raw = os.read(fd, LIMIT + 1)
+            try:
+                state = json.loads(raw) if raw else {}
+                self.records = state.get("keys", {}) if state.get("agent") == self.instance else {}
+                if not isinstance(self.records, dict):
+                    self.records = {}
+                self.records = {p: r for p, r in self.records.items() if isinstance(r, dict)}
+            except (ValueError, AttributeError):
+                self.records = {}
+            def save():
+                data = json.dumps({"agent": self.instance, "keys": self.records}).encode()
+                os.lseek(fd, 0, os.SEEK_SET)
+                os.ftruncate(fd, 0)
+                os.write(fd, data)
+            try:
+                try:
+                    yield
+                finally:
+                    with defer_cancellation():
+                        save()
+            except Cancelled:
+                # Keep the lock and rollback live through response inventory and
+                # public metadata completion, not just the native add command.
+                with defer_cancellation():
+                    if self.saved:
+                        self.records[self.generated_public] = dict(origin="Saved permanently", path=self.saved, temporary=False)
+                    else:
+                        self.rollback_added()
+                    save()
+                raise
+        finally:
+            if fd is not None:
+                os.close(fd)
+            os.close(dirfd)
+
+    def loaded(self):
+        self.agent()
+        # Empty and locked agents both use exit 1; distinguish the native empty reply.
+        result = subprocess.run(["ssh-add", "-L"], capture_output=True, timeout=3,
+                                env=dict(os.environ, LC_ALL="C"), stdin=subprocess.DEVNULL)
+        self.agent()
+        if result.returncode == 1 and result.stdout.strip() == b"The agent has no identities.":
+            # OpenSSH deliberately returns an empty list while locked. Its native
+            # extension query distinguishes that from an unlocked empty agent.
+            try:
+                native(["ssh-add", "-Q"])
+            except Cancelled:
+                raise
+            except Unavailable:
+                raise Unavailable("SSH agent is locked or does not support native queries") from None
+            return []
+        if result.returncode or len(result.stdout) > LIMIT:
+            raise Unavailable("SSH agent unavailable or locked")
+        return [public_fields(line) for line in result.stdout.decode().splitlines()][:128]
+
+    def status(self):
+        available, error, loaded = True, "", []
+        try:
+            loaded = self.loaded()
+        except Cancelled:
+            raise
+        except (Unavailable, OSError, subprocess.SubprocessError) as e:
+            available, error = False, str(e) if isinstance(e, Unavailable) else "Local SSH agent unavailable"
+        entries = {p: dict(public=p, paths=[], loaded=True) for p in loaded}
+        if available:
+            self.records = {p: r for p, r in self.records.items() if not r.get("temporary") or p in loaded}
+        recorded_paths = [Path(r["path"]) for r in self.records.values() if isinstance(r.get("path"), str) and r["path"]]
+        for path in dict.fromkeys(identity_files(self.home) + recorded_paths):
+            public_path = Path(str(path) + ".pub")
+            try:
+                if public_path.is_file():
+                    with public_path.open("r") as stream:
+                        public = public_fields(stream.read(16385))
+                    fingerprint(public)
+                elif path.is_file():
+                    # OpenSSH extracts only public metadata, without asking to decrypt.
+                    summary = native(["ssh-keygen", "-l", "-E", "sha256", "-f", str(path)])
+                    fields = summary.split()
+                    match = next((p for p in loaded if fingerprint(p) == fields[1]), None)
+                    if match:
+                        entries[match]["paths"].append(str(path))
+                    else:
+                        entries.setdefault(str(path), dict(public="", paths=[str(path)], loaded=False,
+                                                          fingerprint=fields[1], type=fields[-1].strip("()")))
+                    continue
+                else:
+                    continue
+                entries.setdefault(public, dict(public=public, paths=[], loaded=False))["paths"].append(str(path))
+            except Cancelled:
+                raise
+            except (Unavailable, OSError, UnicodeError, IndexError):
+                entries.setdefault(str(path), dict(public="", paths=[str(path)], loaded=False,
+                                                  fingerprint="Public metadata unavailable", type="Unknown"))
+        result = []
+        for public, entry in entries.items():
+            if entry["public"]:
+                entry.update(fingerprint=fingerprint(public), type=public.split()[0])
+            record = self.records.get(public, {})
+            entry.update(origin=record.get("origin", ""), temporary=record.get("temporary", False))
+            result.append(entry)
+        return dict(entries=result, available=available, error=error)
+
+    def add(self, fd, phrase, origin, path=""):
+        public = public_fields(native(["ssh-keygen", "-y", "-f", f"/proc/self/fd/{fd}"],
+                                      phrase=phrase, descriptors=(fd,)))
+        before = self.loaded()
+        if public in before:
+            return "Already loaded; existing identity kept", public
+        prior = self.records.get(public)
+        # Ponytail: the lock serialises card calls; OpenSSH has no compare-and-add
+        # transaction with unrelated external ssh-add clients.
+        self.added = (public, prior, origin, path)
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            native(["ssh-add", "-q", "-k", "-"], phrase=phrase, stdin=fd)
+            if public not in self.loaded():
+                raise Unavailable("Key addition was not confirmed")
+            if origin:
+                self.records[public] = dict(origin=origin, path=path, temporary=True)
+            return "Key loaded", public
+        except BaseException:
+            self.rollback_added()
+            raise
+
+    def rollback_added(self):
+        if self.added is None:
+            return
+        public, prior, origin, path = self.added
+        if public in self.loaded():
+            if origin:
+                self.records[public] = dict(origin=origin, path=path, temporary=True)
+            with memory((public + "\n").encode()) as public_fd:
+                native(["ssh-add", "-q", "-d", "-"], stdin=public_fd)
+            if public in self.loaded():
+                raise Unavailable("Addition could not be rolled back. Refresh and unload the key.")
+        if prior is None:
+            self.records.pop(public, None)
+        else:
+            self.records[public] = prior
+        self.added = None
+
+    def saved_result(self):
+        return dict(entries=[], available=False, error="", public=self.generated_public,
+                    saved=self.saved, message="Permanent key saved; inventory refresh cancelled. Not loaded automatically.")
+
+    def remove(self, public):
+        public = public_fields(public)
+        if not self.records.get(public, {}).get("temporary"):
+            raise Unavailable("Only identities added temporarily by this card can be removed here")
+        before = self.loaded()
+        if public in before:
+            with memory((public + "\n").encode()) as fd:
+                native(["ssh-add", "-q", "-d", "-"], stdin=fd)
+        after = self.loaded()
+        if public in after or not set(before).difference([public]).issubset(after):
+            raise Unavailable("Key removal was not confirmed. Refresh the agent state.")
+        self.records.pop(public, None)
+
+    def generate(self, request):
+        permanent = request.get("storage") == "permanent"
+        if request.get("storage") not in ("temporary", "permanent"):
+            raise Unavailable("Choose Temporary or Permanent")
+        phrase = request.get("passphrase", "")
+        if phrase != request.get("confirmation", "") or (not phrase and request.get("unprotected") is not True):
+            raise Unavailable("Confirm the passphrase or explicitly choose no passphrase")
+        # Native generation requires named files; refuse disk-backed temp directories.
+        mount = subprocess.run(["findmnt", "-n", "-T", "/dev/shm", "-o", "FSTYPE"],
+                               capture_output=True, timeout=3)
+        if mount.returncode or mount.stdout.strip() != b"tmpfs":
+            raise Unavailable("Private tmpfs staging unavailable")
+        with tempfile.TemporaryDirectory(prefix="icewine-ssh-", dir="/dev/shm") as directory:
+            private = Path(directory) / "identity"
+            native(["ssh-keygen", "-q", "-t", "ed25519", "-C", "Icewine", "-f", str(private)],
+                   phrase=phrase, repeats=2)
+            public = public_fields(Path(str(private) + ".pub").read_text())
+            if permanent:
+                self.generated_public = public
+                saved = self.publish(private, request.get("path", ""))
+                self.records[public] = dict(origin="Saved permanently", path=saved, temporary=False)
+                return "Saved permanent key; not loaded automatically", public, saved
+            with private.open("rb") as stream:
+                message, public = self.add(stream.fileno(), phrase, "Generated temporarily")
+            return message, public, ""
+
+    def publish(self, private, destination):
+        path = Path(destination)
+        if not path.is_absolute() or not path.name or path.name in (".", ".."):
+            raise Unavailable("Choose an absolute permanent key path in an existing directory")
+        # Walk parents via no-follow directory descriptors, rejecting symlink ancestors.
+        parent = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+        created = []
+        try:
+            for component in path.parts[1:-1]:
+                new = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                os.close(parent)
+                parent = new
+            for name, source in ((path.name, private), (path.name + ".pub", Path(str(private) + ".pub"))):
+                # Register the live descriptor before SIGTERM/SIGINT can run.
+                # Retain it for inode-guarded rollback of either pair member.
+                with defer_cancellation():
+                    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+                    created.append((name, fd))
+                with os.fdopen(os.dup(fd), "wb") as output, source.open("rb") as input_file:
+                    shutil.copyfileobj(input_file, output)
+                os.fsync(fd)
+            with defer_cancellation():
+                os.fsync(parent)
+                self.saved = str(path) # Both complete files are now committed.
+            return self.saved
+        except BaseException:
+            if not self.saved:
+                for name, fd in created:
+                    try:
+                        if os.stat(name, dir_fd=parent, follow_symlinks=False).st_ino == os.fstat(fd).st_ino:
+                            os.unlink(name, dir_fd=parent)
+                    except FileNotFoundError:
+                        pass
+            raise
+        finally:
+            for _, fd in created:
+                os.close(fd)
+            os.close(parent)
+
+    def dispatch(self, request):
+        self.added, self.saved, self.generated_public = None, "", ""
+        action = request.get("action")
+        if action == "status":
+            try:
+                self.agent()
+                with self.ownership():
+                    return self.status()
+            except Cancelled:
+                raise
+            except (Unavailable, OSError) as e:
+                return dict(self.status(), available=False,
+                            error=str(e) if isinstance(e, Unavailable) else "SSH runtime metadata unavailable")
+        self.agent()
+        try:
+            return self.mutate(request)
+        except Cancelled:
+            if self.saved:
+                return self.saved_result()
+            raise
+
+    def mutate(self, request):
+        action = request.get("action")
+        with self.ownership():
+            message, public, saved = "", "", ""
+            if action == "import":
+                if not Path(request.get("path", "")).is_absolute():
+                    raise Unavailable("Choose an absolute private key path")
+                source = os.open(request.get("path", ""), os.O_RDONLY | os.O_NOFOLLOW)
+                try:
+                    st = os.fstat(source)
+                    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+                        raise Unavailable("Choose your private key file with owner-only permissions")
+                    private = os.read(source, LIMIT + 1)
+                finally:
+                    os.close(source)
+                if not private or len(private) > LIMIT:
+                    raise Unavailable("Private key file is empty or too large")
+                with memory(private) as fd:
+                    del private
+                    message, public = self.add(fd, request.get("passphrase", ""), "Imported temporarily", request["path"])
+            elif action == "generate":
+                message, public, saved = self.generate(request)
+            elif action == "remove":
+                self.remove(request.get("public", ""))
+                message = "Key unloaded; original files and existing connections are kept"
+            else:
+                raise Unavailable("Unknown SSH action")
+            return dict(self.status(), message=message, public=public, saved=saved)
+
+
+def main():
+    if "ICEWINE_SSH_PHRASE_FD" in os.environ:
+        # Native askpass callback; bounded replies avoid endless wrong-phrase retries.
+        fd = int(os.environ["ICEWINE_SSH_PHRASE_FD"])
+        answer = bytearray()
+        while len(answer) < 1024:
+            char = os.read(fd, 1)
+            if not char or char == b"\n":
+                break
+            answer.extend(char)
+        os.write(1, answer + b"\n")
+        return
+    signal.signal(signal.SIGTERM, cancelled)
+    signal.signal(signal.SIGINT, cancelled)
+    backend = None
+    try:
+        raw = sys.stdin.buffer.read(LIMIT + 1)
+        if len(raw) > LIMIT:
+            raise Unavailable("SSH request too large")
+        request = json.loads(raw)
+        del raw
+        if not isinstance(request, dict):
+            raise Unavailable("Invalid SSH request")
+        for name in ("private", "passphrase", "confirmation", "path", "public"):
+            if not isinstance(request.get(name, ""), str):
+                raise Unavailable("Invalid SSH input")
+        if any(c in request.get("passphrase", "") for c in "\r\n\0") or len(request.get("passphrase", "").encode()) > 1000:
+            raise Unavailable("Passphrase must be one line, up to 1000 bytes")
+        pid = subprocess.run(["systemctl", "--user", "show", "ssh-agent.service", "-p", "MainPID", "--value"],
+                             capture_output=True, timeout=3)
+        command = subprocess.run(["systemctl", "--user", "show", "ssh-agent.service", "-p", "ExecStart", "--value"],
+                                 capture_output=True, timeout=3)
+        executable = re.search(r"(?:^|\{\s*)path=([^ ;]+)\s*;", command.stdout.decode("utf-8", "replace"))
+        supported = executable and Path(executable[1]).resolve() == Path(shutil.which("ssh-agent") or "").resolve()
+        backend = Backend(Path.home(), os.environ.get("XDG_RUNTIME_DIR", "/nonexistent"),
+                          int(pid.stdout.strip() or b"0") if pid.returncode == 0 and supported else 0)
+        result = backend.dispatch(request)
+        # Keep cancellation rollback live until response delivery is committed.
+        with defer_cancellation():
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except Cancelled:
+        with defer_cancellation():
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        try:
+            if backend is not None and backend.saved:
+                result = backend.saved_result()
+            else:
+                if backend is not None and backend.added is not None:
+                    with backend.ownership():
+                        backend.rollback_added()
+                result = dict(entries=[], available=False, error="Cancelled")
+        except Exception:
+            result = dict(entries=[], available=False,
+                          error="Cancellation could not be confirmed. Refresh and check the agent.")
+    except Exception as e:
+        with defer_cancellation():
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        result = dict(entries=[], available=False,
+                      error=str(e) if isinstance(e, Unavailable) else "SSH operation failed. Refresh and retry.")
+    print(json.dumps(result), flush=True)
+
+
+if __name__ == "__main__":
+    main()

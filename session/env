@@ -9,3 +9,9 @@ export XCURSOR_THEME=Adwaita
 # Qt: let Qt apps follow the per-screen scale Wayland advertises
 export QT_AUTO_SCREEN_SCALE_FACTOR=1
 export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
+
+# One local native agent contract, inherited by UWSM services and ordinary clients.
+# Preserve explicit external/forwarded agents; the SSH card refuses to mutate them.
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -z "${SSH_AUTH_SOCK:-}" ]; then
+    export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent"
+fi

@@ -181,6 +181,14 @@ let
     runtimeInputs = [ pkgs.python3 pkgs.cliphist pkgs.wl-clipboard pkgs.wtype pkgs.hyprland ];
     text = ''exec python3 ${../scripts/clipboard} "$@"'';
   };
+  ssh = pkgs.writeShellApplication {
+    name = "icewine-ssh";
+    runtimeInputs = [ pkgs.python3 config.programs.ssh.package pkgs.systemd pkgs.util-linux ];
+    text = ''
+      export ICEWINE_SSH_ASKPASS="$0"
+      exec python3 ${../scripts/ssh} "$@"
+    '';
+  };
 in {
   config = lib.mkIf cfg.enable {
     users.users.${cfg.user}.packages = [ icewineCli ];
@@ -193,8 +201,10 @@ in {
   systemd.user.services.icewine = lib.mkIf cfg.desktop.enable {
     description = "Icewine desktop shell";
     partOf = [ "graphical-session.target" ];
-    after = [ "graphical-session.target" "nixos-activation.service" ];
-    wants = [ "nixos-activation.service" ];
+    after = [ "graphical-session.target" "nixos-activation.service" ]
+      ++ lib.optional config.programs.ssh.startAgent "ssh-agent.service";
+    wants = [ "nixos-activation.service" ]
+      ++ lib.optional config.programs.ssh.startAgent "ssh-agent.service";
     conflicts = [ "mako.service" ];
     unitConfig.ConditionUser = cfg.user;
     environment.ICEWINE_WIDGET_POLICY = builtins.toJSON cfg.widgets;
@@ -210,7 +220,7 @@ in {
         "ICEWINE_STEAM_ENABLED=${if cfg.steam != "none" then "true" else "false"}"
         "ICEWINE_GAMESCOPE_ENABLED=${if cfg.steam != "none" && cfg.gamescope.enable then "true" else "false"}"
         "ICEWINE_BATTERY_ENABLED=${if cfg.battery.enable then "true" else "false"}"
-        "PATH=/run/wrappers/bin:/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd pkgs.wtype pkgs.coreutils monitorCapabilities monitorBrightness steamShortcuts clipboard ]}"
+        "PATH=/run/wrappers/bin:/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin:${lib.makeBinPath [ themeCli pkgs.glib pkgs.hyprland pkgs.systemd pkgs.wtype pkgs.wl-clipboard pkgs.coreutils monitorCapabilities monitorBrightness steamShortcuts clipboard ssh ]}"
         "QML_IMPORT_PATH=${implementation}/quickshell"
         "QT_IM_MODULE=qtvirtualkeyboard"
         "QT_VIRTUALKEYBOARD_DESKTOP_DISABLE=1"
