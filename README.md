@@ -287,6 +287,25 @@ Icewine reserves workspace selector spellings starting with a tab and a space
 for its removable native picker rules; use ordinary selectors in user rules.
 Desktop controls support scrolling, dwindle, master and monocle.
 
+### Screenshots
+
+Open Screenshot from the topbar or with Super+Print. **Region** opens Flameshot:
+drag to select an area. **Monitor** opens its native editor: press Ctrl+A in
+Flameshot to select the whole display before editing, saving or copying. With
+multiple displays, choose a monitor in Flameshot first. Monitor does not select
+the full image automatically. Enable **3-second delay** to postpone either
+capture. The handheld Screenshot action opens the monitor editor without delay.
+
+In Flameshot, select the area to crop, then use arrows, shapes, freehand, text and
+undo. Use an opaque filled rectangle to cover sensitive content; blur/pixelation
+is not secure redaction. Choose **Save** or **Copy**, or press Esc to cancel without
+exporting. Save defaults to Pictures (then the last Flameshot save directory),
+with a date/time PNG name and a numbered suffix on collisions; the save dialog
+asks before replacing a chosen existing file. No unannotated original is saved.
+Flameshot's own settings can change save/copy behavior, including save-after-copy.
+Icewine leaves those settings intact. Cancelling the save dialog discards the
+unsaved edit, so choose the destination before closing it.
+
 ### Automatic fullscreen
 
 ```sh

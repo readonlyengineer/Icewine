@@ -26,6 +26,7 @@ import "icewine/theme" as Theme
 ShellRoot {
     id: root
     Component { id: handheldOverlay; Deck.DeckOverlay { compositor: compositor; sessionLocked: false; shell: root } }
+    property bool screenshotsOnly: false
     property bool keepAwake: false
     property bool doNotDisturb: false
     property int count: 0
@@ -150,6 +151,16 @@ ShellRoot {
         }
         Bar.Widget { id: animatedWidget; width: 20; height: 20; shown: false }
         TestCase { id: toggleKeys; when: false }
+    }
+    Window {
+        id: screenshotWindow
+        width: 380; height: screenshotPage.implicitHeight
+        property var command: []
+        Popouts.Screenshot {
+            id: screenshotPage
+            width: parent.width
+            onCaptureRequested: command => screenshotWindow.command = command
+        }
     }
     Window {
         id: networkWindow
@@ -1293,6 +1304,12 @@ ShellRoot {
         running: true
         onTriggered: {
             try {
+            if (root.screenshotsOnly) {
+                root.checkScreenshot()
+                console.log("SCREENSHOT_CHECK_PASSED")
+                Qt.quit()
+                return
+            }
             // Sample within the rate model's three-second window, before deliberate motion waits.
             root.tick()
             networkWindow.requestActivate()
@@ -1473,6 +1490,7 @@ ShellRoot {
                 if (root.buttonCalls !== before + 1)
                     throw new Error("Shared action button keyboard activation failed")
             }
+            root.checkScreenshot()
             if (JSON.stringify(steamShortcuts.commands) !== '[["demo"]]')
                 throw new Error("Steam shortcut process result was not published")
             steamShortcuts.refresh()
@@ -1526,6 +1544,39 @@ ShellRoot {
         id: cancelSleep
         interval: 100
         onTriggered: chargingBattery.state = UPowerDeviceState.Charging
+    }
+
+    function checkScreenshot() {
+        screenshotWindow.visible = true
+        screenshotWindow.requestActivate()
+        toggleKeys.tryCompare(screenshotWindow, "active", true)
+        const buttons = descendants(screenshotPage,
+            item => typeof item.click === "function" && ["Monitor", "Region", "Window", "Annotate…"].includes(item.text))
+        const captureDelay = root.findVisible(screenshotPage,
+            item => item.text === "3-second delay" && item.checked !== undefined)
+        if (buttons.map(item => item.text).join(",") !== "Monitor,Region" || !captureDelay)
+            throw new Error("Screenshot must offer only native Monitor and Region actions")
+        if (root.findVisible(screenshotPage, item => typeof item.text === "string" && item.text.includes("clipboard only")))
+            throw new Error("Screenshot output must be chosen in Flameshot")
+        for (const delayed of [false, true]) {
+            captureDelay.checked = delayed
+            for (const button of buttons) {
+                if (button.y + button.height > screenshotPage.implicitHeight)
+                    throw new Error("Screenshot capture button clipped")
+                screenshotWindow.command = []
+                button.forceActiveFocus()
+                toggleKeys.keyPress(Qt.Key_Return)
+                if (screenshotWindow.command.length)
+                    throw new Error("Screenshot launched before key release")
+                toggleKeys.keyRelease(Qt.Key_Return)
+                const expected = button.text === "Monitor"
+                    ? ["flameshot", "screen", "--edit"] : ["flameshot", "gui"]
+                if (delayed) expected.push("--delay", "3000")
+                if (JSON.stringify(screenshotWindow.command) !== JSON.stringify(expected))
+                    throw new Error("Screenshot native mode or delay lost")
+            }
+        }
+        screenshotWindow.visible = false
     }
 
     function findAccessible(item, name) {
@@ -2454,6 +2505,16 @@ with tempfile.TemporaryDirectory() as directory:
                XDG_STATE_HOME=str(root / "state"), ICEWINE_WIDGET_POLICY="{}",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
     env["XDG_CONFIG_HOME"] = fixture_config
+    if "--screenshots-only" in sys.argv:
+        (root / "shell.qml").write_text(QML.replace("property bool screenshotsOnly: false",
+                                                   "property bool screenshotsOnly: true"))
+        result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                                capture_output=True, text=True, timeout=15)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0 and "SCREENSHOT_CHECK_PASSED" in output, output
+        assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
+        print("screenshot Region/Monitor entries, native commands, delay and keyboard-release checks pass")
+        sys.exit(0)
     status_icons = root / "icewine/modules/topbar/StatusIcons.qml"
     native_status_icons = status_icons.read_text()
     status_icons.write_text(native_status_icons.replace("import Quickshell.Services.Pipewire\n", "import ControlFixtures\n")

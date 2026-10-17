@@ -101,7 +101,7 @@ Widget {
 
     function capture(command) {
         instantHandoffRequested()
-        // Hide the popout before Hyprshot freezes the selection surface.
+        // Hide the popout before Flameshot captures the screen.
         Qt.callLater(() => Quickshell.execDetached(command))
     }
 

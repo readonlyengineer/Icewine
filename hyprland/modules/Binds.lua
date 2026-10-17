@@ -115,7 +115,7 @@ end)
 hl.bind(mainMod .. " + F", windows.toggle_fullscreen)
 hl.bind(mainMod .. " + M", windows.toggle_width)
 
--- Screenshot menu: monitor, region or window.
+-- Screenshot menu: monitor or region.
 hl.bind(mainMod .. " + Print", topbar("screenshot"))
 
 -- Resolve the active layout at use time, including native runtime changes.

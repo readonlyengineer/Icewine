@@ -296,22 +296,15 @@ deck.activate({action: "screenshot"}, 0)
 assert.equal(captures.length, 0, "Dismiss the shell before capture")
 flush()
 assert.deepEqual(captures, [
-    ["hyprshot", "--mode", "output", "--mode", "eDP-1"]
-], "Capture the built-in panel immediately to both destinations")
+    ["flameshot", "screen", "--edit"]
+], "Open the native monitor editor after dismissing the shell")
 
 // Exercise real page/host functions with page state unavailable at deferred launch.
-for (const [mode, screens, clipboardOnly, delayCapture, expected] of [
-    ["output", [], false, false, ["hyprshot", "--freeze", "--mode", "output"]],
-    ["output", [{name: "eDP-1"}], false, false,
-        ["hyprshot", "--freeze", "--mode", "output", "--mode", "eDP-1"]],
-    ["output", [{name: "eDP-1"}, {name: "DP-1"}], true, true,
-        ["sh", "-c", 'sleep 3 && exec "$@"', "icewine-screenshot",
-            "hyprshot", "--freeze", "--mode", "output", "--clipboard-only"]],
-    ["region", [], true, false,
-        ["hyprshot", "--freeze", "--mode", "region", "--clipboard-only"]],
-    ["window", [], false, true,
-        ["sh", "-c", 'sleep 3 && exec "$@"', "icewine-screenshot",
-            "hyprshot", "--freeze", "--mode", "window"]]
+for (const [mode, delayCapture, expected] of [
+    ["monitor", false, ["flameshot", "screen", "--edit"]],
+    ["monitor", true, ["flameshot", "screen", "--edit", "--delay", "3000"]],
+    ["region", false, ["flameshot", "gui"]],
+    ["region", true, ["flameshot", "gui", "--delay", "3000"]]
 ]) {
     const events = [], pending = []
     const host = controller("../modules/topbar/StatusPopout.qml", {
@@ -320,11 +313,10 @@ for (const [mode, screens, clipboardOnly, delayCapture, expected] of [
         Quickshell: {execDetached: command => events.push(Array.from(command))}
     })
     const page = controller("../modules/topbar/popouts/Screenshot.qml", {
-        clipboard: {checked: clipboardOnly}, delay: {checked: delayCapture},
-        Quickshell: {screens}, captureRequested: command => host.capture(command)
+        delay: {checked: delayCapture}, captureRequested: command => host.capture(command)
     })
     page.capture(mode)
-    page.root = page.clipboard = page.delay = page.Quickshell = null
+    page.root = page.delay = null
     assert.deepEqual(events, ["dismiss"], "Hide the popout before launching capture")
     while (pending.length) pending.shift()()
     assert.deepEqual(events, ["dismiss", expected])

@@ -147,7 +147,7 @@ Scope {
         shell.handoff()
         if (entry.action === "screenshot") {
             Qt.callLater(() => Quickshell.execDetached([
-                "hyprshot", "--mode", "output", "--mode", "eDP-1"
+                "flameshot", "screen", "--edit"
             ]))
         } else if (entry.action === "close") {
             compositor.dispatch("hl.dsp.window.close()")
