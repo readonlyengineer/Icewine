@@ -33,6 +33,10 @@ Scope {
         PanelWindow {
             required property var modelData
             screen: modelData
+            // Ponytail: Hyprland 0.56 misses layers on output moves. Track the final
+            // origin across coalesced polish; four anchors keep size 0x0. Remove after native repair.
+            implicitWidth: modelData.x
+            implicitHeight: modelData.y
             color: Theme.Palette.background
 
             anchors {

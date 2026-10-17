@@ -60,6 +60,7 @@ in {
     python3 ${self}/tests/controls.py ${self}
     python3 ${self}/tests/layouts.py --qml
     python3 ${self}/tests/render-ready.py ${self}
+    python3 ${self}/tests/wallpaper-layout.py ${self}
     python3 ${self}/tests/keyboard.py ${self}
     python3 ${self}/tests/breeze-lock.py ${self}
     ICEWINE_TEST_QS=quickshell ICEWINE_THEME_TRANSITION=off python3 ${self}/tests/breeze-lock.py ${self}
