@@ -59,14 +59,14 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
                                  "session", str(source / "session/env")], env=dict(env, **overrides),
                                 capture_output=True, text=True)
         assert result.returncode == 0 and tuple(result.stdout.splitlines()) == expected
-    # The actual Arch shell entry opts out through native KConfig, without user writes.
+    # The shell launcher preserves host configuration paths in either motion mode.
     qs = commands / "qs"
     qs.write_text("#!" + sys.executable + "\nimport json, os, sys; print(json.dumps([os.environ.get('XDG_CONFIG_DIRS'), sys.argv[1:]]))\n")
     qs.chmod(0o755)
     for transition, directories, expected in [
         ("on", "/custom/config:/etc/xdg", "/custom/config:/etc/xdg"),
-        ("off", "/custom/config:/etc/xdg", "/usr/share/icewine/no-animations:/custom/config:/etc/xdg"),
-        ("off", "", "/usr/share/icewine/no-animations:/etc/xdg"),
+        ("off", "/custom/config:/etc/xdg", "/custom/config:/etc/xdg"),
+        ("off", "", ""),
     ]:
         result = run("icewine-shell", argument, ICEWINE_THEME_TRANSITION=transition, XDG_CONFIG_DIRS=directories)
         assert result.returncode == 0, result.stderr
@@ -106,7 +106,7 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
     log.unlink()
     assert subprocess.run([str(session)], env=dict(env, ICEWINE_TEST_FAIL="1")).returncode != 0
     assert [json.loads(line) for line in log.read_text().splitlines()] == [["uwsm", "start", "-eD", "Icewine:Hyprland", "-N", "Icewine", "--", "start-hyprland"]]
-print("PASS: literal launchers, process-local reduced-motion config, disabled Steam and session without implicit deployment")
+print("PASS: literal launchers, preserved host config paths in both motion modes, disabled Steam and session without implicit deployment")
 
 shortcuts = importlib.machinery.SourceFileLoader("shortcuts", str(source / "quickshell/tools/steam-shortcuts")).load_module()
 with tempfile.TemporaryDirectory() as directory:
@@ -121,7 +121,7 @@ print("PASS: real python-vdf shortcut binary API and literal command filtering")
 if len(sys.argv) == 2:
     sys.exit(0)
 
-desktop, session, sddm, handheld, keyboard, idle = map(Path, sys.argv[2:8])
+desktop, session, handheld, keyboard, idle = map(Path, sys.argv[2:7])
 assert sorted(str(p.relative_to(keyboard)) for p in keyboard.rglob("*") if p.is_file() and not p.name.startswith(".")) == ["usr/lib/icewine/squeekboard"]
 assert sorted(str(p.relative_to(idle)) for p in idle.rglob("*") if p.is_file() and not p.name.startswith(".")) == ["usr/lib/icewine/wljoywake"]
 assert {p.name for p in (handheld / "usr/lib/systemd/user").iterdir()} == {
@@ -131,7 +131,7 @@ assert "ExecStopPost=" in (handheld / "usr/lib/systemd/user/icewine-inputplumber
 assert not (session / "usr/lib/systemd/user/icewine-keyboard.service").exists()
 assert "ExecStart=/usr/bin/icewine-shell" in (session / "usr/lib/systemd/user/icewine.service").read_text()
 assert (desktop / "usr/bin/icewine-shell").is_file()
-assert (desktop / "usr/share/icewine/no-animations/quickshellrc").read_text() == "[KDE]\nAnimationDurationFactor[$i]=0\n"
+assert not (desktop / "usr/share/icewine/no-animations").exists()
 payload = desktop / "usr/share/icewine"
 defaults = payload / "defaults"
 deck = payload / "quickshell/deck"
@@ -168,10 +168,5 @@ mount = defaults / "config/yazi/plugins/mount.yazi"
 assert {path.name for path in mount.iterdir()} == {"main.lua", "cross.lua", "sudo.lua", "LICENSE", "README.md"}
 for name in ("main.lua", "cross.lua", "sudo.lua"):
     subprocess.run(["luac", "-p", str(mount / name)], check=True)
-breeze = sddm / "usr/share/sddm/themes/icewine-breeze"
-assert "SessionManagementScreen" in (breeze / "Login.qml").read_text()
-assert "Kirigami.Theme.backgroundColor" in (breeze / "Main.qml").read_text()
-assert (sddm / "usr/share/icewine/sddm/kdeglobals").read_text().count("[Colors:Complementary]") == 1
-assert not (breeze / "modules/AuthScreen.qml").exists()
 subprocess.run([sys.executable, str(source / "tests/manager-tty.py"), str(desktop / "usr/bin/icewine-manage")], check=True)
-print("PASS: base/session/login payload separation and real manager TTY interaction")
+print("PASS: base/session payload separation and real manager TTY interaction")

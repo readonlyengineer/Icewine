@@ -502,7 +502,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     selected = dict.fromkeys(("desktop", "terminal", "filemanager", "gaming", "flatpak", "login", "shellExtras"), False) | {"terminal": True, "gaming": True, "shellExtras": True}
     migrated = false | {"terminal": True, "steam": "native", "gamescope": True, "shellExtras": True}
     for bit in (False, True):
-        legacy = selected | {"texteditor": bit}
+        legacy = selected | {"texteditor": bit, "login": True}
         for name in ("manage.json", "applied.json"):
             (state / name).write_text(json.dumps(legacy))
         with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), contextlib.redirect_stdout(io.StringIO()) as saved:
@@ -574,25 +574,18 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         (state / "handheld-rules.sha256").write_text(manage.theme.default_signature(rules))
         manage.handheld_policy(state, False)
         host.assert_called_once_with(["sudo", "unlink", str(rules)])
-    with patch.object(manage, "run") as host, patch.object(manage, "login"):
+    with patch.object(manage, "run") as host:
         apply(("login",), readonly=True)
         assert not any(call.args[0][0] == "icewine-wallpaper" for call in host.call_args_list)
         assert (data / "wallpapers/default.jpg").exists()
-    login_config = root / "sddm.conf"
-    with patch.object(manage, "LOGIN_CONFIG", login_config), patch.object(manage, "run") as host:
-        login_config.write_text("unrelated login policy\n")
+    with patch.object(manage, "run") as host:
         try:
-            manage.login(state, True)
-        except ValueError:
-            pass
+            apply(("login",), readonly=False)
+        except ValueError as error:
+            assert "belongs to the host" in str(error)
         else:
-            raise AssertionError("Unrelated login policy was overwritten")
+            raise AssertionError("Arch Apply accepted retired login integration")
         assert not host.called
-        login_config.write_text(manage.LOGIN_CONTENTS)
-        (state / "login.sha256").write_text(manage.theme.default_signature(login_config))
-        manage.login(state, False)
-        host.assert_called_once_with(["sudo", "unlink", str(login_config)])
-        assert not (state / "login.sha256").exists()
 
 # HOME participates in deployment independently of XDG roots.
 with tempfile.TemporaryDirectory() as temporary:

@@ -46,9 +46,17 @@ In your `flake.nix`:
       modules = [
         ./configuration.nix
         icewine.nixosModules.default
-        {
-          # Host login policy survives deselecting Icewine's login styling.
-          services.displayManager.sddm.enable = true;
+        ({ config, lib, pkgs, ... }: {
+          # Native host login policy, independent of Icewine styling.
+          services.greetd = {
+            enable = true;
+            useTextGreeter = true;
+            settings.default_session.command = lib.escapeShellArgs (
+              [ "${pkgs.tuigreet}/bin/tuigreet"
+                "--cmd" "${pkgs.uwsm}/bin/uwsm start hyprland-uwsm.desktop"
+                "--sessions" "${config.services.displayManager.sessionData.desktops}/share/wayland-sessions"
+              ] ++ config.services.icewine.login.args);
+          };
           services.icewine = {
             enable = true;
             user = "YOUR_USERNAME";
@@ -59,7 +67,7 @@ In your `flake.nix`:
             login.enable = true;
             shellExtras.enable = true;
           };
-        }
+        })
       ];
     };
   };
@@ -118,8 +126,7 @@ Press Enter to submit, or Escape/Ctrl+U to clear. The keyboard button uses Qt's
 native on-screen keyboard. When authentication is explicitly disabled, tap or
 press Enter to unlock.
 
-Login Apply and theme changes publish KDE colours readable before authentication;
-missing public state uses the packaged theme policy or Catppuccin Mocha fallback.
+Tuigreet uses declarative colours; it does not read or publish user theme state.
 The old authentication wallpaper override and custom greeter are retired. Existing
 user files are left in place. Keyboard/touch and real login/unlock behavior still
 need validation on each supported device and distribution.
@@ -293,7 +300,7 @@ Manual and application fullscreen choices take precedence.
 ## Applications
 
 The manager/module offers Kitty, Yazi, Steam with optional Gamescope/Handheld,
-SDDM styling and Starship/Fastfetch alongside the optional desktop session.
+NixOS tuigreet styling and Starship/Fastfetch alongside the optional desktop session.
 Browser profiles and themes belong to you; Icewine uses the host browser.
 
 ### Steam and Flatpak
@@ -321,6 +328,11 @@ Install replacement applications and their configuration in your host. Neovim
 plugins and language servers are host-owned; Icewine generates the optional
 `icewine/current/nvim-theme.lua` appearance adapter and signals themed instances.
 
+Login styling exposes native `services.icewine.login.args` for a host-owned
+greetd/tuigreet command. It uses the declared theme, or Catppuccin Mocha when no
+theme is fixed; user theme changes do not publish to the greeter. Linux console
+colours are terminal-limited and may differ from the desktop.
+
 These options belong under `services.icewine`:
 
 | Option | Stops Icewine providing |
@@ -331,7 +343,7 @@ These options belong under `services.icewine`:
 | `steam = "none";` | Steam integration and dependent Gamescope/Handheld |
 | `gamescope.enable = false;` | Gamescope launch integration; ordinary Steam remains available |
 | `monitors.enable = false;` | Optional HyprMon; locked default needs a Lua-compatible `monitors.package` override |
-| `login.enable = false;` | KDE Breeze SDDM with Icewine colours; host SDDM enablement is retained |
+| `login.enable = false;` | Declarative tuigreet colours and width; login policy belongs to the host |
 | `shellExtras.enable = false;` | Starship/Fastfetch defaults and btop styling |
 | `shellExtras.git.enable = false;` | Git information in the prompt |
 | `gtk.enable = false;` | GTK styling |

@@ -28,22 +28,16 @@ let
     steam = "flatpak";
     login.enable = true;
     shellExtras.enable = true;
-  }; services.displayManager.sddm.enable = true; }]; }).config;
+  }; }]; }).config;
   monitorsOnly = (desktopSystem.extendModules { modules = [{ services.icewine.monitors = { enable = true; package = pkgs.hello; }; }]; }).config;
   nativeGaming = (desktopSystem.extendModules { modules = [{ services.icewine.steam = "native"; }]; }).config;
   flatpakOnly = (desktopSystem.extendModules { modules = [{ services.icewine = { steam = "flatpak"; gamescope.enable = false; }; }]; }).config;
   loginOnly = (desktopSystem.extendModules { modules = [{
     boot.isContainer = true; # Evaluation fixture has no disk/bootloader configuration.
     services.icewine.login.enable = true;
-    services.displayManager.sddm.enable = true;
-    services.displayManager.sddm.settings.General.GreeterEnvironment = "HOST_GREETER_SETTING=retained";
   }]; }).config;
-  loginOff = (desktopSystem.extendModules { modules = [{ services.displayManager.sddm.enable = true; }]; }).config;
+  loginOff = desktop;
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
-  sddmTheme = pkgs.callPackage ../sddm { };
-  sddm = loginOnly.services.displayManager.sddm.package.override (old: {
-    extraPackages = (old.extraPackages or [ ]) ++ loginOnly.services.displayManager.sddm.extraPackages;
-  });
   icewineCli = builtins.head (lib.filter
     (package: lib.getName package == "icewine") optIn.users.users.demo.packages);
   handheldCli = builtins.head (lib.filter
@@ -52,26 +46,6 @@ let
     (package: lib.getName package == "mimeapps.list") optIn.users.users.demo.packages);
   hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
 in {
-  sddm = pkgs.runCommand "icewine-breeze-sddm-checks" {
-    nativeBuildInputs = [ pkgs.python3 pkgs.qt6.wrapQtAppsHook pkgs.libredirect ];
-    buildInputs = sddm.buildInputs ++ [ pkgs.qt6.qtdeclarative ];
-    dontWrapQtApps = true;
-  } ''
-    python3 ${./sddm-standalone.py} ${self}
-    # Use the native wrapper hook; its executables may be compiled binaries.
-    mkdir -p "$TMPDIR/fixture"
-    makeQtWrapper ${pkgs.qt6.qtdeclarative}/bin/qml "$TMPDIR/qml" \
-      ${lib.escapeShellArgs loginOnly.services.displayManager.sddm.package.qtWrapperArgs} \
-      --set XDG_CONFIG_HOME "$TMPDIR/fixture/public" --set XDG_CONFIG_DIRS "$TMPDIR/fixture/fallback"
-    makeQtWrapper ${sddm.unwrapped}/bin/sddm-greeter-qt6 "$TMPDIR/greeter" \
-      ${lib.escapeShellArgs loginOnly.services.displayManager.sddm.package.qtWrapperArgs} \
-      --set SDDM_GREETER_DIR ${sddm}/bin \
-      --set XDG_CONFIG_HOME "$TMPDIR/fixture/public" --set XDG_CONFIG_DIRS "$TMPDIR/fixture/fallback"
-    python3 ${./breeze-sddm.py} ${self} ${sddmTheme} "$TMPDIR/qml" \
-      "$TMPDIR/greeter" "$TMPDIR/fixture" \
-      ${pkgs.libredirect}/lib/libredirect.so
-    touch "$out"
-  '';
   brightness = pkgs.runCommand "icewine-brightness-checks" {
     nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.python3 pkgs.shellcheck pkgs.jq pkgs.util-linux ];
   } ''
@@ -169,13 +143,13 @@ in {
     assert !(hasPackage "bazaar" optIn.environment.systemPackages);
     assert !(hasPackage "hyprmon" desktop.users.users.demo.packages);
     assert hasPackage "hello" monitorsOnly.users.users.demo.packages;
-    assert loginOnly.services.displayManager.sddm.enable;
-    assert loginOnly.services.displayManager.sddm.theme == "breeze";
-    assert loginOnly.services.displayManager.sddm.settings.General.GreeterEnvironment == "HOST_GREETER_SETTING=retained";
+    assert !loginOnly.services.greetd.enable && !loginOnly.services.displayManager.sddm.enable;
+    assert lib.elem "--width" loginOnly.services.icewine.login.args;
+    assert lib.elem "text=#cdd6f4;border=#585b70;prompt=#89b4fa;input=#cdd6f4;action=#7f849c;button=#89b4fa;container=#1e1e2e" loginOnly.services.icewine.login.args;
     assert !loginOnly.programs.hyprland.enable;
     assert loginOnly.services.displayManager.defaultSession == null;
     assert lib.all (assertion: assertion.assertion) loginOnly.assertions;
-    assert loginOff.services.displayManager.sddm.enable;
+    assert loginOff.services.icewine.login.args == [ ];
     assert nativeGaming.programs.steam.enable;
     assert !nativeGaming.services.flatpak.enable;
     assert nativeGaming.nixpkgs.config.allowUnfreePackages == [ "steam" "steam-unwrapped" ];
@@ -212,10 +186,7 @@ in {
         [[ "$selection" = *=true || "$selection" = steam=flatpak || "$selection" = handheld=false ]]
       done
       test ! -e "$XDG_CONFIG_HOME"
-      mkdir -p "$TMPDIR/public"
-      export ICEWINE_SDDM_KDEGLOBALS_FILE="$TMPDIR/public/kdeglobals"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
-      cmp "$XDG_CONFIG_HOME/icewine/current/kdeglobals" "$ICEWINE_SDDM_KDEGLOBALS_FILE"
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -L "$XDG_CONFIG_HOME/hypr/icewine"
       test "$(readlink "$XDG_CONFIG_HOME/quickshell/icewine")" = /etc/icewine/implementation/quickshell
@@ -236,12 +207,10 @@ in {
       lua ${../hyprland/tests/startup.lua} "$XDG_CONFIG_HOME/hypr/hyprland.lua" desktop
       printf '# user changes\n' >> "$XDG_CONFIG_HOME/kitty/kitty.conf"
       printf 'color_theme = "Default"\nupdate_ms = 500\n' > "$XDG_CONFIG_HOME/btop/btop.conf"
-      mkdir -p "$TMPDIR/public"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       grep -Fx '# user changes' "$XDG_CONFIG_HOME/kitty/kitty.conf"
       grep -Fx 'color_theme = "icewine"' "$XDG_CONFIG_HOME/btop/btop.conf"
       grep -Fx 'update_ms = 500' "$XDG_CONFIG_HOME/btop/btop.conf"
-      mkdir -p "$TMPDIR/public"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=true
       ! grep -q '# user changes' "$XDG_CONFIG_HOME/kitty/kitty.conf"
       export HOME=$TMPDIR/handheld XDG_CONFIG_HOME=$TMPDIR/handheld/.config XDG_DATA_HOME=$TMPDIR/handheld/.local/share XDG_STATE_HOME=$TMPDIR/handheld/.local/state

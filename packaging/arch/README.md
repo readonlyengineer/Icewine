@@ -43,7 +43,7 @@ ICEWINE_PACKAGE_DIR="$PWD" icewine manage
 
 The base package supplies Quickshell, the manager and necessary runtime tools.
 Apply installs and configures checked utilities; new selections start unchecked.
-The package directory supplies optional session/login/Handheld archives for the first Apply.
+The package directory supplies optional session/Handheld archives for the first Apply.
 Keep it available when selecting an integration later, or install those optional
 packages from your package repository. Enable Multilib for native Steam.
 Pacman and sudo request approval for host operations. Changing Steam, Gamescope
@@ -56,9 +56,10 @@ preferences. Other existing files are preserved. Cancel before Apply leaves util
 package/file changes; resolve the error and retry with overwrite off. Reopen with
 `icewine manage`; previous successful selections are retained. On deselection,
 only recorded Icewine configuration is removed and edited user files are preserved.
-Desktop deselection removes only the Hyprland implementation link. Login
-deselection removes the owned SDDM snippet, leaving SDDM enabled and the boot
-target unchanged.
+Desktop deselection removes only the Hyprland implementation link. Login is
+host-owned; the installer no longer provides a greeter or changes boot targets.
+Existing installations retain their old `/etc/sddm.conf.d/90-icewine.conf`;
+review and remove it yourself when migrating away from the former integration.
 
 Steam uses a none/native/Flatpak selector (left/right). Its Gamescope child
 starts checked; disabling it retains ordinary Steam without a splash or launcher
@@ -89,22 +90,11 @@ preserved desktop entry already exists. Deselection stops Icewine's controller
 idle, keyboard and routing units before removing its own permission rule; it
 leaves InputPlumber and unrelated services installed.
 
-After selecting Desktop session and Login screen and applying, select **Icewine**
-in SDDM; from a logged-in TTY run `icewine-session`. Keep PipeWire/WirePlumber,
-logind, polkit, UDisks, UPower and power profiles available. Device/backlight/i2c
-permissions remain host policy. Keep Quickshell and Qt coherent with normal
-full distribution upgrades.
-
-SDDM styling uses `/etc/sddm.conf.d/90-icewine.conf` with its X11 greeter;
-Icewine sessions use Wayland. Existing `/etc/sddm.conf` settings take precedence.
-Login packages the installed KDE Breeze theme with the same black/white backdrop
-and KDE colours as NixOS. Icewine publishes public colours to
-`/var/lib/icewine/sddm/kdeglobals`, shared by one desktop user; the packaged
-Catppuccin Mocha fallback is available before the first login. Themes change with
-`icewine theme dracula`. Locks reuse the same upstream Breeze components with
-Icewine's session/PAM backend. Quickshell needs Plasma's QML components and
-KI18nContext (KDE Frameworks 6.23 or later); the native package declares these
-runtime dependencies. The former custom greeter and auth wallpaper are retired.
+After selecting Desktop session and applying, select **Icewine** in your host's
+session picker; from a logged-in TTY run `icewine-session`. Keep
+PipeWire/WirePlumber, logind, polkit, UDisks, UPower and power profiles available.
+Device/backlight/i2c permissions remain host policy. Keep Quickshell and Qt
+coherent with normal full distribution upgrades.
 
 The developer Nix target builds the same makepkg archives with `--nodeps` and
 an honest empty Arch package database. It checks packaging and manager behavior,

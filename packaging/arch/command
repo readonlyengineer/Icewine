@@ -2,12 +2,8 @@
 set -e
 case ${0##*/} in
   icewine-shell)
-    if [[ ${ICEWINE_THEME_TRANSITION:-} == off ]]; then
-      export XDG_CONFIG_DIRS="/usr/share/icewine/no-animations:${XDG_CONFIG_DIRS:-/etc/xdg}"
-    fi
     exec qs "$@" ;;
   icewine-manage-backend)
-    export ICEWINE_SDDM_KDEGLOBALS_FILE=/var/lib/icewine/sddm/kdeglobals
     export ICEWINE_THEME_ASSETS=/usr/share/icewine/theme
     export ICEWINE_DEFAULT_FILES=/usr/share/icewine/defaults
     exec python3 /usr/lib/icewine/manage "$@" ;;
@@ -17,9 +13,6 @@ case ${0##*/} in
     export ICEWINE_GTK_ENABLE=false
     selections=${XDG_STATE_HOME:-$HOME/.local/state}/icewine/manage.json
     if [[ -f $selections ]]; then export ICEWINE_GTK_ENABLE=$(jq -r '.desktop' "$selections"); fi
-    if [[ -d /usr/share/sddm/themes/icewine-breeze && -w /var/lib/icewine/sddm ]]; then
-      export ICEWINE_SDDM_KDEGLOBALS_FILE=/var/lib/icewine/sddm/kdeglobals
-    fi
     exec python3 /usr/lib/icewine/theme "$@" ;;
   icewine-wallpaper)
     export ICEWINE_WALLPAPER_VALIDATOR=/usr/share/icewine/quickshell/modules/WallpaperValidator.qml

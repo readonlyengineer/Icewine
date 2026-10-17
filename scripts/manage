@@ -28,13 +28,8 @@ PACKAGES = {
     "desktop": ("icewine-session",), "terminal": ("kitty",),
     "filemanager": ("yazi", "xdg-terminal-exec", "ffmpegthumbnailer", "7zip", "gvfs", "udisks2"),
     "steam": (), "gamescope": ("gamescope",), "handheld": ("icewine-handheld", "icewine-keyboard", "icewine-controller-idle", "inputplumber"),
-    "login": ("icewine-sddm",), "shellExtras": ("starship", "fastfetch"),
+    "login": (), "shellExtras": ("starship", "fastfetch"),
 }
-LOGIN_CONFIG = Path("/etc/sddm.conf.d/90-icewine.conf")
-LOGIN_CONTENTS = ("[General]\nDisplayServer=x11\nInputMethod=qtvirtualkeyboard\n"
-    "GreeterEnvironment=QT_QPA_PLATFORMTHEME=kde,QT_QUICK_CONTROLS_STYLE=org.kde.breeze,"
-    "KIRIGAMI_PLATFORM_THEME=org.kde.breeze,XDG_CONFIG_HOME=/var/lib/icewine/sddm,"
-    "XDG_CONFIG_DIRS=/usr/share/icewine/sddm\n[Theme]\nCurrent=icewine-breeze\n")
 
 
 def validate(value, *, saved=False):
@@ -64,7 +59,8 @@ def selections(state):
     path = state / "manage.json"
     if path.is_symlink():
         raise ValueError("refusing symlinked manager state")
-    return False, validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, False) | {"steam": "none"}
+    saved = validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, False) | {"steam": "none"}
+    return False, saved | {"login": False}
 
 
 WIDGETS = ("notificationToasts", "windowSwitcher")
@@ -150,29 +146,6 @@ def retire(config, data, state, feature):
     theme.atomic_text(state / "default-files.json", json.dumps(records, sort_keys=True) + "\n")
 
 
-def login(state, enabled):
-    record = state / "login.sha256"
-    if record.is_symlink():
-        raise ValueError("refusing symlinked login ownership record")
-    signature = theme.default_signature(LOGIN_CONFIG)
-    previous = record.read_text().strip() if record.exists() else None
-    if enabled:
-        if signature is not None and signature != previous:
-            raise ValueError(f"preserved unrelated login configuration: {LOGIN_CONFIG}")
-        with tempfile.TemporaryDirectory(prefix="icewine-login-") as temporary:
-            source = Path(temporary) / "sddm.conf"
-            source.write_text(LOGIN_CONTENTS)
-            run(["sudo", "install", "-Dm644", str(source), str(LOGIN_CONFIG)])
-            theme.atomic_text(record, theme.default_signature(source) + "\n")
-        run(["sudo", "install", "-d", "-m0755", "-o", str(os.getuid()), "-g", str(os.getgid()), "/var/lib/icewine/sddm"])
-        run(["sudo", "systemctl", "enable", "sddm.service"])
-        run(["sudo", "systemctl", "set-default", "graphical.target"])
-    elif previous:
-        if signature == previous and not LOGIN_CONFIG.is_symlink():
-            run(["sudo", "unlink", str(LOGIN_CONFIG)])
-        record.unlink()
-
-
 HANDHELD_RULES = Path("/etc/polkit-1/rules.d/90-icewine-handheld.rules")
 HANDHELD_UNITS = ["icewine-controller-idle.service", "icewine-keyboard.service", "icewine-inputplumber-hyprland.service"]
 
@@ -214,6 +187,8 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
     if applied_path.is_symlink():
         raise ValueError("refusing symlinked applied-selection record")
     applied = validate(json.loads(applied_path.read_text()), saved=True) if applied_path.exists() else previous
+    if not readonly and selected["login"]:
+        raise ValueError("Login configuration belongs to the host; login styling is NixOS-only")
     if not readonly:
         packages = [package for feature in FEATURES if selected[feature] and feature != "steam" for package in PACKAGES[feature]]
         if selected["steam"] == "native":
@@ -222,7 +197,7 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
             packages.append("flatpak")
         local = []
         package_dir = os.environ.get("ICEWINE_PACKAGE_DIR")
-        for package in ("icewine-session", "icewine-sddm", "icewine-handheld", "icewine-keyboard", "icewine-controller-idle"):
+        for package in ("icewine-session", "icewine-handheld", "icewine-keyboard", "icewine-controller-idle"):
             if package not in packages:
                 continue
             archives = sorted(path for path in Path(package_dir).glob(package + "-[0-9]*.pkg.tar.*") if path.suffix != ".sig") if package_dir else []
@@ -241,9 +216,6 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         if selected["steam"] == "flatpak":
             run(["flatpak", "remote-add", "--user", "--if-not-exists", "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"])
             run(["flatpak", "install", "--user", "--noninteractive", "flathub", "com.valvesoftware.Steam"])
-        # Host prerequisites finish before any per-user configuration is deployed.
-        if selected["login"] or previous["login"]:
-            login(state, selected["login"])
     shell_running = False
     changed = any(applied[name] != selected[name] for name in ("steam", "gamescope", "handheld")) or selected["handheld"] or (state / "handheld-rules.sha256").exists()
     try:
@@ -269,8 +241,6 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         theme_id, _ = theme.effective(state, themes)
         files = theme.render_theme(assets, themes[theme_id], theme.transparency_level(state))
         theme.publish(config, files)
-        if selected["login"]:
-            theme.publish_sddm(files)
         for feature in FEATURES:
             if applied[feature] and not selected[feature]:
                 retire(config, data, state, feature)

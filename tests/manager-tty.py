@@ -231,7 +231,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         last_widget_calls = [call for call in all_calls if call[0].startswith("widgets-")]
         return [call for call in all_calls if not call[0].startswith("widgets-")]
     ids = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras")
-    visible = 6 # Steam none hides its two children.
+    visible = 5 # Arch hides Login; Steam none hides its two children.
     def state(readonly=False, **selected):
         # Deliberately shuffle fields: identity must not depend on wire order.
         return " ".join([f"{name}={str(selected.get(name, "none" if name == "steam" else False)).lower()}" for name in reversed(ids)]
@@ -249,7 +249,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                 policy=True, auth=True, size=size, capture="readonly-auth")
             run(tab*2+b" "+down*2+b"\r\x1b", state(), size=size, capture="widgets-save")
             if size[1] != 80: continue
-            run(down*3+b"\x1b[C"+down*6+b"\x1b", state(desktop=True), size=size, capture="installer-actions")
+            run(down*3+b"\x1b[C"+down*5+b"\x1b", state(desktop=True), size=size, capture="installer-actions")
             (root / "hyprmon").rename(root / "hyprmon-hidden")
             try:
                 run(tab+down*3+b"\r\x1b", state(), size=size, path=str(root), capture="monitor-error")
@@ -282,15 +282,15 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     expected["desktop"], expected["terminal"] = "false", "true"
     assert applied(run(b"\x1b[B "+b"\x1b[B"*visible+b"\r", state())) == expected
     # Right selects native, defaults Gamescope on and leaves Handheld off.
-    chosen = applied(run(b"\x1b[B"*3+b"\x1b[C"+b"\x1b[B"*5+b"\r", state()))
+    chosen = applied(run(b"\x1b[B"*3+b"\x1b[C"+b"\x1b[B"*4+b"\r", state()))
     assert chosen["steam"] == "native" and chosen["gamescope"] == "true" and chosen["handheld"] == "false"
     # Flatpak skips unsupported Handheld; Gamescope may be turned off.
-    chosen = applied(run(b"\x1b[B"*3+b"\x1b[C\x1b[C\x1b[B "+b"\x1b[B"*4+b"\r", state()))
+    chosen = applied(run(b"\x1b[B"*3+b"\x1b[C\x1b[C\x1b[B "+b"\x1b[B"*3+b"\r", state()))
     assert chosen["steam"] == "flatpak" and chosen["gamescope"] == "false" and chosen["handheld"] == "false"
     # Native+desktop allows Handheld; turning desktop off clears it.
-    chosen = applied(run(b" \x1b[B\x1b[B\x1b[B\x1b[C\x1b[B\x1b[B "+b"\x1b[B"*4+b"\r", state()))
+    chosen = applied(run(b" \x1b[B\x1b[B\x1b[B\x1b[C\x1b[B\x1b[B "+b"\x1b[B"*3+b"\r", state()))
     assert chosen["handheld"] == "true"
-    chosen = applied(run(b" "+b"\x1b[B"*8+b"\r", state(desktop=True, steam="native", gamescope=True, handheld=True)))
+    chosen = applied(run(b" "+b"\x1b[B"*7+b"\r", state(desktop=True, steam="native", gamescope=True, handheld=True)))
     assert chosen["desktop"] == "false" and chosen["handheld"] == "false"
     # Reverse navigation from the first control reaches Cancel.
     assert run(b"\x1b[Z\r", state()) == [["state"]]

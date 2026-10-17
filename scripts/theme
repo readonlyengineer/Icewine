@@ -213,30 +213,6 @@ def render_theme(assets, palette_file, level="high"):
             "error": "error", "info": "info",
         }.items()},
     }, sort_keys=True) + "\n"
-    # Native KDE colours: Breeze's greeter uses Complementary; its controls
-    # also request Window/View/Button/Selection/Tooltip/Header colour sets.
-    groups = []
-    for group, background, foreground in (
-        ("Window", "background", values["foreground"]),
-        ("View", "backgroundDark", values["foreground"]),
-        ("Button", "surface", values["foreground"]),
-        ("Selection", "highlight", values["gtkAccentFg"]),
-        ("Tooltip", "backgroundDark", values["foreground"]),
-        ("Complementary", "background", values["foreground"]),
-        ("Header", "backgroundDark", values["foreground"]),
-    ):
-        roles = {
-            "BackgroundNormal": values[background], "BackgroundAlternate": values["surface"],
-            "ForegroundNormal": foreground, "ForegroundInactive": values["foregroundDark"],
-            "ForegroundActive": values["highlight"], "ForegroundLink": values["highlight"],
-            "ForegroundVisited": values["secondaryHighlight"], "ForegroundNegative": values["error"],
-            "ForegroundNeutral": values["caution"], "ForegroundPositive": values["success"],
-            "DecorationFocus": values["highlight"], "DecorationHover": values["secondaryHighlight"],
-        }
-        if group == "Complementary":
-            roles["BackgroundNormal"] = "ffffff" if values["appearance"] == "light" else "000000"
-        groups.append(f"[Colors:{group}]\n" + "".join(f"{key}=#{value}\n" for key, value in roles.items()))
-    files["kdeglobals"] = "[General]\nColorScheme=Icewine\n[Icons]\nTheme=breeze\n" + "\n".join(groups)
     files["gtk4-settings.ini"] = files["gtk-settings.ini"]
     files["gtk4.css"] = files["gtk.css"] + files["gtk4.css"]
     files["gtk-settings.ini"] = files["gtk-settings.ini"].replace(
@@ -250,15 +226,6 @@ def render_theme(assets, palette_file, level="high"):
     )
     json.loads(files["fastfetch.jsonc"])
     return files
-
-
-def publish_sddm(files):
-    path = os.environ.get("ICEWINE_SDDM_KDEGLOBALS_FILE")
-    if path:
-        try:
-            atomic_text(Path(path), files["kdeglobals"], 0o644)
-        except OSError as error:
-            print(f"Pending: SDDM colours will not update: {error}", file=sys.stderr)
 
 
 def selection(state):
@@ -735,7 +702,6 @@ def dispatch(argv):
     gtk_enabled = os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false"
     gtk_complete = True
     publish(config, files)
-    publish_sddm(files)
     if gtk_enabled:
         install_gtk_theme(config, theme_id)
         install_flatpak_theme(state, theme_id, files)

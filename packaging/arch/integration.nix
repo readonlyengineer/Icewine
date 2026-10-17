@@ -31,7 +31,6 @@ in pkgs.stdenv.mkDerivation {
   buildPhase = ''
   export HOME="$TMPDIR/home"
   export CARGO_NET_OFFLINE=true
-  export ICEWINE_BREEZE_THEME_SOURCE=${pkgs.kdePackages.plasma-desktop}/share/sddm/themes/breeze
   mkdir -p "$HOME" work/icewine $out
   cp -r ${src}/. work/icewine/
   chmod -R u+w work
@@ -76,6 +75,6 @@ in pkgs.stdenv.mkDerivation {
   # These copies are test inputs; leave the native /usr/bin/env shebangs in archives.
   patchShebangs icewine/packaging/arch/command icewine/packaging/arch/session
   python icewine/tests/handheld.py "$PWD/icewine"
-  python icewine/tests/arch-package.py "$PWD/icewine" "$PWD/pkg/icewine" "$PWD/pkg/icewine-session" "$PWD/pkg/icewine-sddm" "$PWD/pkg/icewine-handheld" "$PWD/dependencies/pkg/icewine-keyboard" "$PWD/dependencies/pkg/icewine-controller-idle"
+  python icewine/tests/arch-package.py "$PWD/icewine" "$PWD/pkg/icewine" "$PWD/pkg/icewine-session" "$PWD/pkg/icewine-handheld" "$PWD/dependencies/pkg/icewine-keyboard" "$PWD/dependencies/pkg/icewine-controller-idle"
 '';
 }

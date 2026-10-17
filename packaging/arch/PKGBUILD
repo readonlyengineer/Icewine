@@ -1,12 +1,12 @@
 # Build from an Icewine source archive; see README.md in this directory.
 pkgbase=icewine
-pkgname=(icewine icewine-session icewine-sddm icewine-handheld)
+pkgname=(icewine icewine-session icewine-handheld)
 pkgver=0.1
 pkgrel=1
 arch=(x86_64)
 pkgdesc='Icewine Hyprland desktop session'
 license=(custom)
-makedepends=(python cargo plasma-desktop)
+makedepends=(python cargo)
 options=(!strip)
 _plugins=4dc7f1b6458c2578f4494f10d468c68c1082214f
 source=(icewine.tar.gz "yazi-plugins-${_plugins}.tar.gz::https://codeload.github.com/yazi-rs/plugins/tar.gz/${_plugins}")
@@ -23,8 +23,7 @@ package_icewine() {
     systemd util-linux python python-vdf procps-ng xdg-utils libnotify libcanberra
     brightnessctl ddcutil v4l-utils upower ttf-dejavu ttf-jetbrains-mono-nerd
     noto-fonts-emoji adwaita-icon-theme adwaita-cursors papirus-icon-theme dconf
-    gsettings-desktop-schemas libplasma plasma-workspace kirigami 'ki18n>=6.23'
-    qqc2-breeze-style breeze-icons breeze plasma-integration)
+    gsettings-desktop-schemas)
   optdepends=('networkmanager: network controls' 'bluez: Bluetooth controls' 'hyprmon: optional monitor configuration (requires Lua live IPC support)')
   cd "$srcdir/icewine"
   local share="$pkgdir/usr/share/icewine" defaults="$pkgdir/usr/share/icewine/defaults/config"
@@ -36,7 +35,6 @@ package_icewine() {
   install -Dm644 theme/assets/flower-branch.png "$share/defaults/data/wallpapers/default.jpg"
   install -d "$share/quickshell"
   cp -r quickshell/{modules,adapters,theme} "$share/quickshell/"
-  cp -r quickshell/no-animations "$share/"
   cp quickshell/{Desktop,Handheld}.qml "$share/quickshell/"
   install -d "$share/quickshell/deck"
   cp quickshell/deck/{DeckOverlay.qml,DeckMenu.js} "$share/quickshell/deck/"
@@ -115,15 +113,6 @@ package_icewine-session() {
   for unit in packaging/arch/*.service packaging/arch/*.target packaging/arch/*.path; do
     install -Dm644 "$unit" "$pkgdir/usr/lib/systemd/user/${unit##*/}"
   done
-}
-
-package_icewine-sddm() {
-  pkgdesc='Optional KDE Breeze SDDM with Icewine colours'
-  depends=(icewine sddm plasma-desktop breeze plasma-integration qt6-5compat qt6-virtualkeyboard)
-  cd "$srcdir/icewine"
-  python sddm/package.py "${ICEWINE_BREEZE_THEME_SOURCE:-/usr/share/sddm/themes/breeze}" \
-    "$pkgdir/usr/share/sddm/themes/icewine-breeze" "$pkgdir/usr/share/icewine/sddm/kdeglobals" \
-    scripts/theme theme/assets
 }
 
 package_icewine-handheld() {

@@ -8,7 +8,7 @@ const ROWS: &[(&str, &str, &str)] = &[
     ("filemanager", "File manager", "Yazi"),
     ("steam", "Steam (unfree)", ""),
     ("gamescope", " +- Gamescope", ""), ("handheld", " \u{005c}- Handheld", "Needs Desktop + native Steam + Gamescope"),
-    ("login", "Login screen", "SDDM"), ("shellExtras", "Shell Extras", "Starship + Fastfetch + btop theme"),
+    ("login", "Login styling", "tuigreet (host configuration)"), ("shellExtras", "Shell Extras", "Starship + Fastfetch + btop theme"),
 ];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -164,7 +164,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
         let mut overwrite = false;
         loop {
             let rows: Vec<_> = ROWS.iter().filter(|(id, _, _)|
-                *steam != 0 || !matches!(*id, "gamescope" | "handheld")).collect();
+                (readonly || *id != "login") && (*steam != 0 || !matches!(*id, "gamescope" | "handheld"))).collect();
             let controls: Vec<_> = if page == 1 {
                 let mut controls = Vec::new();
                 if !appearance.policy { controls.push(Control::Theme); }
