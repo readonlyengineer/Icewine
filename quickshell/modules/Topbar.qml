@@ -396,12 +396,6 @@ Scope {
                             onActivated: root.openWidget("launcher", true, panel.screen.name)
                         }
                         Bar.Workspaces { compositor: root.compositor; screen: panel.screen }
-                        Bar.LayoutButton {
-                            id: layoutButton
-                            visible: root.layoutsEnabled
-                            compositor: root.compositor
-                            onActivated: root.openWidget("layout", true, panel.screen.name)
-                        }
                     }
                     Bar.Clock { anchors.centerIn: parent; now: clock.date }
                     Row {

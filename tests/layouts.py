@@ -123,7 +123,6 @@ ShellRoot {
         width: 380; height: 300
         color: Theme.Palette.backgroundDark
         Bar.LayoutPicker { id: picker; width: parent.width; compositor: compositor }
-        Bar.LayoutButton { id: trigger; y: 260; compositor: compositor }
         TestCase { id: keys; when: false }
     }
     function named(item, name) {
@@ -213,14 +212,19 @@ ShellRoot {
                     throw new Error("Keyboard selection/toggle targeted the wrong action")
                 compositor.layoutWorkspaceId = 2
                 compositor.layoutStatus = ({workspace: 2, effective: "monocle", default: "master", override: "monocle", autofullscreen: false})
-                keys.tryCompare(trigger, "text", "▥ Monocle")
+                const heading = picker.children.find(child => child.text?.startsWith("Workspace "))
+                if (!heading) throw new Error("Missing workspace layout heading")
+                if (heading.text.split(" · ")[0] !== "Workspace 2") throw new Error("Stale workspace heading")
+                const selectedPreview = root.named(picker, "Monocle layout").contentItem.children[0]
+                keys.compare(selectedPreview.children[0].border.color, Theme.Palette.primary)
                 compositor.layoutPending = true
                 if (toggle.enabled || picker.initialFocus.enabled || root.named(picker, "Master layout").enabled) throw new Error("Pending actions enabled")
                 compositor.layoutPending = false
                 compositor.layoutAvailable = false
                 compositor.layoutUnavailable = "Fixture unavailable"
                 if (toggle.enabled || picker.initialFocus.enabled) throw new Error("Unavailable choices enabled")
-                keys.tryCompare(trigger, "text", "▥ Layout")
+                if (!picker.children.some(child => child.visible && child.text === "Fixture unavailable"))
+                    throw new Error("Missing unavailable feedback")
                 console.log("LAYOUT_PICKER_PASSED")
                 Qt.quit()
             } catch (error) { console.error(error); Qt.exit(1) }

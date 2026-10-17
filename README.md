@@ -263,9 +263,9 @@ hl.workspace_rule({ workspace = "2", layout = "master" })
 #### Runtime changes
 
 Choose the persistent desktop layout fallback in `icewine manage` (Appearance),
-or with `icewine layout scrolling|dwindle|master|monocle`. The topbar layout
-button (or Super+Shift+D) changes only the focused workspace; **Use default** removes its session
-choice. Choices survive locking, shell restarts and config reloads, and expire
+or with `icewine layout scrolling|dwindle|master|monocle`. The Launcher stack's
+layout card (or Super+Shift+D) changes only the focused workspace; **Use default**
+removes its session choice. Choices survive locking, shell restarts and config reloads, and expire
 when Hyprland exits. The picker displays the compositor's actual layout.
 
 The saved fallback loads before your `hyprland.lua` overrides. Explicit user
