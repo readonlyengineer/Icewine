@@ -16,8 +16,7 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         Layout.margins: 12
-        text: "Workspace " + root.compositor.layoutWorkspaceId + " · "
-            + (root.compositor.layoutAvailable ? Layouts.label(root.compositor.layoutStatus.effective) : "Unavailable")
+        text: "Workspace " + root.compositor.layoutWorkspaceId
         color: Theme.Palette.foreground
         font.pixelSize: 13
         font.bold: true

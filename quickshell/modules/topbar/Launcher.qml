@@ -112,7 +112,8 @@ Widget {
                     text: "Background applications"
                     color: Theme.Palette.foreground
                     font.family: "JetBrainsMono Nerd Font"
-                    font.pixelSize: 12
+                    font.pixelSize: 15
+                    font.bold: true
                 }
                 BackgroundApps {
                     id: apps
