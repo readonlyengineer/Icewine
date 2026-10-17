@@ -5,10 +5,11 @@ import "modules" as Modules
 
 ShellRoot {
     Modules.ThemeService {}
-    Modules.Wallpaper {}
+    Modules.Wallpaper { id: wallpaperOwner }
 
     Modules.SessionControl {
         id: session
+        wallpaper: wallpaperOwner
         authenticationRequired: Config.Settings.authenticationRequired
     }
 

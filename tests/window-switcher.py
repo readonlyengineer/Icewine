@@ -209,11 +209,21 @@ ShellRoot {
                     verify(!topbar.barVisible && !topbar.ui.held && !topbar.ui.page)
                     mockSession.password = "fixture response"
                     mockSession.authenticating = true
+                    let clearAtIdle = false
+                    const observeCompletion = () => {
+                        if (!mockSession.authenticating) clearAtIdle = !mockSession.password
+                    }
+                    mockSession.authenticatingChanged.connect(observeCompletion)
                     mockSession.fixturePam.completed(PamResult.Success + 1)
+                    verify(clearAtIdle, "Completed response clears before input becomes ready")
                     verify(mockSession.locked && mockSession.failed && !mockSession.password)
                     verify(!mockSession.authenticating && !topbar.barVisible)
+                    mockSession.password = "successful fixture response"
                     mockSession.authenticating = true
+                    clearAtIdle = false
                     mockSession.fixturePam.completed(PamResult.Success)
+                    verify(clearAtIdle, "Successful response clears before input becomes ready")
+                    mockSession.authenticatingChanged.disconnect(observeCompletion)
                     verify(!mockSession.locked && !mockSession.lockRequested,
                         "Successful unlock releases every UI guard without native notify")
                     verify(!mockSession.password && !mockSession.failed && !mockSession.authenticating)

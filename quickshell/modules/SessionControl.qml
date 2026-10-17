@@ -12,6 +12,7 @@ Scope {
     id: root
 
     required property bool authenticationRequired
+    property var wallpaper: null
 
     // Guard acquisition too, and re-read native state when intent clears:
     // Quickshell 0.3.2 does not notify QML when its native lock is released.
@@ -164,11 +165,11 @@ Scope {
                 respond(root.password)
         }
         onCompleted: result => {
+            root.password = ""
             root.authenticating = false
             if (result === PamResult.Success) {
                 root.releaseLock(true)
             } else {
-                root.password = ""
                 root.failed = true
             }
         }

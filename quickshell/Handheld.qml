@@ -5,9 +5,10 @@ import "modules" as Modules
 import "deck" as Deck
 ShellRoot {
     Modules.ThemeService {}
-    Modules.Wallpaper {}
+    Modules.Wallpaper { id: wallpaperOwner }
     Modules.SessionControl {
         id: session
+        wallpaper: wallpaperOwner
         authenticationRequired: Config.Settings.authenticationRequired
     }
     Adapters.Hyprland {

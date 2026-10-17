@@ -1,20 +1,17 @@
-{ quickshell, qt6, kdePackages, symlinkJoin, writeShellScriptBin }:
-let
-  runtime = quickshell.overrideAttrs (old: {
-    buildInputs = old.buildInputs ++ (with kdePackages; [
-      libplasma plasma-workspace kirigami ki18n breeze breeze-icons plasma-integration qqc2-breeze-style
-    ]) ++ [ qt6.qtvirtualkeyboard ];
-    qtWrapperArgs = (old.qtWrapperArgs or [ ]) ++ [
-      "--set" "KIRIGAMI_PLATFORM_THEME" "org.kde.breeze"
-    ];
-  });
-in symlinkJoin {
-  name = "icewine-quickshell";
-  paths = [ (writeShellScriptBin "qs" ''
-    # Apply Breeze's supported KConfig setting only to this opted-out process.
-    if [ "''${ICEWINE_THEME_TRANSITION:-}" = off ]; then
-      export XDG_CONFIG_DIRS="${./no-animations}:''${XDG_CONFIG_DIRS:-/etc/xdg}"
-    fi
-    exec ${runtime}/bin/qs "$@"
-  '') runtime ];
+{ quickshell, qt6, symlinkJoin, makeWrapper }:
+symlinkJoin {
+  name = "icewine-${quickshell.name}";
+  inherit (quickshell) pname version meta;
+  passthru = quickshell.passthru or { };
+  paths = [ quickshell ];
+  nativeBuildInputs = [ makeWrapper ];
+  postBuild = ''
+    # Keep nixpkgs' Qt wrapper; only add the matching runtime keyboard modules.
+    for program in qs quickshell; do
+      rm "$out/bin/$program"
+      makeWrapper "${quickshell}/bin/$program" "$out/bin/$program" \
+        --prefix QT_PLUGIN_PATH : "${qt6.qtvirtualkeyboard}/lib/qt-6/plugins" \
+        --prefix NIXPKGS_QT6_QML_IMPORT_PATH : "${qt6.qtvirtualkeyboard}/lib/qt-6/qml"
+    done
+  '';
 }

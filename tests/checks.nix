@@ -87,7 +87,8 @@ in {
     python3 ${self}/tests/layouts.py --qml
     python3 ${self}/tests/render-ready.py ${self}
     python3 ${self}/tests/breeze-lock.py ${self}
-    ICEWINE_THEME_TRANSITION=off python3 ${self}/tests/breeze-lock.py ${self}
+    ICEWINE_TEST_QS=quickshell ICEWINE_THEME_TRANSITION=off python3 ${self}/tests/breeze-lock.py ${self}
+    python3 ${self}/tests/window-switcher.py ${self}
     python3 ${./theme-live.py} ${self}
     touch "$out"
   '';

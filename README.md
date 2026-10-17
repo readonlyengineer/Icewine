@@ -110,11 +110,13 @@ icewine wallpaper "/path/to/image.png"
 
 Icewine copies PNG, JPEG, GIF or BMP images to
 `$XDG_DATA_HOME/icewine/wallpapers/selection.img` and refreshes the wallpaper.
-Your original file can then be moved or deleted. Wallpaper affects the desktop.
-Login and lock use KDE Breeze with a black backdrop for dark themes and white
-for light themes. Lock reuses Breeze's shared layout, controls and feedback with
-Icewine's existing session lock and PAM authentication; it cannot select another
-user or session. Its keyboard button uses Qt's native on-screen keyboard.
+Your original file can then be moved or deleted. The desktop and lockscreen share
+this wallpaper. The lockscreen blurs and dims it behind a large clock and date;
+missing images fall back to an opaque dark background. Password input stays
+concealed; edits briefly pulse the clock (colour only with motion disabled).
+Press Enter to submit, or Escape/Ctrl+U to clear. The keyboard button uses Qt's
+native on-screen keyboard. When authentication is explicitly disabled, tap or
+press Enter to unlock.
 
 Login Apply and theme changes publish KDE colours readable before authentication;
 missing public state uses the packaged theme policy or Catppuccin Mocha fallback.

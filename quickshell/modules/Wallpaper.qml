@@ -15,6 +15,7 @@ Scope {
         || (Quickshell.env("HOME") + "/.local/share")
     property string revision: "initial"
     property bool selectionAvailable: true
+    readonly property url sourceUrl: Wallpaper.source(dataHome, selectionAvailable, revision)
 
     IpcHandler {
         target: "wallpaper"
@@ -50,11 +51,13 @@ Scope {
             Image {
                 anchors.fill: parent
                 cache: false
-                source: Wallpaper.source(root.dataHome, root.selectionAvailable, root.revision)
+                source: root.sourceUrl
                 fillMode: Image.PreserveAspectCrop
                 onStatusChanged: {
                     if (status === Image.Error && root.selectionAvailable)
-                        root.selectionAvailable = false
+                        Qt.callLater(() => {
+                            if (status === Image.Error) root.selectionAvailable = false
+                        })
                 }
             }
         }
