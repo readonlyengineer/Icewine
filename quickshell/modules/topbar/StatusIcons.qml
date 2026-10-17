@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
-import Quickshell.Bluetooth
 import Quickshell.Networking
 import Quickshell.Services.Notifications
 import Quickshell.Services.Pipewire
@@ -19,8 +18,6 @@ Rectangle {
     readonly property bool muted: !sink?.audio || sink.audio.muted
     readonly property bool networkConnected: Networking.devices.values.some(device => device.connected)
     readonly property bool wifiConnected: Networking.devices.values.some(device => device.type === DeviceType.Wifi && device.connected)
-    readonly property var bluetoothAdapter: Bluetooth.defaultAdapter
-    readonly property int bluetoothConnections: Bluetooth.devices.values.filter(device => device.connected).length
     readonly property var battery: UPower.displayDevice
     readonly property bool batteryCharging: battery?.state === UPowerDeviceState.Charging
         || battery?.state === UPowerDeviceState.PendingCharge
@@ -74,12 +71,6 @@ Rectangle {
         }
 
         StatusButton {
-            page: "performance"
-            icon: "󰓅"
-            colour: Theme.Palette.caution
-        }
-
-        StatusButton {
             page: "screenshot"
             icon: "󰄀"
             colour: Theme.Palette.secondary
@@ -89,13 +80,6 @@ Rectangle {
             page: "network"
             icon: root.wifiConnected ? "" : root.networkConnected ? "" : "󰯡"
             colour: root.networkConnected ? Theme.Palette.success : Theme.Palette.muted
-        }
-
-        StatusButton {
-            page: "bluetooth"
-            visible: root.bluetoothAdapter !== null
-            icon: root.bluetoothConnections > 0 ? "󰂰" : root.bluetoothAdapter?.enabled ? "" : "󰂲"
-            colour: root.bluetoothAdapter?.enabled ? Theme.Palette.info : Theme.Palette.muted
         }
 
         StatusButton {

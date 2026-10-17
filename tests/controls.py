@@ -1585,6 +1585,62 @@ ShellRoot {
 """
 
 # Separate run so rendering waits cannot disturb the metric/lifecycle timers.
+STATUS_ICONS_QML = """import QtQuick
+import QtQuick.Window
+import QtTest
+import Quickshell
+import "icewine/modules/topbar" as Bar
+ShellRoot {
+    Window {
+        visible: true
+        width: 300; height: 80
+        Bar.StatusIcons {
+            id: icons
+            width: implicitWidth; height: implicitHeight
+            notificationService: ({count: 1, highestUrgency: 1, doNotDisturb: false, pulseToken: 0})
+            property string activated: ""
+            onPopoutActivated: page => activated = page
+        }
+        TestCase { id: input; when: false }
+    }
+    Timer {
+        interval: 100; running: true
+        onTriggered: {
+            try {
+                const row = icons.children.find(item => item.children.filter(child => child.page !== undefined).length > 0)
+                const buttons = row.children.filter(item => item.page !== undefined)
+                input.compare(buttons.map(item => item.page).join(","), "audio,screenshot,network,notifications,battery")
+                input.compare(icons.implicitWidth, row.implicitWidth + 9)
+                input.compare(icons.battery, null)
+                input.compare(buttons[4].label, "")
+                for (let i = 0; i < buttons.length; ++i) {
+                    const button = buttons[i]
+                    input.verify(button.visible)
+                    if (i) {
+                        input.compare(button.x, buttons[i - 1].x + buttons[i - 1].width + row.spacing)
+                        icons.updateHoveredPage(row.mapToItem(icons, button.x - row.spacing / 2, button.height / 2))
+                        input.compare(icons.hoveredPage, "")
+                    }
+                    const point = button.mapToItem(icons, button.width / 2, button.height / 2)
+                    icons.updateHoveredPage(point)
+                    input.compare(icons.hoveredPage, button.page)
+                    input.mouseClick(button, button.width / 2, button.height / 2)
+                    input.compare(icons.activated, button.page)
+                }
+                icons.sink.audio.muted = true
+                const volume = icons.sink.audio.volume
+                const audio = buttons[0]
+                input.mouseWheel(audio, audio.width / 2, audio.height / 2, 0, 120)
+                input.tryCompare(icons.sink.audio, "muted", false)
+                input.verify(icons.sink.audio.volume > volume)
+                console.log("STATUS_ICONS_CHECK_PASSED")
+                Qt.quit()
+            } catch (error) { console.error(error.stack); Qt.exit(1) }
+        }
+    }
+}
+"""
+
 ARROW_QML = """import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
@@ -2227,6 +2283,8 @@ ShellRoot {
 """
 
 SERVICE_FIXTURES = {
+    "UPower": "property var displayDevice: null",
+    "UPowerDeviceState": "enum State { Charging, PendingCharge }",
     "Pipewire": """
         property var nodes: ({values: Array.from({length: 2}, (_, id) => ({
             id: id, name: "Audio " + id, description: "Device " + id,
@@ -2396,6 +2454,33 @@ with tempfile.TemporaryDirectory() as directory:
                XDG_STATE_HOME=str(root / "state"), ICEWINE_WIDGET_POLICY="{}",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
     env["XDG_CONFIG_HOME"] = fixture_config
+    status_icons = root / "icewine/modules/topbar/StatusIcons.qml"
+    native_status_icons = status_icons.read_text()
+    status_icons.write_text(native_status_icons.replace("import Quickshell.Services.Pipewire\n", "import ControlFixtures\n")
+                            .replace("import Quickshell.Services.UPower\n", ""))
+    (root / "shell.qml").write_text(STATUS_ICONS_QML)
+    result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                            capture_output=True, text=True, timeout=15)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0 and "STATUS_ICONS_CHECK_PASSED" in output, output
+    assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign|unresolvable import|not a type", output), output
+    status_icons.write_text(native_status_icons)
+    (root / "shell.qml").write_text('''import QtQuick
+import Quickshell
+import "icewine/modules/topbar" as Bar
+ShellRoot {
+    Bar.StatusIcons { notificationService: ({count: 0, highestUrgency: 0, doNotDisturb: false, pulseToken: 0}) }
+    Timer { interval: 100; running: true; onTriggered: { console.log("STATUS_IMPORT_CHECK_PASSED"); Qt.quit() } }
+}
+''')
+    result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                            capture_output=True, text=True, timeout=15)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0 and "STATUS_IMPORT_CHECK_PASSED" in output, output
+    assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign|unresolvable import|not a type", output), output
+    if "--status-icons-only" in sys.argv:
+        print("status icon composition, batteryless access, hover, taps and volume scrolling pass")
+        sys.exit(0)
     (root / "shell.qml").write_text(SHADOW_QML)
     result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
                             capture_output=True, text=True, timeout=15)
