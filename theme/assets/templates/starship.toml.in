@@ -4,31 +4,35 @@ add_newline = true
 
 [git_branch]
 disabled = @gitDisabled@
+style = "bold fg:@magentaIndex@"
 [git_commit]
 disabled = @gitDisabled@
+style = "bold fg:@greenIndex@"
 [git_state]
 disabled = @gitDisabled@
+style = "bold fg:@yellowIndex@"
 [git_status]
 disabled = @gitDisabled@
+style = "bold fg:@redIndex@"
 [git_metrics]
 disabled = true
 
 [directory]
 truncation_length = 3
 truncate_to_repo = false
-style = "bold #@highlight@"
+style = "bold fg:@highlightIndex@"
 
 [cmd_duration]
 min_time = 2000
-style = "bold #@muted@"
+style = "bold fg:@mutedIndex@"
 format = "[took $duration ]($style)"
 
 [time]
 disabled = false
 time_format = "%I:%M:%S %p"
-style = "bold #@muted@"
+style = "bold fg:@mutedIndex@"
 format = "[$time]($style) "
 
 [character]
-success_symbol = "[⮐](bold #@highlight@)\n[➜](bold #@highlight@)"
-error_symbol = "[⮐](bold #@error@)\n[➜](bold #@error@)"
+success_symbol = "[⮐](bold fg:@highlightIndex@)\n[➜](bold fg:@highlightIndex@)"
+error_symbol = "[⮐](bold fg:@errorIndex@)\n[➜](bold fg:@errorIndex@)"

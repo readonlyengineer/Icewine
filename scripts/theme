@@ -24,6 +24,24 @@ TRANSPARENCY = {
     "med": ("0.60", "1.00"),
     "high": ("0.40", "1.00"),
 }
+# Append new roles only: retained cells must keep the same meaning across themes.
+# Slots 0-17 retain their existing meanings; repeated RGB values are deliberate.
+TERMINAL_ROLES = (
+    "backgroundDark", "red", "green", "yellow", "blue", "magenta", "cyan", "foregroundDark",
+    "blackBright", "redBright", "greenBright", "yellowBright", "blueBright", "magentaBright",
+    "cyanBright", "foreground", "orange", "redDark", "highlight", "muted", "secondaryHighlight",
+    "error", "purple", "teal", "background", "border", "caution", "highlightDark", "info",
+    "mutedAlt", "mutedBright", "selection", "success", "surface", "tertiaryHighlight", "warning",
+    "rosewater", "flamingo", "sapphire", "lavender", "crust", "foregroundAlt", "blueDark",
+    "redNeutral", "greenNeutral", "yellowNeutral", "blueNeutral", "magentaNeutral", "cyanNeutral",
+    "orangeNeutral", "redFaded", "greenFaded", "yellowFaded", "blueFaded", "magentaFaded",
+    "cyanFaded", "orangeFaded", "redCanonicalBright", "greenCanonicalBright",
+    "yellowCanonicalBright", "blueCanonicalBright", "magentaCanonicalBright",
+    "cyanCanonicalBright", "orangeCanonicalBright", "foregroundCanonicalBright", "backgroundHard",
+    "backgroundBase", "background4", "foregroundHard", "foregroundBase", "foregroundSoft",
+    "backgroundDarker", "backgroundLighter", "lineHighlight", "blue1", "blue2", "blue5", "blue6",
+    "blue7", "green2", "magenta2", "tealCanonical", "gitAdd", "gitChange", "gitDelete",
+)
 CONSUMERS = json.loads((Path(os.environ.get("ICEWINE_THEME_ASSETS", Path(__file__).resolve().parent.parent / "theme/assets"))
                         / "consumers.json").read_text(encoding="utf-8"))
 OWNED = {relative: name for files in CONSUMERS.values() for relative, name in files.items()}
@@ -175,7 +193,17 @@ def render_theme(assets, palette_file, level="high"):
     palette = json.loads(palette_file.read_text(encoding="utf-8"))
     if not isinstance(palette, dict) or not all(isinstance(value, str) for value in palette.values()):
         raise ValueError(f"invalid theme data: {palette_file}")
+    colour_keys = {key for key in palette if key != "appearance" and not key.endswith("Rgb")}
+    if (colour_keys != set(TERMINAL_ROLES)
+            or any(not re.fullmatch(r"[0-9a-f]{6}", palette[key]) for key in colour_keys)
+            or palette.get("appearance") not in {"dark", "light"}):
+        raise ValueError(f"invalid or incomplete terminal palette: {palette_file}")
     values = dict(palette)
+    terminal_colours = []
+    for index, role in enumerate(TERMINAL_ROLES):
+        terminal_colours.append(f"color{index} #{palette[role]}")
+        values[role + "Index"] = str(index)
+    values["terminalColors"] = "\n".join(terminal_colours)
     values["themeId"] = palette_file.stem
     try:
         distro = platform.freedesktop_os_release().get("ID", "")
@@ -197,8 +225,7 @@ def render_theme(assets, palette_file, level="high"):
         values["backgroundDark"], values["highlight"], values["foreground"])
     values["gtkHeaderbarHoverFg"] = gtk_foreground(
         values["surface"], values["highlight"], values["foreground"])
-    for key in ("highlightRgb", "mutedRgb"):
-        values[key.removesuffix("Rgb") + "Sgr"] = values[key].replace(", ", ";")
+    values["mutedSgr"] = values["mutedRgb"].replace(", ", ";")
     git_enabled = os.environ.get("ICEWINE_THEME_GIT_ENABLE", "true") == "true"
     values["gitFormat"] = "$git_branch$git_commit$git_state$git_metrics$git_status" if git_enabled else ""
     values["gitDisabled"] = "false" if git_enabled else "true"

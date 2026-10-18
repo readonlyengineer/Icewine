@@ -1,1 +1,1 @@
-{"type":"command","key":"├─   Nixpkgs","keyColor":"#@muted@","shell":"/bin/sh","text":@nixpkgsCommandJson@},
+{"type":"command","key":"├─   Nixpkgs","keyColor":"38;5;@mutedIndex@","shell":"/bin/sh","text":@nixpkgsCommandJson@},

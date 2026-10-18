@@ -149,6 +149,12 @@ Choose the theme and wallpaper before transparency: wallpaper brightness has a
 large effect on how transparency looks. Reopen apps if their appearance has not
 updated.
 
+Icewine's Kitty palette reserves slots 18–84 for shared roles and upstream shades;
+ANSI colours and slots 16–17 keep their existing values. Starship and Fastfetch
+use palette references so retained output can follow theme changes. Print them
+once after upgrading: existing true-colour output keeps its original colours.
+Other terminal profiles need the same palette mapping for these styles.
+
 Selections survive login and theme changes. An explicit `services.icewine.theme`
 setting overrides the CLI theme choice; leave it unset to choose themes yourself.
 
