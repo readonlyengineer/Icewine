@@ -36,7 +36,7 @@ Scope {
     onLockedChanged: { keyboardEnabled = false; sharedKeyboard.cancel(); Qt.inputMethod.hide() }
 
     function toggleKeyboard(host) {
-        if (!host || externalKeyboardBusy) return
+        if (!host || authenticating || externalKeyboardBusy) return
         if (keyboardEnabled && keyboardHost === host && typeof keyboardController?.prepareHide === "function")
             keyboardController.prepareHide()
         keyboardEnabled = !(keyboardEnabled && keyboardHost === host)

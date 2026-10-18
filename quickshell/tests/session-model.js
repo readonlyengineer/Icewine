@@ -110,4 +110,57 @@ assert.deepEqual(reloads, [], "icon refresh cannot reload a pending or acquired 
 refreshContext.root.locked = false
 refreshContext.refreshIcons()
 assert.deepEqual(reloads, [false])
+// Run the production request/PAM handlers: prompting must not start PAM or
+// weaken busy input guards, and only success releases the lock.
+const submit = source.match(/    function submit\(\) \{[\s\S]*?^    \}/m)[0]
+const toggle = source.match(/    function toggleKeyboard\(host\) \{[\s\S]*?^    \}/m)[0]
+const message = source.match(/        onPamMessage: \{([\s\S]*?)^        \}/m)[1]
+const completed = source.match(/        onCompleted: result => \{([\s\S]*?)^        \}/m)[1]
+const auth = vm.createContext({
+    authenticationRequired: true, password: "", authenticating: false,
+    externalKeyboardBusy: false, failed: false, keyboardEnabled: false,
+    keyboardHost: null, keyboardController: null, starts: 0, releases: 0,
+    responses: [], responseRequired: false, PamResult: { Success: 0 },
+    pam: { start: () => auth.starts++ },
+    releaseLock: () => auth.releases++,
+    respond: value => auth.responses.push(value),
+    Qt: { inputMethod: { show() {}, hide() {} } }
+})
+auth.root = auth
+vm.runInContext(submit + "\n" + toggle + "\nfunction message() {" + message
+    + "}\nfunction complete(result) {" + completed + "}", auth)
+const host = {}
+auth.toggleKeyboard(host)
+assert.equal(auth.keyboardEnabled, true, "OSK opens before PAM starts")
+auth.submit()
+assert.equal(auth.starts, 0, "empty response cannot start PAM")
+auth.password = "fixture-secret"
+auth.submit()
+assert.equal(auth.starts, 1)
+auth.submit()
+auth.toggleKeyboard(host)
+assert.equal(auth.starts, 1, "busy submit cannot start concurrent PAM")
+assert.equal(auth.keyboardEnabled, true, "busy shared toggle cannot alter keyboard")
+auth.message()
+assert.equal(auth.responses.length, 0, "informational PAM message needs no response")
+auth.responseRequired = true
+auth.message()
+assert.deepEqual(Array.from(auth.responses), ["fixture-secret"])
+auth.complete(1)
+assert.equal(auth.password, "")
+assert.equal(auth.authenticating, false)
+assert.equal(auth.failed, true)
+assert.equal(auth.releases, 0, "failure retains lock")
+auth.externalKeyboardBusy = true
+auth.toggleKeyboard(host)
+assert.equal(auth.keyboardEnabled, true, "external chord also blocks shared toggle")
+auth.externalKeyboardBusy = false
+auth.toggleKeyboard(host)
+assert.equal(auth.keyboardEnabled, false, "retry can close OSK")
+auth.password = "retry-secret"
+auth.submit()
+auth.complete(0)
+assert.equal(auth.password, "")
+assert.equal(auth.authenticating, false)
+assert.equal(auth.releases, 1, "PAM success releases lock")
 console.log("session model, persistent lock intent and acquisition checks passed")

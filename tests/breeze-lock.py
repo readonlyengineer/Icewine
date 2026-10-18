@@ -40,9 +40,9 @@ ShellRoot {
         id: session
         property var wallpaper: wallpaperOwner
         property bool locked: true
-        property bool authenticationRequired: true
+        property alias authenticationRequired: keyboardOwner.authenticationRequired
         property string password: ""
-        property bool authenticating: false
+        property alias authenticating: keyboardOwner.authenticating
         property bool failed: false
         property alias keyboardHost: keyboardOwner.keyboardHost
         property alias keyboardVisible: keyboardOwner.keyboardVisible
@@ -103,6 +103,15 @@ ShellRoot {
                 keys.tryCompare(field, "activeFocus", true)
                 keys.compare(field.echoMode, TextInput.NoEcho)
                 keys.compare(field.opacity, 0, "no secret or length display")
+                const prompt = find(view, item => item.objectName === "lockStatus")
+                const toggle = find(view, item => item.objectName === "lockKeyboard")
+                keys.verify(toggle.visible && toggle.enabled, "OSK prompt available before any submission")
+                keys.compare(prompt.text, "", "no idle password or OSK instruction")
+                keys.compare(toggle.text, "󰌌", "keyboard icon only")
+                keys.compare(toggle.Accessible.name, "Toggle virtual keyboard")
+                keys.compare(toggle.width, 44)
+                keys.compare(toggle.height, 44)
+                keys.compare(toggle.font.pixelSize, 24)
                 const clock = find(view, item => item.objectName === "lockClock")
                 function luminance(rgb) {
                     return rgb.map(v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
@@ -142,6 +151,7 @@ ShellRoot {
                 keys.verify(field.activeFocus, "first printable key restores focus")
                 keys.compare(field.text, "a", "first character arrives once")
                 keys.compare(session.password, "a")
+                keys.compare(prompt.text, "", "entry adds no OSK instruction")
                 keys.verify(clock.color !== Theme.Palette.foreground, "edit gives colour feedback")
                 if (Theme.Palette.animate) {
                     keys.tryVerify(() => clock.scale > 1, 100, "clock pulse starts")
@@ -189,6 +199,7 @@ ShellRoot {
                 root.phase = "external chord crossing lock acquisition"
                 external.busy = true
                 keys.verify(!field.enabled, "password disabled until external chord settles")
+                keys.verify(toggle.visible && !toggle.enabled, "external input keeps OSK prompt visible and disabled")
                 keys.keyClick(Qt.Key_X)
                 keys.compare(session.password, "ab", "external input cannot edit lock response")
                 external.busy = false
@@ -199,7 +210,8 @@ ShellRoot {
                 keys.verify(footer.activeFocus, "Tab reaches keyboard control")
                 keys.keyClick(Qt.Key_Tab, Qt.ShiftModifier)
                 keys.verify(field.activeFocus, "Backtab returns to concealed input")
-                keys.mouseClick(footer)
+                keys.touchEvent(footer).press(0, footer, footer.width/2, footer.height/2).commit()
+                keys.touchEvent(footer).release(0, footer, footer.width/2, footer.height/2).commit()
                 keys.tryCompare(keyboardOwner, "keyboardVisible", true, 2000)
                 keys.verify(field.activeFocus, "keyboard activation focuses concealed input")
                 keys.mouseClick(footer)
@@ -208,6 +220,11 @@ ShellRoot {
                 root.phase = "submission and busy state"
                 keys.keyClick(Qt.Key_Return)
                 keys.verify(session.authenticating && session.locked, "submit retains lock")
+                keys.verify(toggle.visible && !toggle.enabled, "busy authentication keeps OSK prompt visible and disabled")
+                keys.compare(prompt.text, "Authenticating…")
+                keys.verify(!keyboardOwner.keyboardView.enabled, "shared keyboard input disabled while PAM is busy")
+                keyboardOwner.toggleKeyboard(view)
+                keys.verify(!keyboardOwner.keyboardVisible, "programmatic toggle cannot open OSK while busy")
                 keys.compare(field.text, "", "visible password clears while PAM retains response")
                 keys.compare(session.password, "ab", "pending PAM response preserved")
                 keys.compare(secondField.text, "", "all output-local buffers clear while busy")
@@ -220,12 +237,16 @@ ShellRoot {
                 session.complete(false)
                 keys.tryCompare(field, "activeFocus", true)
                 keys.verify(session.locked && session.failed && !field.text, "failed retry preserves lock and clears secret")
-                const toggle = find(view, item => item.text === "Virtual Keyboard")
+                keys.verify(toggle.visible && toggle.enabled, "failed retry restores OSK control")
+                keys.compare(prompt.text, "Incorrect password")
                 for (const size of [[1920,1080], [1280,800], [800,600], [320,480]]) {
                     checkTheme()
                     root.phase = "shared keyboard " + size.join("x")
                     win.width = size[0]; win.height = size[1]
                     keys.wait(100)
+                    keys.verify(toggle.visible && toggle.x === 12
+                        && toggle.y + toggle.height === view.height - 12,
+                        "compact icon at bottom left before opening OSK")
                     field.forceActiveFocus()
                     keys.mouseClick(toggle)
                     keys.tryCompare(keyboardOwner, "keyboardVisible", true, 2000)
@@ -233,6 +254,9 @@ ShellRoot {
                     keys.verify(panel && panel.width <= Math.min(1040, win.width - 24)
                         && panel.height > 0 && panel.y + panel.height <= win.height, "shared keyboard bounds")
                     keys.wait(250)
+                    keys.verify(toggle.x === 12 && toggle.y >= 0
+                        && toggle.y + toggle.height <= panel.y,
+                        "bottom-left icon remains reachable above shared OSK")
                     const mapped = field.mapToItem(view, 0, 0)
                     keys.verify(mapped.y >= 0 && mapped.y + field.height <= win.height - panel.height, "field above keyboard")
                     const letter = find(panel, item => item.objectName === "oskKey" + KeyboardModel.keys.find(key => key.text === "a").index)
@@ -366,6 +390,7 @@ ShellRoot {
                 session.locked = true
                 root.phase = "authentication-disabled policy"
                 session.authenticationRequired = false
+                keys.verify(toggle.visible && !toggle.enabled, "no-password policy retains prompt without opening a hidden editor")
                 view.forceActiveFocus()
                 keys.keyClick(Qt.Key_Return)
                 keys.verify(!session.locked, "authentication-required policy retained")

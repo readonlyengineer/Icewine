@@ -152,11 +152,13 @@ FocusScope {
         anchors.bottomMargin: 12 + root.keyboardInset
         font.family: "JetBrainsMono Nerd Font"
         palette.buttonText: Theme.Palette.foreground
-        text: qsTr("Virtual Keyboard")
-        Accessible.name: text
+        text: "󰌌"
+        font.pixelSize: 24
+        width: 44
+        height: 44
+        Accessible.name: qsTr("Toggle virtual keyboard")
         focusPolicy: Qt.TabFocus
-        visible: root.session.authenticationRequired
-        enabled: !root.inputBusy
+        enabled: root.session.authenticationRequired && !root.inputBusy
         KeyNavigation.tab: root.session.keyboardVisible ? root.session.keyboardView.firstControl : password
         KeyNavigation.backtab: password
         onClicked: {
