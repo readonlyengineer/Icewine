@@ -43,7 +43,6 @@ Widget {
     height: implicitHeight
 
     signal mediaRequested()
-    signal instantHandoffRequested()
     signal pasteRequested(string entry)
 
     property var loadedCards: ({})
@@ -88,9 +87,6 @@ Widget {
         currentPage = page
         openPage(page)
     }
-    function openCapturePage() {
-        openPage("screenshot")
-    }
     property bool entryPending: true
     onCurrentPageChanged: {
         restoreEntry = configuration?.id !== openedStackId
@@ -127,10 +123,6 @@ Widget {
     Connections {
         target: root.Window.window
         function onActiveFocusItemChanged() { Qt.callLater(root.revealFocus) }
-    }
-    function capture(command) {
-        instantHandoffRequested()
-        Qt.callLater(() => Quickshell.execDetached(command))
     }
 
     MonitorBrightness {
@@ -224,7 +216,6 @@ Widget {
                                 : moduleLoader.modelData === "network" ? network
                                 : moduleLoader.modelData === "tailscale" ? tailscale
                                 : moduleLoader.modelData === "ssh" ? ssh
-                                : moduleLoader.modelData === "screenshot" ? screenshot
                                 : moduleLoader.modelData === "clipboard" ? clipboard
                                 : moduleLoader.modelData === "notifications" ? notifications
                                 : moduleLoader.modelData === "media" ? media : background
@@ -251,9 +242,6 @@ Widget {
                             Text { x: 12; y: 12; text: "SSH"; color: card.accent
                                 font { family: "JetBrainsMono Nerd Font"; pixelSize: 15; bold: true } }
                             Popouts.Ssh { id: page; anchors.fill: parent; anchors.topMargin: 44; active: card.active }
-                        } }
-                        Component { id: screenshot; Popouts.Screenshot {
-                            accent: card.accent; onCaptureRequested: command => root.capture(command)
                         } }
                         Component { id: clipboard; Popouts.Clipboard {
                             accent: card.accent; history: root.clipboardHistory; pasteBusy: root.pasteBusy

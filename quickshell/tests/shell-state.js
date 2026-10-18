@@ -91,9 +91,12 @@ assert.equal(State.barVisible(state, false, false), true)
 send({type: "dismiss"})
 assert.equal(State.barVisible(state, false, false), false)
 
-// Execute the actual QML controller methods, with only platform I/O replaced.
+// Retired Screenshot requests are rejected; Notifications is the Clipboard entry.
 send({type: "open", page: "screenshot", engaged: true, screen: "external"})
-assert.equal(state.page, "screenshot")
+assert.equal(state.page, "")
+// Execute the actual QML controller methods, with only platform I/O replaced.
+send({type: "open", page: "notifications", engaged: true, screen: "external"})
+assert.equal(state.page, "notifications")
 assert.equal(state.engaged, true)
 assert.equal(state.screen, "external")
 send({type: "dismiss"})
@@ -359,29 +362,6 @@ assert.deepEqual(captures, [
     ["flameshot", "screen", "--edit"]
 ], "Open the native monitor editor after dismissing the shell")
 
-// Exercise real page/host functions with page state unavailable at deferred launch.
-for (const [mode, delayCapture, expected] of [
-    ["monitor", false, ["flameshot", "screen", "--edit"]],
-    ["monitor", true, ["flameshot", "screen", "--edit", "--delay", "3000"]],
-    ["region", false, ["flameshot", "gui"]],
-    ["region", true, ["flameshot", "gui", "--delay", "3000"]]
-]) {
-    const events = [], pending = []
-    const host = controller("../modules/topbar/StatusPopout.qml", {
-        instantHandoffRequested: () => events.push("dismiss"),
-        Qt: {callLater: callback => pending.push(callback)},
-        Quickshell: {execDetached: command => events.push(Array.from(command))}
-    })
-    const page = controller("../modules/topbar/popouts/Screenshot.qml", {
-        delay: {checked: delayCapture}, captureRequested: command => host.capture(command)
-    })
-    page.capture(mode)
-    page.root = page.delay = null
-    assert.deepEqual(events, ["dismiss"], "Hide the popout before launching capture")
-    while (pending.length) pending.shift()()
-    assert.deepEqual(events, ["dismiss", expected])
-}
-
 let launches = 0
 deck.activate = () => launches++
 deck.requestClose({action: "screenshot"})
@@ -403,7 +383,7 @@ shell.Quickshell = {execDetached() {}}
 const originalPasteWindow = {address: "paste-target", lastIpcObject: {stableId: "1abc"}}
 shell.compositor.toplevels = [originalPasteWindow]
 shell.compositor.activeWindowAddress = originalPasteWindow.address
-const preparePaste = (page = "screenshot") => {
+const preparePaste = (page = "notifications") => {
     shell.clipboardPaste = null
     shell.sessionLocked = false
     shell.interactionActive = false

@@ -352,12 +352,8 @@ host-dependent paths or unavailable public metadata may require explicit import.
 
 ### Screenshots
 
-Open Screenshot from the topbar or with Super+Print. **Region** opens Flameshot:
-drag to select an area. **Monitor** opens its native editor: press Ctrl+A in
-Flameshot to select the whole display before editing, saving or copying. With
-multiple displays, choose a monitor in Flameshot first. Monitor does not select
-the full image automatically. Enable **3-second delay** to postpone either
-capture. The handheld Screenshot action opens the monitor editor without delay.
+Press Super+Print to open Flameshot directly, then drag to select an area.
+The handheld Screenshot action opens the monitor editor without delay.
 
 In Flameshot, select the area to crop, then use arrows, shapes, freehand, text and
 undo. Use an opaque filled rectangle to cover sensitive content; blur/pixelation
@@ -369,7 +365,7 @@ Flameshot's own settings can change save/copy behavior, including save-after-cop
 Icewine leaves those settings intact. Cancelling the save dialog discards the
 unsaved edit, so choose the destination before closing it.
 
-The Clipboard card is behind Screenshot (Tab switches cards). Click an entry to
+The Clipboard card is behind Notifications (Tab switches cards). Click an entry to
 load it; its accent outline follows the current clipboard. The ↑ action loads
 and sends one Ctrl+V to the retained original app. Release the opening shortcut
 first; terminals with a different paste binding need manual paste. A last-moment

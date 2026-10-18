@@ -83,6 +83,11 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             manage.main(["widgets-apply", "revision=" + revision,
                          "notificationToasts=" + toasts, "windowSwitcher=" + switcher,
                          "cardStacks=" + (widget_status()["cardStacks"].split(":")[0] if stacks is None else stacks)])
+        assert len(manage.CARD_MODULES) == 13 and "screenshot" not in manage.CARD_MODULES
+        assert next(stack for stack in manage.CARD_DEFAULTS if "clipboard" in stack["modules"]) == {
+            "id": "notifications", "modules": ["notifications", "clipboard"]}
+        # Custom stack IDs remain arbitrary; only member module IDs are registered.
+        assert manage.parse_stacks("screenshot/clipboard") == [{"id": "screenshot", "modules": ["clipboard"]}]
         initial = widget_status()
         assert initial["supported"] == "true"
         assert initial["notificationToasts"] == initial["windowSwitcher"] == "true:user"
@@ -141,6 +146,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         invalid = [None, {}, [None], [[]], [{"id": "", "modules": ["audio"]}],
                    [{"id": "A", "modules": ["audio"]}], [{"id": "a" * 33, "modules": ["audio"]}],
                    [{"id": "audio", "modules": []}], [{"id": "a", "modules": ["unknown"]}],
+                   [{"id": "old", "modules": ["screenshot", "clipboard"]}],
                    [{"id": "a", "modules": ["audio", "audio"]}],
                    [{"id": "a", "modules": ["audio"]}, {"id": "b", "modules": ["audio"]}],
                    [{"id": "a", "modules": ["audio"]}, {"id": "a", "modules": ["ssh"]}],
@@ -160,7 +166,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
                     except ValueError as error: assert "policy" in str(error) and "read-only" in str(error)
                     else: raise AssertionError("invalid policy became editable")
                 assert (widget_saved / "widgets.json").read_bytes() == before
-        for text in ("a", "a/", "A/audio", "a/unknown", "a/audio,audio", "a/audio;b/audio", "a/audio;a/ssh", "a/audio;"):
+        for text in ("a", "a/", "A/audio", "a/unknown", "old/screenshot,clipboard", "a/audio,audio", "a/audio;b/audio", "a/audio;a/ssh", "a/audio;"):
             try: save_widgets(widget_status()["revision"], stacks=text)
             except ValueError: pass
             else: raise AssertionError("accepted malformed card stack request")

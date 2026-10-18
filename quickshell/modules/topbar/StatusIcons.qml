@@ -90,7 +90,7 @@ Rectangle {
                     : page === "battery" ? (root.battery?.isLaptopBattery
                         ? StatusModel.batteryIcon(root.battery?.percentage ?? 0, root.batteryCharging) : "󰐥")
                     : page === "media" ? (root.player?.isPlaying ? "" : "")
-                    : ({background: "󰀻", layout: "󰕰", bluetooth: "", screenshot: "󰄀", clipboard: "󰅌",
+                    : ({background: "󰀻", layout: "󰕰", bluetooth: "", clipboard: "󰅌",
                         tailscale: "󰒍", ssh: "󰣀", performance: "󰓅"})[page] ?? ""
                 colour: page === "network" ? (root.networkConnected ? Theme.Palette.success : Theme.Palette.muted)
                     : page === "notifications" ? root.notificationColour

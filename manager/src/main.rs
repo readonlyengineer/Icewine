@@ -87,7 +87,7 @@ const WIDGETS: &[(&str, &str, &str)] = &[
 ];
 
 const CARD_MODULES: &[&str] = &["launcher", "background", "layout", "media", "audio", "bluetooth",
-    "screenshot", "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance"];
+    "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance"];
 
 struct CardStack { id: String, modules: Vec<usize> }
 

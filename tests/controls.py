@@ -27,7 +27,7 @@ import "icewine/theme" as Theme
 ShellRoot {
     id: root
     Component { id: handheldOverlay; Deck.DeckOverlay { compositor: compositor; sessionLocked: false; shell: root } }
-    property bool screenshotsOnly: false
+    property bool clipboardOnly: false
     property bool sshOnly: false
     property bool keepAwake: false
     property bool doNotDisturb: false
@@ -154,16 +154,6 @@ ShellRoot {
         Bar.Widget { id: animatedWidget; width: 20; height: 20; shown: false }
         TestCase { id: toggleKeys; when: false }
     }
-    Window {
-        id: screenshotWindow
-        width: 380; height: screenshotPage.implicitHeight
-        property var command: []
-        Popouts.Screenshot {
-            id: screenshotPage
-            width: parent.width
-            onCaptureRequested: command => screenshotWindow.command = command
-        }
-    }
     QtObject {
         id: clipboardFixture
         property var entries: []
@@ -187,9 +177,9 @@ ShellRoot {
         Bar.StatusPopout {
             id: clipboardPages
             anchors.fill: parent
-            currentPage: "screenshot"
+            currentPage: "notifications"
             compositor: ({})
-            notificationService: ({})
+            notificationService: ({items: [], count: 0, doNotDisturb: false})
             session: ({})
             player: null
             powerState: ({})
@@ -277,6 +267,7 @@ ShellRoot {
             anchors.fill: parent
             compositor: compositor
             notificationService: root
+            clipboardHistory: clipboardFixture
             session: session
             player: fixturePlayer
             powerState: root
@@ -878,7 +869,8 @@ ShellRoot {
                 throw new Error("Audio did not cross the scroll boundary in the expected direction")
         }
 
-        focusWindow.height = 150
+        // Keep the notification viewport at 150px after the two-card allowance.
+        focusWindow.height = 150 + 64
         root.items = Array.from({length: 3}, (_, index) => ({
             summary: "Notification " + index, appName: "Fixture", appIcon: "", body: "",
             urgency: 1, actions: [{text: "Fixture action", invoke: function() { ++root.buttonCalls }}], dismiss: function() {} }))
@@ -1439,9 +1431,8 @@ ShellRoot {
         onTriggered: {
             try {
             root.checkClipboard()
-            if (root.screenshotsOnly) {
-                root.checkScreenshot()
-                console.log("SCREENSHOT_CHECK_PASSED")
+            if (root.clipboardOnly) {
+                console.log("CLIPBOARD_CHECK_PASSED")
                 Qt.quit()
                 return
             }
@@ -1611,7 +1602,7 @@ ShellRoot {
             animatedWidget.animateClose = false
             animatedWidget.shown = false
             if (animatedWidget.visible || animatedWidget.reveal !== 0)
-                throw new Error("Screenshot dismissal must hide the widget immediately")
+                throw new Error("Instant dismissal must hide the widget immediately")
             toggleWindow.requestActivate()
             toggleKeys.tryCompare(toggleWindow, "active", true)
             keyboardToggle.forceActiveFocus()
@@ -1629,7 +1620,6 @@ ShellRoot {
                 if (root.buttonCalls !== before + 1)
                     throw new Error("Shared action button keyboard activation failed")
             }
-            root.checkScreenshot()
             if (JSON.stringify(steamShortcuts.commands) !== '[["demo"]]')
                 throw new Error("Steam shortcut process result was not published")
             steamShortcuts.refresh()
@@ -1685,47 +1675,15 @@ ShellRoot {
         onTriggered: chargingBattery.state = UPowerDeviceState.Charging
     }
 
-    function checkScreenshot() {
-        screenshotWindow.visible = true
-        screenshotWindow.requestActivate()
-        toggleKeys.tryCompare(screenshotWindow, "active", true)
-        const buttons = descendants(screenshotPage,
-            item => typeof item.click === "function" && ["Monitor", "Region", "Window", "Annotate…"].includes(item.text))
-        const captureDelay = root.findVisible(screenshotPage,
-            item => item.text === "3-second delay" && item.checked !== undefined)
-        if (buttons.map(item => item.text).join(",") !== "Monitor,Region" || !captureDelay)
-            throw new Error("Screenshot must offer only native Monitor and Region actions")
-        if (root.findVisible(screenshotPage, item => typeof item.text === "string" && item.text.includes("clipboard only")))
-            throw new Error("Screenshot output must be chosen in Flameshot")
-        for (const delayed of [false, true]) {
-            captureDelay.checked = delayed
-            for (const button of buttons) {
-                if (button.y + button.height > screenshotPage.implicitHeight)
-                    throw new Error("Screenshot capture button clipped")
-                screenshotWindow.command = []
-                button.forceActiveFocus()
-                toggleKeys.keyPress(Qt.Key_Return)
-                if (screenshotWindow.command.length)
-                    throw new Error("Screenshot launched before key release")
-                toggleKeys.keyRelease(Qt.Key_Return)
-                const expected = button.text === "Monitor"
-                    ? ["flameshot", "screen", "--edit"] : ["flameshot", "gui"]
-                if (delayed) expected.push("--delay", "3000")
-                if (JSON.stringify(screenshotWindow.command) !== JSON.stringify(expected))
-                    throw new Error("Screenshot native mode or delay lost")
-            }
-        }
-        screenshotWindow.visible = false
-    }
-
     function checkClipboard() {
         clipboardWindow.visible = true
         clipboardWindow.requestActivate()
         toggleKeys.tryCompare(clipboardWindow, "active", true)
-        clipboardPages.openCapturePage()
+        clipboardPages.openPage("notifications")
         const stack = clipboardPages.currentItem
-        if (stack.cards.length !== 2 || stack.selectedCard !== 0)
-            throw new Error("Screenshot must initially front the two-card stack")
+        if (stack.cards.length !== 2 || stack.selectedCard !== 0
+                || stack.cards.map(card => card.accessibleName).join(",") !== "Notifications card,Clipboard card")
+            throw new Error("Notifications must initially front Clipboard")
         clipboardPages.focusInitial()
         toggleKeys.keyClick(Qt.Key_Tab)
         toggleKeys.tryCompare(stack, "selectedCard", 1)
@@ -1816,7 +1774,7 @@ ShellRoot {
         toggleKeys.wait(20)
         if (descendants(page, item => item instanceof Image).length)
             throw new Error("Cleared clipboard retained image delegates")
-        clipboardPages.openCapturePage()
+        clipboardPages.openPage("notifications")
         toggleKeys.tryCompare(stack, "selectedCard", 0)
         clipboardWindow.visible = false
         clipboardAdapter.locked = false
@@ -1971,8 +1929,8 @@ ShellRoot {
                 file.setText(JSON.stringify({notificationToasts: false}))
                 file.reload()
                 input.tryCompare(Config.Settings, "notificationToasts", false)
-                input.compare(Config.Settings.cardStacks.length, 7)
-                const mixed = [{id: "mixed", modules: ["screenshot", "layout", "audio", "launcher"]}]
+                input.compare(Config.Settings.cardStacks.length, 6)
+                const mixed = [{id: "mixed", modules: ["notifications", "layout", "audio", "launcher"]}]
                 file.setText(JSON.stringify({notificationToasts: false, cardStacks: mixed}))
                 file.reload()
                 input.tryVerify(() => Config.Settings.cardStacks[0]?.id === "mixed")
@@ -1982,7 +1940,7 @@ ShellRoot {
                     input.wait(30)
                     input.compare(Config.Settings.cardStacks[0].id, "mixed")
                 }
-                host.currentPage = "screenshot"
+                host.currentPage = "notifications"
                 input.wait(40)
                 const stack = host.currentItem
                 input.compare(stack.cards.length, 4)
@@ -1997,7 +1955,7 @@ ShellRoot {
                         input.tryCompare(stack, "exchanging", false, 900)
                         input.compare(stack.frontCard, index)
                         const row = icons.children.find(item => item.children.some(child => child.page !== undefined))
-                        input.compare(row.children.filter(item => item.page !== undefined)[0].page, "screenshot")
+                        input.compare(row.children.filter(item => item.page !== undefined)[0].page, "notifications")
                         input.compare(new Set(stack.cards.map(card => card.y)).size, 4)
                     }
                 }
@@ -2018,11 +1976,11 @@ ShellRoot {
                 host.cardStacks = mixed.concat([{id: "other", modules: ["clipboard"]}])
                 host.currentPage = "clipboard"
                 input.wait(40)
-                host.currentPage = "screenshot"
+                host.currentPage = "notifications"
                 input.wait(40)
                 input.tryCompare(stack, "exchanging", false, 900)
                 input.compare(stack.frontCard, 3)
-                host.openPage("screenshot")
+                host.openPage("notifications")
                 input.tryCompare(stack, "exchanging", false, 900)
                 input.compare(stack.frontCard, 0)
                 host.backgroundItems = []
@@ -2088,10 +2046,10 @@ ShellRoot {
             try {
                 const row = icons.children.find(item => item.children.filter(child => child.page !== undefined).length > 0)
                 const buttons = row.children.filter(item => item.page !== undefined)
-                input.compare(buttons.map(item => item.page).join(","), "launcher,media,audio,screenshot,network,notifications,battery")
+                input.compare(buttons.map(item => item.page).join(","), "launcher,media,audio,network,notifications,battery")
                 input.compare(icons.implicitWidth, row.implicitWidth + 9)
                 input.compare(icons.battery, null)
-                input.compare(buttons[6].label, "")
+                input.compare(buttons[5].label, "")
                 for (let i = 0; i < buttons.length; ++i) {
                     const button = buttons[i]
                     input.verify(button.visible)
@@ -2971,15 +2929,15 @@ print(json.dumps(dict(available=True, error="", entries=[dict(public="ssh-ed2551
         assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
         print("three-card SSH keyboard entry, concealed input, cancel/dismiss/reopen/page lifecycle pass")
         sys.exit(0)
-    if "--screenshots-only" in sys.argv:
-        (root / "shell.qml").write_text(QML.replace("property bool screenshotsOnly: false",
-                                                   "property bool screenshotsOnly: true"))
+    if "--clipboard-only" in sys.argv:
+        (root / "shell.qml").write_text(QML.replace("property bool clipboardOnly: false",
+                                                   "property bool clipboardOnly: true"))
         result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
                                 capture_output=True, text=True, timeout=15)
         output = result.stdout + result.stderr
-        assert result.returncode == 0 and "SCREENSHOT_CHECK_PASSED" in output, output
+        assert result.returncode == 0 and "CLIPBOARD_CHECK_PASSED" in output, output
         assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
-        print("clipboard card/adapter state, scrolling/actions/plain previews and screenshot native-mode/release checks pass")
+        print("notification/clipboard stack, row actions, image previews, scrolling and adapter checks pass")
         sys.exit(0)
     (root / "shell.qml").write_text(STACKS_QML)
     result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,

@@ -2,6 +2,10 @@
 const assert = require("node:assert/strict")
 const Cards = require("../modules/topbar/CardModules.js")
 
+assert.equal(Cards.modules.length, 13)
+assert.equal(Cards.modules.includes("screenshot"), false)
+assert.deepEqual(Cards.containing(Cards.defaults, "clipboard"),
+    {id: "notifications", modules: ["notifications", "clipboard"]})
 assert.equal(Cards.validate(Cards.defaults), Cards.defaults)
 assert.deepEqual(Cards.defaults.flatMap(stack => stack.modules).sort(), [...Cards.modules].sort())
 assert.deepEqual(Cards.preferences({notificationToasts: false}), {notificationToasts: false})
@@ -10,9 +14,12 @@ const mixed = [{id: "mixed", modules: ["clipboard", "launcher", "ssh", "layout"]
 assert.equal(Cards.containing(mixed, "ssh"), mixed[0])
 assert.equal(Cards.containing(mixed, "audio"), null)
 assert.equal(Cards.preferences({cardStacks: mixed}).cardStacks, mixed)
+// Stack IDs are user-owned names, distinct from retired module IDs.
+assert.deepEqual(Cards.validate([{id: "screenshot", modules: ["clipboard"]}]),
+    [{id: "screenshot", modules: ["clipboard"]}])
 for (const stacks of [null, {}, [null], [[]], [{id: "", modules: ["audio"]}],
     [{id: "A", modules: ["audio"]}], [{id: "audio", modules: []}],
-    [{id: "audio", modules: ["unknown"]}], [{id: "audio", modules: ["audio", "audio"]}],
+    [{id: "audio", modules: ["unknown"]}], [{id: "old", modules: ["screenshot", "clipboard"]}], [{id: "audio", modules: ["audio", "audio"]}],
     [{id: "a", modules: ["audio"]}, {id: "b", modules: ["audio"]}],
     [{id: "a", modules: ["audio"]}, {id: "a", modules: ["ssh"]}],
     [{id: "a", modules: ["audio"], enabled: true}]])
@@ -25,12 +32,19 @@ console.log("card stacks: defaults, full registry, mixed membership, disablement
 const fs = require("node:fs"), vm = require("node:vm"), path = require("node:path")
 const settings = fs.readFileSync(path.join(__dirname, "../config/Settings.qml"), "utf8")
 const binding = settings.match(/readonly property var cardStacks: \{([\s\S]*?)^    \}/m)[1]
+const host = fs.readFileSync(path.join(__dirname, "../modules/topbar/StatusPopout.qml"), "utf8")
+assert.doesNotMatch(host, /Popouts\.Screenshot|function (?:capture|openCapturePage)\(/)
+assert.equal(fs.existsSync(path.join(__dirname, "../modules/topbar/popouts/Screenshot.qml")), false)
+const topbar = fs.readFileSync(path.join(__dirname, "../modules/Topbar.qml"), "utf8")
+assert.doesNotMatch(topbar, /function screenshot\(/)
+const manager = fs.readFileSync(path.join(__dirname, "../../manager/src/main.rs"), "utf8")
+assert.deepEqual(JSON.parse("[" + manager.match(/const CARD_MODULES:[^=]+=\s*&?\s*\[([\s\S]*?)\];/)[1] + "]"), Cards.modules)
 const saved = [{id: "saved", modules: ["ssh"]}]
-for (const policy of [undefined, null, [], [{id: "policy", modules: ["clipboard"]}], "bad"]) {
+for (const policy of [undefined, null, [], [{id: "policy", modules: ["clipboard"]}], "bad", [{id: "old", modules: ["screenshot"]}]]) {
     const result = vm.runInNewContext(`(() => {${binding}})()`, {
         widgetPolicy: {cardStacks: policy}, widgetSelections: {cardStacks: saved}, Cards,
         console: {warn() {}}
     })
-    assert.equal(result, policy == null ? saved : policy === "bad" ? Cards.defaults : policy)
+    assert.equal(result, policy == null ? saved : policy === "bad" || policy?.[0]?.modules?.includes("screenshot") ? Cards.defaults : policy)
 }
 console.log("card stack policy: missing/null inherit, valid override, invalid non-null safe defaults pass")

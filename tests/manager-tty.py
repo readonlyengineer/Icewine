@@ -135,7 +135,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         if auth: (data / "auth.img").write_bytes(b"fixture")
         widgets_state = root / "widgets-state"
         widgets_state.write_text(json.dumps({"notificationToasts": True, "windowSwitcher": True,
-            "cardStacks": "launcher/launcher,background,layout;media/media;audio/audio,bluetooth;screenshot/screenshot,clipboard;network/network,tailscale,ssh;notifications/notifications;battery/battery,performance"} | (widgets or {})))
+            "cardStacks": "launcher/launcher,background,layout;media/media;audio/audio,bluetooth;network/network,tailscale,ssh;notifications/notifications,clipboard;battery/battery,performance"} | (widgets or {})))
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
@@ -400,13 +400,13 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             widgets={"cardStacks": "a/launcher,background;b/audio"})
         assert saved_stacks() == "b/audio;stack-1/launcher"
         # Focus scrolls to the last module; its configured fourth accent repeats.
-        run(tab*2+down*15+b"s\x1b", state(), size=size,
+        run(tab*2+down*14+b"s\x1b", state(), size=size,
             widgets={"cardStacks": "mixed/launcher,audio,clipboard,performance"})
         assert saved_stacks() == "mixed/launcher,audio,clipboard,performance"
         assert any(b"performance" in frame and b"4 (primary)" in frame for frame in last_frames)
     # Moving a singleton into its previous stack must remove the old stack
     # without losing or misindexing the destination. Save button remains usable.
-    run(tab*2+down*2+left+down*14+b"\r\x1b", state(), size=(24, 80),
+    run(tab*2+down*2+left+down*13+b"\r\x1b", state(), size=(24, 80),
         widgets={"cardStacks": "a/launcher;b/audio"})
     assert saved_stacks() == "b/audio,launcher"
     # Tab keeps the draft; Cancel never writes it.

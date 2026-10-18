@@ -238,7 +238,7 @@ ShellRoot {
                     topbar.toggleSwitcher()
                     compare(topbar.ui.page, "")
                     for (const page of ["launcher", "audio", "network", "bluetooth", "battery",
-                            "performance", "layout", "screenshot"]) {
+                            "performance", "layout", "notifications"]) {
                         topbar.openWidget(page, true, "DP-1")
                         compare(topbar.ui.page, page, "Configured page opens after unlock")
                         topbar.dismissWidget()

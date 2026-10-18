@@ -1,13 +1,12 @@
 // First-party card IDs and persisted stack contract, shared by every shell entry.
 var modules = ["launcher", "background", "layout", "media", "audio", "bluetooth",
-    "screenshot", "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance"]
+    "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance"]
 var defaults = [
     {id: "launcher", modules: ["launcher", "background", "layout"]},
     {id: "media", modules: ["media"]},
     {id: "audio", modules: ["audio", "bluetooth"]},
-    {id: "screenshot", modules: ["screenshot", "clipboard"]},
     {id: "network", modules: ["network", "tailscale", "ssh"]},
-    {id: "notifications", modules: ["notifications"]},
+    {id: "notifications", modules: ["notifications", "clipboard"]},
     {id: "battery", modules: ["battery", "performance"]}
 ]
 

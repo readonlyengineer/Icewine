@@ -64,10 +64,10 @@ def selections(state):
 
 WIDGETS = ("notificationToasts", "windowSwitcher", "cardStacks")
 CARD_MODULES = ("launcher", "background", "layout", "media", "audio", "bluetooth",
-                "screenshot", "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance")
+                "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance")
 CARD_DEFAULTS = [{"id": names[0], "modules": list(names)} for names in (
     ("launcher", "background", "layout"), ("media",), ("audio", "bluetooth"),
-    ("screenshot", "clipboard"), ("network", "tailscale", "ssh"), ("notifications",), ("battery", "performance"))]
+    ("network", "tailscale", "ssh"), ("notifications", "clipboard"), ("battery", "performance"))]
 
 
 def validate_stacks(stacks):
