@@ -24,6 +24,8 @@ ShellRoot {
     property string phase: "startup"
     property int deliveryStarts: 0
     property int deliveryExits: 0
+    property int hides: 0
+    Connections { target: owner; function onHiding() { root.hides++ } }
     property int lastExit: -1
     QtObject { id: first; property string address: "0x1" }
     QtObject { id: second; property string address: "0x2" }
@@ -34,7 +36,7 @@ ShellRoot {
         function monitorFor(screen) { return {focused: true} }
     }
     Modules.SessionControl { id: session; authenticationRequired: true; keyboardController: owner }
-    Owner.KeyboardController { id: owner; compositor: compositor; session: session }
+    Owner.KeyboardController { id: owner; compositor: compositor; session: session; fixtureHost: win.contentItem }
     Connections {
         target: owner.deliveryProcess
         function onStarted() { root.deliveryStarts++ }
@@ -48,6 +50,81 @@ ShellRoot {
         TestCase { id: check; when: false }
     }
     function count() { calls.reload(); return calls.text().trim().split("\\n").filter(Boolean).length }
+    function find(item, name) {
+        if (item.objectName === name) return item
+        for (const child of item.children ?? []) {
+            const match = find(child, name)
+            if (match) return match
+        }
+        return null
+    }
+    function headerHide(locked) {
+        session.lockRequested = locked
+        session.keyboardHost = lockView
+        for (const touch of [false, true]) {
+            for (const mode of ["pinned", "unpinned", "dragged", "repinned"]) {
+                root.phase = (locked ? "lock" : "desktop") + " Hide " + mode + (touch ? " touch" : " mouse")
+                owner.show()
+                check.tryCompare(owner, "visible", true)
+                const panel = owner.view
+                check.verify(panel.pinned, "reopening resets pin")
+                const pin = find(panel, "keyboardPin"), hide = find(panel, "keyboardHide")
+                const tap = item => {
+                    if (touch) {
+                        const sequence = check.touchEvent(win)
+                        sequence.press(0, item, item.width/2, item.height/2).commit()
+                        sequence.release(0, item, item.width/2, item.height/2).commit()
+                    } else check.mouseClick(item)
+                }
+                if (mode !== "pinned") {
+                    tap(pin)
+                    check.verify(!panel.pinned, "pointer unpins")
+                }
+                if (mode === "dragged" || mode === "repinned") {
+                    const oldX = panel.x, oldY = panel.y
+                    if (touch) {
+                        const sequence = check.touchEvent(win)
+                        const point = panel.mapToItem(win.contentItem, panel.width/2, 20)
+                        sequence.press(0, win.contentItem, point.x, point.y).commit()
+                        sequence.move(0, win.contentItem, point.x-35, point.y-30).commit()
+                        sequence.move(0, win.contentItem, point.x-70, point.y-60).commit()
+                        sequence.release(0, win.contentItem, point.x-70, point.y-60).commit()
+                    } else check.mouseDrag(panel, panel.width/2, 20, -70, -60)
+                    check.verify(panel.x < oldX && panel.y < oldY, "real header drag moves view")
+                }
+                if (mode === "repinned") {
+                    tap(pin)
+                    check.verify(panel.pinned, "pointer repins")
+                    check.compare(panel.x, (panel.parent.width-panel.width)/2)
+                }
+                if (!locked) panel.controller({action:"ui_left", pressed:true})
+                panel.modifiers = Model.shift; panel.caps = true
+                const key = Model.keys.find(key => key.text === "a").index
+                panel.arm(key)
+                if (locked) {
+                    check.wait(520)
+                    check.verify(panel.repeated, "real repeat timer is active before Hide")
+                }
+                const selected = panel.selected, before = count(), password = session.password, hides = root.hides
+                tap(hide)
+                check.tryCompare(owner, "visible", false, 500)
+                check.compare(root.hides, hides+1, "Hide notifies controller release-drain consumer")
+                check.compare(panel.armed, -1, "Hide cancels armed input")
+                check.compare(panel.repeated, false, "Hide cancels active repeat")
+                check.compare(panel.modifiers, 0); check.compare(panel.caps, false)
+                check.compare(panel.heldDirection, "")
+                panel.release(key)
+                panel.controller({action:"ui_accept", pressed:false})
+                check.wait(550)
+                check.compare(panel.selected, selected, "Hide stops navigation timer")
+                check.compare(count(), before, "Hide stops repeats and late release without injection")
+                check.compare(session.password, password, "Hide/release preserves lock input")
+                check.compare(compositor.activeWindowAddress, second.address, "Hide preserves desktop destination focus")
+                check.verify(!session.keyboardEnabled, "lock input method disabled on Hide")
+            }
+        }
+        session.lockRequested = false
+    }
     Timer { interval: 200; running: true; onTriggered: {
         try {
             const action = Model.action(Model.keys.find(key => key.text === "a"), Model.control, false)
@@ -127,6 +204,7 @@ ShellRoot {
             check.tryCompare(owner, "busy", false, 4000)
             check.compare(count(), 5, "fresh invocation recovers after failed startup")
             owner.hide()
+            headerHide(false); headerHide(true)
             console.log("KEYBOARD_OWNER_PASSED"); Qt.quit()
         } catch (error) { console.error("KEYBOARD_OWNER_FAILED phase="+root.phase, error.stack || error); Qt.exit(1) }
     }}
@@ -146,10 +224,10 @@ with tempfile.TemporaryDirectory(prefix="icewine-keyboard-") as directory:
     for name in ("KeyboardView.qml", "KeyboardModel.js"):
         (root / "owner" / name).symlink_to(source / "quickshell/modules" / name)
     owner = (source / "quickshell/modules/KeyboardController.qml").read_text()
-    owner = owner.replace("    id: root\n", "    id: root\n    property alias deliveryProcess: delivery\n", 1)
+    owner = owner.replace("    id: root\n", "    id: root\n    property alias deliveryProcess: delivery\n    property Item fixtureHost\n", 1)
     start = owner.index("    PanelWindow {")
     end = owner.index("        KeyboardView {", start)
-    owner = owner[:start] + "    Item { width: 1280; height: 800; visible: root.desktopVisible && !root.session.locked\n" + owner[end:]
+    owner = owner[:start] + "    Item { parent: root.fixtureHost; width: 1280; height: 800; visible: root.desktopVisible && !root.session.locked\n" + owner[end:]
     (root / "owner/KeyboardController.qml").write_text(owner)
     (root / "bin").mkdir()
     (root / "empty-path").mkdir()
@@ -174,7 +252,7 @@ sys.exit(1 if pathlib.Path(os.environ["TEST_KEYBOARD_CONTROL"]).read_text() == "
                DBUS_SESSION_BUS_ADDRESS="unix:path="+str(root / "no-bus"),
                DBUS_SYSTEM_BUS_ADDRESS="unix:path="+str(root / "no-system-bus"),
                TEST_KEYBOARD_CALLS=str(root / "calls"), TEST_KEYBOARD_CONTROL=str(root / "control"), TEST_KEYBOARD_EMPTY_PATH=str(root / "empty-path"), TEST_KEYBOARD_MISSING_EXECUTABLE=str(missing_executable))
-    result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env, capture_output=True, text=True, timeout=20)
+    result = subprocess.run([os.environ.get("ICEWINE_TEST_QS", "qs"), "-p", str(root), "--no-color"], env=env, capture_output=True, text=True, timeout=45)
     output = result.stdout + result.stderr
     assert result.returncode == 0 and "KEYBOARD_OWNER_PASSED" in output, output
     startup_warnings = [line for line in output.splitlines()
@@ -184,4 +262,4 @@ sys.exit(1 if pathlib.Path(os.environ["TEST_KEYBOARD_CONTROL"]).read_text() == "
     # This synthetic input is logged only by the explicit fake developer backend.
     commands = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
     assert commands == [["-M", "ctrl", "-k", "U0061", "-m", "ctrl"]] * 5, commands
-print("PASS: real delivery FailedToStart (0 started/0 exited) versus shell exit127 (1/1), constant production argv/stdin privacy, lock/busy/reopen/no-backlog and exact fake-wtype argv")
+print("PASS: real delivery FailedToStart (0 started/0 exited) versus shell exit127 (1/1), constant production argv/stdin privacy, lock/busy/reopen/no-backlog exact fake-wtype argv, desktop/lock mouse/touch Hide pinned/unpinned/drag/repin/reopen and input cancellation")

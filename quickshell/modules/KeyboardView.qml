@@ -112,18 +112,22 @@ Rectangle {
             height: 44
             onClicked: root.pinned = !root.pinned
         }
-        Label { text: root.error || qsTr("Keyboard"); color: Theme.Palette.foreground; height: 44; verticalAlignment: Text.AlignVCenter; width: Math.max(0, root.width - 180); elide: Text.ElideRight }
-        ToolButton { objectName: "keyboardHide"; text: qsTr("Hide"); palette.buttonText: Theme.Palette.foreground; focusPolicy: Qt.TabFocus; height: 44; onClicked: root.hideRequested() }
-    }
-    Item {
-        x: 90; y: 0; width: Math.max(0, root.width - 180); height: 44
-        DragHandler {
-            target: root
-            enabled: !root.pinned
-            xAxis.minimum: 0; xAxis.maximum: Math.max(0, (root.parent?.width ?? 0) - root.width)
-            yAxis.minimum: 0; yAxis.maximum: Math.max(0, (root.parent?.height ?? 0) - root.height)
-            onActiveChanged: if (active) root.cancelGesture()
+        Label {
+            text: root.error || qsTr("Keyboard")
+            color: Theme.Palette.foreground
+            height: 44
+            verticalAlignment: Text.AlignVCenter
+            width: Math.max(0, root.width - 180)
+            elide: Text.ElideRight
+            DragHandler {
+                target: root
+                enabled: !root.pinned
+                xAxis.minimum: 0; xAxis.maximum: Math.max(0, (root.parent?.width ?? 0) - root.width)
+                yAxis.minimum: 0; yAxis.maximum: Math.max(0, (root.parent?.height ?? 0) - root.height)
+                onActiveChanged: if (active) root.cancelGesture()
+            }
         }
+        ToolButton { objectName: "keyboardHide"; text: qsTr("Hide"); palette.buttonText: Theme.Palette.foreground; focusPolicy: Qt.TabFocus; height: 44; onClicked: root.hideRequested() }
     }
     Flickable {
         id: viewport
