@@ -286,14 +286,6 @@ shell.handoff()
 shell.finishInteraction()
 flush()
 
-let keyboardToggles = 0
-shell.keyboard = {hide() {}, toggle() { keyboardToggles++ }}
-shell.beginInteraction(); shell.toggleKeyboard(); flush()
-assert.equal(keyboardToggles, 1, "Keyboard entry restores prior focus before opening")
-shell.beginInteraction(); shell.toggleKeyboard(); shell.beginInteraction(); flush()
-assert.equal(keyboardToggles, 1, "Superseded keyboard entry cannot reopen")
-shell.handoff(); shell.finishInteraction(); flush(); shell.keyboard = null
-
 const target = "/org/shadowblip/InputPlumber/devices/target/dbus0"
 const deck = controller("../deck/DeckOverlay.qml", {
     keyboard: null, keyboardVisible: false, keyboardReady: false, Menu, opened: true, draining: false, held: {}, acceptArmed: false,

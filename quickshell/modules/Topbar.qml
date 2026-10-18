@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Effects
-import QtQuick.Controls as Controls
 import Quickshell
 import qs.config as Config
 import Quickshell.Hyprland
@@ -274,16 +273,6 @@ Scope {
         Qt.callLater(() => instantBarHide = false)
     }
 
-    function toggleKeyboard() {
-        dismiss()
-        finishInteraction()
-        const generation = focusGeneration
-        Qt.callLater(() => {
-            if (generation === root.focusGeneration && !root.sessionLocked && !root.barVisible)
-                root.keyboard?.toggle()
-        })
-    }
-
     function raiseMedia() {
         const media = player
         if (!media?.canRaise)
@@ -505,13 +494,6 @@ Scope {
                     Row {
                         anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
                         spacing: 4
-                        Controls.ToolButton {
-                            text: qsTr("Keyboard")
-                            Accessible.name: qsTr("Toggle on-screen keyboard")
-                            focusPolicy: Qt.TabFocus
-                            height: 29
-                            onClicked: root.toggleKeyboard()
-                        }
                         Bar.StatusIcons {
                             id: statusIcons
                             notificationService: root.notificationService
