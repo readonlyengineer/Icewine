@@ -17,6 +17,14 @@ QtObject {
     readonly property string barBehaviour: barChoice("barBehaviour", Cards.barBehaviours, "keyboard")
     readonly property string barLocation: barChoice("barLocation", Cards.barLocations, "above")
 
+    readonly property string barStyle: barChoice("barStyle", Cards.barStyles, "anchored")
+    readonly property int barWidth: {
+        const policy = widgetPolicy.barWidth
+        if (policy !== undefined && policy !== null)
+            return Cards.validBarWidth(policy) ? policy : 80
+        return widgetSelections.barWidth ?? 80
+    }
+
     function barChoice(name, choices, fallback) {
         const policy = widgetPolicy[name]
         if (policy !== undefined && policy !== null)

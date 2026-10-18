@@ -62,18 +62,22 @@ def selections(state):
     return theme.symlinked(path) is not None, saved | {"login": False}
 
 
-WIDGETS = ("notificationToasts", "windowSwitcher", "cardStacks", "barBehaviour", "barLocation")
+WIDGETS = ("notificationToasts", "windowSwitcher", "cardStacks", "barBehaviour", "barLocation", "barStyle", "barWidth")
 BAR_CHOICES = {"barBehaviour": ("keyboard", "keyboard-mouse", "toggle", "always"),
-               "barLocation": ("above", "top", "bottom")}
+               "barLocation": ("above", "top", "bottom"), "barStyle": ("anchored", "floating")}
 
 
 def valid_widget(name, value):
+    if name == "barWidth":
+        return type(value) is int and 50 <= value <= 100
     if name == "cardStacks":
         return True  # Validated separately below, with the existing policy diagnostic.
     return value in BAR_CHOICES[name] if name in BAR_CHOICES else type(value) is bool
 
 
 def widget_default(name):
+    if name == "barWidth":
+        return 80
     return BAR_CHOICES[name][0] if name in BAR_CHOICES else CARD_DEFAULTS if name == "cardStacks" else True
 CARD_MODULES = ("launcher", "background", "layout", "media", "audio", "bluetooth",
                 "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance")
@@ -163,9 +167,11 @@ def widgets(argv, config, state):
     fields = {}
     for field in argv[2:]:
         name, separator, value = field.partition("=")
-        if not separator or name in fields or name not in WIDGETS or (name not in ("cardStacks", *BAR_CHOICES) and value not in {"true", "false"}):
+        if not separator or name in fields or name not in WIDGETS or (name not in ("cardStacks", "barWidth", *BAR_CHOICES) and value not in {"true", "false"}):
             raise ValueError("invalid widget request")
-        fields[name] = parse_stacks(value) if name == "cardStacks" else value if name in BAR_CHOICES else value == "true"
+        if name == "barWidth" and not re.fullmatch(r"(?:[5-9][0-9]|100)", value):
+            raise ValueError("invalid bar width request")
+        fields[name] = int(value) if name == "barWidth" else parse_stacks(value) if name == "cardStacks" else value if name in BAR_CHOICES else value == "true"
         if not valid_widget(name, fields[name]):
             raise ValueError("invalid widget request")
     if set(fields) != set(WIDGETS) or not supported:

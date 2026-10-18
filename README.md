@@ -177,6 +177,12 @@ stack. The first member supplies the topbar icon. Rows show stack/member order
 and the primary, secondary, tertiary accent cycle; modules absent from stacks
 are disabled. These preferences describe configured membership, including cards
 that are temporarily unavailable.
+
+Bar Width selects 50–100% of the output (default 80%). Bar Style selects Anchored
+(default, flush edge) or Floating (pill corners with a 4-pixel gap). At 100%,
+both styles have square corners; 99% retains rounding. Overflowing workspace
+and status rows scroll horizontally by dragging or using their scrollbars.
+
 Bar Behaviour offers Autohide (Keyboard), Autohide (Keyboard & Mouse), Toggle
 (Keyboard), and Always Show. The default is keyboard hold-to-show; mouse mode
 also reveals at the screen edge. Bar Locations offers Above (default overlay),
@@ -193,7 +199,9 @@ Preferences live in `$XDG_STATE_HOME/icewine/widgets.json` (normally
 NixOS `services.icewine.widgets.notificationToasts` and `.windowSwitcher` default
 to null (user choice); true/false enforces policy in the manager and shell.
 `.barBehaviour` accepts `keyboard`, `keyboard-mouse`, `toggle`, or `always`;
-`.barLocation` accepts `above`, `top`, or `bottom`. Both default to null (user choice).
+`.barLocation` accepts `above`, `top`, or `bottom`. `.barWidth` accepts integer
+percentages 50–100; `.barStyle` accepts `anchored` or `floating`. All default to
+null (user choice).
 The Widgets page requires shipped Settings.qml and a desktop/handheld entry;
 custom settings or entries are read-only here. Invalid non-null widget policy
 also makes the editor read-only and reports an error; repair the host policy

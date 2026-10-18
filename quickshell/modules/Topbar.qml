@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Effects
+import QtQuick.Controls
 import Quickshell
 import qs.config as Config
 import Quickshell.Hyprland
@@ -29,6 +30,10 @@ Scope {
         && panels.instances.some(panel => panel.widgetHere && panel.layoutActive)
     readonly property int barHeight: 38
     readonly property int shadowDrop: 4
+    readonly property bool fullBar: fullWidth || radialVisible || Config.Settings.barWidth === 100
+    readonly property bool floatingBar: !fullWidth && !radialVisible && Config.Settings.barStyle === "floating"
+    readonly property int barGap: floatingBar ? 4 : 0
+    readonly property int barExtent: barHeight + barGap
     readonly property bool bottomBar: Config.Settings.barLocation === "bottom"
     readonly property var player: Mpris.players.values.find(candidate => candidate.isPlaying)
         ?? Mpris.players.values[0] ?? null
@@ -369,7 +374,7 @@ Scope {
             readonly property string keyboardScreen: root.widgetEngaged ? root.ui.screen : root.radial?.monitorName ?? ""
             readonly property string hoverPage: statusIcons.hoveredPage
             readonly property bool widgetHovered: statusPopout.hovered
-            readonly property int reservation: root.barVisible && Config.Settings.barLocation !== "above" ? root.barHeight : 0
+            readonly property int reservation: root.barVisible && Config.Settings.barLocation !== "above" ? root.barExtent : 0
             readonly property bool pointerInside: barHover.hovered || edgeHover.hovered || (widgetHere && widgetHovered)
             onPointerInsideChanged: {
                 if (pointerInside) {
@@ -388,7 +393,7 @@ Scope {
                 screen: panel.screen
                 visible: panel.reservation > 0
                 anchors { left: true; right: true; top: !root.bottomBar; bottom: root.bottomBar }
-                implicitHeight: root.barHeight
+                implicitHeight: root.barExtent
                 exclusiveZone: panel.reservation
                 color: "transparent"
                 mask: Region {}
@@ -518,9 +523,9 @@ Scope {
 
                 Rectangle {
                     id: surface
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    y: root.bottomBar ? (root.barVisible ? parent.height - height : parent.height) : (root.barVisible ? 0 : -height)
-                    width: root.fullWidth || root.radialVisible ? parent.width : Math.round(parent.width * 0.8)
+                    x: (parent.width - width) / 2
+                    y: root.bottomBar ? (root.barVisible ? parent.height - height - root.barGap : parent.height) : (root.barVisible ? root.barGap : -height)
+                    width: root.fullBar ? parent.width : parent.width * Config.Settings.barWidth / 100
                     height: root.barHeight
                     opacity: root.barVisible ? 1 : 0
                     enabled: root.barVisible
@@ -534,9 +539,9 @@ Scope {
                         blurMax: 16
                         shadowVerticalOffset: root.shadowDrop
                     }
-                    topLeftRadius: root.bottomBar && !root.radialVisible ? 10 : 0
+                    topLeftRadius: !root.fullBar && (root.floatingBar || root.bottomBar) ? (root.floatingBar ? height / 2 : 10) : 0
                     topRightRadius: topLeftRadius
-                    bottomLeftRadius: !root.bottomBar && !root.radialVisible ? 10 : 0
+                    bottomLeftRadius: !root.fullBar && (root.floatingBar || !root.bottomBar) ? (root.floatingBar ? height / 2 : 10) : 0
                     bottomRightRadius: bottomLeftRadius
 
                     // Consume bar input below its controls, above outside-dismiss.
@@ -546,15 +551,33 @@ Scope {
                         onWheel: event => event.accepted = true
                     }
 
-                    Row {
+                    // Bound intrinsic rows around the centred clock; overflow remains draggable.
+                    readonly property real controlWidth: Math.max(0, (width - barClock.implicitWidth) / 2 - 12)
+                    Flickable {
+                        id: workspaceScroll
                         anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
-                        spacing: 4
-                        Bar.Workspaces { compositor: root.compositor; screen: panel.screen }
+                        width: Math.min(contentWidth, surface.controlWidth)
+                        height: 29
+                        contentWidth: workspaces.implicitWidth
+                        contentHeight: height
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        flickableDirection: Flickable.HorizontalFlick
+                        ScrollBar.horizontal: ScrollBar {}
+                        Bar.Workspaces { id: workspaces; compositor: root.compositor; screen: panel.screen }
                     }
-                    Bar.Clock { anchors.centerIn: parent; now: clock.date }
-                    Row {
+                    Bar.Clock { id: barClock; anchors.centerIn: parent; now: clock.date }
+                    Flickable {
+                        id: statusScroll
                         anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
-                        spacing: 4
+                        width: Math.min(contentWidth, surface.controlWidth)
+                        height: 29
+                        contentWidth: statusIcons.implicitWidth
+                        contentHeight: height
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        flickableDirection: Flickable.HorizontalFlick
+                        ScrollBar.horizontal: ScrollBar {}
                         Bar.StatusIcons {
                             id: statusIcons
                             notificationService: root.notificationService
@@ -612,9 +635,9 @@ Scope {
                     }
                     x: Math.max(8, Math.min(surface.x + surface.width - width,
                         panel.width - width - 8))
-                    y: root.bottomBar ? Math.max(0, panel.height - root.barHeight - 4 - height) : root.barHeight + 4
+                    y: root.bottomBar ? Math.max(0, panel.height - root.barExtent - 4 - height) : root.barExtent + 4
                     width: Math.max(0, Math.min(implicitWidth, panel.width - 16))
-                    height: Math.max(0, Math.min(implicitHeight, panel.height - root.barHeight - 12))
+                    height: Math.max(0, Math.min(implicitHeight, panel.height - root.barExtent - 12))
                     layoutsEnabled: root.layoutsEnabled
                     excludeSteamApps: root.excludeSteamApps
                     compositor: root.compositor

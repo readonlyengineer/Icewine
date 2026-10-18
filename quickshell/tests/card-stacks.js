@@ -48,3 +48,9 @@ for (const policy of [undefined, null, [], [{id: "policy", modules: ["clipboard"
     assert.equal(result, policy == null ? saved : policy === "bad" || policy?.[0]?.modules?.includes("screenshot") ? Cards.defaults : policy)
 }
 console.log("card stack policy: missing/null inherit, valid override, invalid non-null safe defaults pass")
+
+for (const width of [50, 80, 99, 100]) assert.equal(Cards.preferences({barWidth: width}).barWidth, width)
+for (const width of [49, 101, 80.5, true, "80", null, [], {}])
+    assert.throws(() => Cards.preferences({barWidth: width}))
+for (const style of Cards.barStyles) assert.equal(Cards.preferences({barStyle: style}).barStyle, style)
+for (const style of ["Floating", "", true, 80, null]) assert.throws(() => Cards.preferences({barStyle: style}))

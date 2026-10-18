@@ -79,13 +79,13 @@ elif sys.argv[1:] == ["widgets-state"]:
   print("invalid cardStacks policy; Widgets are read-only",file=sys.stderr); sys.exit(1)
  with open(os.environ["TUI_WIDGETS"]) as stream: saved=json.load(stream)
  print("supported="+os.environ["TUI_WIDGET_SUPPORTED"], "revision="+"a"*64, *[
-  name+"="+(saved[name] if name in ("cardStacks","barBehaviour","barLocation") else str(saved[name]).lower())+":"+("symlink" if os.environ["TUI_WIDGET_LINKED"] == "1" else "policy" if name in os.environ["TUI_WIDGET_POLICY"].split(",") else "user")
-  for name in ("notificationToasts","windowSwitcher","cardStacks","barBehaviour","barLocation")])
+  name+"="+(str(saved[name]) if name in ("cardStacks","barBehaviour","barLocation","barStyle","barWidth") else str(saved[name]).lower())+":"+("symlink" if os.environ["TUI_WIDGET_LINKED"] == "1" else "policy" if name in os.environ["TUI_WIDGET_POLICY"].split(",") else "user")
+  for name in ("notificationToasts","windowSwitcher","cardStacks","barBehaviour","barLocation","barStyle","barWidth")])
 elif sys.argv[1] == "widgets-apply":
  if os.environ["TUI_WIDGET_FAIL"] == "1":
   print("Widget preferences changed; reopen the manager before saving",file=sys.stderr); sys.exit(1)
  saved=dict(field.split("=") for field in sys.argv[3:])
- with open(os.environ["TUI_WIDGETS"],"w") as stream: json.dump({name:value if name in ("cardStacks","barBehaviour","barLocation") else value=="true" for name,value in saved.items()},stream)
+ with open(os.environ["TUI_WIDGETS"],"w") as stream: json.dump({name:int(value) if name == "barWidth" else value if name in ("cardStacks","barBehaviour","barLocation","barStyle") else value=="true" for name,value in saved.items()},stream)
  print("Widget preferences saved; the shipped shell watches this file.")
 elif sys.argv[1:] and sys.argv[1] == "apply": sys.exit(int(os.environ["TUI_APPLY_EXIT"]))
 ''')
@@ -135,7 +135,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         if auth: (data / "auth.img").write_bytes(b"fixture")
         widgets_state = root / "widgets-state"
         widgets_state.write_text(json.dumps({"notificationToasts": True, "windowSwitcher": True,
-            "cardStacks": "launcher/launcher,background,layout;media/media;audio/audio,bluetooth;network/network,tailscale,ssh;notifications/notifications,clipboard;battery/battery,performance", "barBehaviour": "keyboard", "barLocation": "above"} | (widgets or {})))
+            "cardStacks": "launcher/launcher,background,layout;media/media;audio/audio,bluetooth;network/network,tailscale,ssh;notifications/notifications,clipboard;battery/battery,performance", "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80} | (widgets or {})))
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
@@ -382,41 +382,41 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     for size in ((24, 80), (36, 120)):
         # Reorder a member, move it to another stack, make it that stack's
         # icon, and move that stack before the original one.
-        run(tab*2+down*4+b"+"+right+b"-[s\x1b", state(), size=size,
+        run(tab*2+down*6+b"+"+right+b"-[s\x1b", state(), size=size,
             widgets={"cardStacks": "a/launcher,background,layout,media;b/audio"})
         assert saved_stacks() == "b/launcher,audio;a/background,layout,media"
         assert any(b"1. b / 1 icon (primary)" in frame for frame in last_frames)
         # New stack, join an existing stack, and move a new singleton stack.
-        run(tab*2+down*4+b" "+down+right+down+b"n[s\x1b", state(), size=size,
+        run(tab*2+down*6+b" "+down+right+down+b"n[s\x1b", state(), size=size,
             widgets={"cardStacks": ""})
         assert saved_stacks() == "stack-2/layout;stack-1/launcher,background"
         # Removing the configured first member makes the next member the icon;
         # disable the final member without retaining an empty stack.
-        run(tab*2+down*4+b" "+down+b" s\x1b", state(), size=size,
+        run(tab*2+down*6+b" "+down+b" s\x1b", state(), size=size,
             widgets={"cardStacks": "a/launcher,background"})
         assert saved_stacks() == ""
         # Remove a whole stack, then explicitly re-enable a module.
-        run(tab*2+down*4+delete+b" s\x1b", state(), size=size,
+        run(tab*2+down*6+delete+b" s\x1b", state(), size=size,
             widgets={"cardStacks": "a/launcher,background;b/audio"})
         assert saved_stacks() == "b/audio;stack-1/launcher"
         # Focus scrolls to the last module; its configured fourth accent repeats.
-        run(tab*2+down*16+b"s\x1b", state(), size=size,
+        run(tab*2+down*18+b"s\x1b", state(), size=size,
             widgets={"cardStacks": "mixed/launcher,audio,clipboard,performance"})
         assert saved_stacks() == "mixed/launcher,audio,clipboard,performance"
         assert any(b"performance" in frame and b"4 (primary)" in frame for frame in last_frames)
     # Moving a singleton into its previous stack must remove the old stack
     # without losing or misindexing the destination. Save button remains usable.
-    run(tab*2+down*4+left+down*13+b"\r\x1b", state(), size=(24, 80),
+    run(tab*2+down*6+left+down*13+b"\r\x1b", state(), size=(24, 80),
         widgets={"cardStacks": "a/launcher;b/audio"})
     assert saved_stacks() == "b/audio,launcher"
     # Tab keeps the draft; Cancel never writes it.
-    run(tab*2+down*4+delete+tab*3+b"\x1b", state())
+    run(tab*2+down*6+delete+tab*3+b"\x1b", state())
     assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
     # Policy locks stack operations but leaves ordinary boolean settings editable.
-    run(tab*2+down*4+b"n+-[]"+right+delete+b" s\x1b", state(),
+    run(tab*2+down*6+b"n+-[]"+right+delete+b" s\x1b", state(),
         widgets={"cardStacks": "host/launcher"}, widget_policy="cardStacks")
     assert saved_stacks() == "host/launcher"
-    run(tab*2+b"ns\x1b", state(), widget_policy="notificationToasts,windowSwitcher,cardStacks,barBehaviour,barLocation")
+    run(tab*2+b"ns\x1b", state(), widget_policy="notificationToasts,windowSwitcher,cardStacks,barBehaviour,barLocation,barStyle,barWidth")
     assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
     run(tab*2+b"ns\x1b", state(), widget_policy="invalid")
     assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
@@ -439,6 +439,17 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         widgets={"barBehaviour": "always", "barLocation": "bottom"}, widget_policy="barBehaviour")
     call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
     assert "barBehaviour=always" in call and "barLocation=above" in call
+    # Numeric width clamps at both endpoints; style wraps and Cancel never saves.
+    for width, moves in ((50, left*40), (99, right*19), (100, right*30)):
+        run(tab*2+down*4+right+down+moves+b"s\x1b", state(), size=(24, 80))
+        call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
+        assert "barStyle=floating" in call and "barWidth=" + str(width) in call
+    run(tab*2+down*4+right+down+right+b"\x1b", state())
+    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+    run(tab*2+down*4+right+b"s\x1b", state(),
+        widgets={"barWidth": 50, "barStyle": "floating"}, widget_policy="barWidth,barStyle")
+    call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
+    assert "barWidth=50" in call and "barStyle=floating" in call
     # Delivery can fail after committing a choice: display/next cycle follow saved state.
     assert run(tab+b"\x1b[C\x1b[C\x1b[B\x1b[C\x1b[C\x1b", state(), delivery_fail=True) == [["state"]]
     changes = [call for call in tools() if call[0] == "icewine" and len(call) == 3]

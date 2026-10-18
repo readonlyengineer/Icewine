@@ -46,6 +46,16 @@ in {
         default = null;
         description = "Optional bar visibility policy; null permits the user preference (default keyboard autohide).";
       };
+      barWidth = lib.mkOption {
+        type = lib.types.nullOr (lib.types.ints.between 50 100);
+        default = null;
+        description = "Optional bar width percentage policy; null permits the user preference (default 80).";
+      };
+      barStyle = lib.mkOption {
+        type = lib.types.nullOr (lib.types.enum [ "anchored" "floating" ]);
+        default = null;
+        description = "Optional bar style policy; null permits the user preference (default anchored).";
+      };
       barLocation = lib.mkOption {
         type = lib.types.nullOr (lib.types.enum [ "above" "top" "bottom" ]);
         default = null;

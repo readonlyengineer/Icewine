@@ -37,7 +37,7 @@ let
     services.icewine.login.enable = true;
   }]; }).config;
   barPolicy = (desktopSystem.extendModules { modules = [{
-    services.icewine.widgets = { barBehaviour = "always"; barLocation = "bottom"; };
+    services.icewine.widgets = { barBehaviour = "always"; barLocation = "bottom"; barWidth = 99; barStyle = "floating"; };
   }]; }).config;
   loginOff = desktop;
   greeterSystem = desktopSystem.extendModules { modules = [{
@@ -127,6 +127,7 @@ in {
     nativeBuildInputs = [ pkgs.nodejs pkgs.python3 quickshell pkgs.qt6.qtdeclarative ];
   } ''
     python3 ${self}/tests/controls.py ${self}
+    python3 ${self}/tests/bar-geometry.py ${self}
     python3 ${self}/tests/layouts.py --qml
     python3 ${self}/tests/render-ready.py ${self}
     python3 ${self}/tests/wallpaper-layout.py ${self}
@@ -234,8 +235,12 @@ in {
     assert handheld.services.inputplumber.enable && handheld.programs.steam.enable;
     assert desktop.services.icewine.widgets.barBehaviour == null;
     assert desktop.services.icewine.widgets.barLocation == null;
+    assert desktop.services.icewine.widgets.barWidth == null;
+    assert desktop.services.icewine.widgets.barStyle == null;
     assert barPolicy.services.icewine.widgets.barBehaviour == "always";
     assert barPolicy.services.icewine.widgets.barLocation == "bottom";
+    assert barPolicy.services.icewine.widgets.barWidth == 99;
+    assert barPolicy.services.icewine.widgets.barStyle == "floating";
     assert !(handheld.systemd.user.services ? icewine-keyboard);
     assert hasPackage "wtype" optIn.environment.systemPackages;
     assert handheld.services.icewine.applications.steam == [ "steam" "-gamepadui" ];

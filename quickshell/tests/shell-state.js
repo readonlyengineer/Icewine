@@ -507,7 +507,7 @@ const popoutSource = topbar.split("id: statusPopout")[1]
 const edgeSource = topbar.split("id: edge\n")[1].split("HoverHandler")[0]
 for (const behaviour of Cards.barBehaviours) for (const location of Cards.barLocations) {
     for (const height of [80, 600, 1440]) for (const visible of [false, true]) {
-        const env = {root: {bottomBar: location === "bottom", barVisible: visible, barHeight: 38, sessionLocked: false},
+        const env = {root: {bottomBar: location === "bottom", barVisible: visible, barHeight: 38, barGap: 0, barExtent: 38, sessionLocked: false},
             Config: {Settings: {barBehaviour: behaviour, barLocation: location}},
             panel: {height, width: 1280}, parent: {height}, height: 38, implicitHeight: 500}
         const value = source => vm.runInNewContext(source, env)

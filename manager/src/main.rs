@@ -12,7 +12,7 @@ const ROWS: &[(&str, &str, &str)] = &[
 ];
 
 #[derive(Clone, Copy, PartialEq)]
-enum Control { Theme, Transparency, Layout, Wallpaper, Monitors, Utility(&'static str), Widget(usize), Bar(usize), Card(usize), Steam, Overwrite, Apply, Cancel }
+enum Control { Theme, Transparency, Layout, Wallpaper, Monitors, Utility(&'static str), Widget(usize), Bar(usize), BarWidth, Card(usize), Steam, Overwrite, Apply, Cancel }
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
 
@@ -90,6 +90,7 @@ const BAR_SETTINGS: &[(&str, &str, &[&str], &[&str])] = &[
     ("barBehaviour", "Bar Behaviour", &["keyboard", "keyboard-mouse", "toggle", "always"],
         &["Autohide (Keyboard)", "Autohide (Keyboard & Mouse)", "Toggle (Keyboard)", "Always Show"]),
     ("barLocation", "Bar Locations", &["above", "top", "bottom"], &["Above", "Top", "Bottom"]),
+    ("barStyle", "Bar Style", &["anchored", "floating"], &["Anchored", "Floating"]),
 ];
 
 const CARD_MODULES: &[&str] = &["launcher", "background", "layout", "media", "audio", "bluetooth",
@@ -98,8 +99,8 @@ const CARD_MODULES: &[&str] = &["launcher", "background", "layout", "media", "au
 struct CardStack { id: String, modules: Vec<usize> }
 
 struct Widgets {
-    enabled: [bool; 2], policy: [bool; 5], linked: [bool; 5], supported: bool, revision: String,
-    stacks: Vec<CardStack>, bar: [usize; 2],
+    enabled: [bool; 2], policy: [bool; 7], linked: [bool; 7], supported: bool, revision: String,
+    stacks: Vec<CardStack>, bar: [usize; 3], width: u8,
 }
 
 fn widget_command(args: &[String]) -> io::Result<String> {
@@ -126,8 +127,8 @@ impl Widgets {
         let revision = fields.remove("revision").filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit()))
             .ok_or_else(|| io::Error::other("Invalid widget revision"))?.to_owned();
         let mut enabled = [true; 2];
-        let mut policy = [false; 5];
-        let mut linked = [false; 5];
+        let mut policy = [false; 7];
+        let mut linked = [false; 7];
         for (index, (id, _, _)) in WIDGETS.iter().enumerate() {
             let (value, owner) = fields.remove(id).and_then(|value| value.split_once(':'))
                 .ok_or_else(|| io::Error::other("Missing widget state"))?;
@@ -159,7 +160,7 @@ impl Widgets {
             }
             stacks.push(CardStack { id: id.to_owned(), modules });
         }
-        let mut bar = [0; 2];
+        let mut bar = [0; 3];
         for (index, (id, _, choices, _)) in BAR_SETTINGS.iter().enumerate() {
             let (value, owner) = fields.remove(id).and_then(|value| value.split_once(':'))
                 .ok_or_else(|| io::Error::other("Missing bar setting"))?;
@@ -169,8 +170,15 @@ impl Widgets {
                 _ => return Err(io::Error::other("Invalid bar ownership")) };
             linked[index + 3] = owner == "symlink";
         }
+        let (value, owner) = fields.remove("barWidth").and_then(|value| value.split_once(':'))
+            .ok_or_else(|| io::Error::other("Missing bar width"))?;
+        let width = value.parse::<u8>().ok().filter(|width| (50..=100).contains(width) && value == width.to_string())
+            .ok_or_else(|| io::Error::other("Invalid bar width"))?;
+        policy[6] = match owner { "policy" | "symlink" => true, "user" => false,
+            _ => return Err(io::Error::other("Invalid bar width ownership")) };
+        linked[6] = owner == "symlink";
         if !fields.is_empty() { return Err(io::Error::other("Unknown widget state")); }
-        Ok(Self { enabled, policy, linked, supported, revision, stacks, bar })
+        Ok(Self { enabled, policy, linked, supported, revision, stacks, bar, width })
     }
 
     fn location(&self, module: usize) -> Option<(usize, usize)> {
@@ -240,6 +248,7 @@ impl Widgets {
             .collect::<Vec<_>>().join(";")));
         args.extend(BAR_SETTINGS.iter().enumerate().map(|(index, (id, _, choices, _))|
             format!("{id}={}", choices[self.bar[index]])));
+        args.push(format!("barWidth={}", self.width));
         let text = widget_command(&args)?;
         *self = Self::load().map_err(|error| io::Error::other(format!("Save completed; refresh failed: {error}")))?;
         Ok(text)
@@ -278,7 +287,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     let mut appearance = Appearance::load()?;
     let (mut widgets, mut widget_message) = match Widgets::load() {
         Ok(value) => (value, String::new()),
-        Err(error) => (Widgets { enabled: [true; 2], policy: [true; 5], linked: [false; 5], supported: false, revision: String::new(), stacks: Vec::new(), bar: [0; 2] }, error.to_string()),
+        Err(error) => (Widgets { enabled: [true; 2], policy: [true; 7], linked: [false; 7], supported: false, revision: String::new(), stacks: Vec::new(), bar: [0; 3], width: 80 }, error.to_string()),
     };
     let mut message = String::new();
     let mut page = 0;
@@ -301,6 +310,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 WIDGETS.iter().enumerate().filter(|(index, _)| widgets.supported && !widgets.policy[*index])
                     .map(|(index, _)| Control::Widget(index))
                     .chain((0..BAR_SETTINGS.len()).filter(|index| widgets.supported && !widgets.policy[index + 3]).map(Control::Bar))
+                    .chain((widgets.supported && !widgets.policy[6]).then_some(Control::BarWidth))
                     .chain((0..CARD_MODULES.len()).map(Control::Card))
                     .chain((widgets.supported && widgets.policy.iter().any(|locked| !locked)).then_some(Control::Apply)).chain([Control::Cancel]).collect()
             } else { rows.iter().filter(|(id, _, _)| !readonly
@@ -369,6 +379,9 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         (Control::Bar(index), (*label).to_owned(), if widgets.supported {
                             format!("< {} >{}", labels[widgets.bar[index]], owner(index + 3))
                         } else { "Unavailable".to_owned() })));
+                    entries.push((Control::BarWidth, "Bar Width".to_owned(), if widgets.supported {
+                        format!("< {}% >{}", widgets.width, owner(6))
+                    } else { "Unavailable".to_owned() }));
                     entries.extend(CARD_MODULES.iter().enumerate().map(|(index, name)| {
                         let value = if !widgets.supported { "Unavailable".to_owned() }
                             else if let Some((stack, position)) = widgets.location(index) {
@@ -383,7 +396,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     *table_state.offset_mut() = selected.unwrap_or(0).saturating_sub(utilities.height.saturating_sub(1) as usize);
                     frame.render_stateful_widget(Table::new(entries.into_iter().map(|(control, label, value)|
                         Row::new([Cell::from(label), Cell::from(value)]).style(if controls[focus] == control { focused }
-                            else if !widgets.supported || match control { Control::Widget(index) => widgets.policy[index], Control::Bar(index) => widgets.policy[index + 3], _ => widgets.policy[2] } { muted }
+                            else if !widgets.supported || match control { Control::Widget(index) => widgets.policy[index], Control::Bar(index) => widgets.policy[index + 3], Control::BarWidth => widgets.policy[6], _ => widgets.policy[2] } { muted }
                             else { Style::default() })), [Constraint::Length(21), Constraint::Min(20)]).column_spacing(1), utilities, &mut table_state);
                     frame.render_widget(Paragraph::new(widget_message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
                 } else {
@@ -442,6 +455,10 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     if matches!(controls[focus], Control::Card(_)) => {
                     if let Control::Card(index) = controls[focus] { widgets.edit(index, key.code); }
                 }
+                KeyCode::Left | KeyCode::Right if controls[focus] == Control::BarWidth => {
+                    widgets.width = if key.code == KeyCode::Right { (widgets.width + 1).min(100) }
+                        else { widgets.width.saturating_sub(1).max(50) };
+                }
                 KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Bar(_)) => {
                     if let Control::Bar(index) = controls[focus] {
                         let count = BAR_SETTINGS[index].2.len();
@@ -488,6 +505,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 }
                 KeyCode::Char(' ') | KeyCode::Enter => match controls[focus] {
                     Control::Widget(index) => widgets.enabled[index] ^= true,
+                    Control::BarWidth => widgets.width = (widgets.width + 1).min(100),
                     Control::Bar(index) => widgets.bar[index] = (widgets.bar[index] + 1) % BAR_SETTINGS[index].2.len(),
                     Control::Card(index) => widgets.edit(index, key.code),
                     Control::Utility(id) => {
