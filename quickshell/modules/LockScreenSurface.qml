@@ -34,6 +34,9 @@ FocusScope {
         anchors.fill: parent
         source: root.session.wallpaper?.sourceUrl ?? ""
         cache: false
+        // Quickshell constructs this surface before requesting the native lock.
+        // Decode off the GUI thread; the opaque backdrop does not depend on readiness.
+        asynchronous: true
         fillMode: Image.PreserveAspectCrop
         visible: false
         onStatusChanged: if (status === Image.Error && root.session.wallpaper?.selectionAvailable)

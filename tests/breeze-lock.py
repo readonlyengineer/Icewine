@@ -118,6 +118,8 @@ ShellRoot {
                         .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0)
                 }
                 function checkTheme() {
+                    keys.tryCompare(clock, "color", Theme.Palette.foreground, 1000,
+                        "bounded edit feedback settles before checking theme colours")
                     const scrim = find(view, item => item.objectName === "lockScrim").color
                     const foreground = Theme.Palette.foreground
                     const a = luminance([foreground.r, foreground.g, foreground.b])
@@ -138,10 +140,16 @@ ShellRoot {
                 keys.tryCompare(wallpaperOwner, "selectionAvailable", false)
                 keys.tryCompare(image, "status", Image.Ready)
                 keys.verify(String(image.source).includes("/wallpapers/default.jpg"), "missing selection uses existing resolver fallback")
+                keys.verify(image.asynchronous, "local wallpaper decoding leaves the GUI thread available")
                 root.phase = "selected wallpaper refresh"
                 wallpaperOwner.dataHome += "/selected"
                 wallpaperOwner.selectionAvailable = true
                 wallpaperOwner.revision = "selected-refresh"
+                keys.compare(image.status, Image.Loading, "uncached local image returns before decoding completes")
+                keys.compare(find(view, item => item.objectName === "lockBackdrop").color.a, 1,
+                    "pending image retains an opaque lock backdrop")
+                keys.verify(field.enabled && toggle.enabled, "input remains usable before wallpaper readiness")
+                keys.verify(session.locked, "presentation readiness cannot release the lock")
                 keys.tryCompare(image, "status", Image.Ready)
                 keys.verify(String(image.source).includes("selection.img?revision=selected-refresh"))
                 root.phase = "neutral focus, native edits and bounded feedback"

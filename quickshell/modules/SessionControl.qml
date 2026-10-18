@@ -45,13 +45,14 @@ Scope {
         else Qt.inputMethod.hide()
     }
 
-    function lockFromLogind() {
-        if (lockRequested || sessionLock.locked)
+    function beginLock() {
+        if (lockRequested)
             return
         lockRequested = true
         password = ""
         failed = false
-        // Record intent before acquisition so a later client can recover it.
+        // Persist before acquiring: a crash must leave a hint for the next client
+        // to restore its authentication UI over the compositor's abandoned lock.
         if (logindSessionPath !== "")
             writeLockHint()
         else
@@ -70,7 +71,8 @@ Scope {
 
     function restoreLock(output) {
         if (String(output).trim() === "(<true>,)") {
-            lockRequested = true
+            beginLock()
+            // This read already establishes persisted intent; do not wait for a rewrite.
             lockState.acquired = true
         }
         // A false or malformed hint never unlocks an acquired lock or bypasses PAM.
@@ -79,7 +81,7 @@ Scope {
     }
 
     function requestLock() {
-        lockFromLogind()
+        beginLock()
         Quickshell.execDetached(["loginctl", "lock-session", logindSessionId])
     }
 
@@ -151,7 +153,7 @@ Scope {
     function handleLogind(line) {
         var event = SessionModel.logindEvent(line, logindSessionPath)
         if (event === "lock" || event === "sleep") {
-            lockFromLogind()
+            beginLock()
         } else if (event === "resume") {
             wakeDisplay()
         }
@@ -190,6 +192,7 @@ Scope {
         PersistentProperties {
             id: lockState
             property bool requested: false
+            // Native target, not compositor acknowledgement (sessionLock.secure).
             property bool acquired: false
         }
 

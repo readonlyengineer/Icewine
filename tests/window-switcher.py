@@ -227,7 +227,7 @@ ShellRoot {
                 shown([1,3], 1)
                 const original = workspaces
                 for (let cycle = 0; cycle < 3; ++cycle) {
-                    mockSession.lockFromLogind()
+                    mockSession.beginLock()
                     verify(mockSession.locked && !topbar.barVisible)
                     compare(workspaces, original, "Lock hides rather than destroys workspace component")
                     if (cycle === 1) {
@@ -349,13 +349,17 @@ ShellRoot {
                 // unlock changes the getter without a notification (qs 0.3.2).
                 mockSession.fixtureNativeLock = {locked: true, secure: true}
                 verify(mockSession.locked, "A native lock still guards UI without recorded intent")
+                mockSession.beginLock()
+                verify(mockSession.lockRequested, "Existing native ownership still records new intent")
+                mockSession.fixturePam.completed(PamResult.Success)
+                verify(!mockSession.locked, "Shared entry restores release notification even for native-only state")
                 mockSession.fixtureNativeLock = {locked: false, secure: false}
                 for (let cycle = 0; cycle < 3; ++cycle) {
                     mockCompositor.restored = ""
                     topbar.openWidget("launcher", true, "DP-1")
                     topbar.pressBar()
                     verify(topbar.barVisible && topbar.widgetEngaged)
-                    mockSession.lockFromLogind()
+                    mockSession.beginLock()
                     verify(mockSession.locked && mockSession.lockRequested)
                     verify(!topbar.barVisible && !topbar.widgetEngaged)
                     compare(topbar.ui.page, "")
@@ -760,7 +764,9 @@ Scope {
         'readonly property bool locked: sessionLock.locked')
     native_session = native_session.replace('    property string password: ""',
         '    property var fixtureNativeLock: ({locked: false, secure: false})\n'
-        '    readonly property var fixturePam: pam\n    property string password: ""')
+        '    readonly property var fixturePam: pam\n'
+        '    readonly property var fixtureLockState: lockState\n'
+        '    readonly property var fixtureLockHint: lockHint\n    property string password: ""')
     native_session, count = re.subn(r'^        WlSessionLock \{[\s\S]*?^        \}', '''        Connections {
             target: lockState
             function onAcquiredChanged() {
@@ -772,6 +778,14 @@ Scope {
             }
         }''', native_session, flags=re.M)
     assert count == 1, 'Expected one native session-lock boundary'
+    # Hold helper completion deterministically for pending intent across real QML reloads.
+    native_session, count = re.subn(r'^    Process \{\n        id: lockHint\n', '''    QtObject {
+        id: lockHint
+        property var command: []
+        property bool running: false
+        signal exited(int exitCode, int exitStatus)
+''', native_session, flags=re.M)
+    assert count == 1, 'Expected one hint subprocess boundary'
     session_source.write_text(native_session.replace('sessionLock.', 'root.fixtureNativeLock.'))
     topbar_source = root / 'icewine/modules/Topbar.qml'
     native_topbar = topbar_source.read_text()
@@ -839,4 +853,60 @@ ShellRoot {
     result = subprocess.run(['qs', '-p', str(root), '--no-color'], env=env,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0 and 'MIXED_POLICY_PASSED' in result.stdout + result.stderr, result.stdout + result.stderr
-    print('Switcher sizing, scrolling, keys, widget policy, repeated lock/unlock UI guards and workspace lifecycle pass')
+    # Reload the actual SessionControl Scope/PersistentProperties tree while a
+    # helper is stalled, then again with an acquired target. No compositor lock.
+    (root / 'shell.qml').write_text('''import QtQuick
+import Quickshell
+import Quickshell.Services.Pam
+import "icewine/modules" as Modules
+ShellRoot {
+    PersistentProperties { id: progress; property int stage: 0 }
+    Modules.SessionControl { id: session; authenticationRequired: true }
+    function verify(value, message = "session reload invariant") {
+        if (!value) throw new Error(message)
+    }
+    Timer {
+        interval: 100; running: true
+        onTriggered: {
+            try {
+                if (progress.stage === 0) {
+                    session.logindSessionPath = "/org/freedesktop/login1/session/_32"
+                    session.beginLock()
+                    verify(session.lockRequested && session.locked)
+                    verify(!session.fixtureLockState.acquired && session.fixtureLockHint.running)
+                    progress.stage = 1
+                    Quickshell.reload(false)
+                } else if (progress.stage === 1) {
+                    verify(session.lockRequested && session.locked, "reload keeps pending intent/UI guard")
+                    verify(!session.fixtureLockState.acquired, "pending target is restored before native reload")
+                    session.logindSessionPath = "/org/freedesktop/login1/session/_32"
+                    session.restoreLock("(<false>,)")
+                    verify(session.fixtureLockHint.running, "reload restarts pending persistence")
+                    session.fixtureLockHint.running = false
+                    session.fixtureLockHint.exited(0, 0)
+                    verify(session.fixtureLockState.acquired && session.fixtureNativeLock.locked)
+                    progress.stage = 2
+                    Quickshell.reload(false)
+                } else {
+                    verify(session.lockRequested && session.fixtureLockState.acquired,
+                        "acquired reload restores both persistent responsibilities")
+                    verify(session.locked, "desktop privacy guard survives acquired reload")
+                    session.fixturePam.completed(PamResult.Success + 1)
+                    verify(session.locked, "failure after reload retains lock")
+                    session.fixturePam.completed(PamResult.Success)
+                    verify(!session.locked && !session.lockRequested && !session.fixtureLockState.acquired,
+                        "success after reload releases target and privacy guard")
+                    console.log("SESSION_RELOAD_PASSED")
+                    Qt.quit()
+                }
+            } catch (error) { console.error("Session reload check failed:", error, error.stack); Qt.exit(1) }
+        }
+    }
+}
+''')
+    result = subprocess.run(['qs', '-p', str(root), '--no-color'], env=env,
+                            capture_output=True, text=True, timeout=10)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0 and 'SESSION_RELOAD_PASSED' in output, output
+    assert not re.search(r'ReferenceError|TypeError|Binding loop|Unable to assign|not a type', output), output
+    print('Switcher sizing, scrolling, keys, widget policy, lock/unlock privacy, pending/acquired reload and workspace lifecycle pass')

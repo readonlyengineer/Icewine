@@ -44,7 +44,7 @@ const handler = source.match(/    function handleLogind\(line\) \{[\s\S]*?^    \
 const events = []
 const context = vm.createContext({
     SessionModel: Session, logindSessionPath: path,
-    lockFromLogind: () => events.push("lock"),
+    beginLock: () => events.push("lock"),
     wakeDisplay: () => events.push("wake"),
     releaseLock: () => events.push("unlock")
 })
@@ -56,45 +56,117 @@ context.handleLogind(signal("Manager.PrepareForSleep (true,)", "/org/freedesktop
 context.handleLogind(signal("Manager.PrepareForSleep (false,)", "/org/freedesktop/login1"))
 assert.deepEqual(events, ["lock", "lock", "wake"])
 
-// Execute persistence/acquisition handlers from the QML implementation.
-const handlers = ["writeLockHint", "restoreLock", "lockFromLogind", "finishLockHint", "releaseLock"]
+// Execute the production lifecycle, substituting only native/helper boundaries.
+const handlers = ["writeLockHint", "restoreLock", "beginLock", "finishLockHint", "releaseLock",
+    "requestLock", "handleLogind"]
     .map(name => source.match(new RegExp("    function " + name + "\\([^)]*\\) \\{[\\s\\S]*?^    \\}", "m"))[0]).join("\n")
-const recovery = vm.createContext({
-    lockState: { acquired: false }, lockRequested: false, keyboardController: null,
-    lockHint: { running: false, value: false }, logindSessionPath: path, logindSessionId: "2",
-    password: "secret", failed: true, console: { warn: () => {} },
-    wakeDisplay: () => {}, Quickshell: { execDetached: () => {} }
-})
-recovery.sessionLock = { get locked() { return recovery.lockState.acquired } }
-vm.runInContext(handlers, recovery)
-recovery.lockFromLogind()
-assert.equal(recovery.lockHint.running, true)
-assert.equal(recovery.lockHint.command.at(-1), "true")
-assert.equal(recovery.sessionLock.locked, false, "persist intent before acquisition")
-recovery.lockHint.running = false
-recovery.finishLockHint(0, 0)
-assert.equal(recovery.sessionLock.locked, true)
-assert.equal(recovery.password, "")
-recovery.restoreLock("(<false>,)")
-assert.equal(recovery.sessionLock.locked, true, "a false hint cannot release a lock")
-recovery.lockHint.running = false
-recovery.releaseLock(true)
-assert.equal(recovery.lockRequested, false)
-assert.equal(recovery.lockHint.command.at(-1), "false")
-// A fresh client reacquires a remembered lock, but never from malformed output.
-recovery.lockHint.running = false
+function client(sessionPath = path) {
+    const state = vm.createContext({
+        SessionModel: Session, lockState: { acquired: false }, lockRequested: false,
+        keyboardController: null, lockHint: { running: false, value: false },
+        logindSessionPath: sessionPath, logindSessionId: "2", password: "fixture response",
+        failed: true, notices: [], warnings: [], wakes: 0,
+        console: { warn: message => state.warnings.push(message) },
+        wakeDisplay: () => state.wakes++,
+        Quickshell: { execDetached: args => state.notices.push(args) }
+    })
+    // Ownership/target and compositor secure acknowledgement are different stages.
+    state.sessionLock = { get locked() { return state.lockState.acquired }, secure: false }
+    vm.runInContext(handlers, state)
+    return state
+}
+function completeHint(state, exitCode = 0, exitStatus = 0) {
+    assert.equal(state.lockHint.running, true)
+    state.lockHint.running = false
+    state.finishLockHint(exitCode, exitStatus)
+}
+for (const request of [state => state.requestLock(), state => state.beginLock(),
+        state => state.handleLogind(signal("Session.Lock ()")),
+        state => state.handleLogind(signal("Manager.PrepareForSleep (true,)", "/org/freedesktop/login1"))]) {
+    const state = client()
+    request(state)
+    assert.equal(state.lockRequested, true)
+    assert.equal(state.lockHint.running, true)
+    assert.equal(state.lockHint.command.at(-1), "true")
+    assert.equal(state.password, "")
+    assert.equal(state.failed, false)
+    assert.equal(state.sessionLock.locked, false, "retain crash-recovery ordering while the write stalls")
+    const command = state.lockHint.command
+    state.password = "in-progress response"
+    state.beginLock()
+    assert.equal(state.lockHint.command, command, "repeated requests do not restart the pending helper")
+    assert.equal(state.password, "in-progress response", "repeated intent does not erase input")
+    state.restoreLock("(<false>,)")
+    state.restoreLock("malformed")
+    assert.equal(state.lockState.acquired, false, "unconfirmed restoration cannot bypass persistence")
+    state.releaseLock(true)
+    assert.equal(state.lockRequested, true, "no native lock has yet been acquired to release")
+    completeHint(state)
+    assert.equal(state.lockState.acquired, true)
+    assert.equal(state.sessionLock.secure, false, "target does not invent compositor acknowledgement")
+    state.handleLogind(signal("Session.Unlock ()"))
+    state.restoreLock("(<false>,)")
+    state.restoreLock("malformed")
+    assert.equal(state.lockState.acquired, true, "external results never release a lock")
+    state.handleLogind(signal("Manager.PrepareForSleep (false,)", "/org/freedesktop/login1"))
+    assert.equal(state.wakes, 1)
+}
+// Existing native ownership does not prevent establishing the persistent intent
+// needed to invalidate privacy guards on release (native unlock has no notifier).
+const nativeOnly = client()
+nativeOnly.lockState.acquired = true
+nativeOnly.beginLock()
+assert.equal(nativeOnly.lockRequested, true)
+assert.equal(nativeOnly.lockState.acquired, true)
+nativeOnly.releaseLock(true)
+assert.equal(nativeOnly.lockRequested, false)
+assert.equal(nativeOnly.lockState.acquired, false)
+// Failed helper completion preserves the existing fail-closed attempt and warning.
+for (const [code, status] of [[1, 0], [0, 1]]) {
+    const state = client()
+    state.beginLock()
+    completeHint(state, code, status)
+    assert.equal(state.lockState.acquired, true)
+    assert.equal(state.warnings.length, 1, "failed persistence must disclose recovery limitation")
+}
+const unavailable = client("")
+unavailable.requestLock()
+assert.equal(unavailable.lockState.acquired, true, "unresolved logind retains immediate native attempt")
+assert.equal(unavailable.lockHint.running, false)
+assert.deepEqual(Array.from(unavailable.notices[0]), ["loginctl", "lock-session", "2"])
+// Crash recovery uses an existing true hint and clears stale response state via the shared entry.
+const recovery = client()
 recovery.restoreLock("(<true>,)")
 assert.equal(recovery.lockRequested, true)
-assert.equal(recovery.sessionLock.locked, true)
-recovery.restoreLock("unexpected")
-assert.equal(recovery.sessionLock.locked, true)
-// A new request while an unlock hint is pending is serialised before acquisition.
-recovery.lockState.acquired = false
-recovery.lockRequested = true
-recovery.lockHint.value = false
-recovery.lockHint.running = false
-recovery.finishLockHint(0, 0)
+assert.equal(recovery.lockState.acquired, true, "confirmed persisted intent needs no rewrite wait")
+assert.equal(recovery.password, "")
+assert.equal(recovery.failed, false)
+// Authentication can finish before the redundant recovery write finishes.
+recovery.releaseLock(true)
+assert.equal(recovery.lockRequested, false)
+assert.equal(recovery.lockState.acquired, false)
+completeHint(recovery)
+assert.equal(recovery.lockState.acquired, false, "late true write must not reacquire after authenticated release")
+assert.equal(recovery.lockHint.command.at(-1), "false")
+// New intent during the false write waits for its own true write, including failure.
+recovery.beginLock()
+assert.equal(recovery.lockRequested, true)
+assert.equal(recovery.lockState.acquired, false)
+completeHint(recovery)
 assert.equal(recovery.lockHint.command.at(-1), "true")
+assert.equal(recovery.lockState.acquired, false, "old unlock completion cannot acquire a newer request")
+completeHint(recovery, 1)
+assert.equal(recovery.lockState.acquired, true)
+for (const output of ["", "(<false>,)", "(<true>,) extra", "true", "unexpected"]) {
+    const fresh = client()
+    fresh.restoreLock(output)
+    assert.equal(fresh.lockRequested, false, "malformed or false recovery cannot invent a request")
+    assert.equal(fresh.lockState.acquired, false)
+}
+// A delayed true recovery read can conservatively relock; it never authorises release.
+recovery.releaseLock(true)
+recovery.restoreLock("(<true>,)")
+assert.equal(recovery.lockState.acquired, true)
 assert.match(source, /Scope\s*\{\s*reloadableId: "sessionLockLifecycle"\s*PersistentProperties[\s\S]*?WlSessionLock\s*\{\s*id: sessionLock\s*locked: lockState.acquired/,
     "native reload restores the persistent acquisition target before transferring the lock manager")
 const refresh = source.match(/        function refreshIcons\(\): void \{[\s\S]*?^        \}/m)[0].replace(": void", "")
