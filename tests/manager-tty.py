@@ -283,6 +283,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             run(tab + b"\x1b", state(readonly=True, desktop=True, steam="native", gamescope=True, handheld=True),
                 policy=True, auth=True, size=size, capture="readonly-auth")
             run(tab*2+b" s\x1b", state(), size=size, capture="widgets-save")
+            run(tab*2+down*7+b"\r\x1b", state(), size=size, capture="arrangement")
             if size[1] != 80: continue
             run(down*3+b"\x1b[C"+down*5+b"\x1b", state(desktop=True), size=size, capture="installer-actions")
             (root / "hyprmon").rename(root / "hyprmon-hidden")
@@ -342,6 +343,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         return [json.loads(line) for line in tool_log.read_text().splitlines()]
     tab = b"\t"
     down = b"\x1b[B"
+    arrangement = tab*2 + down*7 + b"\r"
     # Without the size guard, Tab/Right would immediately change Appearance.
     assert run(tab+b"\x1b[C\x1b", state(), size=(20, 70)) == [["state"]]
     assert not any(len(call) > 2 or call[0] != "icewine" for call in tools()), "hidden control acted"
@@ -377,22 +379,23 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             full_panel(frame, size)
             assert b"[ Cancel ]" in frame and b"Esc: cancel" in frame
             if title == b"Icewine Widgets" and size[0] == 48:
-                assert b"Notification toasts" in frame and b"performance" in frame
+                assert b"Notification toasts" in frame and b"Card arrangement" in frame
+                assert b"performance" not in frame
         # Focus reaches the last module and Save/Cancel at every aspect ratio.
-        run(tab*2+down*19+b" "+down+b"\r"+down+b"\r", state(), size=size)
+        run(arrangement+down*12+b" "+down*2+b"\r"+down+b"\r", state(), size=size)
         assert "performance" not in next(field for call in last_widget_calls
             if call[0] == "widgets-apply" for field in call if field.startswith("cardStacks="))
         assert any(b"performance" in frame for frame in last_frames)
     # Keep a pending Installer draft and last-module focus through growth,
     # shrink below minimum, and recovery. Hidden input must not change pages
     # or toggle the module; the next Space disables it exactly once.
-    assert applied(run(b" "+tab*2+down*19, state(), size=(24, 80), resize_steps=[
+    assert applied(run(b" "+arrangement+down*12, state(), size=(24, 80), resize_steps=[
         ((48, 160), b""), ((20, 70), b" "+tab),
-        ((24, 80), b" s"+tab+down*(visible+1)+b"\r"),
+        ((24, 80), b" sb"+tab+down*(visible+1)+b"\r"),
     ]))["desktop"] == "true"
     assert b"Icewine needs an 80 x 24 terminal." in last_output
     for size in ((48, 160), (24, 80)):
-        frame = next(frame for frame in reversed(last_frames) if b"Icewine Widgets" in frame
+        frame = next(frame for frame in reversed(last_frames) if b"Icewine Widgets > Card arrangement" in frame
                      and len(frame.decode().splitlines()) == size[0])
         full_panel(frame, size)
         assert b"performance" in frame, "focused module lost after resize"
@@ -446,41 +449,77 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
         return next(field.removeprefix("cardStacks=") for field in call if field.startswith("cardStacks="))
     right, left, delete = b"\x1b[C", b"\x1b[D", b"\x1b[3~"
+    for size in ((24, 80), (24, 160), (48, 80), (48, 160)):
+        run(arrangement+b"b\r\x1b", state(), size=size,
+            widgets={"cardStacks": "a/launcher,background;b/audio"})
+        nested = [frame for frame in last_frames if b"Widgets > Card arrangement" in frame]
+        assert nested, "entry/back/re-entry did not open the subpage"
+        for frame in nested:
+            full_panel(frame, size)
+            assert b"b/Tab: Back" in frame and b"[ Save ]" in frame and b"Esc: cancel" in frame
+        assert any(all(label in frame for label in (b"1. a", b"  1. launcher",
+            b"  2. background", b"2. b", b"  1. audio", b"Disabled / unassigned")) for frame in nested)
+        assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+    # Back retains both the arrangement and ordinary widget draft. Save on the
+    # parent commits both without applying a pending Installer selection.
+    calls = run(b" "+tab*2+b" "+down*7+b"\r "+b"b"+tab*3+b"s\x1b", state())
+    assert saved_stacks().startswith("launcher/background,layout;")
+    save = next(call for call in last_widget_calls if call[0] == "widgets-apply")
+    assert "notificationToasts=false" in save
+    assert calls == [["state"]]
+    # Cancel via its button discards the nested draft; Shift-Tab wraps to it.
+    run(arrangement+b"n"+b"\x1b[Z\r", state(), widgets={"cardStacks": ""})
+    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+    # The visible Back button and Backspace also retain the same draft.
+    for back in (b"\x1b[Z"*3+b"\r", b"\x7f"):
+        run(arrangement+b"n"+back+b"s\x1b", state(), widgets={"cardStacks": ""})
+        assert saved_stacks() == "stack-1/launcher"
+        assert b"Icewine Widgets (3/3)" in last_frames[-1]
+    # Save failures stay visible on the subpage as well as the parent.
+    run(arrangement+b"s\x1b", state(), widget_fail=True)
+    assert any(b"preferences changed" in frame and b"b/Tab: Back" in frame for frame in last_frames)
+    # The read-only parent still allows inspecting the nested hierarchy.
+    for readonly_options in ({"widget_linked": True}, {"widget_supported": False},
+                    {"widget_policy": "notificationToasts,windowSwitcher,cardStacks,barBehaviour,barLocation,barStyle,barWidth,oskAccess"}):
+        run(tab*2+b"\r n+-[]\x1b[C\x1b[3~s\x1b", state(), **readonly_options)
+        assert b"Widgets > Card arrangement" in last_output
+        assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
     for size in ((24, 80), (36, 120)):
         # Reorder a member, move it to another stack, make it that stack's
         # icon, and move that stack before the original one.
-        run(tab*2+down*7+b"+"+right+b"-[s\x1b", state(), size=size,
+        run(arrangement+b"+"+right+b"-[s\x1b", state(), size=size,
             widgets={"cardStacks": "a/launcher,background,layout,media;b/audio"})
         assert saved_stacks() == "b/launcher,audio;a/background,layout,media"
-        assert any(b"1. b / 1 icon (primary)" in frame for frame in last_frames)
+        assert any(b"1. b" in frame and b"  1. launcher" in frame
+                   and b"topbar icon / primary" in frame for frame in last_frames)
         # New stack, join an existing stack, and move a new singleton stack.
-        run(tab*2+down*7+b" "+down+right+down+b"n[s\x1b", state(), size=size,
+        run(arrangement+b" "+down+right+down+b"n[s\x1b", state(), size=size,
             widgets={"cardStacks": ""})
         assert saved_stacks() == "stack-2/layout;stack-1/launcher,background"
         # Removing the configured first member makes the next member the icon;
         # disable the final member without retaining an empty stack.
-        run(tab*2+down*7+b" "+down+b" s\x1b", state(), size=size,
+        run(arrangement+b" \x1b[A s\x1b", state(), size=size,
             widgets={"cardStacks": "a/launcher,background"})
         assert saved_stacks() == ""
         # Remove a whole stack, then explicitly re-enable a module.
-        run(tab*2+down*7+delete+b" s\x1b", state(), size=size,
+        run(arrangement+delete+b" s\x1b", state(), size=size,
             widgets={"cardStacks": "a/launcher,background;b/audio"})
         assert saved_stacks() == "b/audio;stack-1/launcher"
         # Focus scrolls to the last module; its configured fourth accent repeats.
-        run(tab*2+down*19+b"s\x1b", state(), size=size,
+        run(arrangement+down*3+b"s\x1b", state(), size=size,
             widgets={"cardStacks": "mixed/launcher,audio,clipboard,performance"})
         assert saved_stacks() == "mixed/launcher,audio,clipboard,performance"
-        assert any(b"performance" in frame and b"4 (primary)" in frame for frame in last_frames)
+        assert any(b"  4. performance" in frame and b"primary" in frame for frame in last_frames)
     # Moving a singleton into its previous stack must remove the old stack
     # without losing or misindexing the destination. Save button remains usable.
-    run(tab*2+down*7+left+down*13+b"\r\x1b", state(), size=(24, 80),
+    run(arrangement+left+down*13+b"\r\x1b", state(), size=(24, 80),
         widgets={"cardStacks": "a/launcher;b/audio"})
     assert saved_stacks() == "b/audio,launcher"
     # Tab keeps the draft; Cancel never writes it.
-    run(tab*2+down*7+delete+tab*3+b"\x1b", state())
+    run(arrangement+delete+tab*4+b"\x1b", state())
     assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
     # Policy locks stack operations but leaves ordinary boolean settings editable.
-    run(tab*2+down*7+b"n+-[]"+right+delete+b" s\x1b", state(),
+    run(arrangement+b"n+-[]"+right+delete+b" s\x1b", state(),
         widgets={"cardStacks": "host/launcher"}, widget_policy="cardStacks")
     assert saved_stacks() == "host/launcher"
     run(tab*2+b"ns\x1b", state(), widget_policy="notificationToasts,windowSwitcher,cardStacks,barBehaviour,barLocation,barStyle,barWidth,oskAccess")

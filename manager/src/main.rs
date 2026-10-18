@@ -12,7 +12,7 @@ const ROWS: &[(&str, &str, &str)] = &[
 ];
 
 #[derive(Clone, Copy, PartialEq)]
-enum Control { Theme, Transparency, Layout, Wallpaper, Monitors, Utility(&'static str), Widget(usize), Bar(usize), BarWidth, Card(usize), Steam, Overwrite, Apply, Cancel }
+enum Control { Theme, Transparency, Layout, Wallpaper, Monitors, Utility(&'static str), Widget(usize), Bar(usize), BarWidth, Arrangement, Back, Card(usize), Steam, Overwrite, Apply, Cancel }
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
 
@@ -196,6 +196,11 @@ impl Widgets {
         self.stacks.push(CardStack { id, modules: vec![module] });
     }
 
+    fn card_order(&self) -> Vec<usize> {
+        self.stacks.iter().flat_map(|stack| stack.modules.iter().copied())
+            .chain((0..CARD_MODULES.len()).filter(|index| self.location(*index).is_none())).collect()
+    }
+
     fn edit(&mut self, module: usize, key: KeyCode) {
         if !self.supported || self.policy[2] { return; }
         match key {
@@ -287,7 +292,8 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     };
     let mut message = String::new();
     let mut page = 0;
-    let mut focuses = [0, 0, 0];
+    let mut focuses = [0, 0, 0, 0];
+    let mut card_focus = None;
     let mut terminal = ratatui::init();
     let result = (|| {
         let mut focus = 0;
@@ -307,12 +313,20 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     .map(|(index, _)| Control::Widget(index))
                     .chain((0..BAR_SETTINGS.len()).filter(|index| widgets.supported && !widgets.policy[index + 3]).map(Control::Bar))
                     .chain((widgets.supported && !widgets.policy[7]).then_some(Control::BarWidth))
-                    .chain((0..CARD_MODULES.len()).map(Control::Card))
+                    .chain([Control::Arrangement])
                     .chain((widgets.supported && widgets.policy.iter().any(|locked| !locked)).then_some(Control::Apply)).chain([Control::Cancel]).collect()
+            } else if page == 3 {
+                widgets.card_order().into_iter().map(Control::Card)
+                    .chain([Control::Back])
+                    .chain((widgets.supported && widgets.policy.iter().any(|locked| !locked)).then_some(Control::Apply))
+                    .chain([Control::Cancel]).collect()
             } else { rows.iter().filter(|(id, _, _)| !readonly
                 && (*id != "handheld" || handheld_available(*steam, selected)))
                 .map(|(id, _, _)| if *id == "steam" { Control::Steam } else { Control::Utility(*id) })
                 .chain([Control::Overwrite, Control::Apply, Control::Cancel]).collect() };
+            if let Some(card) = card_focus.take() {
+                focus = controls.iter().position(|control| *control == Control::Card(card)).unwrap_or(focus);
+            }
             focus = focus.min(controls.len() - 1);
             terminal.draw(|frame| {
                 let accent = Style::default().fg(Color::Cyan).bold();
@@ -323,7 +337,8 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     .border_style(muted).title(Line::from(match page {
                         0 => " Icewine Installer (1/3) | Tab: Appearance ",
                         1 => " Icewine Appearance (2/3) | Tab: Widgets ",
-                        _ => " Icewine Widgets (3/3) | Tab: Installer ",
+                        2 => " Icewine Widgets (3/3) | Tab: Installer ",
+                        _ => " Icewine Widgets > Card arrangement | b/Tab: Back ",
                     }).style(accent))
                     .padding(Padding::horizontal(1));
                 if frame.area().width < 80 || frame.area().height < 24 {
@@ -354,14 +369,17 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                             else if !controls.contains(&control) { muted } else { Style::default() })),
                         [Constraint::Length(23), Constraint::Min(20)]).column_spacing(2), utilities);
                     frame.render_widget(Paragraph::new(message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
-                } else if page == 2 {
+                } else if page >= 2 {
                     frame.render_widget(Paragraph::new(vec![
-                        Line::from("First member: topbar icon; accents: primary/secondary/tertiary, repeat.").style(accent),
+                        Line::from(if page == 3 { "First member: topbar icon; accents: primary/secondary/tertiary, repeat." }
+                            else { "Widget and bar preferences; open Card arrangement to edit stacks." }).style(accent),
                         Line::from("Save commits widgets only; Cancel/Esc discards drafts.").style(muted),
-                        Line::from("Space: enable/disable  Left/right: move to stack  n: new stack").style(muted),
+                        Line::from(if page == 3 { "Space: enable/disable  Left/right: move to stack  n: new stack" }
+                            else { "Space/Enter: change setting or open Card arrangement" }).style(muted),
                         Line::from(if widgets.linked.iter().any(|linked| *linked) { "Symlinked preferences are read-only." }
-                            else if widgets.supported { "+/-: member order  [/]: stack order  Delete: remove stack" }
-                            else { "Unavailable: restore shipped settings/entry via Installer." }).style(muted),
+                            else if !widgets.supported { "Unavailable: restore shipped settings/entry via Installer." }
+                            else if page == 3 { "+/-: member order  [/]: stack order  Delete: remove stack" }
+                            else { "Card arrangement and this page share the same unsaved draft." }).style(muted),
                     ]), intro);
                     let owner = |index| if widgets.linked[index] { " symlink/read-only" }
                         else if widgets.policy[index] { " Nix policy" } else { "" };
@@ -375,21 +393,31 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     entries.push((Control::BarWidth, "Bar Width".to_owned(), if widgets.supported {
                         format!("< {}% >{}", widgets.width, owner(7))
                     } else { "Unavailable".to_owned() }));
-                    entries.extend(CARD_MODULES.iter().enumerate().map(|(index, name)| {
-                        let value = if !widgets.supported { "Unavailable".to_owned() }
-                            else if let Some((stack, position)) = widgets.location(index) {
-                                format!("{}. {} / {}{} ({})", stack + 1, widgets.stacks[stack].id, position + 1,
-                                    if position == 0 { " icon" } else { "" }, ["primary", "secondary", "tertiary"][position % 3])
-                            } else { "Disabled".to_owned() };
-                        (Control::Card(index), (*name).to_owned(), value + owner(2))
-                    }));
+                    entries.push((Control::Arrangement, "Card arrangement".to_owned(), "[ Open > ]".to_owned()));
+                    if page == 3 {
+                        entries.clear();
+                        for (stack_index, stack) in widgets.stacks.iter().enumerate() {
+                            // Group headings are display-only; keyboard focus follows member order.
+                            entries.push((Control::Arrangement, format!("{}. {}", stack_index + 1, stack.id), owner(2).to_owned()));
+                            for (position, index) in stack.modules.iter().enumerate() {
+                                entries.push((Control::Card(*index), format!("  {}. {}", position + 1, CARD_MODULES[*index]),
+                                    format!("{}{}", if position == 0 { "topbar icon / " } else { "" },
+                                        ["primary", "secondary", "tertiary"][position % 3])));
+                            }
+                        }
+                        entries.push((Control::Arrangement, "Disabled / unassigned".to_owned(), owner(2).to_owned()));
+                        entries.extend((0..CARD_MODULES.len()).filter(|index| widgets.location(*index).is_none())
+                            .map(|index| (Control::Card(index), format!("  {}", CARD_MODULES[index]),
+                                if widgets.supported { "Disabled".to_owned() } else { "Unavailable".to_owned() })));
+                        entries.push((Control::Back, "[ < Back to Widgets ]".to_owned(), "Draft retained".to_owned()));
+                    }
                     let selected = entries.iter().position(|(control, _, _)| *control == controls[focus]);
                     let mut table_state = TableState::default().with_selected(selected);
                     // Keep the focused row visible in the existing 80 x 24 minimum.
                     *table_state.offset_mut() = selected.unwrap_or(0).saturating_sub(utilities.height.saturating_sub(1) as usize);
                     frame.render_stateful_widget(Table::new(entries.into_iter().map(|(control, label, value)|
                         Row::new([Cell::from(label), Cell::from(value)]).style(if controls[focus] == control { focused }
-                            else if !widgets.supported || match control { Control::Widget(index) => widgets.policy[index], Control::Bar(index) => widgets.policy[index + 3], Control::BarWidth => widgets.policy[7], _ => widgets.policy[2] } { muted }
+                            else if match control { Control::Arrangement | Control::Back => false, Control::Widget(index) => !widgets.supported || widgets.policy[index], Control::Bar(index) => !widgets.supported || widgets.policy[index + 3], Control::BarWidth => !widgets.supported || widgets.policy[7], _ => !widgets.supported || widgets.policy[2] } { muted }
                             else { Style::default() })), [Constraint::Length(25), Constraint::Min(20)]).column_spacing(1), utilities, &mut table_state);
                     frame.render_widget(Paragraph::new(widget_message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
                 } else {
@@ -424,12 +452,13 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     .style(if controls[focus] == Control::Overwrite { focused } else { Style::default() }), reset);
                 }
                 frame.render_widget(Paragraph::new(Line::from(vec![
-                    Span::styled(if page == 2 { "[ Save ]" } else { "[ Apply ]" }, if controls[focus] == Control::Apply { focused } else if page == 2 && (!widgets.supported || widgets.policy.iter().all(|locked| *locked)) { muted } else { accent }),
+                    Span::styled(if page >= 2 { "[ Save ]" } else { "[ Apply ]" }, if controls[focus] == Control::Apply { focused } else if page >= 2 && (!widgets.supported || widgets.policy.iter().all(|locked| *locked)) { muted } else { accent }),
                     Span::raw("   "),
                     Span::styled("[ Cancel ]", if controls[focus] == Control::Cancel { focused } else { muted }),
                 ])), buttons);
                 frame.render_widget(Paragraph::new(vec![
-                    Line::from("Tab: page   Up/down: move   Shift-Tab: previous control"),
+                    Line::from(if page == 3 { "b/Tab: Back   Up/down: move   Shift-Tab: previous control" }
+                        else { "Tab: page   Up/down: move   Shift-Tab: previous control" }),
                     Line::from(if page == 0 { "Left/right: Steam   Space/Enter: act   Esc: cancel" }
                         else if page == 1 { "Left/right: cycle   Space/Enter: act   Esc: cancel" }
                         else { "Space/Enter: act   s: Save   Esc: cancel" }),
@@ -441,12 +470,12 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 KeyCode::Esc | KeyCode::Char('q') => return Ok(None),
                 KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(None),
                 _ if terminal.size()?.width < 80 || terminal.size()?.height < 24 => (),
-                KeyCode::Char('s') if page == 2 && widgets.supported && widgets.policy.iter().any(|locked| !locked) => {
+                KeyCode::Char('s') if page >= 2 && widgets.supported && widgets.policy.iter().any(|locked| !locked) => {
                     widget_message = match widgets.save() { Ok(text) => text, Err(error) => error.to_string() };
                 }
                 KeyCode::Left | KeyCode::Right | KeyCode::Char('n' | '+' | '-' | '[' | ']') | KeyCode::Delete
                     if matches!(controls[focus], Control::Card(_)) => {
-                    if let Control::Card(index) = controls[focus] { widgets.edit(index, key.code); }
+                    if let Control::Card(index) = controls[focus] { widgets.edit(index, key.code); card_focus = Some(index); }
                 }
                 KeyCode::Left | KeyCode::Right if controls[focus] == Control::BarWidth => {
                     widgets.width = if key.code == KeyCode::Right { (widgets.width + 1).min(100) }
@@ -458,7 +487,10 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         widgets.bar[index] = (widgets.bar[index] + if key.code == KeyCode::Right { 1 } else { count - 1 }) % count;
                     }
                 }
-                KeyCode::Tab => { focuses[page] = focus; page = (page + 1) % 3; focus = focuses[page]; }
+                KeyCode::Char('b') | KeyCode::Backspace if page == 3 => {
+                    focuses[page] = focus; page = 2; focus = focuses[page];
+                }
+                KeyCode::Tab => { focuses[page] = focus; page = if page == 3 { 2 } else { (page + 1) % 3 }; focus = focuses[page]; }
                 KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Theme | Control::Transparency | Control::Layout) => {
                     let (values, current, command) = if controls[focus] == Control::Theme {
                         (appearance.themes.iter().map(String::as_str).collect::<Vec<_>>(), appearance.theme, "theme")
@@ -500,7 +532,9 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     Control::Widget(index) => widgets.enabled[index] ^= true,
                     Control::BarWidth => widgets.width = (widgets.width + 1).min(100),
                     Control::Bar(index) => widgets.bar[index] = (widgets.bar[index] + 1) % BAR_SETTINGS[index].2.len(),
-                    Control::Card(index) => widgets.edit(index, key.code),
+                    Control::Card(index) => { widgets.edit(index, key.code); card_focus = Some(index); }
+                    Control::Arrangement => { focuses[page] = focus; page = 3; focus = focuses[page]; }
+                    Control::Back => { focuses[page] = focus; page = 2; focus = focuses[page]; }
                     Control::Utility(id) => {
                         *selected.get_mut(id).unwrap() ^= true;
                         if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
@@ -541,7 +575,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         };
                     }
                     Control::Overwrite => overwrite = !overwrite,
-                    Control::Apply if page == 2 => {
+                    Control::Apply if page >= 2 => {
                         widget_message = match widgets.save() { Ok(text) => text, Err(error) => error.to_string() };
                     }
                     Control::Apply => return Ok(Some(overwrite)),
