@@ -979,16 +979,53 @@ ShellRoot {
         root.findAccessible(ssh, "Import SSH key").click()
         const path = root.findAccessible(ssh, "SSH key path")
         const phrase = root.findAccessible(ssh, "SSH key passphrase")
+        const pasteMode = root.findAccessible(ssh, "Import SSH key from pasted text")
+        const privateInput = root.findAccessible(ssh, "Pasted SSH private key")
+        pasteMode.checked = true
+        privateInput.text = "synthetic private key\nsecond line"
+        pasteMode.checked = false
+        if (privateInput.text) throw new Error("Switching SSH input retained private text")
         path.text = "/synthetic/private-key"
         phrase.text = "fixture secret"
         if (phrase.echoMode !== TextInput.Password) throw new Error("SSH passphrase is visible")
         page.selectCard(0)
         settleCards(page)
-        if (path.text || phrase.text || ssh.form || ssh.active)
+        if (path.text || privateInput.text || phrase.text || ssh.form || ssh.active)
             throw new Error("Leaving SSH retained private form state")
         page.selectCard(2)
         settleCards(page)
         networkKeys.tryCompare(ssh, "busy", false)
+        root.findAccessible(ssh, "Import SSH key").click()
+        pasteMode.checked = true
+        privateInput.text = "synthetic private key\nsecond line"
+        phrase.text = "fixture secret"
+        root.findAccessible(ssh, "Cancel SSH key action").click()
+        if (privateInput.text || phrase.text || ssh.form) throw new Error("Cancel retained pasted SSH input")
+        root.findAccessible(ssh, "Import SSH key").click()
+        pasteMode.checked = true
+        privateInput.text = "synthetic private key\nsecond line"
+        phrase.text = "fixture secret"
+        networkWindow.height = 350
+        networkKeys.wait(30)
+        privateInput.forceActiveFocus()
+        networkKeys.keyClick(Qt.Key_Tab)
+        if (!phrase.activeFocus || page.selectedCard !== 2) throw new Error("Paste Tab did not reach passphrase")
+        const phraseTop = phrase.mapToItem(ssh, 0, 0).y
+        if (phraseTop < 0 || phraseTop + phrase.height > ssh.height + 1)
+            throw new Error("SSH keyboard focus was clipped on a small viewport")
+        networkKeys.keyClick(Qt.Key_Return)
+        if (privateInput.text || phrase.text || ssh.form) throw new Error("Submit retained pasted SSH input")
+        networkKeys.tryCompare(ssh, "busy", false)
+        networkKeys.tryCompare(ssh, "message", "Pasted import received")
+        if (ssh.pending || ssh.publicKey.includes("private")) throw new Error("Private input escaped to public state")
+        const publicButton = root.findAccessible(ssh, "Show public SSH key SHA256:fixture")
+        let identity = publicButton.parent.parent.parent
+        if (identity.color.toString() !== Theme.Palette.surface.toString() || identity.radius !== 9
+                || identity.width > ssh.width || identity.height <= publicButton.height)
+            throw new Error("SSH identity is not a constrained individual card")
+        publicButton.forceActiveFocus()
+        networkKeys.keyClick(Qt.Key_Return)
+        if (ssh.publicKey !== "ssh-ed25519 fixture-public") throw new Error("Keyboard public-key display failed")
         root.findAccessible(ssh, "Generate SSH key").click()
         phrase.text = "fixture secret"
         root.findAccessible(ssh, "Confirm SSH passphrase").text = "fixture secret"
@@ -1004,10 +1041,12 @@ ShellRoot {
         networkKeys.tryCompare(ssh, "available", true)
         if (ssh.entries.length !== 1) throw new Error("Reopened SSH did not refresh public inventory")
         root.findAccessible(ssh, "Import SSH key").click()
+        pasteMode.checked = true
+        privateInput.text = "synthetic private key\nsecond line"
         phrase.text = "fixture secret"
         networkPages.currentPage = "audio"
         networkKeys.wait(30)
-        if (phrase.text || ssh.form || ssh.active) throw new Error("Page change retained SSH secret fields")
+        if (privateInput.text || phrase.text || ssh.form || ssh.active) throw new Error("Page change retained SSH secret fields")
         networkPages.currentPage = "network"
         networkKeys.tryCompare(networkPages, "enabled", true)
         networkKeys.wait(220)
@@ -2838,9 +2877,14 @@ for line in sys.stdin:
     ssh_command.write_text("#!" + sys.executable + "\n" + '''import json, sys, time
 request = json.load(sys.stdin)
 if request["action"] == "generate": time.sleep(2)
+message = ""
+if request["action"] == "import" and "private" in request:
+    assert request["private"] == "synthetic private key\\nsecond line", "Pasted transport mismatch"
+    assert request["passphrase"] == "fixture secret" and not request.get("path"), "Pasted request mismatch"
+    message = "Pasted import received"
 print(json.dumps(dict(available=True, error="", entries=[dict(public="ssh-ed25519 fixture-public",
     paths=[], loaded=True, temporary=True, origin="Generated temporarily", type="ssh-ed25519",
-    fingerprint="SHA256:fixture")], message="")))
+    fingerprint="SHA256:fixture")], message=message)))
 ''')
     ssh_command.chmod(0o755)
     mock = root / "bin/icewine-monitor-brightness"

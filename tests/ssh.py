@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the real SSH helper using only disposable agents and synthetic keys."""
+import contextlib
 import importlib.machinery
 import importlib.util
 import io
@@ -49,6 +50,48 @@ with tempfile.TemporaryDirectory(prefix="icewine-ssh-launcher-") as tools, tempf
                SSH_AUTH_SOCK=str(runtime / "ssh-agent"), ICEWINE_SSH_ASKPASS=str(askpass))
     env.pop("ICEWINE_SSH_PHRASE_FD", None)
     with mock.patch.dict(os.environ, env, clear=True):
+        if "--input-only" in sys.argv:
+            # Exercise the actual import branch without an agent/socket. The add
+            # boundary still asks real OpenSSH to parse/decrypt the passed memfd.
+            backend = ssh.Backend(home, runtime, 0)
+            private = keys / "synthetic"
+            phrase = "synthetic input phrase"
+            popen = ssh.subprocess.Popen
+            observed = []
+
+            def observe_input(args, **kwargs):
+                assert phrase not in repr((args, kwargs.get("env", {})))
+                assert "PRIVATE KEY" not in repr((args, kwargs.get("env", {})))
+                return popen(args, **kwargs)
+
+            def parse(fd, phrase, origin, path):
+                assert stat.S_IMODE(os.fstat(fd).st_mode) == 0o600
+                assert os.readlink(f"/proc/self/fd/{fd}").startswith("/memfd:")
+                observed.append(path)
+                public = ssh.public_fields(ssh.native(["ssh-keygen", "-y", "-f", f"/proc/self/fd/{fd}"],
+                                                     phrase=phrase, descriptors=(fd,)))
+                return "Parsed synthetic input", public
+
+            with mock.patch.object(backend, "ownership", contextlib.nullcontext), mock.patch.object(backend, "status", return_value={}), mock.patch.object(backend, "add", parse), mock.patch.object(ssh.subprocess, "Popen", observe_input):
+                for password in ("", phrase):
+                    ssh.native(["ssh-keygen", "-q", "-t", "ed25519", "-f", str(private)], phrase=password, repeats=2)
+                    text = private.read_text()
+                    for request in (dict(private=text), dict(path=str(private))):
+                        result = backend.mutate(dict(action="import", passphrase=password, **request))
+                        assert result["public"].startswith("ssh-ed25519 ")
+                        assert "PRIVATE KEY" not in json.dumps(result) and phrase not in json.dumps(result)
+                    if password:
+                        rejected(lambda: backend.mutate(dict(action="import", private=text, passphrase="wrong")), "Wrong pasted passphrase accepted")
+                    private.unlink()
+                    Path(str(private) + ".pub").unlink()
+                for request in (dict(private=""), dict(private="x" * (ssh.LIMIT + 1)),
+                                dict(private="not a private key"), dict(private=text, path="/ambiguous")):
+                    rejected(lambda: backend.mutate(dict(action="import", **request)), "Invalid pasted input accepted")
+            assert "" in observed and str(private) in observed
+            assert not list(keys.iterdir()), "Pasted input wrote key files"
+            print("PASS input-only: real file/paste import, encrypted/plain native parsing, memfd/argv/env/output confidentiality, invalid input")
+            sys.exit(0)
+
         # The host assertions select foreground mode. A real native forked
         # listener must still fail the exact peer/MainPID check, not be accepted
         # merely because its socket is local and owned by this user.
@@ -101,6 +144,7 @@ with tempfile.TemporaryDirectory(prefix="icewine-ssh-launcher-") as tools, tempf
                     return original_status()
 
                 for request in (dict(action="import", path=str(imported), passphrase=phrase),
+                                dict(action="import", private=original.decode(), passphrase=phrase),
                                 dict(action="generate", storage="temporary", unprotected=True)):
                     with mock.patch.object(backend, "add", completed_add), mock.patch.object(backend, "status", cancel_response):
                         rejected(lambda: backend.dispatch(request), "Post-add response cancellation reported success")
@@ -201,6 +245,29 @@ with tempfile.TemporaryDirectory(prefix="icewine-ssh-launcher-") as tools, tempf
             statefile.write_text(provenance)
             statefile.chmod(0o600)
             print("PASS native encrypted memfd import, actual argv/env boundary, public-only provenance, inventory")
+
+            # Pasted input follows the real encrypted memfd/agent transaction too.
+            backend.dispatch(dict(action="remove", public=public))
+            files_before = {p.relative_to(home) for p in home.rglob("*")}
+            with mock.patch.object(ssh.subprocess, "Popen", observe):
+                pasted = backend.dispatch(dict(action="import", private=original.decode(), passphrase=phrase))
+            assert pasted["public"] == public and public in backend.loaded()
+            assert original.decode() not in json.dumps(pasted) and phrase not in json.dumps(pasted)
+            metadata = (runtime / "icewine-ssh/public.json").read_text()
+            assert "PRIVATE KEY" not in metadata and phrase not in metadata
+            assert {p.relative_to(home) for p in home.rglob("*")} == files_before
+            assert backend.records[public]["path"] == ""
+            before_invalid = set(backend.loaded())
+            for request in (dict(private=original.decode(), passphrase="wrong"),
+                            dict(private="not a private key"), dict(private=""),
+                            dict(private="x" * (ssh.LIMIT + 1)),
+                            dict(private=original.decode(), path=str(imported))):
+                rejected(lambda: backend.dispatch(dict(action="import", **request)), "Invalid pasted input accepted")
+                assert set(backend.loaded()) == before_invalid
+            backend.dispatch(dict(action="remove", public=public))
+            # The encrypted fixture is reloaded for the existing ownership checks.
+            backend.dispatch(dict(action="import", private=original.decode(), passphrase=phrase))
+            print("PASS pasted encrypted import, no disk writes or secret output, invalid/ambiguous/oversize rejection")
 
             # A new helper instance represents reopening/reloading the shell.
             reloaded = ssh.Backend(home, runtime, agent.pid)
