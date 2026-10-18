@@ -37,6 +37,36 @@ let
     services.icewine.login.enable = true;
   }]; }).config;
   loginOff = desktop;
+  greeterSystem = desktopSystem.extendModules { modules = [{
+    boot.isContainer = true;
+    services.icewine = { desktop.enable = true; login.greeter.enable = true; };
+  }]; };
+  greeter = greeterSystem.config;
+  hostGreeterSystem = greeterSystem.extendModules { modules = [{
+    services.greetd.settings = {
+      default_session = { user = "host-greeter"; command = "host-greeter --session host-session"; };
+      initial_session = { user = "other"; command = "host-autologin"; };
+    };
+  }]; };
+  hostGreeter = hostGreeterSystem.config;
+  greeterOff = (hostGreeterSystem.extendModules { modules = [{
+    services.icewine.login.greeter.enable = lib.mkForce false;
+    services.greetd.enable = true;
+  }]; }).config;
+  greeterUnstyled = (greeterSystem.extendModules { modules = [{ services.icewine.login.enable = false; }]; }).config;
+  greeterOnlyOff = (greeterSystem.extendModules { modules = [{ services.icewine.login.greeter.enable = lib.mkForce false; }]; }).config;
+  greeterWithoutDesktop = (desktopSystem.extendModules { modules = [{ services.icewine.login.greeter.enable = true; }]; }).config;
+  greeterConflict = (greeterSystem.extendModules { modules = [{
+    services.displayManager.sddm = { enable = true; wayland.enable = true; };
+  }]; }).config;
+  greeterAliasConflict = (greeterSystem.extendModules { modules = [{
+    systemd.services.host-login = { aliases = [ "display-manager.service" ]; serviceConfig.ExecStart = "/host-login"; };
+  }]; }).config;
+  icewineOff = (greeterSystem.extendModules { modules = [{ services.icewine.enable = lib.mkForce false; }]; }).config;
+  valid = config: lib.all (entry: entry.assertion) config.assertions;
+  rejects = message: config: lib.any (entry: entry.message == message && !entry.assertion) config.assertions;
+  contains = needle: lib.hasInfix (builtins.unsafeDiscardStringContext needle);
+  greeterCommand = greeter.services.greetd.settings.default_session.command;
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
   icewineCli = builtins.head (lib.filter
     (package: lib.getName package == "icewine") optIn.users.users.demo.packages);
@@ -46,6 +76,36 @@ let
     (package: lib.getName package == "mimeapps.list") optIn.users.users.demo.packages);
   hasPackage = name: packages: lib.any (package: lib.getName package == name) packages;
 in {
+  login =
+    assert greeter.services.greetd.enable && greeter.services.greetd.useTextGreeter;
+    assert greeter.services.greetd.settings.default_session.user == "greeter";
+    assert contains "${pkgs.tuigreet}/bin/tuigreet" greeterCommand;
+    assert contains "${pkgs.uwsm}/bin/uwsm start hyprland-uwsm.desktop" greeterCommand;
+    assert contains "${greeter.services.displayManager.sessionData.desktops}/share/wayland-sessions" greeterCommand;
+    assert lib.hasInfix "--remember-session" greeterCommand && lib.hasInfix "--theme" greeterCommand;
+    assert lib.elem "hyprland-uwsm" greeter.services.displayManager.sessionData.sessionNames;
+    assert !(greeter.services.greetd.settings ? initial_session) && greeter.services.greetd.restart;
+    assert !greeter.services.displayManager.autoLogin.enable && greeter.services.displayManager.defaultSession == null;
+    assert greeter.systemd.services.greetd.serviceConfig.StandardInput == "tty";
+    assert hostGreeter.services.greetd.settings.default_session == { user = "host-greeter"; command = "host-greeter --session host-session"; };
+    assert hostGreeter.services.greetd.settings.initial_session == { user = "other"; command = "host-autologin"; };
+    assert !hostGreeter.services.greetd.restart;
+    assert greeterOff.services.greetd.enable && greeterOff.services.icewine.login.args == [ ];
+    assert greeterOff.services.greetd.settings == hostGreeter.services.greetd.settings;
+    assert greeterUnstyled.services.greetd.enable;
+    assert !(lib.hasInfix "--theme" greeterUnstyled.services.greetd.settings.default_session.command);
+    assert !loginOff.services.greetd.enable && !greeterOnlyOff.services.greetd.enable && !icewineOff.services.greetd.enable;
+    assert lib.all valid [ greeter hostGreeter greeterOff greeterUnstyled ];
+    assert rejects "Icewine greeter requires services.icewine.desktop.enable for its Hyprland UWSM session." greeterWithoutDesktop;
+    assert lib.all (rejects "Icewine greeter conflicts with another display manager; disable it explicitly before opting in.")
+      [ greeterConflict greeterAliasConflict ];
+    pkgs.runCommand "icewine-login-checks" { nativeBuildInputs = [ pkgs.greetd pkgs.tuigreet ]; } ''
+      greetd --help > /dev/null
+      tuigreet --help > /dev/null
+      test -d ${greeter.services.displayManager.sessionData.desktops}/share/wayland-sessions
+      grep -F 'ExecStart=' ${greeter.systemd.units."greetd.service".unit}/greetd.service
+      touch "$out"
+    '';
   ssh = pkgs.runCommand "icewine-ssh-checks" {
     nativeBuildInputs = [ pkgs.python3 pkgs.openssh pkgs.util-linux ];
   } ''

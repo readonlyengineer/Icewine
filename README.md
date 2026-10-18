@@ -46,17 +46,7 @@ In your `flake.nix`:
       modules = [
         ./configuration.nix
         icewine.nixosModules.default
-        ({ config, lib, pkgs, ... }: {
-          # Native host login policy, independent of Icewine styling.
-          services.greetd = {
-            enable = true;
-            useTextGreeter = true;
-            settings.default_session.command = lib.escapeShellArgs (
-              [ "${pkgs.tuigreet}/bin/tuigreet"
-                "--cmd" "${pkgs.uwsm}/bin/uwsm start hyprland-uwsm.desktop"
-                "--sessions" "${config.services.displayManager.sessionData.desktops}/share/wayland-sessions"
-              ] ++ config.services.icewine.login.args);
-          };
+        {
           services.icewine = {
             enable = true;
             user = "YOUR_USERNAME";
@@ -64,10 +54,10 @@ In your `flake.nix`:
             terminal.enable = true;
             filemanager.enable = true;
             steam = "flatpak";
-            login.enable = true;
+            login.greeter.enable = true;
             shellExtras.enable = true;
           };
-        })
+        }
       ];
     };
   };
@@ -397,7 +387,7 @@ Manual and application fullscreen choices take precedence.
 ## Applications
 
 The manager/module offers Kitty, Yazi, Steam with optional Gamescope/Handheld,
-NixOS tuigreet styling and Starship/Fastfetch alongside the optional desktop session.
+an optional NixOS greeter and Starship/Fastfetch alongside the optional desktop session.
 Browser profiles and themes belong to you; Icewine uses the host browser.
 
 ### Steam and Flatpak
@@ -425,10 +415,25 @@ Install replacement applications and their configuration in your host. Neovim
 plugins and language servers are host-owned; Icewine generates the optional
 `icewine/current/nvim-theme.lua` appearance adapter and signals themed instances.
 
-Login styling exposes native `services.icewine.login.args` for a host-owned
-greetd/tuigreet command. It uses the declared theme, or Catppuccin Mocha when no
-theme is fixed; user theme changes do not publish to the greeter. Linux console
-colours are terminal-limited and may differ from the desktop.
+On NixOS, `services.icewine.login.greeter.enable = true` opts into native
+greetd/tuigreet with the Icewine Hyprland UWSM session and session selection.
+It requires `desktop.enable`; another display manager must be disabled explicitly.
+Host `services.greetd` settings override these defaults. Users, PAM policy and
+autologin remain host-owned; greetd autologin uses `settings.initial_session`.
+Disabling the opt-in removes only Icewine's service defaults. A host's explicit
+`services.greetd.enable = true` and command remain; if Icewine supplied the only
+login service, configure a replacement or use console login before rebuilding.
+The Arch/CachyOS installer does not install or configure a greeter; retain your
+host's login manager there.
+
+The greeter opt-in also defaults `login.enable` on for declarative styling.
+Styling alone still exposes `services.icewine.login.args` for a host-owned
+tuigreet command. It uses the declared theme or Catppuccin Mocha; user theme
+changes do not publish to the greeter. Linux console colours are terminal-limited.
+`--width 60` sizes the login box in terminal columns, not the display mode.
+Console resolution and output scaling belong to the host; Hyprland monitor
+settings do not configure the login VT. Native screen coverage needs validation
+on the affected output before choosing a console/display-mode change.
 
 These options belong under `services.icewine`:
 
@@ -440,7 +445,8 @@ These options belong under `services.icewine`:
 | `steam = "none";` | Steam integration and dependent Gamescope/Handheld |
 | `gamescope.enable = false;` | Gamescope launch integration; ordinary Steam remains available |
 | `monitors.enable = false;` | Optional HyprMon; locked default needs a Lua-compatible `monitors.package` override |
-| `login.enable = false;` | Declarative tuigreet colours and width; login policy belongs to the host |
+| `login.greeter.enable = false;` | Optional NixOS greetd service defaults; explicit host login configuration remains |
+| `login.enable = false;` | Declarative tuigreet colours and width; keeps the host or opt-in login service |
 | `shellExtras.enable = false;` | Starship/Fastfetch defaults and btop styling |
 | `shellExtras.git.enable = false;` | Git information in the prompt |
 | `gtk.enable = false;` | GTK styling |

@@ -613,14 +613,20 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         apply(("login",), readonly=True)
         assert not any(call.args[0][0] == "icewine-wallpaper" for call in host.call_args_list)
         assert (data / "wallpapers/default.jpg").exists()
-    with patch.object(manage, "run") as host:
-        try:
-            apply(("login",), readonly=False)
-        except ValueError as error:
-            assert "belongs to the host" in str(error)
-        else:
-            raise AssertionError("Arch Apply accepted retired login integration")
-        assert not host.called
+    for distro in ("arch", "cachyos"):
+        with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": distro}), \
+                patch.object(manage.subprocess, "run", side_effect=AssertionError("unsupported login ran a host operation")):
+            # A stale saved greeter selection must not offer native installation.
+            (state / "manage.json").write_text(json.dumps(false | {"login": True}))
+            assert manage.selections(state) == (False, false)
+            before = {path: path.read_bytes() for path in state.iterdir() if path.is_file()}
+            try:
+                manage.apply(false | {"login": True}, False, False, false, config, data, state)
+            except ValueError as error:
+                assert "belongs to the host" in str(error)
+            else:
+                raise AssertionError(f"{distro} Apply accepted unsupported login integration")
+            assert {path: path.read_bytes() for path in state.iterdir() if path.is_file()} == before
 
 # HOME participates in deployment independently of XDG roots.
 with tempfile.TemporaryDirectory() as temporary:
