@@ -2,6 +2,7 @@
 """Check controls, live metric sampling and performance layout updates.
 Run with python3 tests/controls.py . (requires qs on PATH).
 """
+import base64
 import os
 from pathlib import Path
 from qml_fixture import theme_fixture
@@ -1691,15 +1692,58 @@ ShellRoot {
         if (!page || !root.findVisible(page, item => item.text === "No clipboard history"))
             throw new Error("Clipboard empty state missing")
         clipboardFixture.entries = Array.from({length: 12}, (_, i) => ({id: "epoch:" + i,
-            preview: i === 0 ? "<b>literal</b> & fixture" : "Entry " + i}))
+            preview: i === 0 ? "<b>literal</b> & fixture" : "Entry " + i,
+            image: i >= 1 && i <= 4,
+            thumbnail: i === 1 ? Qt.resolvedUrl("clipboard-image.png").toString()
+                : i === 2 ? Qt.resolvedUrl("clipboard-broken.png").toString()
+                : i === 3 ? Qt.resolvedUrl("clipboard-removed.png").toString() : ""}))
         clipboardFixture.activeEntry = "epoch:0"
         toggleKeys.wait(30)
         const rows = descendants(page, item => item.modelData?.id !== undefined)
         if (rows.length !== 12 || rows.filter(item => item.border.width === 2).length !== 1)
             throw new Error("Clipboard active-selection border missing")
         const load = root.findAccessible(page, "Load clipboard entry: <b>literal</b> & fixture")
-        if (!load || load.contentItem.textFormat !== Text.PlainText)
+        if (!load || !root.findVisible(load.contentItem,
+                item => item.text === "<b>literal</b> & fixture" && item.textFormat === Text.PlainText))
             throw new Error("Clipboard preview accepted markup")
+        const image = descendants(rows[1], item => item instanceof Image
+            && String(item.source) === Qt.resolvedUrl("clipboard-image.png").toString())[0]
+        if (!image) throw new Error("Clipboard PNG source did not reach its entry thumbnail")
+        toggleKeys.tryCompare(image, "status", Image.Ready)
+        toggleKeys.wait(30) // Allow native image geometry to settle after asynchronous decode.
+        if (!image.visible || image.cache || !image.asynchronous
+                || image.sourceSize.width > 64 || image.sourceSize.height > 48
+                || image.paintedWidth > 64 || image.paintedHeight > 48
+                || image.paintedHeight <= 0 || Math.abs(image.paintedWidth - 2 * image.paintedHeight) > 0.1) {
+            const ancestry = []
+            for (let item = image; item && ancestry.length < 16; item = item.parent)
+                ancestry.push({object: String(item), visible: item.visible, enabled: item.enabled})
+            throw new Error("Clipboard PNG lost bounded aspect-preserving rendering: " + JSON.stringify({
+                visible: image.visible, cache: image.cache, asynchronous: image.asynchronous,
+                status: image.status, imageFlag: rows[1].modelData.image, rowId: rows[1].modelData.id,
+                selectedCard: stack.selectedCard, frontCard: stack.frontCard, pageVisible: page.visible,
+                sourceWidth: image.sourceSize.width, sourceHeight: image.sourceSize.height,
+                paintedWidth: image.paintedWidth, paintedHeight: image.paintedHeight, ancestry: ancestry}))
+        }
+        for (const index of [2, 3, 4]) {
+            const failed = descendants(rows[index], item => item instanceof Image)[0]
+            toggleKeys.tryCompare(failed, "status", index === 4 ? Image.Null : Image.Error)
+            if (failed.visible || !root.findVisible(rows[index],
+                    item => item.text === "PNG image · preview unavailable"))
+                throw new Error("Invalid, removed or unavailable PNG lost its fallback")
+        }
+        const imageLoad = root.findAccessible(rows[1], "Load clipboard entry: PNG image")
+        imageLoad.forceActiveFocus()
+        toggleKeys.keyPress(Qt.Key_Return)
+        if (clipboardFixture.calls.length) throw new Error("PNG load ran before release")
+        toggleKeys.keyRelease(Qt.Key_Return)
+        root.findAccessible(rows[1], "Paste clipboard entry: PNG image").click()
+        root.findAccessible(rows[1], "Remove clipboard entry: PNG image").click()
+        if (JSON.stringify(clipboardFixture.calls) !== JSON.stringify([["load", "epoch:1"], ["remove", "epoch:1"]])
+                || JSON.stringify(clipboardWindow.pastes) !== JSON.stringify(["epoch:1"]))
+            throw new Error("PNG entry controls lost stable identity")
+        clipboardFixture.calls = []
+        clipboardWindow.pastes = []
         load.forceActiveFocus()
         toggleKeys.keyPress(Qt.Key_Return)
         if (clipboardFixture.calls.length) throw new Error("Clipboard load ran before release")
@@ -1726,6 +1770,10 @@ ShellRoot {
         toggleKeys.wait(20)
         if (!root.findVisible(page, item => item.text === clipboardFixture.error))
             throw new Error("Clipboard operation failure is hidden")
+        clipboardFixture.entries = []
+        toggleKeys.wait(20)
+        if (descendants(page, item => item instanceof Image).length)
+            throw new Error("Cleared clipboard retained image delegates")
         clipboardPages.openCapturePage()
         toggleKeys.tryCompare(stack, "selectedCard", 0)
         clipboardWindow.visible = false
@@ -1736,8 +1784,11 @@ ShellRoot {
         if (clipboardAdapter.confirmations.join(",") !== String(request)
                 || clipboardAdapter.activeEntry !== "fixture:1")
             throw new Error("Clipboard adapter lost request confirmation/current selection")
+        clipboardAdapter.receive(JSON.stringify({entries: [{id: "fixture:image", image: true,
+            thumbnail: Qt.resolvedUrl("clipboard-image.png").toString()}], active: "fixture:image"}))
         clipboardAdapter.locked = true
-        clipboardAdapter.receive(JSON.stringify({entries: [{id: "stale", preview: "fixture"}], active: "stale"}))
+        clipboardAdapter.receive(JSON.stringify({entries: [{id: "stale", image: true,
+            thumbnail: Qt.resolvedUrl("clipboard-image.png").toString()}], active: "stale"}))
         if (clipboardAdapter.entries.length || clipboardAdapter.activeEntry || clipboardAdapter.available)
             throw new Error("Locked clipboard accepted late state")
     }
@@ -2770,6 +2821,10 @@ with tempfile.TemporaryDirectory() as directory:
     shutil.copytree(source / "quickshell/config", root / "config")
     (root / "bin").mkdir()
     clipboard_command = root / "bin/icewine-clipboard"
+    # A real 2:1 PNG plus decode failures exercise the native Qt image path.
+    (root / "clipboard-image.png").write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAD0lEQVR4nGP4z8DA8J8BAAf/Af8Bf4mnAAAAAElFTkSuQmCC"))
+    (root / "clipboard-broken.png").write_bytes(b"invalid PNG fixture")
     clipboard_command.write_text("#!" + sys.executable + "\n" + '''import json, sys
 state = dict(entries=[dict(id="fixture:1", preview="<b>fixture</b>")], active="", selection=None, error="", request=0, loaded=False)
 print(json.dumps(state), flush=True)

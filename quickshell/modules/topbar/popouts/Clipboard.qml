@@ -84,35 +84,51 @@ Item {
                         anchors { fill: parent; margins: 4 }
                         spacing: 4
                         ActionButton {
+                            id: load
                             width: Math.max(0, row.width - 8 - 2 * 38 - 2 * parent.spacing)
                             height: parent.height
                             enabled: root.history.available && !root.history.busy && !root.pasteBusy
                             text: row.modelData.preview
-                            Accessible.name: "Load clipboard entry: " + row.modelData.preview
+                            Accessible.name: "Load clipboard entry: " + (row.modelData.image ? "PNG image" : row.modelData.preview)
                             Accessible.description: root.history.activeEntry === row.modelData.id ? "Current clipboard" : ""
-                            contentItem: Text {
-                                text: parent.text
-                                textFormat: Text.PlainText
-                                color: Theme.Palette.foreground
-                                font: parent.font
-                                wrapMode: Text.WrapAnywhere
-                                maximumLineCount: 2
-                                elide: Text.ElideRight
-                                verticalAlignment: Text.AlignVCenter
+                            contentItem: Item {
+                                Image {
+                                    id: thumbnail
+                                    anchors.centerIn: parent
+                                    width: Math.min(64, parent.width); height: parent.height
+                                    source: row.modelData.image ? row.modelData.thumbnail ?? "" : ""
+                                    sourceSize { width: 64; height: 48 }
+                                    fillMode: Image.PreserveAspectFit
+                                    asynchronous: true
+                                    cache: false
+                                    visible: row.modelData.image && thumbnail.status === Image.Ready
+                                }
+                                Text {
+                                    anchors.fill: parent
+                                    visible: !thumbnail.visible
+                                    text: row.modelData.image ? "PNG image · preview unavailable" : load.text
+                                    textFormat: Text.PlainText
+                                    color: Theme.Palette.foreground
+                                    font: load.font
+                                    wrapMode: Text.WrapAnywhere
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignVCenter
+                                }
                             }
                             onClicked: root.history.request("load", row.modelData.id)
                         }
                         ActionButton {
                             width: 38; height: parent.height
                             text: "↑"
-                            Accessible.name: "Paste clipboard entry: " + row.modelData.preview
+                            Accessible.name: "Paste clipboard entry: " + (row.modelData.image ? "PNG image" : row.modelData.preview)
                             enabled: root.history.available && !root.history.busy && !root.pasteBusy
                             onClicked: root.pasteRequested(row.modelData.id)
                         }
                         ActionButton {
                             width: 38; height: parent.height
                             text: "×"
-                            Accessible.name: "Remove clipboard entry: " + row.modelData.preview
+                            Accessible.name: "Remove clipboard entry: " + (row.modelData.image ? "PNG image" : row.modelData.preview)
                             enabled: root.history.available && !root.history.busy && !root.pasteBusy
                             onClicked: root.history.request("remove", row.modelData.id)
                         }

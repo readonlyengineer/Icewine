@@ -8,15 +8,30 @@ import os
 from pathlib import Path
 import selectors
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+from urllib.parse import unquote, urlparse
 from unittest.mock import patch
+import zlib
 
 sys.dont_write_bytecode = True
 source = Path(__file__).resolve().parent.parent
 clipboard = importlib.machinery.SourceFileLoader("clipboard", str(source / "scripts/clipboard")).load_module()
+
+def png(width=2, height=1):
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"\x00\xff\x00\x00\x00\xff\x00")) + chunk(b"IEND", b""))
+
+
+def thumbnail_path(row):
+    url = urlparse(row["thumbnail"])
+    assert url.scheme == "file" and not url.netloc
+    return Path(unquote(url.path))
 
 # Only external command contracts are substituted; state/identity/load logic is real.
 TOOLS = r'''
@@ -146,6 +161,7 @@ with tempfile.TemporaryDirectory() as directory:
             select(original)
             history.observe()
             first = history.rows[0]["id"]
+            assert history.rows[0]["thumbnail"] == "", "Text acquired an image source"
             assert history.snapshot()["active"] == first
             select(b"second")
             history.observe()
@@ -196,11 +212,28 @@ with tempfile.TemporaryDirectory() as directory:
             select(b"x" * (clipboard.LIMIT + 1))
             fails(history.observe)
             assert history.current is None and not history.rows
-            image = b"\x89PNG\r\n\x1a\nfixture bytes"
+            for invalid in (b"\x89PNG\r\n\x1a\nfixture bytes", png(0, 1), png(16385, 1),
+                            png(4001, 4000), png() + b"x" * clipboard.LIMIT):
+                assert history.thumbnail("invalid", invalid) == ""
+            assert not list(history_dir.glob("*.png")), "Rejected image left a preview file"
+            select(b"\x89PNG\r\n\x1a\nmalformed", "image/png")
+            history.observe()
+            assert history.rows[0]["image"] and not history.rows[0]["thumbnail"]
+            image = png()
             select(image, "image/png")
             history.observe()
             assert history.rows[0]["image"]
             image_id = history.rows[0]["id"]
+            image_path = thumbnail_path(history.rows[0])
+            assert image_path.parent == history_dir and image_path.read_bytes() == image
+            assert image_path.stat().st_mode & 0o777 == 0o600, "Preview file is not private"
+            for action in ("delete", "wipe"):
+                (root / "fail").write_text(action)
+                fails(lambda: history.change(dict(action="remove" if action == "delete" else "clear", id=image_id)))
+                assert image_path.read_bytes() == image, "Failed deletion discarded a live preview"
+                (root / "fail").unlink()
+            history.observe()
+            assert thumbnail_path(history.rows[0]) == image_path, "Unchanged offer recreated its preview"
             select(b"different")
             assert history.change(dict(action="load", id=image_id))
             assert json.loads((root / "selection").read_text())["types"] == ["image/png"]
@@ -247,10 +280,20 @@ with tempfile.TemporaryDirectory() as directory:
             history.observe(state="nil")
             assert history.snapshot()["active"] == ""
             history.change(dict(action="clear"))
+            assert not image_path.exists() and not history.thumbnails
+            select(image, "image/png")
+            history.observe()
+            image_path = thumbnail_path(history.rows[0])
+            history.change(dict(action="remove", id=history.rows[0]["id"]))
+            assert not image_path.exists() and not history.thumbnails
+            select(image + b"eviction fixture", "image/png")
+            history.observe()
+            image_path = thumbnail_path(history.rows[0])
             for i in range(51):
                 select(str(i).encode())
                 history.observe()
             assert len(history.rows) == 50 and history.rows[0]["preview"] == "50"
+            assert not image_path.exists() and not history.thumbnails, "Eviction retained image bytes"
         finally:
             clipboard.stop(history.owner)
         # Reap only fixture orphans locally; never scan or signal provider/app PIDs.
@@ -366,9 +409,14 @@ with (root / "transfer-fifo").open("wb", buffering=0) as output:
             process.stdin.write(b'{"action":"clear","request":1}\n')
             state = message(lambda state: state["request"] == 1)
             assert not state["entries"] and not state["active"] and not state["error"]
+            select(png(), "image/png")
+            state = message(lambda state: state["entries"] and state["entries"][0]["image"])
+            session_image = thumbnail_path(state["entries"][0])
+            assert session_image.read_bytes() == png()
         finally:
             process.terminate()
             process.wait(timeout=4)
         assert not list(runtime.glob("icewine-clipboard-*")), "Runtime history survived orderly stop"
+        assert not session_image.exists(), "Image bytes survived backend stop/lock"
         assert process.stderr.read() == b"", "Normal operation leaked into logs"
     print("PASS clipboard: real adapter ordering/dedupe, identities, external/active state, literal bytes, PNG, bounds, deletion failures, sensitive hints, guarded finite input, owned waiter/reader cleanup on timeout/cancel/completion and runtime cleanup")

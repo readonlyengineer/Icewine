@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import selectors
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -116,10 +117,36 @@ class History:
                         "-max-dedupe-search", "50", "-preview-width", "160"]
         self.rows = []
         self.metadata = {}
+        self.thumbnails = {}
         self.current = None
         self.observed = None
         self.owner = None
         self.error = ""
+
+    def thumbnail(self, key, data):
+        # Bound Qt's decoder input and advertised allocation before exposing a URL.
+        # Invalid PNG bodies still fall back through Image.Error in the shell.
+        if (len(data) > LIMIT or len(data) < 33
+                or data[:16] != b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"):
+            return ""
+        width, height = struct.unpack(">II", data[16:24])
+        if not (0 < width <= 16384 and 0 < height <= 16384 and width * height <= 16_000_000):
+            return ""
+        path = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=self.directory, suffix=".png", delete=False) as image:
+                path = Path(image.name)
+                image.write(data)
+            self.thumbnails[key] = path
+            return path.as_uri()
+        except OSError:
+            if path is not None:
+                path.unlink(missing_ok=True)
+            return ""
+
+    def prune_thumbnails(self):
+        for key in self.thumbnails.keys() - self.metadata.keys():
+            self.thumbnails.pop(key).unlink(missing_ok=True)
 
     def snapshot(self, request=0, loaded=False):
         active = next((row["id"] for row in self.rows
@@ -154,9 +181,14 @@ class History:
                     raise ValueError("Clipboard history identity unavailable")
                 # Preview is plain data: suppress control/bidi formatting, bound after decoding.
                 preview = "".join(c for c in preview if c.isprintable())[:160]
-                rows.append(dict(id=key, preview=preview, image=self.metadata[key][1] == "image/png"))
+                image = self.metadata[key][1] == "image/png"
+                thumbnail = self.thumbnails[key].as_uri() if key in self.thumbnails else ""
+                if image and index == 0 and not thumbnail:
+                    thumbnail = self.thumbnail(key, data)
+                rows.append(dict(id=key, preview=preview, image=image, thumbnail=thumbnail))
             self.rows = rows
             self.metadata = {row["id"]: self.metadata[row["id"]] for row in rows}
+            self.prune_thumbnails()
         # Ponytail: identical events cannot recreate an X/Cleared item until the
         # content changes. Native offer serials would distinguish recopy from a
         # delayed own-copy event; wl-paste's callback does not expose them.
@@ -170,6 +202,7 @@ class History:
             run(self.command + ["wipe"])
             self.rows = []
             self.metadata = {}
+            self.prune_thumbnails()
         elif action in ("remove", "load"):
             if ident not in self.metadata:
                 raise ValueError("Clipboard entry is no longer available")
@@ -178,6 +211,7 @@ class History:
                 run(self.command + ["delete"], raw_id)
                 self.rows = [row for row in self.rows if row["id"] != ident]
                 del self.metadata[ident]
+                self.prune_thumbnails()
             else:
                 identity, mime = self.metadata[ident]
                 data = run(self.command + ["decode"], raw_id)
