@@ -456,7 +456,7 @@ Scope {
             readonly property bool widgetHere: root.ui.page !== "" && root.ui.screen === screen.name
             readonly property bool modal: root.radialVisible || root.widgetEngaged
             readonly property string keyboardScreen: root.widgetEngaged ? root.ui.screen : root.radial?.monitorName ?? ""
-            readonly property string hoverPage: statusIcons.hoveredPage
+            readonly property string hoverPage: logo.visible && logo.hovered ? "launcher" : statusIcons.hoveredPage
             readonly property bool widgetHovered: statusPopout.hovered
             readonly property int reservation: root.barVisible && Config.Settings.barLocation !== "above" ? root.barExtent : 0
             readonly property bool pointerInside: barHover.hovered || edgeHover.hovered || (widgetHere && widgetHovered)
@@ -642,13 +642,24 @@ Scope {
                         anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
                         width: Math.min(contentWidth, surface.controlWidth)
                         height: 29
-                        contentWidth: workspaces.implicitWidth
+                        contentWidth: workspaceRow.implicitWidth
                         contentHeight: height
                         clip: true
                         boundsBehavior: Flickable.StopAtBounds
                         flickableDirection: Flickable.HorizontalFlick
                         ScrollBar.horizontal: ScrollBar {}
-                        Bar.Workspaces { id: workspaces; compositor: root.compositor; screen: panel.screen }
+                        Row {
+                            id: workspaceRow
+                            spacing: 4
+                            Bar.Logo {
+                                id: logo
+                                visible: Config.Settings.cardStacks.some(stack => stack.modules[0] === "launcher")
+                                backgroundCount: statusPopout.backgroundCount
+                                backgroundAttention: statusPopout.backgroundAttention
+                                onActivated: root.openWidget("launcher", true, panel.screen.name)
+                            }
+                            Bar.Workspaces { id: workspaces; compositor: root.compositor; screen: panel.screen }
+                        }
                     }
                     Bar.Clock { id: barClock; anchors.centerIn: parent; now: clock.date }
                     Flickable {
@@ -664,6 +675,7 @@ Scope {
                         ScrollBar.horizontal: ScrollBar {}
                         Bar.StatusIcons {
                             id: statusIcons
+                            cardStacks: Config.Settings.cardStacks.filter(stack => stack.modules[0] !== "launcher")
                             notificationService: root.notificationService
                             player: root.player
                             layoutsEnabled: root.layoutsEnabled
@@ -718,7 +730,8 @@ Scope {
                         when: statusPopout.shown
                         restoreMode: Binding.RestoreNone
                     }
-                    x: Math.max(8, Math.min(surface.x + surface.width - width,
+                    x: Math.max(8, Math.min(statusPopout.configuration?.modules[0] === "launcher"
+                        ? surface.x : surface.x + surface.width - width,
                         panel.width - width - 8))
                     y: root.bottomBar ? Math.max(0, panel.height - root.barExtent - 4 - height) : root.barExtent + 4
                     width: Math.max(0, Math.min(implicitWidth, panel.width - 16))
