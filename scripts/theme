@@ -542,6 +542,8 @@ def signal_reload(name, config, runtime):
         return False
     skipped = exited = 0
     failed = False
+    # Nixpkgs wraps Kitty's executable while retaining kitty as argv[0].
+    process_names = (b"kitty", b".kitty-wrapped") if name == "kitty" else (name.encode(),)
     try:
         processes = list(PROC.iterdir())
     except OSError as error:
@@ -551,7 +553,7 @@ def signal_reload(name, config, runtime):
         if not process.name.isdecimal():
             continue
         try:
-            if ((process / "comm").read_bytes().strip() != name.encode() or
+            if ((process / "comm").read_bytes().strip() not in process_names or
                     process.stat().st_uid != os.getuid()):
                 continue
         except (OSError, ValueError):
@@ -582,11 +584,14 @@ def signal_reload(name, config, runtime):
                     continue
                 env = dict(item.split(b"=", 1) for item in (process / "environ").read_bytes().split(b"\0")
                            if b"=" in item and item.split(b"=", 1)[0] in
-                           (b"HOME", b"XDG_CONFIG_HOME", b"XDG_RUNTIME_DIR", b"NVIM_APPNAME"))
+                           (b"HOME", b"XDG_CONFIG_HOME", b"XDG_RUNTIME_DIR", b"NVIM_APPNAME", b"KITTY_CONFIG_DIRECTORY"))
                 home = os.fsdecode(env.get(b"HOME", b""))
                 target_config = os.fsdecode(env.get(b"XDG_CONFIG_HOME", b"")) or (home + "/.config" if home else "")
+                kitty_config = os.fsdecode(env.get(b"KITTY_CONFIG_DIRECTORY", b""))
                 if (os.fsdecode(env.get(b"XDG_RUNTIME_DIR", b"")) != runtime or
                         not target_config or Path(target_config).resolve() != config.resolve() or
+                        (name == "kitty" and kitty_config and
+                         (not Path(kitty_config).is_absolute() or Path(kitty_config).resolve() != (config / "kitty").resolve())) or
                         (name == "nvim" and env.get(b"NVIM_APPNAME", b"nvim") != b"nvim")):
                     skipped += 1
                     continue

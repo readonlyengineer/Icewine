@@ -454,27 +454,43 @@ with tempfile.TemporaryDirectory() as temporary:
     # Synthetic proc entries exercise scoped pidfd dispatch and exit handling.
     proc = root / "proc"
     proc.mkdir()
-    def process(pid, name, arguments, *, config_home=str(config), runtime_dir=str(runtime)):
+    def process(pid, name, arguments, *, config_home=str(config), runtime_dir=str(runtime), kitty_config=""):
         entry = proc / str(pid)
         entry.mkdir()
         (entry / "comm").write_text(name + "\n")
         (entry / "cmdline").write_bytes(b"\0".join(arg.encode() for arg in arguments) + b"\0")
         (entry / "environ").write_bytes(
-            f"HOME={root}\0XDG_CONFIG_HOME={config_home}\0XDG_RUNTIME_DIR={runtime_dir}\0".encode())
+            f"HOME={root}\0XDG_CONFIG_HOME={config_home}\0XDG_RUNTIME_DIR={runtime_dir}\0KITTY_CONFIG_DIRECTORY={kitty_config}\0".encode())
     process(123, "kitty", ["kitty"])
     process(124, "kitty", ["kitty"], runtime_dir="/other-session")
     process(125, "kitty", ["kitty", "--config", "/other/kitty.conf"])
     process(126, "nvim", ["nvim", "notes.md"])
     process(127, "nvim", ["nvim", "-uNONE"])
+    # Nixpkgs wraps Kitty's ELF executable but preserves the public argv[0].
+    process(128, ".kitty-wrapped", ["/nix/store/example-kitty/bin/kitty"])
+    process(129, ".kitty-wrapped", ["kitty"], runtime_dir="/other-session")
+    process(130, ".kitty-wrapped", ["kitty", "--config=/other/kitty.conf"])
+    process(131, ".kitty-wrapped", ["other-program"])
+    process(132, ".kitty-wrapped", ["kitty"], kitty_config=str(root / "custom-kitty"))
+    process(133, ".kitty-wrapped", ["kitty"], kitty_config=str(config / "kitty"))
+    process(134, "kitty", ["kitty"], kitty_config=str(root / "custom-kitty"))
+    process(135, ".kitty-wrapped", ["kitty"], config_home=str(root / "other-config"))
+    process(136, ".kitty-wrapped", ["kitty", "-obackground=red"])
+    process(137, ".kitty-wrapped", ["kitty"], kitty_config="relative-kitty")
     delivered = []
+    fd_pids = {}
+    def open_pid(pid):
+        fd = os.open(os.devnull, os.O_RDONLY)
+        fd_pids[fd] = pid
+        return fd
     def send(fd, number):
-        delivered.append(number)
+        delivered.append((fd_pids[fd], number))
     with mock.patch.object(module, "PROC", proc), \
-         mock.patch.object(module.os, "pidfd_open", lambda pid: os.open(os.devnull, os.O_RDONLY), create=True), \
+         mock.patch.object(module.os, "pidfd_open", open_pid, create=True), \
          mock.patch.object(module.signal, "pidfd_send_signal", send, create=True):
         assert module.signal_reload("kitty", config, str(runtime)) is False
         assert module.signal_reload("nvim", config, str(runtime)) is False
-        assert delivered == [signal.SIGUSR1, signal.SIGUSR1]
+        assert sorted(delivered) == [(pid, signal.SIGUSR1) for pid in (123, 126, 128, 133)], delivered
         with mock.patch.object(module.signal, "pidfd_send_signal", mock.Mock(side_effect=ProcessLookupError)):
             assert module.signal_reload("kitty", config, str(runtime)) is False
         with mock.patch.object(module.signal, "pidfd_send_signal", mock.Mock(side_effect=PermissionError)):
