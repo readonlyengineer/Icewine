@@ -85,7 +85,7 @@ in {
     assert contains "${pkgs.tuigreet}/bin/tuigreet" greeterCommand;
     assert contains "${pkgs.uwsm}/bin/uwsm start hyprland-uwsm.desktop" greeterCommand;
     assert contains "${greeter.services.displayManager.sessionData.desktops}/share/wayland-sessions" greeterCommand;
-    assert lib.hasInfix "--remember-session" greeterCommand && lib.hasInfix "--theme" greeterCommand;
+    assert !(lib.any (flag: lib.hasInfix flag greeterCommand) [ "--remember-session" "--theme" "--width" ]);
     assert lib.elem "hyprland-uwsm" greeter.services.displayManager.sessionData.sessionNames;
     assert !(greeter.services.greetd.settings ? initial_session) && greeter.services.greetd.restart;
     assert !greeter.services.displayManager.autoLogin.enable && greeter.services.displayManager.defaultSession == null;

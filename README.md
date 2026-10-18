@@ -456,11 +456,11 @@ login service, configure a replacement or use console login before rebuilding.
 The Arch/CachyOS installer does not install or configure a greeter; retain your
 host's login manager there.
 
-The greeter opt-in also defaults `login.enable` on for declarative styling.
-Styling alone still exposes `services.icewine.login.args` for a host-owned
-tuigreet command. It uses the declared theme or Catppuccin Mocha; user theme
-changes do not publish to the greeter. Linux console colours are terminal-limited.
-`--width 60` sizes the login box in terminal columns, not the display mode.
+The default greeter command sets only the session launch command and available
+Wayland sessions, leaving appearance and session remembering at tuigreet defaults.
+For custom host commands, `login.enable` exposes optional styling through
+`services.icewine.login.args`, using the declared theme or Catppuccin Mocha.
+User theme changes do not publish to the greeter.
 Console resolution and output scaling belong to the host; Hyprland monitor
 settings do not configure the login VT. Native screen coverage needs validation
 on the affected output before choosing a console/display-mode change.
@@ -476,7 +476,7 @@ These options belong under `services.icewine`:
 | `gamescope.enable = false;` | Gamescope launch integration; ordinary Steam remains available |
 | `monitors.enable = false;` | Optional HyprMon; locked default needs a Lua-compatible `monitors.package` override |
 | `login.greeter.enable = false;` | Optional NixOS greetd service defaults; explicit host login configuration remains |
-| `login.enable = false;` | Declarative tuigreet colours and width; keeps the host or opt-in login service |
+| `login.enable = false;` | Optional tuigreet styling arguments for custom host commands |
 | `shellExtras.enable = false;` | Starship/Fastfetch defaults and btop styling |
 | `shellExtras.git.enable = false;` | Git information in the prompt |
 | `gtk.enable = false;` | GTK styling |

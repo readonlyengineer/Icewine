@@ -5,9 +5,7 @@ let
     (../theme/assets/themes + "/${if cfg.theme == null then "catppuccin-mocha" else cfg.theme}.json"));
 in {
   options.services.icewine.login = {
-    enable = lib.mkEnableOption "minimal Icewine tuigreet styling" // {
-      default = cfg.login.greeter.enable;
-    };
+    enable = lib.mkEnableOption "minimal Icewine tuigreet styling";
     greeter.enable = lib.mkEnableOption "the optional NixOS Icewine greetd/tuigreet login service (requires desktop.enable)";
     args = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -37,8 +35,7 @@ in {
       settings.default_session.command = lib.mkDefault (lib.escapeShellArgs (
         [ "${pkgs.tuigreet}/bin/tuigreet"
           "--cmd" "${pkgs.uwsm}/bin/uwsm start hyprland-uwsm.desktop"
-          "--sessions" "${config.services.displayManager.sessionData.desktops}/share/wayland-sessions"
-          "--remember-session" ] ++ cfg.login.args));
+          "--sessions" "${config.services.displayManager.sessionData.desktops}/share/wayland-sessions" ]));
     };
   };
 }
