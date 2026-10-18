@@ -75,7 +75,8 @@ QtObject {
     }
 
     function monitorFor(screen) {
-        return Hyprland.monitorFor(screen)
+        // The native lookup does not track monitor model replacement in QML bindings.
+        return Hyprland.monitors.values.find(monitor => monitor.name === screen?.name) ?? null
     }
 
     function focusedWorkspaceId() {

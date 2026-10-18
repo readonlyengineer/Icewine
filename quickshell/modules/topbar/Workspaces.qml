@@ -73,7 +73,7 @@ Rectangle {
                 }
 
                 ApplicationIcon {
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenter: contents.verticalCenter
                 }
             }
         }

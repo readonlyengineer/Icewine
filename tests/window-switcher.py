@@ -15,6 +15,7 @@ source = Path(sys.argv[1]).resolve()
 qml = '''import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
+import QtQuick.Effects
 import QtTest
 import Quickshell
 import Quickshell.Io
@@ -22,10 +23,22 @@ import Quickshell.Services.Pam
 import qs.config as Config
 import "icewine/modules" as Modules
 import "icewine/modules/topbar" as Bar
+import "icewine/adapters" as Adapters
+import "icewine/theme" as Theme
+import HyprlandFixtures
 ShellRoot {
     id: shell
     Modules.SessionControl { id: mockSession; authenticationRequired: true }
-    QtObject { id: mockNotifications }
+    QtObject {
+        id: mockNotifications
+        property int count: 0
+        property int highestUrgency: 0
+        property bool doNotDisturb: false
+        property int pulseToken: 0
+    }
+    QtObject { id: clock; property date date: new Date(2026, 9, 18, 12, 30) }
+    QtObject { id: statusPopout; property int backgroundCount: 0; property bool backgroundAttention: false }
+    Adapters.Hyprland { id: workspaceCompositor }
     Modules.NotificationService { id: notificationService }
     Modules.Topbar {
         id: topbar
@@ -72,6 +85,34 @@ ShellRoot {
     QtObject { id: b; property string address: "0x2"; property string title: "Selected"; property var workspace: ws1; property var wayland: null }
     QtObject { id: c; property string address: "0x3"; property string title: "Third"; property var workspace: ws3; property var wayland: null }
     QtObject { id: d; property string address: "0x4"; property string title: "Fourth"; property var workspace: ws1; property var wayland: null }
+    Component {
+        id: fixtureMonitor
+        QtObject {
+            property string name
+            property bool focused: true
+            property var activeWorkspace
+        }
+    }
+    Component {
+        id: fixtureWorkspace
+        QtObject {
+            property int id
+            property string name: String(id)
+            property var monitor
+            property var toplevels: QtObject { property var values: [] }
+            function activate() { Hyprland.activatedWorkspace = id }
+        }
+    }
+    Window {
+        id: workspaceWindow
+        width: 1280; height: 720; visible: true
+        Item {
+            id: workspacePanel
+            anchors.fill: parent
+            property var screen: ({name: "DP-1"})
+            __WORKSPACE_SURFACE__
+        }
+    }
     Window {
         id: keyboardActionWindow
         visible: false
@@ -156,6 +197,85 @@ ShellRoot {
                     && sizedLoader.width <= 1000 && sizedLoader.height <= 720
                     && sizedLoader.width <= geometryHost.width && sizedLoader.height <= geometryHost.height
             }
+            function workspacesAfterUnlock() {
+                Config.Settings.widgetSelections = {barBehaviour: "keyboard", barWidth: 100}
+                const secondary = fixtureMonitor.createObject(shell, {name: "DP-2"})
+                let primary = fixtureMonitor.createObject(shell, {name: "DP-1"})
+                const first = fixtureWorkspace.createObject(shell, {id: 1, monitor: primary})
+                const second = fixtureWorkspace.createObject(shell, {id: 3, monitor: primary})
+                const other = fixtureWorkspace.createObject(shell, {id: 8, monitor: secondary})
+                primary.activeWorkspace = first; secondary.activeWorkspace = other
+                Hyprland.monitors.values = [primary, secondary]
+                Hyprland.workspaces.values = [first, second, other]
+                workspacePanel.screen = {name: "DP-1"}
+                function buttons() {
+                    return descendants(workspaces, item => item.workspaceId !== undefined)
+                }
+                function shown(ids, active) {
+                    verify(topbar.barVisible && surface.opacity === 1, "Whole bar recovered")
+                    compare(workspaces.workspaceIds.join(","), ids.join(","), "Output workspace model recovered")
+                    compare(buttons().length, ids.length)
+                    verify(workspaces.width > 9 && workspaces.height > 0, "Workspace component has geometry")
+                    verify(workspaceScroll.width > 0 && workspaceScroll.width >= workspaces.width,
+                        "Workspace buttons are not clipped")
+                    verify(surface.y >= 0 && surface.y + surface.height <= workspacePanel.height)
+                    compare(workspaces.activeId, active)
+                    compare(buttons().filter(button => button.active).length, 1)
+                }
+                topbar.pressBar()
+                wait(200)
+                shown([1,3], 1)
+                const original = workspaces
+                for (let cycle = 0; cycle < 3; ++cycle) {
+                    mockSession.lockFromLogind()
+                    verify(mockSession.locked && !topbar.barVisible)
+                    compare(workspaces, original, "Lock hides rather than destroys workspace component")
+                    if (cycle === 1) {
+                        // Real QObject invalidation, same ShellScreen identity.
+                        Hyprland.monitors.values = [secondary]
+                        first.monitor = null; second.monitor = null
+                        primary.destroy()
+                        wait(1)
+                        primary = fixtureMonitor.createObject(shell, {name: "DP-1", activeWorkspace: second})
+                        Hyprland.monitors.values = [primary, secondary]
+                        first.monitor = primary; second.monitor = primary
+                    } else if (cycle === 2) {
+                        first.monitor = secondary
+                        primary.activeWorkspace = second
+                    }
+                    mockSession.fixturePam.completed(PamResult.Success)
+                    verify(!mockSession.locked)
+                    topbar.pressBar()
+                    wait(200)
+                    shown(cycle === 2 ? [3] : [1,3], cycle === 0 ? 1 : 3)
+                    const occupied = buttons().find(button => button.workspaceId === 3)
+                    second.toplevels.values = [b]
+                    tryCompare(occupied, "occupied", true)
+                    second.toplevels.values = []
+                    tryCompare(occupied, "occupied", false)
+                    mouseClick(occupied, occupied.width / 2, occupied.height / 2)
+                    compare(Hyprland.activatedWorkspace, 3, "Real workspace TapHandler activates after unlock")
+                    Hyprland.activatedWorkspace = 0
+                }
+                // Screen replacement and a monitor arriving after its screen.
+                workspacePanel.screen = {name: "DP-2"}
+                wait(200)
+                shown([1,8], 8)
+                workspacePanel.screen = {name: "DP-3"}
+                tryCompare(workspaces, "monitor", null)
+                const added = fixtureMonitor.createObject(shell, {name: "DP-3", activeWorkspace: second})
+                second.monitor = added
+                Hyprland.monitors.values = [primary, secondary, added]
+                wait(200)
+                shown([3], 3)
+                // Same-object active-workspace notifications remain reactive.
+                added.activeWorkspace = first; first.monitor = added
+                wait(200)
+                shown([1,3], 1)
+                topbar.dismiss(false)
+                workspaceWindow.visible = false
+                console.log("WORKSPACES_UNLOCK_PASSED")
+            }
             function sizing() {
                 geometryHost.widgetHere = true
                 topbar.openWidget("switcher", true, "DP-1")
@@ -223,6 +343,7 @@ ShellRoot {
                 console.log("SWITCHER_SIZING_PASSED")
             }
             function check() {
+                workspacesAfterUnlock()
                 // Keep the real session/PAM-result handlers and topbar bindings.
                 // Only native lock delivery is replaced: acquisition notifies,
                 // unlock changes the getter without a notification (qs 0.3.2).
@@ -530,6 +651,38 @@ with tempfile.TemporaryDirectory(prefix='.switcher-check-') as directory:
     (root / 'icewine').mkdir()
     # Disposable QML copies must be writable even when source is in the store.
     shutil.copytree(source / 'quickshell/modules', root / 'icewine/modules', copy_function=shutil.copyfile)
+    shutil.copytree(source / 'quickshell/adapters', root / 'icewine/adapters', copy_function=shutil.copyfile)
+    adapter_source = root / 'icewine/adapters/Hyprland.qml'
+    adapter_source.write_text(adapter_source.read_text().replace(
+        'import Quickshell.Hyprland', 'import HyprlandFixtures'))
+    fixtures = root / 'HyprlandFixtures'
+    fixtures.mkdir()
+    (fixtures / 'qmldir').write_text('module HyprlandFixtures\nsingleton Hyprland 1.0 Hyprland.qml\n')
+    (fixtures / 'Hyprland.qml').write_text('''pragma Singleton
+import QtQuick
+QtObject {
+    id: native
+    property var monitors: QtObject {
+        property var values: []
+        onValuesChanged: native.lookup.values = values
+    }
+    property var workspaces: QtObject { property var values: [] }
+    property var toplevels: QtObject { property var values: [] }
+    property var activeToplevel: null
+    property var focusedMonitor: null
+    property var focusedWorkspace: null
+    property bool usingLua: true
+    property int activatedWorkspace: 0
+    signal rawEvent(var event)
+    // Model the C++ invokable's unobservable ObjectModel::valueList() read.
+    // Mutating this JS field has no notifier, unlike monitors.values.
+    readonly property var lookup: ({values: []})
+    function monitorFor(screen) {
+        return lookup.values.find(monitor => monitor.name === screen?.name) ?? null
+    }
+    function dispatch(request) {}
+}
+''')
     notification_source = root / 'icewine/modules/NotificationService.qml'
     notification_source.write_text(notification_source.read_text().replace(
         "import Quickshell.Services.Notifications", "import NotificationFixtures"))
@@ -571,6 +724,16 @@ Scope {
     session_source.write_text(native_session.replace('sessionLock.', 'root.fixtureNativeLock.'))
     topbar_source = root / 'icewine/modules/Topbar.qml'
     native_topbar = topbar_source.read_text()
+    surface_start = native_topbar.index('                Rectangle {\n                    id: surface')
+    surface_open = native_topbar.index('{', surface_start)
+    surface_end = surface_open + 1
+    depth = 1
+    while depth:
+        depth += (native_topbar[surface_end] == '{') - (native_topbar[surface_end] == '}')
+        surface_end += 1
+    workspace_surface = native_topbar[surface_start:surface_end].replace('root.', 'topbar.')
+    workspace_surface = workspace_surface.replace('panel.', 'workspacePanel.')
+    workspace_surface = workspace_surface.replace('compositor: topbar.compositor', 'compositor: workspaceCompositor')
     # Keep actual shared state/IPC/settings methods without Wayland panels or
     # host metric discovery. This does not establish real compositor capture.
     loader_start = native_topbar.index("                Loader {\n                    id: switcher")
@@ -586,7 +749,8 @@ Scope {
     (root / 'icewine/theme').symlink_to(root / 'theme')
     (root / 'config').symlink_to(source / 'quickshell/config')
     fixture_config = theme_fixture(source, root)
-    (root / 'shell.qml').write_text(qml.replace("__SIZING_LOADER__", sizing_loader))
+    (root / 'shell.qml').write_text(qml.replace("__SIZING_LOADER__", sizing_loader)
+                                  .replace("__WORKSPACE_SURFACE__", workspace_surface))
     (root / 'runtime').mkdir(mode=0o700)
     (root / 'state/icewine').mkdir(parents=True)
     env = dict(os.environ, QT_QPA_PLATFORM='offscreen', QML_IMPORT_PATH=str(root),
@@ -597,9 +761,10 @@ Scope {
                XDG_STATE_HOME=str(root / 'state'), ICEWINE_WIDGET_POLICY='{}')
     env["XDG_CONFIG_HOME"] = fixture_config
     result = subprocess.run(['qs', '-p', str(root), '--no-color'], env=env,
-                            capture_output=True, text=True, timeout=10)
+                            capture_output=True, text=True, timeout=20)
     output = result.stdout + result.stderr
     assert result.returncode == 0 and 'SWITCHER_PASSED' in output and 'SWITCHER_SIZING_PASSED' in output, output
+    assert 'WORKSPACES_UNLOCK_PASSED' in output, output
     assert not re.search(r'ReferenceError|TypeError|Binding loop|Unable to assign|not a type', output), output
     # One lightweight mixed policy case exercises both fixed directions against
     # opposing saved choices; nullable user choice was covered by the watcher.
@@ -623,4 +788,4 @@ ShellRoot {
     result = subprocess.run(['qs', '-p', str(root), '--no-color'], env=env,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0 and 'MIXED_POLICY_PASSED' in result.stdout + result.stderr, result.stdout + result.stderr
-    print('Switcher sizing, scrolling, keys, widget policy and repeated lock/unlock UI guards pass')
+    print('Switcher sizing, scrolling, keys, widget policy, repeated lock/unlock UI guards and workspace lifecycle pass')
