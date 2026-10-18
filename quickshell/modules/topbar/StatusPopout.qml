@@ -43,6 +43,7 @@ Widget {
     height: implicitHeight
 
     signal mediaRequested()
+    signal keyboardRequested()
     signal pasteRequested(string entry)
 
     property var loadedCards: ({})
@@ -171,6 +172,7 @@ Widget {
                         engaged: root.engaged
                         excludeSteamApps: root.excludeSteamApps
                         onHandoffRequested: root.handoffRequested()
+                        onKeyboardRequested: root.keyboardRequested()
                     }
                 }
                 Component {

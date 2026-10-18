@@ -79,14 +79,15 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 manage.main(["widgets-state"])
             return dict(field.split("=") for field in output.getvalue().split())
-        def save_widgets(revision, toasts="false", switcher="false", stacks=None, behaviour=None, location=None, style=None, width=None):
+        def save_widgets(revision, toasts="false", switcher="false", stacks=None, behaviour=None, location=None, style=None, width=None, access=None):
             manage.main(["widgets-apply", "revision=" + revision,
                          "notificationToasts=" + toasts, "windowSwitcher=" + switcher,
                          "cardStacks=" + (widget_status()["cardStacks"].split(":")[0] if stacks is None else stacks),
                          "barBehaviour=" + (widget_status()["barBehaviour"].split(":")[0] if behaviour is None else behaviour),
                          "barLocation=" + (widget_status()["barLocation"].split(":")[0] if location is None else location),
                          "barStyle=" + (widget_status()["barStyle"].split(":")[0] if style is None else style),
-                         "barWidth=" + (widget_status()["barWidth"].split(":")[0] if width is None else width)])
+                         "barWidth=" + (widget_status()["barWidth"].split(":")[0] if width is None else width),
+                         "oskAccess=" + (widget_status()["oskAccess"].split(":")[0] if access is None else access)])
         assert len(manage.CARD_MODULES) == 13 and "screenshot" not in manage.CARD_MODULES
         assert next(stack for stack in manage.CARD_DEFAULTS if "clipboard" in stack["modules"]) == {
             "id": "notifications", "modules": ["notifications", "clipboard"]}
@@ -122,8 +123,21 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             except ValueError: pass
             else: raise AssertionError("mutable widget_saved overrode Nix policy")
             save_widgets(widget_status()["revision"], "true", "true")
-            assert json.loads((widget_saved / "widgets.json").read_text()) == {"notificationToasts": False, "windowSwitcher": True, "cardStacks": manage.CARD_DEFAULTS, "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80}
+            assert json.loads((widget_saved / "widgets.json").read_text()) == {"notificationToasts": False, "windowSwitcher": True, "cardStacks": manage.CARD_DEFAULTS, "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80, "oskAccess": "none"}
         assert initial["barBehaviour"] == "keyboard:user" and initial["barLocation"] == "above:user"
+        assert initial["oskAccess"] == "none:user"
+        for access in ("launcher", "topbar", "none"):
+            save_widgets(widget_status()["revision"], access=access)
+            assert widget_status()["oskAccess"] == access + ":user"
+        with patch.dict(os.environ, {"ICEWINE_WIDGET_POLICY": '{"oskAccess":"launcher"}'}):
+            before_access = (widget_saved / "widgets.json").read_bytes()
+            assert widget_status()["oskAccess"] == "launcher:policy"
+            try: save_widgets(widget_status()["revision"], access="topbar")
+            except ValueError: pass
+            else: raise AssertionError("overrode OSK policy")
+            assert (widget_saved / "widgets.json").read_bytes() == before_access
+            save_widgets(widget_status()["revision"])
+            assert json.loads((widget_saved / "widgets.json").read_text())["oskAccess"] == "none"
         assert initial["barWidth"] == "80:user" and initial["barStyle"] == "anchored:user"
         for style in ("floating", "anchored"):
             for width in ("50", "99", "100"):
@@ -161,7 +175,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
                 save_widgets(widget_status()["revision"], behaviour=behaviour, location=location)
                 assert widget_status()["barBehaviour"] == behaviour + ":user"
                 assert widget_status()["barLocation"] == location + ":user"
-        for name, argument in (("barBehaviour", "behaviour"), ("barLocation", "location"), ("barStyle", "style")):
+        for name, argument in (("barBehaviour", "behaviour"), ("barLocation", "location"), ("barStyle", "style"), ("oskAccess", "access")):
             before_bar = (widget_saved / "widgets.json").read_bytes()
             for invalid in ("", "unknown", "true", "Bottom"):
                 try: save_widgets(widget_status()["revision"], **{argument: invalid})
@@ -193,7 +207,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         mixed = [{"id": "mixed", "modules": ["ssh", "audio", "clipboard", "launcher"]}]
         save_widgets(widget_status()["revision"], "false", "true", "mixed/ssh,audio,clipboard,launcher")
         assert json.loads((widget_saved / "widgets.json").read_text()) == {
-            "notificationToasts": False, "windowSwitcher": True, "cardStacks": mixed, "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80}
+            "notificationToasts": False, "windowSwitcher": True, "cardStacks": mixed, "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80, "oskAccess": "none"}
         assert widget_status()["cardStacks"] == "mixed/ssh,audio,clipboard,launcher:user"
         # A policy override may be empty. It is immutable, and saving other
         # settings must preserve the user's hidden stack choice for later.
@@ -245,7 +259,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         assert widget_status()["cardStacks"] == initial["cardStacks"]
         save_widgets(widget_status()["revision"], "false", "true")
         assert json.loads((widget_saved / "widgets.json").read_text()) == {
-            "notificationToasts": False, "windowSwitcher": True, "cardStacks": manage.CARD_DEFAULTS, "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80}
+            "notificationToasts": False, "windowSwitcher": True, "cardStacks": manage.CARD_DEFAULTS, "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80, "oskAccess": "none"}
         before = (widget_saved / "widgets.json").read_bytes()
         with patch.object(manage.theme, "atomic_text", side_effect=PermissionError("fixture save denied")):
             try: save_widgets(widget_status()["revision"], "true", "true", "attempt/ssh")

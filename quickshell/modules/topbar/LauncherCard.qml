@@ -4,6 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Widgets
 import "LauncherSearch.js" as LauncherSearch
+import qs.config as Config
 import qs.icewine.theme as Theme
 
 Card {
@@ -11,6 +12,7 @@ Card {
 
     property bool engaged: false
     signal handoffRequested()
+    signal keyboardRequested()
     initialFocus: search
 
     property bool excludeSteamApps: false
@@ -25,6 +27,10 @@ Card {
         if (!entry || !active)
             return
 
+        if (entry.action === "keyboard") {
+            if (Config.Settings.oskAccess === "launcher") keyboardRequested()
+            return
+        }
         handoffRequested()
         Quickshell.execDetached(LauncherSearch.launchOptions(entry, Quickshell.env("HOME")))
     }
@@ -133,8 +139,11 @@ Card {
             model: ScriptModel {
                 values: LauncherSearch.applications(
                     DesktopEntries.applications.values, search.text,
-                    root.excludeSteamApps, steamShortcuts.commands)
-                onValuesChanged: results.currentIndex = values.length > 0 ? 0 : -1
+                    root.excludeSteamApps, steamShortcuts.commands, Config.Settings.oskAccess)
+                onValuesChanged: {
+                    search.launchKey = 0
+                    results.currentIndex = values.length > 0 ? 0 : -1
+                }
             }
 
             delegate: Rectangle {

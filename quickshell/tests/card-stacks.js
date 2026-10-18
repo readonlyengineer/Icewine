@@ -54,3 +54,16 @@ for (const width of [49, 101, 80.5, true, "80", null, [], {}])
     assert.throws(() => Cards.preferences({barWidth: width}))
 for (const style of Cards.barStyles) assert.equal(Cards.preferences({barStyle: style}).barStyle, style)
 for (const style of ["Floating", "", true, 80, null]) assert.throws(() => Cards.preferences({barStyle: style}))
+
+for (const access of Cards.oskAccessModes)
+    assert.equal(Cards.preferences({oskAccess: access}).oskAccess, access)
+for (const access of ["Launcher", "", false, 0, null, [], {}])
+    assert.throws(() => Cards.preferences({oskAccess: access}))
+const choice = settings.match(/    function barChoice\([^\n]*\) \{[\s\S]*?^    \}/m)[0]
+for (const policy of [undefined, null, "none", "launcher", "topbar", "invalid", true]) {
+    const context = vm.createContext({widgetPolicy: {oskAccess: policy}, widgetSelections: {oskAccess: "topbar"}})
+    vm.runInContext(choice, context)
+    assert.equal(context.barChoice("oskAccess", Cards.oskAccessModes, "none"),
+        policy == null ? "topbar" : Cards.oskAccessModes.includes(policy) ? policy : "none")
+}
+console.log("OSK settings: exact enum, policy ownership and safe invalid-policy default pass")

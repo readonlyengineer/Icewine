@@ -194,13 +194,18 @@ the next shortcut, widget or controller opening (mouse mode also permits a fresh
 edge entry); unlocking restores the selected mode.
 Notification toasts and the window switcher default to enabled. Disabling toasts
 keeps notification history and sounds; session and authentication controls remain.
+Onscreen Keyboard Access offers None (default), Launcher, or Topbar. Launcher
+adds a searchable Onscreen Keyboard action; Topbar adds a keyboard icon. Both
+open the existing keyboard for the original application. Lockscreen and
+handheld/controller access remain independent.
 Preferences live in `$XDG_STATE_HOME/icewine/widgets.json` (normally
 `~/.local/state/icewine/widgets.json`); host persistence remains your policy.
 NixOS `services.icewine.widgets.notificationToasts` and `.windowSwitcher` default
 to null (user choice); true/false enforces policy in the manager and shell.
 `.barBehaviour` accepts `keyboard`, `keyboard-mouse`, `toggle`, or `always`;
 `.barLocation` accepts `above`, `top`, or `bottom`. `.barWidth` accepts integer
-percentages 50–100; `.barStyle` accepts `anchored` or `floating`. All default to
+percentages 50–100; `.barStyle` accepts `anchored` or `floating`. `.oskAccess`
+accepts `none`, `launcher`, or `topbar`. All default to
 null (user choice).
 The Widgets page requires shipped Settings.qml and a desktop/handheld entry;
 custom settings or entries are read-only here. Invalid non-null widget policy

@@ -62,6 +62,73 @@ Scope {
     readonly property bool oskVisible: keyboard?.desktopVisible ?? false
     property bool instantBarHide: false
     property var clipboardPaste: null
+    property var keyboardRequest: null
+    property int barModifiersHeld: 0
+
+    function cancelKeyboardRequest() {
+        keyboardRequest = null
+        keyboardWait.stop()
+    }
+
+    function keyboardRequestValid() {
+        const request = keyboardRequest
+        return request && !sessionLocked && request.mode === Config.Settings.oskAccess
+            && request.generation === focusGeneration
+            && (request.awaitingRelease || (!ui.page && !ui.held && !radialVisible))
+            && compositor.toplevels.includes(request.window)
+            && (!compositor.activeWindowAddress || compositor.activeWindowAddress === request.window.address)
+    }
+
+    function showKeyboard(mode) {
+        if (sessionLocked || !["launcher", "topbar"].includes(mode)
+                || mode !== Config.Settings.oskAccess || !keyboard || keyboard.busy)
+            return
+        // An invalidated original target must not fall back to the newly active app.
+        const window = interactionActive
+            ? (previousWindow ? previousToplevel : null)
+            : compositor.toplevels.find(candidate => candidate.address === compositor.activeWindowAddress)
+        if (!window || !compositor.toplevels.includes(window)) return
+        cancelClipboardPaste()
+        cancelKeyboardRequest()
+        keyboardRequest = {window: window, mode: mode, generation: focusGeneration, awaitingRelease: true}
+        if (!ui.held && barModifiersHeld === 0) handoffKeyboardRequest()
+    }
+
+    function handoffKeyboardRequest() {
+        if (!keyboardRequestValid()) { cancelKeyboardRequest(); return }
+        const request = keyboardRequest
+        instantHandoff()
+        finishInteraction()
+        request.awaitingRelease = false
+        request.generation = focusGeneration
+        keyboardRequest = request
+        Qt.callLater(() => {
+            if (root.keyboardRequest !== request) return
+            if (!root.keyboardRequestValid()) { root.cancelKeyboardRequest(); return }
+            root.compositor.activateToplevel(request.window)
+            keyboardWait.attempts = 0
+            keyboardWait.start()
+        })
+    }
+
+    function finishKeyboardRequest() {
+        if (!keyboardRequestValid() || ++keyboardWait.attempts > 30) {
+            cancelKeyboardRequest()
+            return
+        }
+        if (keyboardRequest.awaitingRelease || barModifiersHeld > 0
+                || compositor.activeWindowAddress !== keyboardRequest.window.address || keyboard.busy) return
+        // The owner retains its existing live-target, finite-input and lock gates.
+        cancelKeyboardRequest()
+        keyboard.show()
+    }
+
+    Timer {
+        id: keyboardWait
+        property int attempts: 0
+        interval: 30; repeat: true
+        onTriggered: root.finishKeyboardRequest()
+    }
 
     Bar.ClipboardHistory {
         id: clipboardHistory
@@ -174,6 +241,7 @@ Scope {
     }
 
     function beginInteraction() {
+        cancelKeyboardRequest()
         if (interactionActive || sessionLocked)
             return
         ui = State.reduce(ui, { type: "resume" })
@@ -194,6 +262,12 @@ Scope {
     }
 
     function releaseBar() {
+        if (keyboardRequest?.awaitingRelease) {
+            // A click under the opening chord retains intent until Super is up.
+            // Keep its interaction alive if grave was released before Super.
+            if (barModifiersHeld > 0) return
+            handoffKeyboardRequest()
+        }
         ui = State.reduce(ui, { type: "release" })
     }
 
@@ -252,6 +326,7 @@ Scope {
     }
 
     function dismissWidget() {
+        cancelKeyboardRequest()
         if (clipboardPaste?.phase !== "handoff") cancelClipboardPaste()
         ++widgetFocusGeneration
         if (ui.engaged) radial?.drainInput()
@@ -260,6 +335,7 @@ Scope {
     }
 
     function dismiss(suppress = true) {
+        cancelKeyboardRequest()
         if (clipboardPaste?.phase !== "handoff") cancelClipboardPaste()
         ++widgetFocusGeneration
         if (ui.engaged) radial?.drainInput()
@@ -270,6 +346,7 @@ Scope {
     }
 
     function yieldFocus() {
+        cancelKeyboardRequest()
         previousWindow = ""
         ++focusGeneration
     }
@@ -295,12 +372,13 @@ Scope {
     }
 
     onSessionLockedChanged: {
-        if (sessionLocked) { cancelClipboardPaste(); handoff(true) }
+        if (sessionLocked) { barModifiersHeld = 0; cancelClipboardPaste(); handoff(true) }
         else ui = State.initial()
     }
 
     Connections {
         target: Config.Settings
+        function onOskAccessChanged() { root.cancelKeyboardRequest() }
         function onBarBehaviourChanged() { root.handoff(false) }
         function onBarLocationChanged() { root.handoff(false) }
         function onCardStacksChanged() { root.dismissWidget() }
@@ -323,6 +401,8 @@ Scope {
         function onNavigationRequested() { root.cancelClipboardPaste(); root.handoff(false) }
         function onActiveWindowAddressChanged() {
             const address = root.compositor.activeWindowAddress
+            if (root.keyboardRequest && address && address !== root.keyboardRequest.window.address)
+                root.cancelKeyboardRequest()
             if (root.clipboardPaste && address && address !== root.clipboardPaste.window.address)
                 root.cancelClipboardPaste()
             // Never undo an application launch or an explicit focus change.
@@ -350,7 +430,11 @@ Scope {
     }
     GlobalShortcut {
         name: "topbarModifier"
-        onReleased: root.releaseBar()
+        onPressed: root.barModifiersHeld++
+        onReleased: {
+            root.barModifiersHeld = Math.max(0, root.barModifiersHeld - 1)
+            root.releaseBar()
+        }
     }
 
     LazyLoader {
@@ -585,6 +669,7 @@ Scope {
                             layoutsEnabled: root.layoutsEnabled
                             backgroundCount: statusPopout.backgroundCount
                             backgroundAttention: statusPopout.backgroundAttention
+                            onKeyboardRequested: root.showKeyboard("topbar")
                             onMediaRequested: root.raiseMedia()
                             onPopoutActivated: page => root.openWidget(page, true, panel.screen.name)
                         }
@@ -653,6 +738,7 @@ Scope {
                     onEngageRequested: root.engageWidget()
                     onDismissRequested: root.dismissWidget()
                     onHandoffRequested: root.handoff()
+                    onKeyboardRequested: root.showKeyboard("launcher")
                     onMediaRequested: root.raiseMedia()
                 }
             }

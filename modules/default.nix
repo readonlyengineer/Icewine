@@ -46,6 +46,11 @@ in {
         default = null;
         description = "Optional bar visibility policy; null permits the user preference (default keyboard autohide).";
       };
+      oskAccess = lib.mkOption {
+        type = lib.types.nullOr (lib.types.enum [ "none" "launcher" "topbar" ]);
+        default = null;
+        description = "Optional desktop onscreen keyboard access policy; null permits the user preference (default none). Lockscreen and controller access are independent.";
+      };
       barWidth = lib.mkOption {
         type = lib.types.nullOr (lib.types.ints.between 50 100);
         default = null;

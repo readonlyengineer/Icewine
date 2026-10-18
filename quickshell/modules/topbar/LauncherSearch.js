@@ -59,10 +59,14 @@ function steamManaged(entry, shortcuts) {
             && command.every((argument, index) => argument === shortcut[index])))
 }
 
-function applications(entries, rawQuery, excludeSteam = false, shortcuts = []) {
+function applications(entries, rawQuery, excludeSteam = false, shortcuts = [], oskAccess = "none") {
     const query = String(rawQuery || "").trim().toLowerCase()
 
-    return entries
+    const actions = oskAccess === "launcher" ? [{
+        name: "Onscreen Keyboard", genericName: "Virtual keyboard", keywords: ["osk", "keyboard"],
+        icon: "input-keyboard", action: "keyboard"
+    }] : []
+    return entries.concat(actions)
         .filter(entry => !entry.noDisplay
             && (!excludeSteam || !steamManaged(entry, shortcuts)))
         .map(entry => ({ entry, score: rank(entry, query) }))

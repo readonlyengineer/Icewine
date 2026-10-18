@@ -124,7 +124,8 @@ const shell = controller("../modules/Topbar.qml", {
     Cards, Config: {Settings: {cardStacks: Cards.defaults, windowSwitcher: true}},
     keyboard: null, State, focusWidgetRequested: (...args) => focusRequests.push(args), ui: State.initial(), hoveredScreen: "", sessionLocked: false,
     interactionActive: false, previousWindow: "", previousToplevel: null, focusGeneration: 0, widgetFocusGeneration: 0,
-    clipboardPaste: null,
+    clipboardPaste: null, keyboardRequest: null, barModifiersHeld: 0,
+    keyboardWait: {attempts: 0, start() {}, stop() {}},
     layoutsEnabled: true, barVisible: false, radial: {dismiss() {}, drainInput() {}}, widgetDismissed() {},
     compositor: {activeWindowAddress: "original", toplevels: [{address: "original"}],
         activateWindow: address => focused.push(address), activateToplevel: window => focused.push(window)},
@@ -561,3 +562,121 @@ shell.dismiss()
 assert.equal(State.barVisible(shell.ui, false, false, "always"), false,
     "Explicit hide remains suppressed independently of ordinary handoffs")
 console.log("ordinary launcher/media/clipboard/window/controller handoffs preserve Always Show; capture/explicit hide still suppress")
+
+// Execute actual Topbar handoff and delivery readiness with a mocked compositor.
+const oskCallbacks = [], oskCalls = [], oskTarget = {address: "app"}
+const keyboardShell = controller("../modules/Topbar.qml", {
+    State, Cards, Config: {Settings: {oskAccess: "launcher", barBehaviour: "always", cardStacks: Cards.defaults}},
+    focusWidgetRequested() {},
+    keyboard: {busy: false, show() { oskCalls.push("show") }, hide() {}}, keyboardRequest: null,
+    keyboardWait: {attempts: 0, start() { oskCalls.push("wait") }, stop() {}}, barModifiersHeld: 0,
+    sessionLocked: false, radialVisible: false, interactionActive: true,
+    previousWindow: "app", previousToplevel: oskTarget, focusGeneration: 0, widgetFocusGeneration: 0,
+    ui: State.reduce(State.initial(), {type: "open", page: "launcher", engaged: true, screen: "screen"}),
+    hoveredScreen: "screen", clipboardPaste: null,
+    radial: {drainInput() {}, dismiss() {}}, widgetDismissed() {},
+    compositor: {activeWindowAddress: "app", toplevels: [oskTarget],
+        activateToplevel(window) { oskCalls.push(window) }, activateWindow() { throw Error("wrong restoration path") }},
+    Qt: {callLater: fn => oskCallbacks.push(fn)}
+})
+const oskFlush = () => { while (oskCallbacks.length) oskCallbacks.shift()() }
+function prepareKeyboard(mode = "launcher") {
+    keyboardShell.cancelKeyboardRequest(); oskFlush(); oskCalls.length = 0
+    Object.assign(keyboardShell, {sessionLocked: false, radialVisible: false, interactionActive: true,
+        previousWindow: "app", previousToplevel: oskTarget, clipboardPaste: null, barModifiersHeld: 0,
+        ui: State.reduce(State.initial(), {type: "open", page: "launcher", engaged: true, screen: "screen"})})
+    keyboardShell.Config.Settings.oskAccess = mode
+    keyboardShell.keyboard.busy = false
+    Object.assign(keyboardShell.compositor, {activeWindowAddress: "app", toplevels: [oskTarget]})
+}
+for (const mode of ["launcher", "topbar"]) {
+    prepareKeyboard(mode)
+    keyboardShell.showKeyboard(mode)
+    assert.equal(keyboardShell.ui.page, "")
+    assert.equal(keyboardShell.ui.suppressed, false, "Ordinary handoff preserves Always Show")
+    assert.equal(oskCalls.length, 0, "No keyboard before the deferred handoff callback")
+    oskFlush()
+    assert.equal(oskCalls[0], oskTarget, "Restore exact live object, never address replacement")
+    assert(!oskCalls.includes("show"))
+    keyboardShell.finishKeyboardRequest()
+    assert.equal(oskCalls.at(-1), "show")
+    assert.equal(keyboardShell.keyboardRequest, null)
+}
+for (const invalidate of [
+    () => { keyboardShell.sessionLocked = true },
+    () => { keyboardShell.Config.Settings.oskAccess = "none" },
+    () => { keyboardShell.compositor.toplevels = [{address: "app"}] },
+    () => { keyboardShell.compositor.activeWindowAddress = "other" },
+    () => { keyboardShell.beginInteraction() },
+    () => { keyboardShell.handoff(true) }
+]) {
+    for (const afterRestore of [false, true]) {
+        prepareKeyboard(); keyboardShell.showKeyboard("launcher")
+        if (afterRestore) oskFlush()
+        invalidate(); oskFlush(); keyboardShell.finishKeyboardRequest()
+        assert(!oskCalls.includes("show"), "Lock/mode/identity/focus/new interaction cancels pending open")
+        assert.equal(keyboardShell.keyboardRequest, null)
+    }
+}
+for (const mode of ["none", "topbar"]) {
+    prepareKeyboard(mode); keyboardShell.showKeyboard("launcher"); oskFlush()
+    assert.equal(keyboardShell.keyboardRequest, null)
+}
+for (const invalidate of [() => {keyboardShell.previousWindow = ""},
+    () => {keyboardShell.keyboard.busy = true}]) {
+    prepareKeyboard(); invalidate(); keyboardShell.showKeyboard("launcher"); oskFlush()
+    assert.equal(keyboardShell.keyboardRequest, null)
+}
+prepareKeyboard(); keyboardShell.showKeyboard("launcher"); keyboardShell.showKeyboard("launcher"); oskFlush()
+assert.equal(oskCalls.filter(value => value === oskTarget).length, 1, "Superseded callback cannot restore or cancel the new request")
+keyboardShell.compositor.activeWindowAddress = ""
+for (let attempt = 0; attempt < 31; ++attempt) keyboardShell.finishKeyboardRequest()
+assert.equal(keyboardShell.keyboardRequest, null, "A target which never regains focus expires without opening")
+assert(!oskCalls.includes("show"))
+console.log("OSK focus: exact retained target, both desktop entries, Always Show, supersession and bounded cancellation pass")
+
+// Default keyboard-autohide: press opening chord, click/tap action, release.
+for (const mode of ["topbar", "launcher"]) for (const modifierFirst of [false, true]) {
+    prepareKeyboard(mode)
+    keyboardShell.Config.Settings.barBehaviour = "keyboard"
+    keyboardShell.interactionActive = false
+    keyboardShell.ui = State.initial()
+    keyboardShell.barModifiersHeld = 1
+    keyboardShell.pressBar()
+    if (mode === "launcher") keyboardShell.openWidget("launcher", true, "screen")
+    keyboardShell.showKeyboard(mode)
+    assert.equal(keyboardShell.keyboardRequest.window, oskTarget)
+    assert.equal(keyboardShell.keyboardRequest.awaitingRelease, true)
+    oskFlush()
+    assert(!oskCalls.includes("show") && !oskCalls.includes(oskTarget), "Held action neither opens nor restores early")
+    if (!modifierFirst) {
+        keyboardShell.releaseBar() // grave first; Super still physically down
+        oskFlush()
+        assert.equal(keyboardShell.ui.held, true)
+        assert.equal(keyboardShell.keyboardRequest.awaitingRelease, true)
+        assert(!oskCalls.includes("show"))
+    }
+    keyboardShell.barModifiersHeld = 0
+    keyboardShell.releaseBar()
+    oskFlush()
+    assert.equal(oskCalls.filter(value => value === oskTarget).length, 1)
+    keyboardShell.finishKeyboardRequest()
+    assert.equal(oskCalls.filter(value => value === "show").length, 1)
+    keyboardShell.releaseBar(); oskFlush()
+    assert.equal(oskCalls.filter(value => value === "show").length, 1, "Second release cannot reopen")
+}
+for (const invalidate of [
+    () => {keyboardShell.sessionLocked = true},
+    () => {keyboardShell.Config.Settings.oskAccess = "none"},
+    () => {keyboardShell.compositor.toplevels = [{address: "app"}]},
+    () => {keyboardShell.compositor.activeWindowAddress = "other"},
+    () => {keyboardShell.focusGeneration++},
+    () => {keyboardShell.dismiss()}
+]) {
+    prepareKeyboard(); keyboardShell.ui.held = true; keyboardShell.barModifiersHeld = 1
+    keyboardShell.showKeyboard("launcher"); invalidate()
+    keyboardShell.barModifiersHeld = 0; keyboardShell.releaseBar(); oskFlush()
+    assert(!oskCalls.includes("show"), "Retained held request still obeys all cancellation gates")
+    assert.equal(keyboardShell.keyboardRequest, null)
+}
+console.log("OSK held shortcut: both actions retain target, both release orders defer until modifier up, stale intent cancels")

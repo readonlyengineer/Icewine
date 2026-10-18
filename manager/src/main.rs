@@ -91,6 +91,7 @@ const BAR_SETTINGS: &[(&str, &str, &[&str], &[&str])] = &[
         &["Autohide (Keyboard)", "Autohide (Keyboard & Mouse)", "Toggle (Keyboard)", "Always Show"]),
     ("barLocation", "Bar Locations", &["above", "top", "bottom"], &["Above", "Top", "Bottom"]),
     ("barStyle", "Bar Style", &["anchored", "floating"], &["Anchored", "Floating"]),
+    ("oskAccess", "Onscreen Keyboard Access", &["none", "launcher", "topbar"], &["None", "Launcher", "Topbar"]),
 ];
 
 const CARD_MODULES: &[&str] = &["launcher", "background", "layout", "media", "audio", "bluetooth",
@@ -99,8 +100,8 @@ const CARD_MODULES: &[&str] = &["launcher", "background", "layout", "media", "au
 struct CardStack { id: String, modules: Vec<usize> }
 
 struct Widgets {
-    enabled: [bool; 2], policy: [bool; 7], linked: [bool; 7], supported: bool, revision: String,
-    stacks: Vec<CardStack>, bar: [usize; 3], width: u8,
+    enabled: [bool; 2], policy: [bool; 8], linked: [bool; 8], supported: bool, revision: String,
+    stacks: Vec<CardStack>, bar: [usize; 4], width: u8,
 }
 
 fn widget_command(args: &[String]) -> io::Result<String> {
@@ -127,8 +128,8 @@ impl Widgets {
         let revision = fields.remove("revision").filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit()))
             .ok_or_else(|| io::Error::other("Invalid widget revision"))?.to_owned();
         let mut enabled = [true; 2];
-        let mut policy = [false; 7];
-        let mut linked = [false; 7];
+        let mut policy = [false; 8];
+        let mut linked = [false; 8];
         for (index, (id, _, _)) in WIDGETS.iter().enumerate() {
             let (value, owner) = fields.remove(id).and_then(|value| value.split_once(':'))
                 .ok_or_else(|| io::Error::other("Missing widget state"))?;
@@ -160,7 +161,7 @@ impl Widgets {
             }
             stacks.push(CardStack { id: id.to_owned(), modules });
         }
-        let mut bar = [0; 3];
+        let mut bar = [0; 4];
         for (index, (id, _, choices, _)) in BAR_SETTINGS.iter().enumerate() {
             let (value, owner) = fields.remove(id).and_then(|value| value.split_once(':'))
                 .ok_or_else(|| io::Error::other("Missing bar setting"))?;
@@ -174,9 +175,9 @@ impl Widgets {
             .ok_or_else(|| io::Error::other("Missing bar width"))?;
         let width = value.parse::<u8>().ok().filter(|width| (50..=100).contains(width) && value == width.to_string())
             .ok_or_else(|| io::Error::other("Invalid bar width"))?;
-        policy[6] = match owner { "policy" | "symlink" => true, "user" => false,
+        policy[7] = match owner { "policy" | "symlink" => true, "user" => false,
             _ => return Err(io::Error::other("Invalid bar width ownership")) };
-        linked[6] = owner == "symlink";
+        linked[7] = owner == "symlink";
         if !fields.is_empty() { return Err(io::Error::other("Unknown widget state")); }
         Ok(Self { enabled, policy, linked, supported, revision, stacks, bar, width })
     }
@@ -287,7 +288,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     let mut appearance = Appearance::load()?;
     let (mut widgets, mut widget_message) = match Widgets::load() {
         Ok(value) => (value, String::new()),
-        Err(error) => (Widgets { enabled: [true; 2], policy: [true; 7], linked: [false; 7], supported: false, revision: String::new(), stacks: Vec::new(), bar: [0; 3], width: 80 }, error.to_string()),
+        Err(error) => (Widgets { enabled: [true; 2], policy: [true; 8], linked: [false; 8], supported: false, revision: String::new(), stacks: Vec::new(), bar: [0; 4], width: 80 }, error.to_string()),
     };
     let mut message = String::new();
     let mut page = 0;
@@ -310,7 +311,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 WIDGETS.iter().enumerate().filter(|(index, _)| widgets.supported && !widgets.policy[*index])
                     .map(|(index, _)| Control::Widget(index))
                     .chain((0..BAR_SETTINGS.len()).filter(|index| widgets.supported && !widgets.policy[index + 3]).map(Control::Bar))
-                    .chain((widgets.supported && !widgets.policy[6]).then_some(Control::BarWidth))
+                    .chain((widgets.supported && !widgets.policy[7]).then_some(Control::BarWidth))
                     .chain((0..CARD_MODULES.len()).map(Control::Card))
                     .chain((widgets.supported && widgets.policy.iter().any(|locked| !locked)).then_some(Control::Apply)).chain([Control::Cancel]).collect()
             } else { rows.iter().filter(|(id, _, _)| !readonly
@@ -380,7 +381,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                             format!("< {} >{}", labels[widgets.bar[index]], owner(index + 3))
                         } else { "Unavailable".to_owned() })));
                     entries.push((Control::BarWidth, "Bar Width".to_owned(), if widgets.supported {
-                        format!("< {}% >{}", widgets.width, owner(6))
+                        format!("< {}% >{}", widgets.width, owner(7))
                     } else { "Unavailable".to_owned() }));
                     entries.extend(CARD_MODULES.iter().enumerate().map(|(index, name)| {
                         let value = if !widgets.supported { "Unavailable".to_owned() }
@@ -396,8 +397,8 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     *table_state.offset_mut() = selected.unwrap_or(0).saturating_sub(utilities.height.saturating_sub(1) as usize);
                     frame.render_stateful_widget(Table::new(entries.into_iter().map(|(control, label, value)|
                         Row::new([Cell::from(label), Cell::from(value)]).style(if controls[focus] == control { focused }
-                            else if !widgets.supported || match control { Control::Widget(index) => widgets.policy[index], Control::Bar(index) => widgets.policy[index + 3], Control::BarWidth => widgets.policy[6], _ => widgets.policy[2] } { muted }
-                            else { Style::default() })), [Constraint::Length(21), Constraint::Min(20)]).column_spacing(1), utilities, &mut table_state);
+                            else if !widgets.supported || match control { Control::Widget(index) => widgets.policy[index], Control::Bar(index) => widgets.policy[index + 3], Control::BarWidth => widgets.policy[7], _ => widgets.policy[2] } { muted }
+                            else { Style::default() })), [Constraint::Length(25), Constraint::Min(20)]).column_spacing(1), utilities, &mut table_state);
                     frame.render_widget(Paragraph::new(widget_message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
                 } else {
                 frame.render_widget(Paragraph::new(vec![

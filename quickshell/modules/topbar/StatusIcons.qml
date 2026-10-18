@@ -38,6 +38,7 @@ Rectangle {
 
     signal popoutActivated(string page)
     signal mediaRequested()
+    signal keyboardRequested()
 
     function openingPage(page) {
         return Cards.containing(cardStacks, page)?.modules.find(name => (name !== "layout" || layoutsEnabled)
@@ -59,7 +60,7 @@ Rectangle {
         hoveredPage = page
     }
 
-    visible: cardStacks.length > 0
+    visible: cardStacks.length > 0 || Config.Settings.oskAccess === "topbar"
     implicitWidth: visible ? statusRow.implicitWidth + 9 : 0
     implicitHeight: 29
     radius: height / 2
@@ -105,7 +106,21 @@ Rectangle {
                     : page === "launcher" && root.backgroundCount > 0 ? "•" : ""
                 pulseToken: page === "notifications" ? root.notificationService.pulseToken : 0
                 onScrolled: delta => { if (page === "audio") root.adjustVolume(delta) }
+                onActivated: {
+                    const opening = root.openingPage(page)
+                    if (opening) root.popoutActivated(opening)
+                }
             }
+        }
+        StatusButton {
+            visible: Config.Settings.oskAccess === "topbar"
+            page: "keyboard"
+            icon: "󰌌"
+            colour: Theme.Palette.primary
+            Accessible.name: "Onscreen Keyboard"
+            Accessible.role: Accessible.Button
+            Accessible.onPressAction: root.keyboardRequested()
+            onActivated: root.keyboardRequested()
         }
     }
 
@@ -133,6 +148,7 @@ Rectangle {
         property int pulseToken: 0
 
         signal scrolled(real delta)
+        signal activated()
 
         implicitWidth: Math.max(badge.length > 0 ? 25 : 21, statusContent.implicitWidth + 8)
         implicitHeight: 22
@@ -257,10 +273,8 @@ Rectangle {
         }
 
         TapHandler {
-            onTapped: {
-                const page = root.openingPage(statusButton.page)
-                if (page) root.popoutActivated(page)
-            }
+            enabled: statusButton.visible
+            onTapped: statusButton.activated()
         }
 
         WheelHandler {

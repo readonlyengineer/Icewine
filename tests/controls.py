@@ -1891,6 +1891,7 @@ ShellRoot {
         function requestReboot() {}
         function requestShutdown() {}
     }
+    SignalSpy { id: keyboardActions; target: host; signalName: "keyboardRequested" }
     FileView { id: dark; path: Qt.resolvedUrl("palette-dark.json"); blockAllReads: true }
     FileView { id: light; path: Qt.resolvedUrl("palette-light.json"); blockAllReads: true }
     Window {
@@ -1926,6 +1927,7 @@ ShellRoot {
                 input.tryCompare(window, "active", true)
                 // Existing preference files acquire the defaults without losing booleans.
                 const file = Config.Settings.widgetsFile
+                file.blockWrites = true // Serialise fixture writes before explicit reloads.
                 file.setText(JSON.stringify({notificationToasts: false}))
                 file.reload()
                 input.tryCompare(Config.Settings, "notificationToasts", false)
@@ -1945,6 +1947,55 @@ ShellRoot {
                     input.compare(Config.Settings.barBehaviour, "always")
                     input.compare(Config.Settings.barLocation, "bottom")
                 }
+                input.compare(Config.Settings.oskAccess, "none")
+                for (const access of Cards.oskAccessModes) {
+                    file.setText(JSON.stringify({oskAccess: access}))
+                    file.reload()
+                    input.tryCompare(Config.Settings, "oskAccess", access)
+                }
+                file.setText(JSON.stringify({oskAccess: "invalid"}))
+                file.reload(); input.wait(30)
+                input.compare(Config.Settings.oskAccess, "topbar", "Bad saved input retains last good mode")
+                host.cardStacks = [{id: "osk", modules: ["launcher"]}]
+                host.currentPage = "launcher"
+                input.wait(40)
+                const launcher = host.cardFor("launcher")
+                for (const access of ["none", "launcher", "topbar"]) {
+                    file.setText(JSON.stringify({oskAccess: access}))
+                    file.reload(); input.tryCompare(Config.Settings, "oskAccess", access)
+                    host.openPage("launcher"); host.focusInitial()
+                    const search = launcher.initialFocus
+                    search.text = "osk"
+                    input.wait(30)
+                    const before = keyboardActions.count
+                    input.keyClick(Qt.Key_Return)
+                    input.compare(keyboardActions.count, before + (access === "launcher" ? 1 : 0))
+                }
+                file.setText(JSON.stringify({oskAccess: "launcher"}))
+                file.reload(); input.tryCompare(Config.Settings, "oskAccess", "launcher")
+                host.focusInitial(); launcher.initialFocus.text = "osk"; input.wait(30)
+                const before = keyboardActions.count
+                function findResults(item) {
+                    if (item instanceof ListView) return item
+                    for (const child of item.children ?? []) {
+                        const result = findResults(child)
+                        if (result) return result
+                    }
+                    return null
+                }
+                const results = findResults(launcher)
+                input.verify(results.currentItem !== null)
+                const touchAction = input.touchEvent(window)
+                touchAction.press(0, results.currentItem, 60, 20).commit()
+                touchAction.release(0, results.currentItem, 60, 20).commit()
+                input.compare(keyboardActions.count, before + 1, "Touch dispatches the real Launcher action")
+                host.focusInitial()
+                input.keyPress(Qt.Key_Return)
+                file.setText(JSON.stringify({oskAccess: "none"}))
+                file.reload(); input.tryCompare(Config.Settings, "oskAccess", "none")
+                input.keyRelease(Qt.Key_Return)
+                input.compare(keyboardActions.count, before + 1, "Mode change cancels armed Enter")
+                host.cardStacks = Qt.binding(() => Config.Settings.cardStacks)
                 const mixed = [{id: "mixed", modules: ["notifications", "layout", "audio", "launcher"]}]
                 file.setText(JSON.stringify({notificationToasts: false, cardStacks: mixed}))
                 file.reload()
@@ -2041,6 +2092,7 @@ STATUS_ICONS_QML = """import QtQuick
 import QtQuick.Window
 import QtTest
 import Quickshell
+import qs.config as Config
 import "icewine/modules/topbar" as Bar
 ShellRoot {
     Window {
@@ -2051,6 +2103,8 @@ ShellRoot {
             width: implicitWidth; height: implicitHeight
             notificationService: ({count: 1, highestUrgency: 1, doNotDisturb: false, pulseToken: 0})
             property string activated: ""
+            property int keyboardActions: 0
+            onKeyboardRequested: keyboardActions++
             onPopoutActivated: page => activated = page
         }
         TestCase { id: input; when: false }
@@ -2060,7 +2114,7 @@ ShellRoot {
         onTriggered: {
             try {
                 const row = icons.children.find(item => item.children.filter(child => child.page !== undefined).length > 0)
-                const buttons = row.children.filter(item => item.page !== undefined)
+                const buttons = row.children.filter(item => item.page !== undefined && item.visible)
                 input.compare(buttons.map(item => item.page).join(","), "launcher,media,audio,network,notifications,battery")
                 input.compare(icons.implicitWidth, row.implicitWidth + 9)
                 input.compare(icons.battery, null)
@@ -2085,6 +2139,31 @@ ShellRoot {
                 input.mouseWheel(audio, audio.width / 2, audio.height / 2, 0, 120)
                 input.tryCompare(icons.sink.audio, "muted", false)
                 input.verify(icons.sink.audio.volume > volume)
+                icons.cardStacks = []
+                input.verify(!icons.visible)
+                Config.Settings.widgetSelections = {oskAccess: "topbar"}
+                input.wait(30)
+                input.verify(icons.visible)
+                const keyboard = row.children.find(item => item.page === "keyboard")
+                input.verify(keyboard.visible)
+                input.compare(keyboard.Accessible.name, "Onscreen Keyboard")
+                input.compare(icons.implicitWidth, keyboard.width + 9)
+                icons.updateHoveredPage(keyboard.mapToItem(icons, keyboard.width / 2, keyboard.height / 2))
+                input.compare(icons.hoveredPage, "", "OSK action never previews a card")
+                input.mouseClick(keyboard, keyboard.width / 2, keyboard.height / 2)
+                input.compare(icons.keyboardActions, 1)
+                const touch = input.touchEvent(keyboard.Window.window)
+                touch.press(0, keyboard, 8, 8).commit()
+                touch.release(0, keyboard, 8, 8).commit()
+                input.compare(icons.keyboardActions, 2)
+                input.mousePress(keyboard, keyboard.width / 2, keyboard.height / 2)
+                Config.Settings.widgetSelections = {oskAccess: "none"}
+                input.wait(30)
+                input.mouseRelease(keyboard, keyboard.width / 2, keyboard.height / 2)
+                input.compare(icons.keyboardActions, 2, "Hidden action cancels pending mouse release")
+                input.verify(!icons.visible)
+                Config.Settings.widgetSelections = {oskAccess: "launcher"}
+                input.verify(!icons.visible)
                 console.log("STATUS_ICONS_CHECK_PASSED")
                 Qt.quit()
             } catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }

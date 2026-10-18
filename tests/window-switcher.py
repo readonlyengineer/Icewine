@@ -21,6 +21,7 @@ import Quickshell.Io
 import Quickshell.Services.Pam
 import qs.config as Config
 import "icewine/modules" as Modules
+import "icewine/modules/topbar" as Bar
 ShellRoot {
     id: shell
     Modules.SessionControl { id: mockSession; authenticationRequired: true }
@@ -31,8 +32,16 @@ ShellRoot {
         compositor: mockCompositor
         notificationService: mockNotifications
         session: mockSession
+        keyboard: mockKeyboard
         sessionLocked: mockSession.locked
         function focusedScreenName() { return "DP-1" } // Offscreen output has no name.
+    }
+    QtObject {
+        id: mockKeyboard
+        property bool busy: false
+        property int opens: 0
+        function hide() {}
+        function show() { opens++ }
     }
     Process {
         id: preferenceWriter
@@ -52,6 +61,9 @@ ShellRoot {
         signal configReloaded()
         function supress_mouse_binds(value) { suppressed = value }
         function activateWindow(address) { restored = address }
+        function activateToplevel(target) {
+            if (toplevels.includes(target)) { restored = target.address; activeWindowAddress = target.address }
+        }
         function monitorFor(screen) { return {focused:true} }
     }
     QtObject { id: ws1; property int id: 1; property string name: "1"; property var monitor: ({name: "DP-1"}) }
@@ -60,6 +72,30 @@ ShellRoot {
     QtObject { id: b; property string address: "0x2"; property string title: "Selected"; property var workspace: ws1; property var wayland: null }
     QtObject { id: c; property string address: "0x3"; property string title: "Third"; property var workspace: ws3; property var wayland: null }
     QtObject { id: d; property string address: "0x4"; property string title: "Fourth"; property var workspace: ws1; property var wayland: null }
+    Window {
+        id: keyboardActionWindow
+        visible: false
+        width: 420; height: 500
+        Bar.StatusIcons {
+            id: keyboardIcons
+            notificationService: notificationService
+            cardStacks: []
+            visible: topbar.barVisible
+            onKeyboardRequested: topbar.showKeyboard("topbar")
+        }
+        Bar.StatusPopout {
+            id: keyboardLauncher
+            y: 40; width: 400; height: 424
+            compositor: mockCompositor
+            notificationService: notificationService
+            cardStacks: [{id: "held-action", modules: ["launcher"]}]
+            currentPage: "launcher"
+            shown: topbar.ui.page === "launcher"
+            engaged: topbar.widgetEngaged
+            backgroundItems: []
+            onKeyboardRequested: topbar.showKeyboard("launcher")
+        }
+    }
     Window {
         id: window
         width: 420; height: 280; visible: true
@@ -289,6 +325,102 @@ ShellRoot {
                         compare(topbar.barVisible, behaviour === "always", "Unlock restores selected mode")
                     }
                 }
+                // Actual Topbar bindings/signals/timer; native layer focus remains a device check.
+                Config.Settings.widgetsFile.blockWrites = true
+                for (const mode of ["launcher", "topbar"]) {
+                    Config.Settings.widgetsFile.setText(JSON.stringify({oskAccess: mode, barBehaviour: "always"}))
+                    Config.Settings.widgetsFile.reload()
+                    tryCompare(Config.Settings, "oskAccess", mode)
+                    topbar.openWidget("launcher", true, "DP-1")
+                    const original = topbar.previousToplevel
+                    verify(original !== null)
+                    const count = mockKeyboard.opens
+                    topbar.showKeyboard(mode)
+                    verify(!topbar.widgetEngaged && !topbar.interactionActive && topbar.barVisible)
+                    tryCompare(mockKeyboard, "opens", count + 1)
+                    compare(mockCompositor.restored, original.address)
+                    compare(topbar.keyboardRequest, null)
+                    topbar.openWidget("launcher", true, "DP-1")
+                    topbar.showKeyboard(mode)
+                    topbar.sessionLocked = true
+                    wait(80)
+                    compare(mockKeyboard.opens, count + 1, "Lock cancels deferred desktop request")
+                    topbar.sessionLocked = Qt.binding(() => mockSession.locked)
+                    topbar.openWidget("launcher", true, "DP-1")
+                    topbar.showKeyboard(mode)
+                    Config.Settings.widgetSelections = {oskAccess: "none", barBehaviour: "always"}
+                    wait(80)
+                    compare(topbar.keyboardRequest, null)
+                    compare(mockKeyboard.opens, count + 1, "Mode change cancels pending request")
+                }
+                // Regression: real icon/result pointer handlers under default hold-to-show.
+                keyboardActionWindow.visible = true
+                keyboardActionWindow.requestActivate()
+                tryCompare(keyboardActionWindow, "active", true)
+                for (const mode of ["topbar", "launcher"]) for (const touch of [false, true]) {
+                    Config.Settings.widgetsFile.setText(JSON.stringify({oskAccess: mode, barBehaviour: "keyboard"}))
+                    Config.Settings.widgetsFile.reload()
+                    tryCompare(Config.Settings, "oskAccess", mode)
+                    tryCompare(Config.Settings, "barBehaviour", "keyboard")
+                    topbar.dismiss(false)
+                    topbar.barModifiersHeld = 1 // Native topbarModifier press stand-in.
+                    topbar.pressBar()
+                    let button
+                    if (mode === "launcher") {
+                        topbar.openWidget("launcher", true, "DP-1")
+                        tryVerify(() => keyboardLauncher.cardFor("launcher") !== null)
+                        keyboardLauncher.focusInitial()
+                        keyboardLauncher.cardFor("launcher").initialFocus.text = "osk"
+                        const results = descendants(keyboardLauncher, item => item instanceof ListView)[0]
+                        tryVerify(() => results.currentItem?.entry?.action === "keyboard")
+                        button = results.currentItem
+                    } else button = descendants(keyboardIcons, item => item.page === "keyboard")[0]
+                    verify(button.visible)
+                    wait(220) // Let popup reveal/row positioning finish before pointer delivery.
+                    const count = mockKeyboard.opens
+                    const original = topbar.previousToplevel
+                    if (touch) {
+                        const pointer = touchEvent(keyboardActionWindow)
+                        pointer.press(0, button, 8, 8).commit()
+                        pointer.release(0, button, 8, 8).commit()
+                    } else {
+                        mouseClick(button, 8, 8, Qt.LeftButton, Qt.MetaModifier)
+                    }
+                    if (!topbar.keyboardRequest) throw new Error("Held action dropped: " + mode + "/" + touch
+                        + " held=" + topbar.ui.held + " modifiers=" + topbar.barModifiersHeld
+                        + " previous=" + topbar.previousWindow)
+                    compare(topbar.keyboardRequest.window, original)
+                    verify(topbar.keyboardRequest.awaitingRelease)
+                    wait(80)
+                    compare(mockKeyboard.opens, count, "No keyboard while opening modifier is held")
+                    if (!touch) {
+                        topbar.releaseBar() // grave released first; Super remains down.
+                        wait(80)
+                        verify(topbar.keyboardRequest?.awaitingRelease)
+                        compare(mockKeyboard.opens, count)
+                    }
+                    topbar.barModifiersHeld = 0 // Native topbarModifier release stand-in.
+                    topbar.releaseBar()
+                    tryCompare(mockKeyboard, "opens", count + 1)
+                    compare(mockCompositor.restored, original.address)
+                    compare(topbar.keyboardRequest, null)
+                    topbar.releaseBar(); wait(40)
+                    compare(mockKeyboard.opens, count + 1, "Second release does not replay activation")
+                }
+                topbar.barModifiersHeld = 1
+                topbar.pressBar()
+                topbar.showKeyboard("launcher")
+                verify(topbar.keyboardRequest?.awaitingRelease)
+                const beforeLock = mockKeyboard.opens
+                topbar.sessionLocked = true
+                compare(topbar.keyboardRequest, null)
+                compare(topbar.barModifiersHeld, 0, "Lock cannot leave stale modifier ownership")
+                topbar.sessionLocked = Qt.binding(() => mockSession.locked)
+                topbar.releaseBar(); wait(80)
+                compare(mockKeyboard.opens, beforeLock, "Lock cancels held intent before release")
+                keyboardActionWindow.visible = false
+                window.requestActivate()
+                tryCompare(window, "active", true)
                 Config.Settings.widgetsFile.setText("{}")
                 Config.Settings.widgetsFile.reload()
                 tryCompare(Config.Settings, "barBehaviour", "keyboard")

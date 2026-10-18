@@ -138,3 +138,14 @@ assert.equal(search.applications([{ command: ["flatpak", "run", "--unknown",
 assert.equal(search.applications([{ command: [] }], "", true, shortcuts).length, 1)
 
 console.log("launcher search and Steam shortcut checks passed")
+
+for (const mode of ["none", "launcher", "topbar"]) {
+    for (const query of ["Onscreen", "virtual keyboard", "keyboard", "osk"]) {
+        const actions = search.applications(apps, query, false, [], mode).filter(entry => entry.action === "keyboard")
+        assert.equal(actions.length, mode === "launcher" ? 1 : 0)
+        if (actions.length) assert.equal(actions[0].name, "Onscreen Keyboard")
+    }
+}
+assert.equal(search.applications(apps, "osk", true, [], "launcher").length, 1)
+assert.equal(search.applications(apps, "osk").length, 0, "Shared handheld caller stays desktop-action free")
+console.log("OSK Launcher: named searchable action appears only in Launcher mode, independent of app filtering")

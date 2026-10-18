@@ -62,9 +62,10 @@ def selections(state):
     return theme.symlinked(path) is not None, saved | {"login": False}
 
 
-WIDGETS = ("notificationToasts", "windowSwitcher", "cardStacks", "barBehaviour", "barLocation", "barStyle", "barWidth")
+WIDGETS = ("notificationToasts", "windowSwitcher", "cardStacks", "barBehaviour", "barLocation", "barStyle", "barWidth", "oskAccess")
 BAR_CHOICES = {"barBehaviour": ("keyboard", "keyboard-mouse", "toggle", "always"),
-               "barLocation": ("above", "top", "bottom"), "barStyle": ("anchored", "floating")}
+               "barLocation": ("above", "top", "bottom"), "barStyle": ("anchored", "floating"),
+               "oskAccess": ("none", "launcher", "topbar")}
 
 
 def valid_widget(name, value):
