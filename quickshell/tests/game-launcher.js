@@ -62,6 +62,8 @@ for (const output of ["", "MainPID=1", "LoadState=loaded\nMainPID=no", "LoadStat
     assert.equal(launcher.steamServicePid(output), null)
 assert.equal(launcher.steamServicePid("LoadState=not-found\nMainPID=0\n"), 0)
 assert.equal(launcher.steamServicePid("MainPID=481\nLoadState=loaded\n"), 481)
+assert.doesNotMatch(source, /steamSplashVisible/, "Splash visibility has no duplicate writable state")
+const splashModel = source.match(/Variants \{\s*model: ([\s\S]*?)\n\n        FloatingWindow/)[1]
 const steamQueries = []
 const steamCommands = []
 const steamRoot = {
@@ -69,7 +71,6 @@ const steamRoot = {
     steamEnabled: true,
     gamescopeEnabled: true,
     steamLaunching: false,
-    steamSplashVisible: false,
     steamSplashScreen: "",
     pendingSteamCommand: null,
     steamAutostartRetries: 0,
@@ -89,7 +90,10 @@ const steamContext = vm.createContext({
         this.running = true
         steamQueries.push(Array.from(command))
     }},
-    Quickshell: { execDetached(command) { steamCommands.push(Array.from(command)) } },
+    Quickshell: {
+        screens: [{name: "eDP-1"}, {name: "HDMI-A-1"}],
+        execDetached(command) { steamCommands.push(Array.from(command)) }
+    },
     steamLaunchTimeout: { restart() { this.running = true }, stop() { this.running = false } },
     steamAutostartRetry: { restarts: 0, restart() { this.restarts++ }, stop() { this.running = false } },
     console,
@@ -121,10 +125,11 @@ steamContext.steamSessionProbe.running = false
 steamRoot.resolveSteamRequest("LoadState=not-found\nMainPID=0")
 assert.equal(steamRoot.steamAutostartRetries, 0)
 assert.equal(steamRoot.steamLaunching, true)
-assert.equal(steamRoot.steamSplashVisible, true)
+assert.deepEqual(Array.from(vm.runInContext(splashModel, steamContext), screen => screen.name), ["eDP-1"])
 assert.equal(steamRoot.steamSplashScreen, "eDP-1")
 assert.equal(steamCommands.length, 0, "Gamescope waits for the splash's first frame")
 assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).pending, true)
+steamRoot.startSteamProcess()
 steamRoot.startSteamProcess()
 assert.equal(steamCommands.length, 1, "The rendered splash starts exactly one session")
 assert.deepEqual(steamCommands[0].slice(0, 12),
@@ -132,7 +137,7 @@ assert.deepEqual(steamCommands[0].slice(0, 12),
         "-u", "icewine-steam-gamescope.service",
         "-p", "ExitType=main", "-p", "KillMode=control-group", "--", "gamescope"],
     "A stable UWSM service prevents duplicates and cleans up children when Gamescope exits")
-assert.equal(steamRoot.steamSplashVisible, true)
+assert.deepEqual(Array.from(vm.runInContext(splashModel, steamContext), screen => screen.name), ["eDP-1"])
 assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).pending, true,
     "The placeholder reserves the launch position until handoff or launch timeout")
 assert.equal(steamCommands.length, 1)
@@ -140,7 +145,7 @@ steamCompositor.toplevels = [existing]
 vm.runInContext(source.match(/onClosed: (.+)/)[1], steamContext)
 assert.equal(steamCompositor.activated, undefined, "Hyprland owns conditional focus handoff")
 assert.equal(steamRoot.steamLaunching, false, "Closing the placeholder clears launch state")
-assert.equal(steamRoot.steamSplashVisible, false)
+assert.equal(vm.runInContext(splashModel, steamContext).length, 0)
 assert.equal(steamContext.steamLaunchTimeout.running, false)
 assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).pending, true)
 steamContext.steamSessionProbe.running = false
@@ -233,11 +238,10 @@ assert.doesNotMatch(source, /GAMESCOPE_FOCUSED_APP_GFX|icewine-steam-session/,
     "Steam readiness no longer waits for an inner X11 property")
 
 steamRoot.gamescopeEnabled = false
-steamRoot.steamSplashVisible = false
 const ordinaryBefore = steamCommands.length
 assert.equal(JSON.parse(steamRoot.launchSteamGamescope()).ok, true)
 assert.deepEqual(steamCommands[ordinaryBefore], ["uwsm", "app", "--", "icewine-steam"])
-assert.equal(steamRoot.steamSplashVisible, false, "Ordinary Steam has no Gamescope splash")
+assert.equal(vm.runInContext(splashModel, steamContext).length, 0, "Ordinary Steam has no Gamescope splash")
 steamRoot.gamescopeEnabled = true
 
 // An outside singleton may reveal its ordinary window only after Gamescope starts.
@@ -256,7 +260,7 @@ for (const identity of ["com.valvesoftware.Steam", "steam"]) {
     steamCompositor.toplevels = [outer]
     steamRoot.handoffSteam()
     assert.equal(steamCompositor.activated, outer.address)
-    assert.equal(steamRoot.steamSplashVisible, false, "Outside Steam must dismiss the splash")
+    assert.equal(vm.runInContext(splashModel, steamContext).length, 0, "Outside Steam must dismiss the splash")
     assert.equal(steamRoot.steamLaunching, false)
     assert.equal(steamRoot.steamRequestPending, false)
     assert.equal(steamContext.steamLaunchTimeout.running, false)
@@ -275,7 +279,6 @@ for (const identity of ["com.valvesoftware.Steam", "steam"]) {
 steamCompositor.toplevels = []
 steamRoot.steamLaunching = true
 steamRoot.pendingSteamCommand = ["must-not-run"]
-steamRoot.steamSplashVisible = true
 steamCompositor.toplevels = [{address: "0xearly", wayland: {appId: "steam"}}]
 steamRoot.handoffSteam()
 steamRoot.startSteamProcess()
@@ -305,6 +308,22 @@ steamContext.steamSessionProbe.running = false
 steamRoot.resolveSteamRequest("LoadState=not-found\nMainPID=0")
 assert.equal(steamRoot.steamLaunching, true, "An exited cached session must allow a new launch")
 steamRoot.finishSteamLaunch()
+
+// A failed spawn and a late render callback must leave no splash or queued work.
+steamRoot.steamSplashScreen = "eDP-1"
+steamRoot.steamLaunching = true
+steamRoot.pendingSteamCommand = ["fixture-failed-spawn"]
+const execDetached = steamContext.Quickshell.execDetached
+steamContext.Quickshell.execDetached = () => { throw new Error("fixture spawn failure") }
+steamRoot.startSteamProcess()
+steamContext.Quickshell.execDetached = execDetached
+assert.equal(steamRoot.steamLaunching, false, "Failed spawn must finish the launch")
+assert.equal(vm.runInContext(splashModel, steamContext).length, 0)
+assert.equal(steamRoot.pendingSteamCommand, null)
+assert.equal(steamContext.steamLaunchTimeout.running, false)
+const afterFailure = steamCommands.length
+steamRoot.startSteamProcess()
+assert.equal(steamCommands.length, afterFailure, "Late render callbacks cannot revive a finished launch")
 
 steamRoot.steamEnabled = false
 assert.equal(JSON.parse(steamContext.launchSteamGamescope()).ok, false,

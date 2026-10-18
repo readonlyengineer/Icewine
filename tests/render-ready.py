@@ -46,19 +46,19 @@ ShellRoot {
         onTriggered: {
             renderTimer.stop()
             if (launcher.pendingSteamCommand !== null) { renderTimer.start(); return }
-            if (!launcher.steamLaunching || !launcher.steamSplashVisible)
+            if (!launcher.steamLaunching)
                 throw new Error("Missing launch state after the placeholder's first frame")
             if (!JSON.parse(launcher.launchSteamGamescope()).pending)
                 throw new Error("Repeated request was not guarded")
             if (root.launches === 0) {
                 // The running Flatpak singleton opens an outer window after splash startup.
                 compositor.toplevels = [{address: "0xouter", lastIpcObject: {class: "com.valvesoftware.Steam"}}]
-                keys.tryCompare(launcher, "steamSplashVisible", false)
+                keys.tryCompare(launcher, "steamLaunching", false)
                 if (launcher.steamLaunching || launcher.steamRequestPending
                         || launcher.pendingSteamCommand !== null || compositor.activated !== "0xouter")
                     throw new Error("Outside singleton did not complete the shared launch")
                 const reused = JSON.parse(launcher.launchSteamGamescope())
-                if (!reused.reused || !reused.outsideGamescope || launcher.steamSplashVisible)
+                if (!reused.reused || !reused.outsideGamescope || launcher.steamLaunching)
                     throw new Error("Visible outside session was not identified/reused")
                 launcher.steamRequestPending = true
                 launcher.steamGamescopePid = 481
@@ -74,12 +74,12 @@ ShellRoot {
                 compositor.toplevels = []
                 launcher.steamRequestPending = true
                 launcher.resolveSteamRequest("unavailable")
-                if (launcher.steamRequestPending || launcher.steamLaunching || launcher.steamSplashVisible)
+                if (launcher.steamRequestPending || launcher.steamLaunching)
                     throw new Error("Detection error retained launch state")
             } else {
                 launcher.finishSteamLaunch()
             }
-            if (launcher.steamLaunching || launcher.steamSplashVisible)
+            if (launcher.steamLaunching)
                 throw new Error("Teardown did not clear launch state")
             if (++root.launches === 2) {
                 console.log("RENDER_READY_PASSED")

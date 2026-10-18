@@ -17,7 +17,6 @@ Scope {
     readonly property var monitors: compositor.getMonitors().map(monitor => monitorRecord(monitor))
     property var monitorCapabilities: ({})
     property bool steamLaunching: false
-    property bool steamSplashVisible: false
     property string steamSplashScreen: ""
     property var pendingSteamCommand: null
     property int steamAutostartRetries: 0
@@ -125,7 +124,6 @@ Scope {
 
     function finishSteamLaunch() {
         root.steamLaunching = false
-        root.steamSplashVisible = false
         root.steamSplashScreen = ""
         root.pendingSteamCommand = null
         root.steamRequestPending = false
@@ -221,7 +219,6 @@ Scope {
 
         root.steamSplashScreen = plan.monitor.name
         root.steamLaunching = true
-        root.steamSplashVisible = true
         // The stable service prevents duplicates after QML's launch timeout.
         // Follow Gamescope's lifetime and clean up Steam when it exits;
         // UWSM otherwise defaults services to ExitType=cgroup.
@@ -321,7 +318,7 @@ Scope {
     }
 
     Variants {
-        model: root.steamSplashVisible
+        model: root.steamLaunching
             ? Quickshell.screens.filter(screen => screen.name === root.steamSplashScreen)
             : []
 
