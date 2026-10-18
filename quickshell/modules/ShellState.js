@@ -1,3 +1,5 @@
+.import "topbar/CardModules.js" as Cards
+
 // Only user intent lives here. Hover, animation and controller routing are
 // separate inputs, never alternative owners of widget lifetime.
 function initial() {
@@ -11,7 +13,7 @@ function reduce(state, event) {
     case "release":
         return Object.assign({}, state, { held: false })
     case "open":
-        if (!["switcher", "launcher", "audio", "network", "performance", "bluetooth", "battery", "media", "notifications", "screenshot", "layout"].includes(event.page))
+        if (event.page !== "switcher" && !Cards.modules.includes(event.page))
             return state
         // Hover can leave the window overview, but cannot replace an engaged popout.
         if (state.engaged && state.page !== "switcher" && !event.engaged)

@@ -87,18 +87,6 @@ vm.runInContext('flushLayoutRequest()', context)
 assert.match(context.layoutProcess.command[2], /select_autofullscreen\(1,"6e6577",false\)/)
 assert.throws(() => Layouts.status(text.replace('"autofullscreen":false', '"autofullscreen":"false"'), 1))
 assert.throws(() => Layouts.request(1, "31", null))
-// Layout shares the launcher's clamped placement, with no standalone status page.
-const topbar = fs.readFileSync(path.join(__dirname, "../modules/Topbar.qml"), "utf8")
-const launcher = topbar.slice(topbar.indexOf("id: launcher"), topbar.indexOf("id: switcher"))
-const position = launcher.match(/\n                    x: ([^\n]+)/)[1]
-for (const [x, expected] of [[500, 500], [-20, 8]])
-    assert.equal(vm.runInNewContext(position, {surface: {x}}), expected)
-const shown = launcher.match(/shown: ([^\n]+)/)[1]
-for (const page of ["launcher", "layout", "audio", ""])
-    for (const widgetHere of [false, true])
-        assert.equal(vm.runInNewContext(shown, {panel: {widgetHere}, root: {ui: {page}}}),
-            widgetHere && ["launcher", "layout"].includes(page))
-assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../modules/topbar/StatusPopout.qml"), "utf8"), /LayoutPicker|layoutPage/)
 // Event-driven refreshes execute the real adapter functions and handlers.
 const refreshContext = vm.createContext({Layouts, layoutActive: false, layoutWorkspaceId: 1,
     layoutStatus: null, layoutUnavailable: "", layoutRefreshPending: false,
@@ -180,6 +168,7 @@ assert.equal(refreshContext.layoutProcess.workspace, 1)
 complete(state)
 // Activity follows the selected, settled card on the owning monitor, even when
 // it was reached through stack navigation while ui.page still names Launcher.
+const topbar = fs.readFileSync(path.join(__dirname, "../modules/Topbar.qml"), "utf8")
 const activity = topbar.match(/readonly property bool layoutActive: ([\s\S]*?)\n    readonly property int barHeight/)[1]
 for (const layoutsEnabled of [false, true]) for (const sessionLocked of [false, true])
     for (const widgetHere of [false, true]) for (const layoutActive of [false, true]) {

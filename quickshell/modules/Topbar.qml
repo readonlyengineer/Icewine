@@ -11,6 +11,7 @@ import Quickshell.Services.Mpris
 import Quickshell.Wayland
 import "topbar" as Bar
 import "ShellState.js" as State
+import "topbar/CardModules.js" as Cards
 import qs.icewine.theme as Theme
 
 Scope {
@@ -56,7 +57,7 @@ Scope {
 
     Bar.ClipboardHistory {
         id: clipboardHistory
-        locked: root.sessionLocked
+        locked: root.sessionLocked || !Cards.containing(Config.Settings.cardStacks, "clipboard")
         onLoaded: request => root.clipboardLoaded(request)
         onBusyChanged: if (!busy && root.clipboardPaste?.phase === "loading" && error)
             root.cancelClipboardPaste()
@@ -101,7 +102,7 @@ Scope {
     function clipboardLoaded(request) {
         const intent = clipboardPaste
         if (!intent || intent.phase !== "loading" || intent.request !== request) return
-        if (!clipboardPasteValid() || ui.page !== "screenshot"
+        if (!clipboardPasteValid() || !Cards.containing(Config.Settings.cardStacks, "clipboard")?.modules.includes(ui.page)
                 || previousWindow !== intent.window.address) {
             cancelClipboardPaste()
             return
@@ -205,6 +206,7 @@ Scope {
     function openWidget(page, engaged, screenName) {
         if (sessionLocked || !screenName || (page === "layout" && !layoutsEnabled) || (page === "switcher" && !Config.Settings.windowSwitcher))
             return
+        if (page !== "switcher" && !Cards.containing(Config.Settings.cardStacks, page)) return
         cancelClipboardPaste()
         const next = State.reduce(ui, { type: "open", page: page, engaged: engaged, screen: screenName })
         if (next === ui) return
@@ -290,14 +292,12 @@ Scope {
         Qt.callLater(() => { if (media?.canRaise) media.raise() })
     }
 
-    onLayoutsEnabledChanged: if (!layoutsEnabled && ui.page === "layout")
-        openWidget("launcher", ui.engaged, ui.screen)
-
     onBarVisibleChanged: if (!barVisible) finishInteraction()
     onSessionLockedChanged: if (sessionLocked) { cancelClipboardPaste(); handoff() }
 
     Connections {
         target: Config.Settings
+        function onCardStacksChanged() { root.dismissWidget() }
         function onWindowSwitcherChanged() {
             if (!Config.Settings.windowSwitcher && root.ui.page === "switcher")
                 root.dismissWidget()
@@ -354,29 +354,18 @@ Scope {
         PanelWindow {
             id: panel
             required property var modelData
-            readonly property bool layoutActive: launcher.layoutActive
+            readonly property bool layoutActive: statusPopout.layoutActive
             readonly property bool widgetHere: root.ui.page !== "" && root.ui.screen === screen.name
             readonly property bool modal: root.radialVisible || root.widgetEngaged
             readonly property string keyboardScreen: root.widgetEngaged ? root.ui.screen : root.radial?.monitorName ?? ""
-            readonly property string hoverPage: logo.hovered ? "launcher"
-                : nowPlaying.hovered ? "media" : statusIcons.hoveredPage
-            readonly property bool widgetHovered: launcher.hovered || statusPopout.hovered
+            readonly property string hoverPage: statusIcons.hoveredPage
+            readonly property bool widgetHovered: statusPopout.hovered
 
             function focusWidget(openingPage) {
-                if (!widgetHere || !root.widgetEngaged)
-                    return
+                if (!widgetHere || !root.widgetEngaged) return
                 if (switcher.item) switcher.item.forceActiveFocus()
-                else if (launcher.shown) {
-                    if (openingPage === "launcher") launcher.openLauncher()
-                    else if (openingPage === "layout") launcher.openLayout()
-                    else launcher.focusInitial()
-                }
                 else {
-                    if (openingPage === "battery" || openingPage === "performance")
-                        statusPopout.openPowerPage(openingPage)
-                    else if (openingPage === "audio" || openingPage === "bluetooth")
-                        statusPopout.openAudioPage(openingPage)
-                    else if (openingPage === "screenshot") statusPopout.openCapturePage()
+                    if (openingPage) statusPopout.openPage(openingPage)
                     statusPopout.focusInitial()
                 }
             }
@@ -425,7 +414,6 @@ Scope {
                 Region { item: panel.modal && !root.oskVisible && !root.sessionLocked ? input : null }
                 Region { item: root.barVisible ? surface : null }
                 Region { item: switcher.active ? switcher : null }
-                Region { item: launcher.shown ? launcher : null }
                 Region { item: statusPopout.shown ? statusPopout : null }
             }
 
@@ -511,12 +499,6 @@ Scope {
                     Row {
                         anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
                         spacing: 4
-                        Bar.Logo {
-                            id: logo
-                            backgroundCount: launcher.backgroundCount
-                            backgroundAttention: launcher.backgroundAttention
-                            onActivated: root.openWidget("launcher", true, panel.screen.name)
-                        }
                         Bar.Workspaces { compositor: root.compositor; screen: panel.screen }
                     }
                     Bar.Clock { anchors.centerIn: parent; now: clock.date }
@@ -530,15 +512,14 @@ Scope {
                             height: 29
                             onClicked: root.toggleKeyboard()
                         }
-                        Bar.NowPlaying {
-                            id: nowPlaying
-                            player: root.player
-                            onPopoutActivated: root.openWidget("media", true, panel.screen.name)
-                            onMediaRequested: root.raiseMedia()
-                        }
                         Bar.StatusIcons {
                             id: statusIcons
                             notificationService: root.notificationService
+                            player: root.player
+                            layoutsEnabled: root.layoutsEnabled
+                            backgroundCount: statusPopout.backgroundCount
+                            backgroundAttention: statusPopout.backgroundAttention
+                            onMediaRequested: root.raiseMedia()
                             onPopoutActivated: page => root.openWidget(page, true, panel.screen.name)
                         }
                     }
@@ -553,32 +534,6 @@ Scope {
                     Behavior on opacity { NumberAnimation { duration: root.instantBarHide ? 0 : 140 } }
                 }
 
-                Bar.Launcher {
-                    id: launcher
-                    shadowDrop: root.shadowDrop
-                    layer.enabled: visible
-                    layer.effect: MultiEffect {
-                        shadowEnabled: !launcher.floatingCards
-                        shadowColor: "#000000"
-                        shadowOpacity: 0.35
-                        shadowBlur: 0.6
-                        blurMax: 16
-                        shadowVerticalOffset: root.shadowDrop
-                    }
-                    compositor: root.compositor
-                    layoutsEnabled: root.layoutsEnabled
-                    excludeSteamApps: root.excludeSteamApps
-                    shown: panel.widgetHere && ["launcher", "layout"].includes(root.ui.page)
-                    animateClose: !root.instantBarHide && !root.sessionLocked
-                    engaged: root.widgetEngaged
-                    x: Math.max(8, surface.x)
-                    y: root.barHeight + 4
-                    width: Math.min(implicitWidth, panel.width - 16)
-                    height: Math.min(implicitHeight, panel.height - y - 8)
-                    onEngageRequested: root.engageWidget()
-                    onDismissRequested: root.dismissWidget()
-                    onHandoffRequested: root.handoff()
-                }
                 Loader {
                     id: switcher
                     active: Config.Settings.windowSwitcher === true && panel.widgetHere && root.ui.page === "switcher" && !root.sessionLocked
@@ -605,7 +560,7 @@ Scope {
                         blurMax: 16
                         shadowVerticalOffset: root.shadowDrop
                     }
-                    shown: panel.widgetHere && !["launcher", "layout", "switcher"].includes(root.ui.page)
+                    shown: panel.widgetHere && root.ui.page !== "switcher"
                     animateClose: !root.instantBarHide && !root.sessionLocked
                     engaged: root.widgetEngaged
                     Binding {
@@ -618,8 +573,10 @@ Scope {
                     x: Math.max(8, Math.min(surface.x + surface.width - width,
                         panel.width - width - 8))
                     y: root.barHeight + 4
-                    width: Math.min(380, panel.width - 16)
+                    width: Math.min(implicitWidth, panel.width - 16)
                     height: Math.min(implicitHeight, panel.height - y - 8)
+                    layoutsEnabled: root.layoutsEnabled
+                    excludeSteamApps: root.excludeSteamApps
                     compositor: root.compositor
                     notificationService: root.notificationService
                     session: root.session

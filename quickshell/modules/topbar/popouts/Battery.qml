@@ -7,6 +7,7 @@ import qs.icewine.theme as Theme
 
 Flickable {
     id: root
+    property color accent: Theme.Palette.primary
 
     required property var powerState
     required property var session
@@ -52,7 +53,7 @@ Flickable {
 
         Text {
             text: "Power"
-            color: root.stateColour
+            color: root.accent
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true

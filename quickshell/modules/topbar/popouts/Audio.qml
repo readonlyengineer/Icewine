@@ -7,6 +7,7 @@ import qs.icewine.theme as Theme
 
 Flickable {
     id: root
+    property color accent: Theme.Palette.primary
 
     readonly property Item initialFocus: outputMute
     readonly property var sink: Pipewire.defaultAudioSink
@@ -35,7 +36,7 @@ Flickable {
 
         Text {
             text: "Audio"
-            color: Theme.Palette.tertiary
+            color: root.accent
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true

@@ -3,6 +3,7 @@
 import importlib.machinery
 import io
 import os
+import shutil
 from pathlib import Path
 from qml_fixture import theme_fixture
 import subprocess
@@ -54,8 +55,7 @@ if "--qml" not in sys.argv:
                        env=os.environ | env | {"HYPRLAND_INSTANCE_SIGNATURE": "fixture"}, check=True)
     print("PASS layout CLI: persistent fallback, validation and saved-but-failed delivery")
 
-# Reuse the existing controls.py offscreen QtTest pattern for the picker. This
-# fixture has no metrics, DBus clients or compositor adapter/processes.
+# Exercise the picker and shared host against the real adapter, with native IPC replaced.
 if "--qml" in sys.argv:
     import json
     import re
@@ -70,10 +70,40 @@ ShellRoot {
     id: root
     property var calls: []
     property int queries: 0
+    property bool hostOwnsLayout: false
     Adapters.Hyprland { id: backend }
     Connections {
         target: backend.layoutProcess
         function onRunningChanged() { if (backend.layoutProcess.running) ++root.queries }
+    }
+    Binding {
+        target: backend
+        property: "layoutActive"
+        value: host.layoutActive
+        when: root.hostOwnsLayout
+    }
+    function checkHostedRefresh() {
+        keys.compare(backend.layoutStatus, null)
+        keys.compare(backend.layoutAvailable, false)
+        const before = root.queries
+        root.hostOwnsLayout = true
+        host.shown = true
+        keys.tryCompare(host, "layoutActive", true)
+        keys.tryCompare(backend, "layoutAvailable", true)
+        keys.compare(root.queries, before + 1)
+        // Activity must stay true while a real action disables picker availability.
+        backend.selectLayout("master")
+        keys.tryCompare(backend, "layoutPending", true)
+        keys.compare(host.layoutActive, true)
+        keys.tryCompare(backend, "layoutPending", false)
+        keys.tryCompare(root, "queries", before + 3)
+        keys.tryCompare(backend.layoutProcess, "running", false)
+        keys.compare(backend.layoutAvailable, true)
+        keys.compare(host.layoutActive, true)
+        host.shown = false
+        keys.tryCompare(host, "layoutActive", false)
+        keys.compare(backend.layoutStatus, null)
+        console.log("LAYOUT_HOST_PASSED")
     }
     function checkRefresh() {
         keys.wait(850)
@@ -123,6 +153,14 @@ ShellRoot {
         width: 380; height: 300
         color: Theme.Palette.backgroundDark
         Bar.LayoutPicker { id: picker; width: parent.width; compositor: compositor }
+        Bar.StatusPopout {
+            id: host
+            compositor: backend
+            currentPage: "layout"
+            cardStacks: [{id: "layout", modules: ["layout"]}]
+            shown: false
+            anchors.fill: parent
+        }
         TestCase { id: keys; when: false }
     }
     function named(item, name) {
@@ -199,6 +237,7 @@ ShellRoot {
                 window.requestActivate()
                 keys.tryCompare(window, "active", true)
                 root.checkRefresh()
+                root.checkHostedRefresh()
                 root.checkPreviews()
                 const button = root.named(picker, "Dwindle layout")
                 if (!button || !button.enabled) throw new Error("Missing enabled choice")
@@ -235,6 +274,7 @@ ShellRoot {
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "icewine").mkdir()
+            shutil.copytree(source / "quickshell/config", root / "config")
             (root / "icewine/modules").symlink_to(source / "quickshell/modules")
             (root / "icewine/theme").symlink_to(root / "theme")
             # Replace only the native focus input; execute the real adapter/Process lifecycle.
@@ -257,6 +297,7 @@ ShellRoot {
             (root / "shell.qml").write_text(qml)
             env = os.environ | {"QT_QPA_PLATFORM": "offscreen", "XDG_CACHE_HOME": str(root / "cache"),
                                 "XDG_RUNTIME_DIR": str(root / "runtime"), "XDG_CONFIG_HOME": fixture_config,
+                                "XDG_STATE_HOME": str(root / "state"), "ICEWINE_WIDGET_POLICY": "{}",
                                 "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(root / "no-bus"),
                                 "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=" + str(root / "no-system-bus"),
                                 "HYPRLAND_INSTANCE_SIGNATURE": "", "WAYLAND_DISPLAY": "",
@@ -264,6 +305,6 @@ ShellRoot {
             result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
                                     capture_output=True, text=True, timeout=10)
             output = result.stdout + result.stderr
-            assert result.returncode == 0 and "LAYOUT_PICKER_PASSED" in output and "LAYOUT_REFRESH_PASSED" in output, output
+            assert result.returncode == 0 and "LAYOUT_PICKER_PASSED" in output and "LAYOUT_REFRESH_PASSED" in output and "LAYOUT_HOST_PASSED" in output, output
             assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
-    print("PASS actual QML adapter: disabled startup, coalesced focus, action completion, reopen and hidden lifetime; picker: four rendered previews at 380/320px, dark/light, unselected/selected/focused/disabled; keyboard choice/toggle, external state, pending/unavailable")
+    print("PASS actual QML adapter: disabled startup, coalesced focus, action completion, reopen and hidden lifetime; shared host cold status and pending action; picker: four rendered previews at 380/320px, dark/light, unselected/selected/focused/disabled; keyboard choice/toggle, external state, pending/unavailable")

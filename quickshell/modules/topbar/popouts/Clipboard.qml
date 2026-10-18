@@ -6,6 +6,7 @@ import qs.icewine.theme as Theme
 
 Item {
     id: root
+    property color accent: Theme.Palette.primary
     required property var history
     property bool pasteBusy: false
     readonly property Item initialFocus: clear
@@ -23,7 +24,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: "Clipboard"
             textFormat: Text.PlainText
-            color: Theme.Palette.tertiary
+            color: root.accent
             font { family: "JetBrainsMono Nerd Font"; pixelSize: 15; bold: true }
         }
         ActionButton {

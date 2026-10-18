@@ -3,7 +3,11 @@ const assert = require("node:assert/strict")
 const fs = require("node:fs")
 const path = require("node:path")
 const vm = require("node:vm")
-const State = require("../modules/ShellState.js")
+const Cards = require("../modules/topbar/CardModules.js")
+// Execute the QML script with its real registry import supplied to Node's VM.
+const State = vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../modules/ShellState.js"), "utf8")
+    .replace(/^\.import "topbar\/CardModules\.js" as Cards\n/, "") + "\nmodule.exports",
+    {Cards, module: {exports: {}}})
 const Menu = require("../deck/DeckMenu.js")
 
 // Guard the scene's input boundary as well as the controller below. Qt's real
@@ -14,6 +18,15 @@ assert.match(barBackground, /MouseArea\s*\{\s*anchors\.fill: parent\s*acceptedBu
     "Bar background must catch clicks beneath its controls, before outside-dismiss")
 assert.match(barBackground, /onWheel: event => event\.accepted = true/,
     "Bar background must consume scrolling rather than passing it underneath")
+
+const mask = topbar.match(/mask: Region \{([\s\S]*?)^            \}/m)[1]
+assert.match(mask, /statusPopout\.shown \? statusPopout : null/, "Shared host supplies its input region")
+assert.doesNotMatch(mask, /\blauncher\b/, "Removed launcher cannot leave a dangling input-region binding")
+
+const clipboardLock = topbar.match(/^        locked: ([^\n]+)$/m)[1]
+for (const [locked, stacks, expected] of [[false, Cards.defaults, false], [true, Cards.defaults, true], [false, [], true]])
+    assert.equal(vm.runInNewContext(clipboardLock, {root: {sessionLocked: locked}, Cards,
+        Config: {Settings: {cardStacks: stacks}}}), expected, "Clipboard collection stops when locked or disabled")
 
 // Media-key IPC uses the panel's selection and respects player capabilities.
 const media = vm.createContext({Mpris: {players: {values: []}}, root: {}})
@@ -105,6 +118,7 @@ function controller(file, properties) {
 
 const callbacks = [], focused = [], focusRequests = []
 const shell = controller("../modules/Topbar.qml", {
+    Cards, Config: {Settings: {cardStacks: Cards.defaults, windowSwitcher: true}},
     keyboard: null, State, focusWidgetRequested: (...args) => focusRequests.push(args), ui: State.initial(), hoveredScreen: "", sessionLocked: false,
     interactionActive: false, previousWindow: "", previousToplevel: null, focusGeneration: 0, widgetFocusGeneration: 0,
     clipboardPaste: null,
@@ -114,6 +128,22 @@ const shell = controller("../modules/Topbar.qml", {
     Qt: {callLater: fn => callbacks.push(fn)}
 })
 const flush = () => { while (callbacks.length) callbacks.shift()() }
+for (const page of Cards.modules) {
+    shell.Config.Settings.cardStacks = [{id: "standalone", modules: [page]}]
+    for (const engaged of [false, true]) {
+        shell.dismissWidget()
+        focusRequests.length = 0
+        shell.openWidget(page, engaged, "external")
+        flush()
+        assert.equal(shell.ui.page, page, `${page}: real controller admits every registered standalone card`)
+        assert.equal(shell.ui.engaged, engaged)
+        assert.deepEqual(focusRequests, engaged ? [["external", page]] : [])
+    }
+}
+shell.Config.Settings.cardStacks = Cards.defaults
+shell.dismissWidget()
+flush()
+focusRequests.length = 0
 for (let repeat = 0; repeat < 2; ++repeat) {
     shell.openWidget("launcher", true, "external")
     flush()
@@ -141,6 +171,16 @@ for (const method of ["dismissWidget", "dismiss"]) {
     assert.deepEqual(focusRequests, [["external", "launcher"]],
         "Reopening the same target cannot revive its dismissed request")
 }
+shell.dismissWidget()
+shell.Config.Settings.cardStacks = []
+shell.openWidget("launcher", true, "external")
+assert.equal(shell.ui.page, "", "Disabled modules cannot be entered through the shared boundary")
+shell.Config.Settings.cardStacks = [{id: "mixed", modules: ["clipboard", "audio"]}]
+shell.openWidget("audio", true, "external")
+assert.equal(shell.ui.page, "audio", "Direct module entry resolves configured membership")
+shell.Config.Settings.cardStacks = Cards.defaults
+shell.dismissWidget()
+flush()
 focusRequests.length = 0
 shell.openWidget("launcher", true, "external")
 shell.sessionLocked = true
@@ -167,17 +207,17 @@ flush()
 const panelFocus = topbar.match(/            function focusWidget\(openingPage\) \{[\s\S]*?^            \}/m)[0]
 const routes = []
 const panel = vm.createContext({widgetHere: true, root: {widgetEngaged: true},
-    switcher: {item: null}, launcher: {shown: true,
-        openLayout: () => routes.push("layout"), openLauncher: () => routes.push("open"), focusInitial: () => routes.push("restore")},
-    statusPopout: {focusInitial: () => routes.push("status")}})
+    switcher: {item: null}, statusPopout: {
+        openPage: page => routes.push(page), focusInitial: () => routes.push("restore")}})
 vm.runInContext(panelFocus, panel)
 panel.focusWidget("launcher")
 panel.focusWidget("")
 panel.focusWidget("layout")
-assert.deepEqual(routes, ["open", "restore", "layout"], "Panel routes explicit card entry and ordinary focus restoration")
+assert.deepEqual(routes, ["launcher", "restore", "restore", "layout", "restore"],
+    "Every module uses the shared entry and ordinary restoration preserves selection")
 panel.widgetHere = false
 panel.focusWidget("layout")
-assert.equal(routes.length, 3, "Another monitor cannot take Layout focus")
+assert.equal(routes.length, 5, "Another monitor cannot take Layout focus")
 shell.layoutsEnabled = false
 shell.openWidget("layout", true, "external")
 flush()
@@ -371,11 +411,11 @@ shell.Quickshell = {execDetached() {}}
 const originalPasteWindow = {address: "paste-target", lastIpcObject: {stableId: "1abc"}}
 shell.compositor.toplevels = [originalPasteWindow]
 shell.compositor.activeWindowAddress = originalPasteWindow.address
-const preparePaste = () => {
+const preparePaste = (page = "screenshot") => {
     shell.clipboardPaste = null
     shell.sessionLocked = false
     shell.interactionActive = false
-    shell.openWidget("screenshot", true, "external")
+    shell.openWidget(page, true, "external")
     flush()
     shell.pasteClipboard("epoch:7")
     assert.equal(shell.clipboardPaste.phase, "loading")
@@ -395,6 +435,32 @@ shell.deliverClipboardPaste()
 assert.equal(shell.pasteDelivery.running, false, "A duplicate completion/timer cannot paste twice")
 shell.clipboardLoaded(pasteRequest)
 assert.equal(shell.pasteDelivery.running, false)
+for (const [page, modules] of [["audio", ["audio", "clipboard"]], ["clipboard", ["clipboard"]]]) {
+    shell.Config.Settings.cardStacks = [{id: "regrouped", modules}]
+    pasteRequest = preparePaste(page)
+    shell.clipboardLoaded(pasteRequest + 1)
+    assert.equal(shell.clipboardPaste.phase, "loading", "Unmatched completion cannot hand off a regrouped clipboard")
+    shell.clipboardLoaded(pasteRequest)
+    assert.equal(shell.ui.page, "", `${page}: clipboard membership permits ordinary focus handoff`)
+    flush()
+    assert.equal(focused.at(-1), originalPasteWindow)
+    shell.deliverClipboardPaste()
+    assert.equal(shell.pasteDelivery.running, true)
+    assert.deepEqual(Array.from(shell.pasteDelivery.command), ["icewine-clipboard", "paste", "1abc", ...shell.clipboardHistory.selection])
+    shell.pasteDelivery.running = false
+    shell.deliverClipboardPaste()
+    assert.equal(shell.pasteDelivery.running, false, "Regrouped clipboard delivers once")
+}
+for (const stacks of [[{id: "audio", modules: ["audio"]}], Cards.defaults]) {
+    shell.Config.Settings.cardStacks = [{id: "mixed", modules: ["audio", "clipboard"]}]
+    pasteRequest = preparePaste("audio")
+    shell.Config.Settings.cardStacks = stacks
+    shell.clipboardLoaded(pasteRequest)
+    flush()
+    assert.equal(shell.clipboardPaste, null, "Removing or moving clipboard from the current stack cancels paste")
+    assert.equal(shell.pasteDelivery.running, false)
+}
+shell.Config.Settings.cardStacks = Cards.defaults
 for (const invalidate of [
     () => {shell.sessionLocked = true},
     () => {shell.focusGeneration++},

@@ -2,100 +2,115 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Window
+import QtQuick.Controls
 import Quickshell
+import Quickshell.Services.SystemTray
+import qs.config as Config
+import "CardModules.js" as Cards
 import "popouts" as Popouts
 import qs.icewine.theme as Theme
 
+// One host per output. Module loaders retain asynchronous ownership after first use.
 Widget {
     id: root
-    floatingCards: currentItem?.stacked ?? false
-
     required property var compositor
-    required property var notificationService
-    required property var session
-    required property var player
-    required property var powerState
-    required property var metrics
-    required property string monitorName
+    property var notificationService: null
+    property var session: null
+    property var player: null
+    property var powerState: null
+    property var metrics: null
+    property string monitorName: ""
     property var clipboardHistory: null
     property bool pasteBusy: false
-
-    MonitorBrightness {
-        id: monitorBrightness
-        monitorName: root.monitorName
-        active: powerCard.active && !root.powerEntryPending
-    }
+    property bool excludeSteamApps: false
+    property bool layoutsEnabled: true
+    property var backgroundItems: SystemTray.items.values
+    readonly property int backgroundCount: backgroundItems.length
+    readonly property bool backgroundAvailable: backgroundCount > 0
+    readonly property bool backgroundAttention: backgroundItems.some(item => item.status === Status.NeedsAttention)
+    property var cardStacks: Config.Settings.cardStacks
     property string currentPage: "audio"
-    readonly property bool powerPage: currentPage === "battery" || currentPage === "performance"
-    readonly property bool audioPage: currentPage === "audio" || currentPage === "bluetooth"
-    readonly property Item currentItem: audioPage ? audioStack : powerPage ? powerStack
-        : currentPage === "screenshot" ? captureStack
-        : currentPage === "network" ? networkLoader.item : pageLoader.item
-    property bool powerEntryPending: true
-    onCurrentPageChanged: {
-        powerEntryPending = true
-        if (powerEntry) powerEntry.restart()
-        if (audioEntry) audioEntry.restart()
-        if (captureEntry) captureEntry.restart()
-    }
-    onShownChanged: if (shown && powerEntry) {
-        powerEntryPending = true
-        powerEntry.restart()
-        audioEntry.restart()
-        captureEntry.restart()
-    }
-    Component.onCompleted: { powerEntry.restart(); audioEntry.restart(); captureEntry.restart() }
+    readonly property var configuration: Cards.containing(cardStacks, currentPage)
+    readonly property var modules: configuration?.modules ?? []
+    readonly property var availableModules: modules.filter(name => (name !== "layout" || layoutsEnabled)
+        && (name !== "background" || backgroundAvailable))
+    readonly property alias currentItem: stack
+    readonly property bool layoutActive: cardFor("layout")?.layoutActive ?? false
+    floatingCards: stack.stacked
+    implicitWidth: stack.implicitWidth
+    implicitHeight: Math.min(620, stack.implicitHeight)
+    width: implicitWidth
+    height: implicitHeight
 
-    Timer {
-        id: captureEntry
-        interval: 0
-        onTriggered: root.openCapturePage()
-    }
-
-    function openCapturePage() {
-        if (root.currentPage === "screenshot" && root.shown) captureStack.resetSelection()
-    }
-
-    // Wait for page visibility/enabled bindings before selecting; never poll.
-    Timer {
-        id: powerEntry
-        interval: 0
-        onTriggered: if (root.powerPage) root.openPowerPage(root.currentPage)
-    }
-
-    function openPowerPage(page) {
-        if (!root.powerPage || !root.visible || !root.enabled) return
-        powerEntryPending = true
-        powerStack.resetSelection()
-        if (page === "performance") powerStack.selectCard(1)
-        powerEntryPending = false
-    }
-    Timer {
-        id: audioEntry
-        interval: 0
-        onTriggered: if (root.audioPage) root.openAudioPage(root.currentPage)
-    }
-
-    function openAudioPage(page) {
-        if (!root.audioPage || !root.visible || !root.enabled) return
-        audioStack.resetSelection()
-        if (page === "bluetooth") audioStack.selectCard(1)
-    }
     signal mediaRequested()
     signal instantHandoffRequested()
     signal pasteRequested(string entry)
 
+    property var loadedCards: ({})
+    function cardFor(name) {
+        return loadedCards[name] ?? null
+    }
     function focusInitial() {
         root.forceActiveFocus(Qt.ShortcutFocusReason)
-        root.currentItem?.initialFocus?.forceActiveFocus(Qt.ShortcutFocusReason)
+        stack.initialFocus?.forceActiveFocus(Qt.ShortcutFocusReason)
     }
+    property var selections: ({})
+    property string openedStackId: ""
+    property bool restoreEntry: false
+    function rememberSelection() {
+        if (!entryPending && configuration && availableModules[stack.selectedCard])
+            selections = Object.assign({}, selections, {[configuration.id]: availableModules[stack.selectedCard]})
+    }
+    function openPage(page, restore = false) {
+        if (!shown || !stack.visible || !stack.enabled) return
+        const target = restore ? selections[configuration?.id] ?? page : page
+        entryPending = true
+        stack.resetSelection()
+        const index = availableModules.indexOf(target)
+        if (index > 0) stack.selectCard(index)
+        openedStackId = configuration?.id ?? ""
+        entryPending = false
+        rememberSelection()
+        if (engaged) focusInitial()
+    }
+    // Preserve existing explicit opening intents, including IPC calls.
+    function openLauncher() {
+        openPage("launcher")
+    }
+    function openLayout() {
+        openPage("layout")
+    }
+    function openPowerPage(page) {
+        currentPage = page
+        openPage(page)
+    }
+    function openAudioPage(page) {
+        currentPage = page
+        openPage(page)
+    }
+    function openCapturePage() {
+        openPage("screenshot")
+    }
+    property bool entryPending: true
+    onCurrentPageChanged: {
+        restoreEntry = configuration?.id !== openedStackId
+        entryPending = true
+        entry.restart()
+    }
+    onShownChanged: if (shown && entryPending) entry.restart()
+    onAvailableModulesChanged: {
+        restoreEntry = configuration?.id !== openedStackId
+        entryPending = true
+        entry.restart()
+    }
+    Component.onCompleted: entry.restart()
+    Timer { id: entry; interval: 0; onTriggered: root.openPage(root.currentPage, root.restoreEntry) }
 
     function revealFocus() {
         const item = root.Window.window?.activeFocusItem
         let page = item
-        while (page && page !== root.currentItem) page = page.parent
-        if (!root.visible || !root.enabled || !page || item === page)
-            return
+        while (page && page !== stack) page = page.parent
+        if (!root.visible || !root.enabled || !page || item === page) return
         for (let scroll = item.parent; scroll; scroll = scroll.parent) {
             if (scroll instanceof Flickable && scroll.height > 0) {
                 const top = item.mapToItem(scroll.contentItem, 0, 0).y
@@ -105,225 +120,173 @@ Widget {
                 scroll.contentY = Math.max(scroll.originY, Math.min(target,
                     scroll.originY + Math.max(0, scroll.contentHeight - scroll.height)))
             }
-            if (scroll === root.currentItem) break
+            if (scroll === stack) break
         }
     }
-
     onHeightChanged: Qt.callLater(root.revealFocus)
     Connections {
         target: root.Window.window
         function onActiveFocusItemChanged() { Qt.callLater(root.revealFocus) }
     }
-
     function capture(command) {
         instantHandoffRequested()
-        // Hide the popout before Flameshot captures the screen.
         Qt.callLater(() => Quickshell.execDetached(command))
     }
 
-    width: 380
-    implicitHeight: Math.min(620, root.currentItem?.implicitHeight ?? 0)
-
-    CardStack {
-        shadowDrop: root.shadowDrop
-        shadowHost: root.cardShadowHost
-        anchors.fill: parent
-        cards: [pageCard]
-        visible: !root.audioPage && !root.powerPage && !["network", "screenshot"].includes(root.currentPage)
-        Card {
-            id: pageCard
-            stack: parent
-            implicitHeight: pageLoader.item?.implicitHeight ?? 0
-            initialFocus: pageLoader.item?.initialFocus ?? null
-            Loader {
-                id: pageLoader
-                anchors.fill: parent
-                active: root.visible && !root.audioPage && !root.powerPage && !["network", "screenshot"].includes(root.currentPage)
-                sourceComponent: root.currentPage === "media" ? mediaPage
-                    : root.currentPage === "notifications" ? notificationsPage : null
-            }
-        }
+    MonitorBrightness {
+        id: monitorBrightness
+        monitorName: root.monitorName
+        active: !root.entryPending && (root.cardFor("battery")?.active ?? false)
     }
     CardStack {
-        id: captureStack
+        id: stack
         shadowDrop: root.shadowDrop
         shadowHost: root.cardShadowHost
         anchors.fill: parent
-        visible: root.currentPage === "screenshot"
-        cards: [screenshotCard, clipboardCard]
-        Card {
-            id: screenshotCard
-            stack: captureStack
-            accessibleName: "Screenshot card"
-            implicitHeight: screenshotLoader.item?.implicitHeight ?? 0
-            initialFocus: screenshotLoader.item?.initialFocus ?? selector
-            Loader {
-                id: screenshotLoader
-                anchors.fill: parent
-                active: root.visible && root.currentPage === "screenshot"
-                enabled: screenshotCard.active
-                sourceComponent: screenshotPage
-            }
-        }
-        Card {
-            id: clipboardCard
-            stack: captureStack
-            index: 1
-            accessibleName: "Clipboard card"
-            implicitHeight: clipboardLoader.item?.implicitHeight ?? 0
-            initialFocus: clipboardLoader.item?.initialFocus?.enabled ? clipboardLoader.item.initialFocus : selector
-            Loader {
-                id: clipboardLoader
-                anchors.fill: parent
-                active: root.visible && root.currentPage === "screenshot" && root.clipboardHistory !== null
-                enabled: clipboardCard.active
-                sourceComponent: Popouts.Clipboard {
-                    history: root.clipboardHistory
-                    pasteBusy: root.pasteBusy
-                    onPasteRequested: entry => root.pasteRequested(entry)
+        onSelectedCardChanged: root.rememberSelection()
+        cards: root.availableModules.map(name => root.cardFor(name)).filter(card => card !== null)
+        available: visible && enabled && !(cards[selectedCard]?.navigationBlocked ?? false)
+        // A pending password owns focus without enabling the other cards.
+        initialFocus: cards[selectedCard]?.navigationBlocked ? cards[selectedCard].initialFocus
+            : exchanging ? motionInitialFocus : cards[selectedCard]?.initialFocus ?? null
+        Repeater {
+            id: moduleCards
+            model: Cards.modules
+            delegate: Loader {
+                id: moduleLoader
+                required property string modelData
+                readonly property int configuredIndex: root.modules.indexOf(modelData)
+                readonly property int cardIndex: root.availableModules.indexOf(modelData)
+                readonly property color accent: [Theme.Palette.primary, Theme.Palette.secondary,
+                    Theme.Palette.tertiary][Math.max(0, configuredIndex) % 3]
+                active: root.availableModules.includes(modelData)
+                sourceComponent: modelData === "launcher" ? launcherCard
+                    : modelData === "layout" ? layoutCard : contentCard
+                onLoaded: {
+                    active = true
+                    item.parent = stack
+                    root.loadedCards = Object.assign({}, root.loadedCards, {[modelData]: item})
+                    entry.restart()
+                }
+                Component {
+                    id: launcherCard
+                    LauncherCard {
+                        stack: stack
+                        index: moduleLoader.cardIndex
+                        visible: index >= 0
+                        accent: moduleLoader.accent
+                        accessibleName: "Launcher card"
+                        engaged: root.engaged
+                        excludeSteamApps: root.excludeSteamApps
+                        onHandoffRequested: root.handoffRequested()
+                    }
+                }
+                Component {
+                    id: layoutCard
+                    LayoutCard {
+                        stack: stack
+                        index: moduleLoader.cardIndex
+                        visible: index >= 0
+                        accent: moduleLoader.accent
+                        compositor: root.compositor
+                    }
+                }
+                Component {
+                    id: contentCard
+                    Card {
+                        id: card
+                        stack: stack
+                        index: moduleLoader.cardIndex
+                        visible: index >= 0
+                        accent: moduleLoader.accent
+                        accessibleName: (moduleLoader.modelData === "network" ? "Networking"
+                            : moduleLoader.modelData === "battery" ? "Power"
+                            : moduleLoader.modelData === "ssh" ? "SSH"
+                            : moduleLoader.modelData === "background" ? "Background applications"
+                            : moduleLoader.modelData[0].toUpperCase() + moduleLoader.modelData.slice(1)) + " card"
+                        implicitWidth: moduleLoader.modelData === "background" ? 400 : 380
+                        implicitHeight: body.item?.implicitHeight ?? 0
+                        readonly property bool navigationBlocked: body.item?.navigationBlocked ?? false
+                        initialFocus: body.item?.initialFocus?.enabled ? body.item.initialFocus : selector
+                        arrowKeyOwners: moduleLoader.modelData === "background" && body.item ? [body.item] : []
+                        Loader {
+                            id: body
+                            anchors.fill: parent
+                            active: root.visible && card.visible
+                            // Keep service owners alive when the stack changes or closes.
+                            onLoaded: active = true
+                            visible: card.visible
+                            enabled: card.selected && !stack.exchanging && root.enabled
+                            sourceComponent: moduleLoader.modelData === "audio" ? audio
+                                : moduleLoader.modelData === "bluetooth" ? bluetooth
+                                : moduleLoader.modelData === "battery" ? battery
+                                : moduleLoader.modelData === "performance" ? performance
+                                : moduleLoader.modelData === "network" ? network
+                                : moduleLoader.modelData === "tailscale" ? tailscale
+                                : moduleLoader.modelData === "ssh" ? ssh
+                                : moduleLoader.modelData === "screenshot" ? screenshot
+                                : moduleLoader.modelData === "clipboard" ? clipboard
+                                : moduleLoader.modelData === "notifications" ? notifications
+                                : moduleLoader.modelData === "media" ? media : background
+                        }
+                        Component { id: audio; Popouts.Audio { accent: card.accent } }
+                        Component { id: bluetooth; Popouts.Bluetooth { accent: card.accent } }
+                        Component { id: battery; Popouts.Battery {
+                            accent: card.accent
+                            powerState: root.powerState; session: root.session; brightness: monitorBrightness
+                        } }
+                        Component { id: performance; Popouts.Performance { accent: card.accent; metrics: root.metrics } }
+                        Component { id: network; Popouts.Network {
+                            accent: card.accent; metrics: root.metrics
+                            active: card.active
+                        } }
+                        Component { id: tailscale; Item {
+                            implicitHeight: page.implicitHeight + 44
+                            Text { x: 12; y: 12; text: "Tailscale"; color: card.accent
+                                font { family: "JetBrainsMono Nerd Font"; pixelSize: 15; bold: true } }
+                            Popouts.Tailscale { id: page; anchors.fill: parent; anchors.topMargin: 44; active: card.active }
+                        } }
+                        Component { id: ssh; Item {
+                            implicitHeight: page.implicitHeight + 44
+                            Text { x: 12; y: 12; text: "SSH"; color: card.accent
+                                font { family: "JetBrainsMono Nerd Font"; pixelSize: 15; bold: true } }
+                            Popouts.Ssh { id: page; anchors.fill: parent; anchors.topMargin: 44; active: card.active }
+                        } }
+                        Component { id: screenshot; Popouts.Screenshot {
+                            accent: card.accent; onCaptureRequested: command => root.capture(command)
+                        } }
+                        Component { id: clipboard; Popouts.Clipboard {
+                            accent: card.accent; history: root.clipboardHistory; pasteBusy: root.pasteBusy
+                            onPasteRequested: entry => root.pasteRequested(entry)
+                        } }
+                        Component { id: media; Popouts.Media {
+                            accent: card.accent; player: root.player; onRaiseRequested: root.mediaRequested()
+                        } }
+                        Component { id: notifications; Popouts.Notifications {
+                            accent: card.accent; compositor: root.compositor; notificationService: root.notificationService
+                            onSourceRequested: address => {
+                                root.handoffRequested()
+                                Qt.callLater(() => root.compositor.activateWindow(address))
+                            }
+                        } }
+                        Component { id: background; Item {
+                            implicitHeight: 424
+                            readonly property Item initialFocus: apps.initialFocus
+                            Text { x: 12; y: 12; text: "Background applications"; color: card.accent
+                                font { family: "JetBrainsMono Nerd Font"; pixelSize: 15; bold: true } }
+                            BackgroundApps {
+                                id: apps
+                                anchors.fill: parent; anchors.margins: 12; anchors.topMargin: 50
+                                items: root.backgroundItems
+                                enabled: card.active
+                                onEnabledChanged: if (!enabled) closeMenu()
+                                onBackRequested: stack.selectCard(0)
+                                onHandoffRequested: root.handoffRequested()
+                            }
+                        } }
+                    }
                 }
             }
-        }
-    }
-    CardStack {
-        shadowDrop: root.shadowDrop
-        shadowHost: root.cardShadowHost
-        id: audioStack
-        anchors.fill: parent
-        visible: root.audioPage
-        cards: [audioCard, bluetoothCard]
-        Card {
-            id: audioCard
-            stack: audioStack
-            accessibleName: "Audio card"
-            implicitHeight: audioLoader.item?.implicitHeight ?? 0
-            initialFocus: audioLoader.item?.initialFocus?.enabled ? audioLoader.item.initialFocus : selector
-            Loader {
-                id: audioLoader
-                anchors.fill: parent
-                active: root.visible && root.audioPage
-                enabled: audioCard.active
-                sourceComponent: audioContent
-            }
-        }
-        Card {
-            id: bluetoothCard
-            stack: audioStack
-            index: 1
-            accessibleName: "Bluetooth card"
-            implicitHeight: bluetoothLoader.item?.implicitHeight ?? 0
-            initialFocus: bluetoothLoader.item?.initialFocus?.enabled ? bluetoothLoader.item.initialFocus : selector
-            Loader {
-                id: bluetoothLoader
-                anchors.fill: parent
-                active: root.visible && root.audioPage
-                enabled: bluetoothCard.active
-                sourceComponent: bluetoothPage
-                // Pair-to-connect ownership survives card/page changes and dismissal.
-                onLoaded: active = true
-            }
-        }
-    }
-    CardStack {
-        shadowDrop: root.shadowDrop
-        shadowHost: root.cardShadowHost
-        id: powerStack
-        anchors.fill: parent
-        visible: root.powerPage
-        cards: [powerCard, performanceCard]
-        Card {
-            id: powerCard
-            stack: powerStack
-            accessibleName: "Power card"
-            implicitHeight: powerLoader.item?.implicitHeight ?? 0
-            initialFocus: powerLoader.item?.initialFocus ?? selector
-            Loader {
-                id: powerLoader
-                anchors.fill: parent
-                active: root.visible && root.powerPage
-                enabled: powerCard.active
-                sourceComponent: batteryPage
-            }
-        }
-        Card {
-            id: performanceCard
-            stack: powerStack
-            index: 1
-            accessibleName: "Performance card"
-            implicitHeight: performanceLoader.item?.implicitHeight ?? 0
-            initialFocus: performanceLoader.item?.initialFocus ?? selector
-            Loader {
-                id: performanceLoader
-                anchors.fill: parent
-                active: root.visible && root.powerPage
-                enabled: performanceCard.active
-                sourceComponent: performancePage
-            }
-        }
-    }
-    // Network owns asynchronous mutations and their feedback across popout/page changes.
-    Loader {
-        id: networkLoader
-        anchors.fill: parent
-        active: root.visible && root.currentPage === "network"
-        visible: root.currentPage === "network"
-        sourceComponent: networkPage
-        // Replace the visibility binding after first load to retain the operation owner.
-        onLoaded: active = true
-    }
-
-    Component {
-        id: performancePage
-        Popouts.Performance {
-            metrics: root.metrics
-        }
-    }
-    Component {
-        id: audioContent
-        Popouts.Audio {}
-    }
-    Component {
-        id: networkPage
-        Popouts.Network {
-            shadowDrop: root.shadowDrop
-            shadowHost: root.cardShadowHost
-            metrics: root.metrics
-        }
-    }
-    Component {
-        id: bluetoothPage
-        Popouts.Bluetooth {}
-    }
-    Component {
-        id: notificationsPage
-        Popouts.Notifications {
-            compositor: root.compositor
-            notificationService: root.notificationService
-            onSourceRequested: address => {
-                root.handoffRequested()
-                Qt.callLater(() => root.compositor.activateWindow(address))
-            }
-        }
-    }
-    Component {
-        id: batteryPage
-        Popouts.Battery {
-            powerState: root.powerState
-            session: root.session
-            brightness: monitorBrightness
-        }
-    }
-    Component {
-        id: screenshotPage
-        Popouts.Screenshot {
-            onCaptureRequested: command => root.capture(command)
-        }
-    }
-    Component {
-        id: mediaPage
-        Popouts.Media {
-            player: root.player
-            onRaiseRequested: root.mediaRequested()
         }
     }
 }

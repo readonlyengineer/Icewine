@@ -842,7 +842,7 @@ ShellRoot {
         toggleKeys.wait(20)
         const play = root.findAccessible(focusPopout, "Play")
         assertRevealed(play, "Media initial")
-        const surface = focusPopout.currentItem.parent.parent
+        const surface = focusPopout.currentItem.cards[0]
         if (surface.x !== 0 || surface.y !== 0 || surface.width !== focusPopout.width
                 || surface.height !== focusPopout.height || surface.radius !== 12
                 || surface.border.width !== 0
@@ -932,6 +932,7 @@ ShellRoot {
         root.items = []
         root.count = 0
     }
+    function networkBody() { return descendants(networkPages.cardFor("network"), item => item.wifiDevice !== undefined)[0] }
     function selectCardTarget(target) { target.parent.stack.selectCard(target.parent.index) }
     function checkNetworkCards(selected, other, page) {
         const front = selected.parent
@@ -969,7 +970,7 @@ ShellRoot {
         settleCards(page)
         networkKeys.keyClick(Qt.Key_Tab)
         settleCards(page)
-        if (!third.checked || !third.activeFocus || page.wifiDevice.scannerEnabled)
+        if (!third.checked || !third.activeFocus || root.networkBody().wifiDevice.scannerEnabled)
             throw new Error("Keyboard entry did not select SSH and stop background Wi-Fi scanning")
         const ssh = descendants(third.parent, item => typeof item.openForm === "function")[0]
         networkKeys.tryCompare(ssh, "busy", false)
@@ -1111,7 +1112,7 @@ ShellRoot {
         selectCardTarget(second)
         networkKeys.wait(20)
         networkPages.shown = false
-        if (page.exchanging || page.wifiDevice.scannerEnabled || tailscale.active)
+        if (page.exchanging || root.networkBody().wifiDevice.scannerEnabled || tailscale.active)
             throw new Error("Hidden/closing card kept animation, scanning or polling")
         networkPages.shown = true
         networkKeys.wait(30)
@@ -1140,7 +1141,7 @@ ShellRoot {
                         checkNetworkCards(selected, other, page)
                         if (page.implicitHeight !== naturalHeight)
                             throw new Error("Constrained card height fed back into natural measurement")
-                        if (descendants(first.parent, item => item.text === "Networking")[0].color.toString() !== Theme.Palette.success.toString()
+                        if (descendants(first.parent, item => item.text === "Networking")[0].color.toString() !== Theme.Palette.primary.toString()
                                 || descendants(second.parent, item => item.text === "Tailscale")[0].color.toString() !== Theme.Palette.secondary.toString())
                             throw new Error("Card titles did not follow theme roles")
                         const image = networkKeys.grabImage(page)
@@ -1341,17 +1342,16 @@ ShellRoot {
         const networking = root.findAccessible(networkPages, "Networking card")
         selectCardTarget(networking)
         settleCards(networkPages.currentItem)
-        let networkPage = networking
-        while (networkPage && networkPage.wifiDevice === undefined) networkPage = networkPage.parent
-        if (!networkPage.wifiDevice.scannerEnabled || page.active)
+        const networkPage = descendants(networking.parent, item => item.wifiDevice !== undefined)[0]
+        if (!root.networkBody().wifiDevice.scannerEnabled || page.active)
             throw new Error("Retained Network did not restore ordinary tab activity")
         networkPages.shown = false
         networkKeys.tryCompare(networkPages, "visible", false)
-        if (networkPage.wifiDevice.scannerEnabled || page.active)
-            throw new Error(`Retained Network left background scanning/polling active while hidden: networkVisible=${networkPage.visible}, scanning=${networkPage.wifiDevice.scannerEnabled}, tailscaleActive=${page.active}`)
+        if (root.networkBody().wifiDevice.scannerEnabled || page.active)
+            throw new Error(`Retained Network left background scanning/polling active while hidden: networkVisible=${networkPage.visible}, scanning=${root.networkBody().wifiDevice.scannerEnabled}, tailscaleActive=${page.active}`)
         networkPages.shown = true
         networkKeys.wait(30)
-        if (!networkPage.wifiDevice.scannerEnabled || page.active)
+        if (!root.networkBody().wifiDevice.scannerEnabled || page.active)
             throw new Error("Retained Network did not resume scanning on reopening its Networking tab")
     }
     function checkRetainedNetworkFocus() {
@@ -1359,8 +1359,7 @@ ShellRoot {
         networkKeys.tryCompare(networkWindow, "active", true)
         networkPages.currentPage = "network"
         const networking = root.findAccessible(networkPages, "Networking card")
-        let page = networking
-        while (page && page.wifiDevice === undefined) page = page.parent
+        const page = descendants(networking.parent, item => item.wifiDevice !== undefined)[0]
         const password = root.findAccessible(page, "Wi-Fi password")
         page.connectNetwork(delayedWifi)
         networkPages.currentPage = "audio"
@@ -1413,27 +1412,25 @@ ShellRoot {
             networkPages.focusInitial()
             if (!firstTab.activeFocus || !firstTab.checked || secondTab.checked)
                 throw new Error("Network initial tab/focus is incorrect")
-            let networkPage = firstTab
-            while (networkPage && networkPage.wifiDevice === undefined) networkPage = networkPage.parent
+            const networkPage = networkPages.currentItem
             root.checkSsh(networkPage, firstTab, secondTab)
             if (root.sshOnly) { console.log("SSH_UI_CHECK_PASSED"); Qt.quit(); return }
-            const password = root.findAccessible(networkPage, "Wi-Fi password")
-            networkPage.passwordNetwork = {name: "Fixture Wi-Fi"}
+            const password = root.findAccessible(root.networkBody(), "Wi-Fi password")
+            root.networkBody().passwordNetwork = {name: "Fixture Wi-Fi"}
             password.text = "fixture secret"
             networkPages.focusInitial()
             if (!password.activeFocus) throw new Error("Host initial focus lost password precedence")
-            const tabCentre = firstTab.mapToItem(networkPage, firstTab.width / 2, firstTab.height / 2)
-            if (networkPage.childAt(tabCentre.x, tabCentre.y) !== password.parent.parent.parent)
-                throw new Error("Password overlay must remain above both cards")
+            if (!password.visible || networkPage.available)
+                throw new Error("Password prompt must own stack navigation")
             networkKeys.keyClick(Qt.Key_Tab)
             networkKeys.keyClick(Qt.Key_Backtab)
             selectCardTarget(firstTab)
             selectCardTarget(secondTab)
             if (networkPage.selectedCard !== 0 || networkPage.exchanging
-                    || firstTab.enabled || secondTab.enabled || networkPage.wifiDevice.scannerEnabled)
-                throw new Error("Password overlay did not suppress card input/scanning")
-            networkPage.closePassword()
-            if (password.text || networkPage.passwordNetwork)
+                    || firstTab.parent.active || secondTab.parent.active || root.networkBody().wifiDevice.scannerEnabled)
+                throw new Error(`Password overlay did not suppress card input/scanning: selected=${networkPage.selectedCard}, exchanging=${networkPage.exchanging}, first=${firstTab.parent.active}, second=${secondTab.parent.active}, scanning=${root.networkBody().wifiDevice.scannerEnabled}`)
+            root.networkBody().closePassword()
+            if (password.text || root.networkBody().passwordNetwork)
                 throw new Error("Password dismissal retained a secret or pending network")
             root.checkCardMotion(networkPage, firstTab, secondTab)
             root.checkCardThemes(networkPage, firstTab, secondTab)
@@ -1447,7 +1444,7 @@ ShellRoot {
             const wifiPage = descendants(networkPage, item => item instanceof Flickable && !(item instanceof ListView))[0]
             if (wifiPage.contentHeight <= wifiPage.height) throw new Error("Long Wi-Fi card lost scrolling")
             wifiPage.contentY = 50
-            networkPage.errorMessage = "Retained fixture error"
+            root.networkBody().errorMessage = "Retained fixture error"
             secondTab.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Enter)
             root.settleCards(networkPage)
@@ -1455,7 +1452,7 @@ ShellRoot {
                 throw new Error("Enter did not select/focus Tailscale card")
             networkKeys.wait(20)
             root.checkNetworkCards(secondTab, firstTab, networkPage)
-            if (!networkPage || networkPage.wifiDevice.scannerEnabled)
+            if (!networkPage || root.networkBody().wifiDevice.scannerEnabled)
                 throw new Error("Tailscale tab left synthetic Wi-Fi scanning active")
             const picker = root.findAccessible(networkPages, "Exit node")
             networkKeys.tryCompare(picker, "enabled", true)
@@ -1504,9 +1501,11 @@ ShellRoot {
             networkKeys.keyClick(Qt.Key_Return)
             networkKeys.tryCompare(menu, "visible", false)
             networkKeys.tryCompare(picker, "enabled", true)
+            // An enabled picker also permits a read with a queued mutation.
+            networkKeys.tryCompare(page, "busy", false)
             networkKeys.tryCompare(page, "confirming", "")
             if (page.data.selected !== "fixture-sydney-best" || picker.text !== "Australia · Sydney")
-                throw new Error("City selection did not confirm its highest-priority exit node")
+                throw new Error(`City selection did not confirm its highest-priority exit node: selected=${page.data.selected}, picker=${picker.text}, error=${page.error}, busy=${page.busy}`)
             picker.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Space)
             networkKeys.tryCompare(menu, "visible", true)
@@ -1515,6 +1514,8 @@ ShellRoot {
             networkKeys.keyClick(Qt.Key_Return)
             networkKeys.tryCompare(menu, "visible", false)
             networkKeys.tryCompare(picker, "enabled", true)
+            // An enabled picker also permits a read with a queued mutation.
+            networkKeys.tryCompare(page, "busy", false)
             networkKeys.tryCompare(page, "confirming", "")
             if (page.data.connected || page.data.selected !== "fixture-exit")
                 throw new Error("Expected confirmed Running/offline selected-node fixture")
@@ -1542,13 +1543,13 @@ ShellRoot {
             firstTab.forceActiveFocus()
             networkKeys.keyClick(Qt.Key_Space)
             root.settleCards(networkPage)
-            if (!firstTab.checked || !firstTab.activeFocus || picker.enabled || !networkPage.wifiDevice.scannerEnabled)
-                throw new Error(`Space did not restore Networking card: selected=${networkPage.selectedCard}, front=${networkPage.frontCard}, checked=${firstTab.checked}, focus=${firstTab.activeFocus}, pickerEnabled=${picker.enabled}, scanning=${networkPage.wifiDevice.scannerEnabled}, activeFocus=${networkWindow.activeFocusItem}`)
+            if (!firstTab.checked || !firstTab.activeFocus || picker.enabled || !root.networkBody().wifiDevice.scannerEnabled)
+                throw new Error(`Space did not restore Networking card: selected=${networkPage.selectedCard}, front=${networkPage.frontCard}, checked=${firstTab.checked}, focus=${firstTab.activeFocus}, pickerEnabled=${picker.enabled}, scanning=${root.networkBody().wifiDevice.scannerEnabled}, activeFocus=${networkWindow.activeFocusItem}`)
             root.checkNetworkCards(firstTab, secondTab, networkPage)
-            if (wifiPage.contentY !== 50 || networkPage.errorMessage !== "Retained fixture error"
+            if (wifiPage.contentY !== 50 || root.networkBody().errorMessage !== "Retained fixture error"
                     || page.active || page.data.selected !== "")
                 throw new Error("Card exchange reset page state or left Tailscale active")
-            networkPage.errorMessage = ""
+            root.networkBody().errorMessage = ""
             networkWindow.width = 380
             if (handheldOverlay.status !== Component.Ready)
                 throw new Error("Packaged handheld overlay did not compile")
@@ -1632,7 +1633,7 @@ ShellRoot {
             performance.metrics = { now: root.now, cpu: { history: [] },
                 cpuTemperature: null, memory: { current: null, history: [] }, gpus: [] }
             finish.start()
-            } catch (error) { console.error(error); Qt.exit(1) }
+            } catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }
         }
     }
     Timer {
@@ -1789,9 +1790,181 @@ ShellRoot {
                 root.checkPopoutFocus(); root.checkPowerCards(); root.checkAudioCards(); root.checkTailscaleConnection(); root.checkTailscaleLifetime()
                 root.checkRetainedNetworkFocus()
             }
-            catch (error) { console.error(error); Qt.exit(1); return }
+            catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1); return }
             console.log("CONTROL_CHECK_PASSED")
             Qt.quit()
+        }
+    }
+}
+"""
+
+STACKS_QML = """import QtQuick
+import QtQuick.Window
+import QtTest
+import Quickshell
+import Quickshell.Io
+import qs.config as Config
+import "icewine/modules/topbar" as Bar
+import "icewine/modules/topbar/CardModules.js" as Cards
+import "icewine/modules/ShellState.js" as State
+import "icewine/theme" as Theme
+ShellRoot {
+    QtObject {
+        id: compositor
+        property bool layoutAvailable: true
+        property bool layoutPending: false
+        property int layoutWorkspaceId: 1
+        property string layoutError: ""
+        property string layoutUnavailable: ""
+        property var layoutStatus: ({effective: "master", autofullscreen: false})
+        function selectLayout(choice) {}
+        function selectAutofullscreen(choice) {}
+        function activateWindow(address) {}
+    }
+    QtObject {
+        id: service
+        property int count: 0
+        property var items: []
+        property bool doNotDisturb: false
+        property int highestUrgency: 0
+        property int pulseToken: 0
+        property bool keepAwake: false
+        property var entries: []
+        property bool available: true
+        property bool busy: false
+        property string error: ""
+        property string activeEntry: ""
+        function request() {}
+        function requestLock() {}
+        function requestSleep() {}
+        function requestReboot() {}
+        function requestShutdown() {}
+    }
+    FileView { id: dark; path: Qt.resolvedUrl("palette-dark.json"); blockAllReads: true }
+    FileView { id: light; path: Qt.resolvedUrl("palette-light.json"); blockAllReads: true }
+    Window {
+        id: window
+        visible: true
+        width: 500; height: 620
+        Bar.StatusPopout {
+            id: host
+            anchors.fill: parent
+            compositor: compositor
+            notificationService: service
+            session: service
+            powerState: service
+            clipboardHistory: service
+            monitorName: "fixture-no-screen"
+            metrics: ({now: Date.now(), network: {history: []}, cpu: {history: []}, cpuTemperature: null,
+                memory: {current: {usedGiB: 0, totalGiB: 1}, history: []}, gpus: []})
+            backgroundItems: [{id: "fixture", title: "App", icon: "", status: 0, hasMenu: false, activate() {}}]
+            engaged: true
+        }
+        Bar.StatusIcons {
+            id: icons
+            notificationService: service
+            cardStacks: host.cardStacks
+        }
+        TestCase { id: input; when: false }
+    }
+    Timer {
+        interval: 200; running: true
+        onTriggered: {
+            try {
+                window.requestActivate()
+                input.tryCompare(window, "active", true)
+                // Existing preference files acquire the defaults without losing booleans.
+                const file = Config.Settings.widgetsFile
+                file.setText(JSON.stringify({notificationToasts: false}))
+                file.reload()
+                input.tryCompare(Config.Settings, "notificationToasts", false)
+                input.compare(Config.Settings.cardStacks.length, 7)
+                const mixed = [{id: "mixed", modules: ["screenshot", "layout", "audio", "launcher"]}]
+                file.setText(JSON.stringify({notificationToasts: false, cardStacks: mixed}))
+                file.reload()
+                input.tryVerify(() => Config.Settings.cardStacks[0]?.id === "mixed")
+                for (const invalid of ["{", JSON.stringify({cardStacks: [{id: "bad", modules: ["stale"]}]})]) {
+                    file.setText(invalid)
+                    file.reload()
+                    input.wait(30)
+                    input.compare(Config.Settings.cardStacks[0].id, "mixed")
+                }
+                host.currentPage = "screenshot"
+                input.wait(40)
+                const stack = host.currentItem
+                input.compare(stack.cards.length, 4)
+                for (const palette of [light, dark]) {
+                    Theme.Palette.file.setText(palette.text())
+                    input.verify(Theme.Palette.refresh())
+                    input.wait(220)
+                    const colours = [Theme.Palette.primary, Theme.Palette.secondary, Theme.Palette.tertiary, Theme.Palette.primary]
+                    input.compare(stack.cards.map(card => card.accent.toString()).join(","), colours.map(String).join(","))
+                    for (let index = 0; index < 4; ++index) {
+                        stack.selectCard(index)
+                        input.tryCompare(stack, "exchanging", false, 900)
+                        input.compare(stack.frontCard, index)
+                        const row = icons.children.find(item => item.children.some(child => child.page !== undefined))
+                        input.compare(row.children.filter(item => item.page !== undefined)[0].page, "screenshot")
+                        input.compare(new Set(stack.cards.map(card => card.y)).size, 4)
+                    }
+                }
+                host.focusInitial()
+                input.keyClick(Qt.Key_Tab)
+                input.tryCompare(stack, "exchanging", false, 900)
+                input.compare(stack.frontCard, 0)
+                input.keyClick(Qt.Key_Backtab)
+                input.tryCompare(stack, "exchanging", false, 900)
+                input.compare(stack.frontCard, 3)
+                const touch = input.touchEvent(window)
+                touch.press(0, stack.cards[0], 8, 6).commit()
+                touch.release(0, stack.cards[0], 8, 6).commit()
+                input.tryCompare(stack, "exchanging", false, 900)
+                input.compare(stack.frontCard, 0)
+                stack.selectCard(3)
+                input.tryCompare(stack, "exchanging", false, 900)
+                host.cardStacks = mixed.concat([{id: "other", modules: ["clipboard"]}])
+                host.currentPage = "clipboard"
+                input.wait(40)
+                host.currentPage = "screenshot"
+                input.wait(40)
+                input.tryCompare(stack, "exchanging", false, 900)
+                input.compare(stack.frontCard, 3)
+                host.openPage("screenshot")
+                input.tryCompare(stack, "exchanging", false, 900)
+                input.compare(stack.frontCard, 0)
+                host.backgroundItems = []
+                host.layoutsEnabled = false
+                host.cardStacks = [{id: "filtered", modules: ["background", "layout", "audio"]}]
+                host.currentPage = "audio"
+                input.wait(40)
+                input.compare(stack.cards.length, 1)
+                input.compare(stack.cards[0].accent.toString(), Theme.Palette.tertiary.toString())
+                icons.layoutsEnabled = false
+                input.compare(icons.openingPage("background"), "audio")
+                host.layoutsEnabled = true
+                host.backgroundItems = [{id: "fixture", title: "App", icon: "", status: 0, hasMenu: false, activate() {}}]
+                // Every current module can use the same host as a single card.
+                for (const name of Cards.modules) {
+                    input.compare(State.reduce(State.initial(), {type: "open", page: name,
+                        engaged: true, screen: "fixture"}).page, name)
+                    host.cardStacks = [{id: "single", modules: [name]}]
+                    host.currentPage = name
+                    input.wait(40)
+                    input.compare(stack.cards.length, 1)
+                    input.verify(!host.floatingCards)
+                    input.compare(stack.cards[0].index, 0)
+                    input.compare(stack.cards[0].accent.toString(), Theme.Palette.primary.toString())
+                    input.verify(stack.cards[0].implicitHeight > 0)
+                }
+                host.cardStacks = []
+                input.wait(30)
+                input.compare(stack.cards.length, 0)
+                input.compare(host.implicitHeight, 0)
+                file.setText("{}")
+                file.reload()
+                console.log("STACKS_CHECK_PASSED")
+                Qt.quit()
+            } catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }
         }
     }
 }
@@ -1822,10 +1995,10 @@ ShellRoot {
             try {
                 const row = icons.children.find(item => item.children.filter(child => child.page !== undefined).length > 0)
                 const buttons = row.children.filter(item => item.page !== undefined)
-                input.compare(buttons.map(item => item.page).join(","), "audio,screenshot,network,notifications,battery")
+                input.compare(buttons.map(item => item.page).join(","), "launcher,media,audio,screenshot,network,notifications,battery")
                 input.compare(icons.implicitWidth, row.implicitWidth + 9)
                 input.compare(icons.battery, null)
-                input.compare(buttons[4].label, "")
+                input.compare(buttons[6].label, "")
                 for (let i = 0; i < buttons.length; ++i) {
                     const button = buttons[i]
                     input.verify(button.visible)
@@ -1842,13 +2015,13 @@ ShellRoot {
                 }
                 icons.sink.audio.muted = true
                 const volume = icons.sink.audio.volume
-                const audio = buttons[0]
+                const audio = buttons[2]
                 input.mouseWheel(audio, audio.width / 2, audio.height / 2, 0, 120)
                 input.tryCompare(icons.sink.audio, "muted", false)
                 input.verify(icons.sink.audio.volume > volume)
                 console.log("STATUS_ICONS_CHECK_PASSED")
                 Qt.quit()
-            } catch (error) { console.error(error.stack); Qt.exit(1) }
+            } catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }
         }
     }
 }
@@ -2139,7 +2312,7 @@ ShellRoot {
                 }
                 console.log("ARROW_CHECK_PASSED")
                 Qt.quit()
-            } catch (error) { console.error(error); Qt.exit(1) }
+            } catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }
         }
     }
 }
@@ -2340,7 +2513,7 @@ ShellRoot {
                 menu.close()
                 console.log("MENU_RENDER_CHECK_PASSED")
                 Qt.quit()
-            } catch (error) { console.error(error); Qt.exit(1) }
+            } catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }
         }
     }
 }
@@ -2488,7 +2661,7 @@ ShellRoot {
                         console.log("SHADOW_PIXELS_UNAVAILABLE: software scene graph does not render MultiEffect; native preview required")
                     console.log("SHADOW_CHECK_PASSED")
                     Qt.quit()
-                } catch (error) { console.error(error); Qt.exit(1) }
+                } catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }
             }
         }
     }
@@ -2594,7 +2767,7 @@ with tempfile.TemporaryDirectory() as directory:
     render_theme = runpy.run_path(str(source / "scripts/theme"))["render_theme"]
     assets = source / "theme/assets"
     (root / "palette-light.json").write_text(render_theme(assets, assets / "themes/catppuccin-latte.json")["palette.json"])
-    (root / "config").symlink_to(source / "quickshell/config")
+    shutil.copytree(source / "quickshell/config", root / "config")
     (root / "bin").mkdir()
     clipboard_command = root / "bin/icewine-clipboard"
     clipboard_command.write_text("#!" + sys.executable + "\n" + '''import json, sys
@@ -2686,6 +2859,7 @@ print(json.dumps(dict(available=True, error="", entries=[dict(public="ssh-ed2551
                XDG_STATE_HOME=str(root / "state"), ICEWINE_WIDGET_POLICY="{}",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
     env["XDG_CONFIG_HOME"] = fixture_config
+    (root / "state/icewine").mkdir(parents=True)
     if "--ssh-only" in sys.argv:
         (root / "shell.qml").write_text(QML.replace("property bool sshOnly: false", "property bool sshOnly: true"))
         result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
@@ -2704,6 +2878,15 @@ print(json.dumps(dict(available=True, error="", entries=[dict(public="ssh-ed2551
         assert result.returncode == 0 and "SCREENSHOT_CHECK_PASSED" in output, output
         assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
         print("clipboard card/adapter state, scrolling/actions/plain previews and screenshot native-mode/release checks pass")
+        sys.exit(0)
+    (root / "shell.qml").write_text(STACKS_QML)
+    result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                            capture_output=True, text=True, timeout=20)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0 and "STACKS_CHECK_PASSED" in output, output
+    assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign|unresolvable import", output), output
+    if "--stacks-only" in sys.argv:
+        print("shared stacks: all modules alone, mixed four-card order/navigation, live accent wrap, stable identity and last-good preferences pass")
         sys.exit(0)
     status_icons = root / "icewine/modules/topbar/StatusIcons.qml"
     native_status_icons = status_icons.read_text()

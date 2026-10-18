@@ -9,6 +9,7 @@ Rectangle {
     id: card
     property CardStack stack: null
     property int index: 0
+    property color accent: Theme.Palette.primary
     property Item initialFocus: selector
     // Reserve custom arrow owners (and their descendants), including ignored endpoints.
     property list<Item> arrowKeyOwners

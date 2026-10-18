@@ -5,6 +5,7 @@ import qs.icewine.theme as Theme
 
 Flickable {
     id: root
+    property color accent: Theme.Palette.primary
 
     required property var player
     readonly property Item initialFocus: playPause
@@ -32,7 +33,7 @@ Flickable {
         Text {
             width: parent.width
             text: "Now Playing"
-            color: Theme.Palette.primary
+            color: root.accent
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true

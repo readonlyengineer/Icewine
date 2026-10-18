@@ -7,6 +7,7 @@ import qs.icewine.theme as Theme
 
 ColumnLayout {
     id: root
+    property color accent: Theme.Palette.primary
     required property var compositor
     readonly property var initialFocus: autofullscreen
     readonly property bool available: compositor.layoutAvailable && !compositor.layoutPending
@@ -17,7 +18,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.margins: 12
         text: "Workspace " + root.compositor.layoutWorkspaceId
-        color: Theme.Palette.foreground
+        color: root.accent
         font.pixelSize: 13
         font.bold: true
     }

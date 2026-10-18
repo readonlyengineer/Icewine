@@ -8,6 +8,7 @@ import qs.icewine.theme as Theme
 
 Flickable {
     id: root
+    property color accent: Theme.Palette.primary
 
     readonly property Item initialFocus: adapterToggle
     readonly property var adapter: Bluetooth.defaultAdapter
@@ -87,7 +88,7 @@ Flickable {
 
         Text {
             text: "Bluetooth"
-            color: Theme.Palette.info
+            color: root.accent
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true

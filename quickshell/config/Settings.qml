@@ -2,6 +2,7 @@ pragma Singleton
 import QtQml
 import Quickshell
 import Quickshell.Io
+import "../icewine/modules/topbar/CardModules.js" as Cards
 
 QtObject {
     id: root
@@ -12,6 +13,14 @@ QtObject {
     }
     readonly property bool notificationToasts: widgetEnabled("notificationToasts")
     readonly property bool windowSwitcher: widgetEnabled("windowSwitcher")
+
+    readonly property var cardStacks: {
+        if (widgetPolicy.cardStacks !== undefined && widgetPolicy.cardStacks !== null) {
+            try { return Cards.validate(widgetPolicy.cardStacks) }
+            catch (error) { console.warn("Invalid card stack policy:", error); return Cards.defaults }
+        }
+        return widgetSelections.cardStacks ?? Cards.defaults
+    }
 
     function widgetEnabled(name) {
         if (typeof widgetPolicy[name] === "boolean") return widgetPolicy[name]
@@ -27,10 +36,7 @@ QtObject {
         onLoaded: {
             try {
                 const value = JSON.parse(text())
-                if (!value || Array.isArray(value) || typeof value !== "object"
-                    || Object.keys(value).some(name => !["notificationToasts", "windowSwitcher"].includes(name)
-                        || typeof value[name] !== "boolean")) throw new Error("Invalid widget selections")
-                root.widgetSelections = value
+                root.widgetSelections = Cards.preferences(value)
             } catch (error) { console.warn("Widget preferences unchanged:", error) }
         }
         onLoadFailed: root.widgetSelections = ({})

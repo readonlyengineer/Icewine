@@ -7,7 +7,6 @@ import QtQuick.Effects
 // Nonvisual arrangement and selection; card surfaces belong to Card.
 FocusScope {
     id: root
-    // Ponytail: fixed one/two/three-card compositions; larger decks need a selection design.
     property list<Card> cards
     onCardsChanged: resetSelection()
     readonly property bool stacked: cards.length > 1
@@ -211,9 +210,9 @@ FocusScope {
         if (available && motionFocus.activeFocus) initialFocus?.forceActiveFocus()
     }
 
-    // The next declared rear card sits halfway between the far rear and front.
+    // Distribute every rear card within the existing fixed stack allowance.
     function rearOffset(index, front) {
-        return cards.length === 3 && (index - front + cards.length) % cards.length === 1 ? 0.5 : 0
+        return cards.length < 2 ? 0 : 1 - ((index - front + cards.length) % cards.length) / (cards.length - 1)
     }
 
     function inOutCubic(t) {

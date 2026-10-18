@@ -7,6 +7,7 @@ import qs.icewine.theme as Theme
 
 Flickable {
     id: root
+    property color accent: Theme.Palette.primary
 
     required property var metrics
     readonly property Item initialFocus: root
@@ -32,7 +33,7 @@ Flickable {
 
         Text {
             text: "Performance"
-            color: Theme.Palette.caution
+            color: root.accent
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true

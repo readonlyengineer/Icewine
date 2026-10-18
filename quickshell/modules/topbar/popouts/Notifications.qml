@@ -7,6 +7,7 @@ import qs.icewine.theme as Theme
 
 Item {
     id: root
+    property color accent: Theme.Palette.primary
 
     required property var compositor
     required property var notificationService
@@ -33,7 +34,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: root.notificationService.count > 0
                 ? "Notifications  " + root.notificationService.count : "Notifications"
-            color: Theme.Palette.secondary
+            color: root.accent
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true

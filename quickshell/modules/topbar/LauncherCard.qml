@@ -65,7 +65,7 @@ Card {
                 anchors.leftMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
                 text: ""
-                color: search.activeFocus ? Theme.Palette.primary : Theme.Palette.muted
+                color: search.activeFocus ? root.accent : Theme.Palette.muted
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 13
             }

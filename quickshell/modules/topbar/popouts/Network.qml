@@ -7,18 +7,18 @@ import "StatusModel.js" as StatusModel
 import ".." as Bar
 import qs.icewine.theme as Theme
 
-Bar.CardStack {
+FocusScope {
     id: root
 
     required property var metrics
-    implicitHeight: Math.max(64 + 44 + Math.max(content.implicitHeight + 24, tailscale.implicitHeight, ssh.implicitHeight),
+    property color accent: Theme.Palette.primary
+    property bool active: visible && enabled
+    readonly property bool navigationBlocked: passwordNetwork !== null
+    readonly property Item initialFocus: passwordNetwork ? password : null
+    implicitHeight: Math.max(44 + content.implicitHeight + 24,
         passwordNetwork ? passwordContent.implicitHeight + 36 : 0)
     clip: true
 
-    initialFocus: passwordNetwork ? password : exchanging ? motionInitialFocus : cards[selectedCard]?.selector ?? null
-    available: visible && enabled && !passwordNetwork
-    cards: [networkCard, tailscaleCard, sshCard]
-    onSelectionChanging: tailscale.closeMenus()
     readonly property var wifiDevice: Networking.devices.values.find(device =>
         device.type === DeviceType.Wifi) ?? null
     readonly property var wifiNetworks: wifiDevice
@@ -32,7 +32,7 @@ Bar.CardStack {
 
     function setScanning(enabled) {
         if (wifiDevice)
-            wifiDevice.scannerEnabled = enabled && root.available && selectedCard === 0 && Networking.wifiEnabled
+            wifiDevice.scannerEnabled = enabled && root.active && !root.passwordNetwork && Networking.wifiEnabled
     }
 
     function connectNetwork(network) {
@@ -63,19 +63,12 @@ Bar.CardStack {
         errorMessage = ""
     }
 
-    onAvailableChanged: {
-        setScanning(available)
-        if (!available) {
-            scanRestart.stop()
-            tailscale.closeMenus()
-        }
+    onActiveChanged: {
+        setScanning(active)
+        if (!active) scanRestart.stop()
     }
-    onSelectedCardChanged: {
-        setScanning(available)
-        if (selectedCard !== 0) scanRestart.stop()
-    }
-    onWifiDeviceChanged: setScanning(visible)
-    Component.onCompleted: setScanning(visible)
+    onWifiDeviceChanged: setScanning(active)
+    Component.onCompleted: setScanning(active)
     Component.onDestruction: setScanning(false)
 
     Connections {
@@ -85,7 +78,7 @@ Bar.CardStack {
             if (!Networking.wifiEnabled) {
                 root.closePassword()
             }
-            root.setScanning(root.visible)
+            root.setScanning(root.active)
         }
     }
 
@@ -124,41 +117,21 @@ Bar.CardStack {
         onTriggered: root.setScanning(true)
     }
 
-    // Network keeps its content and service ownership; shared cards supply selection.
-    component NetworkCard: Bar.Card {
-        id: card
-        required property string title
-        required property color titleColor
-        accessibleName: title + " card"
-        default property alias contentData: body.data
-        stack: root
-        enabled: !root.passwordNetwork
-        Text {
-            id: heading
-            width: parent.width
-            height: 44
-            text: card.title
-            color: card.titleColor
-            font.family: "JetBrainsMono Nerd Font"
-            font.pixelSize: 15
-            font.bold: true
-            leftPadding: 12
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-        Item {
-            id: body
-            anchors { top: heading.bottom; bottom: parent.bottom; left: parent.left; right: parent.right }
-            enabled: !root.exchanging && root.selectedCard === card.index
-        }
+    Text {
+        width: parent.width
+        height: 44
+        text: "Networking"
+        color: root.accent
+        font.family: "JetBrainsMono Nerd Font"
+        font.pixelSize: 15
+        font.bold: true
+        leftPadding: 12
+        verticalAlignment: Text.AlignVCenter
     }
-
-    NetworkCard {
-        id: networkCard
-        title: "Networking"
-        titleColor: Theme.Palette.success
     Flickable {
         anchors.fill: parent
+        anchors.topMargin: 44
+        enabled: !root.passwordNetwork
         contentHeight: content.implicitHeight + 24
         clip: true
         boundsBehavior: Flickable.StopAtBounds
@@ -250,31 +223,6 @@ Bar.CardStack {
                 font.pixelSize: 10
                 wrapMode: Text.Wrap
             }
-        }
-    }
-
-    }
-    NetworkCard {
-        id: tailscaleCard
-        index: 1
-        title: "Tailscale"
-        titleColor: Theme.Palette.secondary
-        Tailscale {
-            id: tailscale
-            anchors.fill: parent
-            active: root.available && root.selectedCard === 1
-        }
-    }
-
-    NetworkCard {
-        id: sshCard
-        index: 2
-        title: "SSH"
-        titleColor: Theme.Palette.primary
-        Ssh {
-            id: ssh
-            anchors.fill: parent
-            active: root.available && root.selectedCard === 2 && !root.exchanging
         }
     }
 

@@ -5,6 +5,7 @@ import qs.icewine.theme as Theme
 
 Item {
     id: root
+    property color accent: Theme.Palette.primary
 
     readonly property Item initialFocus: monitor
     signal captureRequested(var command)
@@ -26,7 +27,7 @@ Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: "Screenshot"
-            color: Theme.Palette.secondary
+            color: root.accent
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 15
             font.bold: true

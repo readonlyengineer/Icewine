@@ -6,6 +6,8 @@ import Quickshell.Networking
 import Quickshell.Services.Notifications
 import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
+import qs.config as Config
+import "CardModules.js" as Cards
 import "popouts/StatusModel.js" as StatusModel
 import qs.icewine.theme as Theme
 
@@ -13,6 +15,11 @@ Rectangle {
     id: root
 
     required property var notificationService
+    property var player: null
+    property int backgroundCount: 0
+    property bool backgroundAttention: false
+    property var cardStacks: Config.Settings.cardStacks
+    property bool layoutsEnabled: true
     readonly property var sink: Pipewire.defaultAudioSink
     readonly property int volume: sink?.audio ? Math.round(sink.audio.volume * 100) : 0
     readonly property bool muted: !sink?.audio || sink.audio.muted
@@ -30,6 +37,12 @@ Rectangle {
     property string hoveredPage: ""
 
     signal popoutActivated(string page)
+    signal mediaRequested()
+
+    function openingPage(page) {
+        return Cards.containing(cardStacks, page)?.modules.find(name => (name !== "layout" || layoutsEnabled)
+            && (name !== "background" || backgroundCount > 0)) ?? ""
+    }
 
     function adjustVolume(delta) {
         if (!sink?.audio || delta === 0)
@@ -40,13 +53,14 @@ Rectangle {
 
     function updateHoveredPage(position) {
         const point = root.mapToItem(statusRow, position.x, position.y)
-        const page = StatusModel.pageAt(statusRow.children, point.x, point.y)
+        const page = openingPage(StatusModel.pageAt(statusRow.children, point.x, point.y))
         if (page === hoveredPage)
             return
         hoveredPage = page
     }
 
-    implicitWidth: statusRow.implicitWidth + 9
+    visible: cardStacks.length > 0
+    implicitWidth: visible ? statusRow.implicitWidth + 9 : 0
     implicitHeight: 29
     radius: height / 2
     color: Theme.Palette.alpha(Theme.Palette.surface, 0.92)
@@ -63,46 +77,35 @@ Rectangle {
         anchors.centerIn: parent
         spacing: 2
 
-        StatusButton {
-            page: "audio"
-            icon: root.muted ? "󰝟" : root.volume < 34 ? "" : root.volume < 67 ? "" : ""
-            colour: Theme.Palette.tertiary
-            onScrolled: delta => root.adjustVolume(delta)
-        }
-
-        StatusButton {
-            page: "screenshot"
-            icon: "󰄀"
-            colour: Theme.Palette.secondary
-        }
-
-        StatusButton {
-            page: "network"
-            icon: root.wifiConnected ? "" : root.networkConnected ? "" : "󰯡"
-            colour: root.networkConnected ? Theme.Palette.success : Theme.Palette.muted
-        }
-
-        StatusButton {
-            page: "notifications"
-            icon: root.notificationService.doNotDisturb ? "󰂛"
-                : root.notificationService.count > 0 ? "󰂚" : "󰂜"
-            colour: root.notificationColour
-            badge: root.notificationService.count > 9 ? "9+"
-                : root.notificationService.count > 0
-                    ? String(root.notificationService.count) : ""
-            pulseToken: root.notificationService.pulseToken
-        }
-
-        StatusButton {
-            page: "battery"
-            // Power controls are also needed on desktops without a battery.
-            icon: root.battery?.isLaptopBattery
-                ? StatusModel.batteryIcon(root.battery?.percentage ?? 0, root.batteryCharging) : "󰐥"
-            label: root.battery?.isLaptopBattery
-                ? `${Math.round((root.battery?.percentage ?? 0) * 100)}%` : ""
-            colour: root.battery?.isLaptopBattery && (root.battery?.percentage ?? 1) < 0.15
-                ? Theme.Palette.error
-                : root.batteryCharging ? Theme.Palette.success : Theme.Palette.primary
+        Repeater {
+            model: root.cardStacks
+            StatusButton {
+                required property var modelData
+                page: modelData.modules[0]
+                icon: page === "launcher" ? Theme.Palette.osGlyph
+                    : page === "audio" ? (root.muted ? "󰝟" : root.volume < 34 ? "" : root.volume < 67 ? "" : "")
+                    : page === "network" ? (root.wifiConnected ? "" : root.networkConnected ? "" : "󰯡")
+                    : page === "notifications" ? (root.notificationService.doNotDisturb ? "󰂛"
+                        : root.notificationService.count > 0 ? "󰂚" : "󰂜")
+                    : page === "battery" ? (root.battery?.isLaptopBattery
+                        ? StatusModel.batteryIcon(root.battery?.percentage ?? 0, root.batteryCharging) : "󰐥")
+                    : page === "media" ? (root.player?.isPlaying ? "" : "")
+                    : ({background: "󰀻", layout: "󰕰", bluetooth: "", screenshot: "󰄀", clipboard: "󰅌",
+                        tailscale: "󰒍", ssh: "󰣀", performance: "󰓅"})[page] ?? ""
+                colour: page === "network" ? (root.networkConnected ? Theme.Palette.success : Theme.Palette.muted)
+                    : page === "notifications" ? root.notificationColour
+                    : page === "battery" && root.battery?.isLaptopBattery && (root.battery?.percentage ?? 1) < 0.15
+                        ? Theme.Palette.error
+                    : page === "battery" && root.batteryCharging ? Theme.Palette.success : Theme.Palette.primary
+                label: page === "battery" && root.battery?.isLaptopBattery
+                    ? `${Math.round((root.battery?.percentage ?? 0) * 100)}%`
+                    : page === "media" ? (root.player?.trackTitle || root.player?.identity || "") : ""
+                badge: page === "notifications" && root.notificationService.count > 0
+                    ? (root.notificationService.count > 9 ? "9+" : String(root.notificationService.count))
+                    : page === "launcher" && root.backgroundCount > 0 ? "•" : ""
+                pulseToken: page === "notifications" ? root.notificationService.pulseToken : 0
+                onScrolled: delta => { if (page === "audio") root.adjustVolume(delta) }
+            }
         }
     }
 
@@ -126,6 +129,7 @@ Rectangle {
         required property color colour
         property string label: ""
         property string badge: ""
+        property color badgeColour: page === "launcher" && root.backgroundAttention ? Theme.Palette.error : colour
         property int pulseToken: 0
 
         signal scrolled(real delta)
@@ -176,6 +180,12 @@ Rectangle {
                 visible: statusButton.label.length > 0
                 anchors.verticalCenter: parent.verticalCenter
                 text: statusButton.label
+                width: Math.min(implicitWidth, 145)
+                elide: Text.ElideRight
+                TapHandler {
+                    enabled: statusButton.page === "media" && (root.player?.canRaise ?? false)
+                    onTapped: root.mediaRequested()
+                }
                 color: statusButton.colour
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 9
@@ -192,7 +202,7 @@ Rectangle {
             width: Math.max(9, badgeText.implicitWidth + 3)
             height: 9
             radius: height / 2
-            color: statusButton.colour
+            color: statusButton.badgeColour
 
             Text {
                 id: badgeText
@@ -247,7 +257,10 @@ Rectangle {
         }
 
         TapHandler {
-            onTapped: root.popoutActivated(statusButton.page)
+            onTapped: {
+                const page = root.openingPage(statusButton.page)
+                if (page) root.popoutActivated(page)
+            }
         }
 
         WheelHandler {
