@@ -95,8 +95,9 @@ elif sys.argv[1:] == ["widgets-state"]:
  if os.environ["TUI_WIDGET_POLICY"] == "invalid":
   print("invalid cardStacks policy; Widgets are read-only",file=sys.stderr); sys.exit(1)
  with open(os.environ["TUI_WIDGETS"]) as stream: saved=json.load(stream)
+ owners=json.loads(os.environ["TUI_WIDGET_OWNERS"])
  print("supported="+os.environ["TUI_WIDGET_SUPPORTED"], "revision="+"a"*64, *[
-  name+"="+(str(saved[name]) if name in ("cardStacks","barBehaviour","barLocation","barStyle","barWidth","oskAccess") else str(saved[name]).lower())+":"+("symlink" if os.environ["TUI_WIDGET_LINKED"] == "1" else "policy" if name in os.environ["TUI_WIDGET_POLICY"].split(",") else "user")
+  name+"="+(str(saved[name]) if name in ("cardStacks","barBehaviour","barLocation","barStyle","barWidth","oskAccess") else str(saved[name]).lower())+":"+owners.get(name, "symlink" if os.environ["TUI_WIDGET_LINKED"] == "1" else "policy" if name in os.environ["TUI_WIDGET_POLICY"].split(",") else "user")
   for name in ("notificationToasts","windowSwitcher","cardStacks","barBehaviour","barLocation","barStyle","barWidth","oskAccess")])
 elif sys.argv[1] == "widgets-apply":
  if os.environ["TUI_WIDGET_FAIL"] == "1":
@@ -137,7 +138,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, incomplete=False, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=()):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, incomplete=False, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None):
         global last_output, last_frames, last_widget_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.write_text("")  # A run may legitimately invoke no external tools.
@@ -155,7 +156,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
                    TUI_APPLY_EXIT=str(apply_exit), TUI_WIDGETS=str(widgets_state), TUI_WIDGET_SUPPORTED=str(widget_supported).lower(),
                    TUI_FILE_STATE=file_state, TUI_APPEARANCE_WIRE=appearance_wire, TUI_REFRESH_BAD=str(int(refresh_bad)), TUI_WIDGET_LINKED=str(int(widget_linked)),
-                   TUI_WIDGET_POLICY=widget_policy, TUI_WIDGET_FAIL=str(int(widget_fail)), TUI_TOOLS=str(tool_log), TUI_POLICY=str(int(policy)),
+                   TUI_WIDGET_OWNERS=json.dumps(widget_owners or {}), TUI_WIDGET_POLICY=widget_policy, TUI_WIDGET_FAIL=str(int(widget_fail)), TUI_TOOLS=str(tool_log), TUI_POLICY=str(int(policy)),
                    TUI_PICK=pick, TUI_PICK_EXIT=str(pick_exit), TUI_HYPRMON_EXIT=str(hyprmon_exit),
                    TUI_COMMAND_FAIL=str(int(command_fail)), TUI_DELIVERY_FAIL=str(int(delivery_fail)),
                    TUI_APPEARANCE=str(appearance_state), XDG_DATA_HOME=str(root / "data"), XDG_STATE_HOME=str(root / "state"),
@@ -572,6 +573,39 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     run(tab*2+b"s\x1b", state(), widgets={"oskAccess": "invalid"})
     assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
     assert b"Invalid bar setting" in last_output
+    # Each of the eight ownership slots independently enables editing and Save.
+    # All other slots alternate policy/symlink, so neither read-only state can
+    # accidentally enable a control or suppress the sole user-owned setting.
+    initial = {"notificationToasts": True, "windowSwitcher": True,
+               "cardStacks": "a/launcher,background", "barBehaviour": "keyboard",
+               "barLocation": "above", "barStyle": "anchored", "oskAccess": "none", "barWidth": 80}
+    for name in initial:
+        owners = {field: "policy" if index % 2 else "symlink" for index, field in enumerate(initial)}
+        owners[name] = "user"
+        keys = b"\r n" if name == "cardStacks" else b" "
+        run(tab*2+keys+b"s\x1b", state(), widgets=initial, widget_owners=owners)
+        call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
+        saved = dict(field.split("=", 1) for field in call[2:])
+        for field, value in initial.items():
+            before = str(value).lower() if isinstance(value, bool) else str(value)
+            assert (saved[field] != before) == (field == name), (name, field, saved)
+        assert b"Widget preferences saved" in last_output
+    # Full policy, symlink and mixed ownership keep both Save paths disabled
+    # while allowing arrangement inspection. Unsupported user state also locks.
+    for owners, supported in ((dict.fromkeys(initial, "policy"), True),
+                              (dict.fromkeys(initial, "symlink"), True),
+                              ({name: "policy" if index % 2 else "symlink" for index, name in enumerate(initial)}, True),
+                              (dict.fromkeys(initial, "user"), False)):
+        run(tab*2+b"s\r n+-[]"+right+delete+b"s\x1b", state(),
+            widgets=initial, widget_owners=owners, widget_supported=supported)
+        assert b"Widgets > Card arrangement" in last_output
+        assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+    # Unknown, empty and compound tokens must fail closed at every owner parse.
+    for name in initial:
+        for owner in ("unknown", "", "user:policy"):
+            run(tab*2+b"s\x1b", state(), widget_owners={name: owner})
+            assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+            assert b"Invalid " in last_output and b" ownership" in last_output
     # Delivery can fail after committing a choice: display/next cycle follow saved state.
     assert run(tab+b"\x1b[C\x1b[C\x1b[B\x1b[C\x1b[C\x1b", state(), delivery_fail=True) == [["state"]]
     changes = [call for call in tools() if call[0] == "icewine" and len(call) == 3]

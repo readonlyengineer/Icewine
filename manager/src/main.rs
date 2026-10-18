@@ -94,8 +94,11 @@ const CARD_MODULES: &[&str] = &["launcher", "background", "layout", "media", "au
 
 struct CardStack { id: String, modules: Vec<usize> }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Ownership { User, Policy, Symlink }
+
 struct Widgets {
-    enabled: [bool; 2], policy: [bool; 8], linked: [bool; 8], supported: bool, revision: String,
+    enabled: [bool; 2], ownership: [Ownership; 8], supported: bool, revision: String,
     stacks: Vec<CardStack>, bar: [usize; 4], width: u8,
 }
 
@@ -123,21 +126,18 @@ impl Widgets {
         let revision = fields.remove("revision").filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit()))
             .ok_or_else(|| io::Error::other("Invalid widget revision"))?.to_owned();
         let mut enabled = [true; 2];
-        let mut policy = [false; 8];
-        let mut linked = [false; 8];
+        let mut ownership = [Ownership::User; 8];
         for (index, (id, _, _)) in WIDGETS.iter().enumerate() {
             let (value, owner) = fields.remove(id).and_then(|value| value.split_once(':'))
                 .ok_or_else(|| io::Error::other("Missing widget state"))?;
             enabled[index] = boolean(Some(value))?;
-            policy[index] = match owner { "policy" | "symlink" => true, "user" => false,
+            ownership[index] = match owner { "policy" => Ownership::Policy, "symlink" => Ownership::Symlink, "user" => Ownership::User,
                 _ => return Err(io::Error::other("Invalid widget ownership")) };
-            linked[index] = owner == "symlink";
         }
         let (value, owner) = fields.remove("cardStacks").and_then(|value| value.split_once(':'))
             .ok_or_else(|| io::Error::other("Missing card stacks"))?;
-        policy[2] = match owner { "policy" | "symlink" => true, "user" => false,
+        ownership[2] = match owner { "policy" => Ownership::Policy, "symlink" => Ownership::Symlink, "user" => Ownership::User,
             _ => return Err(io::Error::other("Invalid card ownership")) };
-        linked[2] = owner == "symlink";
         let mut stacks: Vec<CardStack> = Vec::new();
         let mut seen = Vec::new();
         for entry in value.split(';').filter(|_| !value.is_empty()) {
@@ -162,19 +162,17 @@ impl Widgets {
                 .ok_or_else(|| io::Error::other("Missing bar setting"))?;
             bar[index] = choices.iter().position(|choice| *choice == value)
                 .ok_or_else(|| io::Error::other("Invalid bar setting"))?;
-            policy[index + 3] = match owner { "policy" | "symlink" => true, "user" => false,
+            ownership[index + 3] = match owner { "policy" => Ownership::Policy, "symlink" => Ownership::Symlink, "user" => Ownership::User,
                 _ => return Err(io::Error::other("Invalid bar ownership")) };
-            linked[index + 3] = owner == "symlink";
         }
         let (value, owner) = fields.remove("barWidth").and_then(|value| value.split_once(':'))
             .ok_or_else(|| io::Error::other("Missing bar width"))?;
         let width = value.parse::<u8>().ok().filter(|width| (50..=100).contains(width) && value == width.to_string())
             .ok_or_else(|| io::Error::other("Invalid bar width"))?;
-        policy[7] = match owner { "policy" | "symlink" => true, "user" => false,
+        ownership[7] = match owner { "policy" => Ownership::Policy, "symlink" => Ownership::Symlink, "user" => Ownership::User,
             _ => return Err(io::Error::other("Invalid bar width ownership")) };
-        linked[7] = owner == "symlink";
         if !fields.is_empty() { return Err(io::Error::other("Unknown widget state")); }
-        Ok(Self { enabled, policy, linked, supported, revision, stacks, bar, width })
+        Ok(Self { enabled, ownership, supported, revision, stacks, bar, width })
     }
 
     fn location(&self, module: usize) -> Option<(usize, usize)> {
@@ -202,7 +200,7 @@ impl Widgets {
     }
 
     fn edit(&mut self, module: usize, key: KeyCode) {
-        if !self.supported || self.policy[2] { return; }
+        if !self.supported || self.ownership[2] != Ownership::User { return; }
         match key {
             KeyCode::Char(' ') | KeyCode::Enter => {
                 if self.location(module).is_some() { self.remove(module); } else { self.new_stack(module); }
@@ -288,7 +286,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     let mut appearance = Appearance::load()?;
     let (mut widgets, mut widget_message) = match Widgets::load() {
         Ok(value) => (value, String::new()),
-        Err(error) => (Widgets { enabled: [true; 2], policy: [true; 8], linked: [false; 8], supported: false, revision: String::new(), stacks: Vec::new(), bar: [0; 4], width: 80 }, error.to_string()),
+        Err(error) => (Widgets { enabled: [true; 2], ownership: [Ownership::Policy; 8], supported: false, revision: String::new(), stacks: Vec::new(), bar: [0; 4], width: 80 }, error.to_string()),
     };
     let mut message = String::new();
     let mut page = 0;
@@ -309,16 +307,16 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 controls.extend([Control::Apply, Control::Cancel]);
                 controls
             } else if page == 2 {
-                WIDGETS.iter().enumerate().filter(|(index, _)| widgets.supported && !widgets.policy[*index])
+                WIDGETS.iter().enumerate().filter(|(index, _)| widgets.supported && widgets.ownership[*index] == Ownership::User)
                     .map(|(index, _)| Control::Widget(index))
-                    .chain((0..BAR_SETTINGS.len()).filter(|index| widgets.supported && !widgets.policy[index + 3]).map(Control::Bar))
-                    .chain((widgets.supported && !widgets.policy[7]).then_some(Control::BarWidth))
+                    .chain((0..BAR_SETTINGS.len()).filter(|index| widgets.supported && widgets.ownership[index + 3] == Ownership::User).map(Control::Bar))
+                    .chain((widgets.supported && widgets.ownership[7] == Ownership::User).then_some(Control::BarWidth))
                     .chain([Control::Arrangement])
-                    .chain((widgets.supported && widgets.policy.iter().any(|locked| !locked)).then_some(Control::Apply)).chain([Control::Cancel]).collect()
+                    .chain((widgets.supported && widgets.ownership.contains(&Ownership::User)).then_some(Control::Apply)).chain([Control::Cancel]).collect()
             } else if page == 3 {
                 widgets.card_order().into_iter().map(Control::Card)
                     .chain([Control::Back])
-                    .chain((widgets.supported && widgets.policy.iter().any(|locked| !locked)).then_some(Control::Apply))
+                    .chain((widgets.supported && widgets.ownership.contains(&Ownership::User)).then_some(Control::Apply))
                     .chain([Control::Cancel]).collect()
             } else { rows.iter().filter(|(id, _, _)| !readonly
                 && (*id != "handheld" || handheld_available(*steam, selected)))
@@ -376,13 +374,14 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         Line::from("Save commits widgets only; Cancel/Esc discards drafts.").style(muted),
                         Line::from(if page == 3 { "Space: enable/disable  Left/right: move to stack  n: new stack" }
                             else { "Space/Enter: change setting or open Card arrangement" }).style(muted),
-                        Line::from(if widgets.linked.iter().any(|linked| *linked) { "Symlinked preferences are read-only." }
+                        Line::from(if widgets.ownership.contains(&Ownership::Symlink) { "Symlinked preferences are read-only." }
                             else if !widgets.supported { "Unavailable: restore shipped settings/entry via Installer." }
                             else if page == 3 { "+/-: member order  [/]: stack order  Delete: remove stack" }
                             else { "Card arrangement and this page share the same unsaved draft." }).style(muted),
                     ]), intro);
-                    let owner = |index| if widgets.linked[index] { " symlink/read-only" }
-                        else if widgets.policy[index] { " Nix policy" } else { "" };
+                    let owner = |index| match widgets.ownership[index] {
+                        Ownership::Symlink => " symlink/read-only", Ownership::Policy => " Nix policy", Ownership::User => "",
+                    };
                     let mut entries: Vec<_> = WIDGETS.iter().enumerate().map(|(index, (_, label, _))|
                         (Control::Widget(index), (*label).to_owned(), format!("[{}]{}",
                             if !widgets.supported { "?" } else if widgets.enabled[index] { "x" } else { " " }, owner(index)))).collect();
@@ -417,7 +416,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     *table_state.offset_mut() = selected.unwrap_or(0).saturating_sub(utilities.height.saturating_sub(1) as usize);
                     frame.render_stateful_widget(Table::new(entries.into_iter().map(|(control, label, value)|
                         Row::new([Cell::from(label), Cell::from(value)]).style(if controls[focus] == control { focused }
-                            else if match control { Control::Arrangement | Control::Back => false, Control::Widget(index) => !widgets.supported || widgets.policy[index], Control::Bar(index) => !widgets.supported || widgets.policy[index + 3], Control::BarWidth => !widgets.supported || widgets.policy[7], _ => !widgets.supported || widgets.policy[2] } { muted }
+                            else if match control { Control::Arrangement | Control::Back => false, Control::Widget(index) => !widgets.supported || widgets.ownership[index] != Ownership::User, Control::Bar(index) => !widgets.supported || widgets.ownership[index + 3] != Ownership::User, Control::BarWidth => !widgets.supported || widgets.ownership[7] != Ownership::User, _ => !widgets.supported || widgets.ownership[2] != Ownership::User } { muted }
                             else { Style::default() })), [Constraint::Length(25), Constraint::Min(20)]).column_spacing(1), utilities, &mut table_state);
                     frame.render_widget(Paragraph::new(widget_message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
                 } else {
@@ -452,7 +451,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     .style(if controls[focus] == Control::Overwrite { focused } else { Style::default() }), reset);
                 }
                 frame.render_widget(Paragraph::new(Line::from(vec![
-                    Span::styled(if page >= 2 { "[ Save ]" } else { "[ Apply ]" }, if controls[focus] == Control::Apply { focused } else if page >= 2 && (!widgets.supported || widgets.policy.iter().all(|locked| *locked)) { muted } else { accent }),
+                    Span::styled(if page >= 2 { "[ Save ]" } else { "[ Apply ]" }, if controls[focus] == Control::Apply { focused } else if page >= 2 && (!widgets.supported || !widgets.ownership.contains(&Ownership::User)) { muted } else { accent }),
                     Span::raw("   "),
                     Span::styled("[ Cancel ]", if controls[focus] == Control::Cancel { focused } else { muted }),
                 ])), buttons);
@@ -470,7 +469,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 KeyCode::Esc | KeyCode::Char('q') => return Ok(None),
                 KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(None),
                 _ if terminal.size()?.width < 80 || terminal.size()?.height < 24 => (),
-                KeyCode::Char('s') if page >= 2 && widgets.supported && widgets.policy.iter().any(|locked| !locked) => {
+                KeyCode::Char('s') if page >= 2 && widgets.supported && widgets.ownership.contains(&Ownership::User) => {
                     widget_message = match widgets.save() { Ok(text) => text, Err(error) => error.to_string() };
                 }
                 KeyCode::Left | KeyCode::Right | KeyCode::Char('n' | '+' | '-' | '[' | ']') | KeyCode::Delete
