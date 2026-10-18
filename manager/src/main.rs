@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fs::{self, OpenOptions}, io::{self, IsTerminal}, os::unix::fs::OpenOptionsExt, path::PathBuf, process::{Command, ExitCode}};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::{layout::Flex, prelude::*, widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table, TableState, Wrap}};
+use ratatui::{prelude::*, widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table, TableState, Wrap}};
 
 const ROWS: &[(&str, &str, &str)] = &[
     ("desktop", "Desktop session", "Hyprland + Icewine Quickshell"),
@@ -318,10 +318,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 let accent = Style::default().fg(Color::Cyan).bold();
                 let muted = Style::default().fg(Color::DarkGray);
                 let focused = Style::default().fg(Color::Black).bg(Color::Cyan).bold();
-                let [panel] = Layout::horizontal([Constraint::Max(96)])
-                    .flex(Flex::Center).areas(frame.area());
-                let [panel] = Layout::vertical([Constraint::Max(24)])
-                    .flex(Flex::Center).areas(panel);
+                let panel = frame.area();
                 let block = Block::bordered().border_type(BorderType::Rounded)
                     .border_style(muted).title(Line::from(match page {
                         0 => " Icewine Installer (1/3) | Tab: Appearance ",

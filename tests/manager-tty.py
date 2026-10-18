@@ -8,6 +8,7 @@ from pathlib import Path
 import pty
 import re
 import select
+import signal
 import struct
 import subprocess
 import sys
@@ -15,7 +16,7 @@ import tempfile
 import termios
 import time
 
-def rendered_frames(output, size, check_contrast=False):
+def rendered_frames(output, size, check_contrast=False, resize_events=()):
     # Ratatui emits positioned cell deltas, not complete text on page changes.
     # Replay its cursor/clear commands; retain completed draws for assertions.
     rows, columns = size
@@ -23,7 +24,20 @@ def rendered_frames(output, size, check_contrast=False):
     x = y = 0
     foreground = background = None
     frames = []
-    for token in re.split(r"(\x1b\[[0-?]*[ -/]*[@-~])", output.decode(errors="replace")):
+    # Resize offsets belong to the harness, keeping captured ANSI unmodified.
+    def tokens():
+        start = 0
+        for offset, new_size in resize_events:
+            yield from re.split(r"(\x1b\[[0-?]*[ -/]*[@-~])", output[start:offset].decode(errors="replace"))
+            yield new_size
+            start = offset
+        yield from re.split(r"(\x1b\[[0-?]*[ -/]*[@-~])", output[start:].decode(errors="replace"))
+    for token in tokens():
+        if isinstance(token, tuple):
+            rows, columns = token
+            screen = [[" "] * columns for _ in range(rows)]
+            x = y = 0
+            continue
         if token.startswith("\x1b["):
             command, args = token[-1], token[2:-1]
             if command in ("H", "f"):
@@ -123,7 +137,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, incomplete=False, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, incomplete=False, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=()):
         global last_output, last_frames, last_widget_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.write_text("")  # A run may legitimately invoke no external tools.
@@ -160,16 +174,20 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         output = bytearray()
         deadline = time.monotonic() + 10
         sent = False
+        pending_resizes = list(resize_steps)
+        resize_events = []
+        resize_keys = None
         reviewed = False
         stop_reason = "child-exit"
         while process.poll() is None and time.monotonic() < deadline:
-            if select.select([master], [], [], 0.1)[0]:
+            readable = select.select([master], [], [], 0.1)[0]
+            if readable:
                 try:
                     output.extend(os.read(master, 65536))
                 except OSError as error:
                     stop_reason = f"read-error:{error.errno}"
                     break
-            frames = rendered_frames(output, size)
+            frames = rendered_frames(output, size, resize_events=resize_events)
             rendered = b"\n".join(frames)
             if sent and not reviewed and b"Icewine: planned changes" in rendered:
                 os.write(master, b"i" if confirm else b"\x1b")
@@ -180,6 +198,17 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                         b"Icewine Installer (1/3) | Tab: Appearance") in rendered
                 os.write(master, keys)
                 sent = True
+            elif resize_keys is not None:
+                # Wait for a completed redraw at the new dimensions before keys.
+                offset, new_size = resize_events[-1]
+                if rendered_frames(output[offset:], new_size):
+                    os.write(master, resize_keys)
+                    resize_keys = None
+            elif sent and pending_resizes and not readable:
+                new_size, resize_keys = pending_resizes.pop(0)
+                resize_events.append((len(output), new_size))
+                fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", *new_size, 0, 0))
+                os.kill(process.pid, signal.SIGWINCH)
         forced_kill = process.poll() is None
         if forced_kill:
             if stop_reason == "child-exit": stop_reason = "deadline"
@@ -190,7 +219,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             except OSError: break
         diagnostic = {"binary": str(binary), "size": size, "keys_hex": keys.hex(),
             "exit": code, "forced_kill": forced_kill, "stop_reason": stop_reason,
-            "sent": sent, "reviewed": reviewed,
+            "sent": sent, "reviewed": reviewed, "resize_events": resize_events,
             "mock_calls": log.read_text().splitlines() if log.exists() else [],
             "tool_calls": tool_log.read_text().splitlines() if tool_log.exists() else []}
         if options.export_frames:
@@ -200,7 +229,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             (directory / "terminal.ansi").write_bytes(output)
             (directory / "capture.json").write_text(json.dumps(diagnostic, indent=2)+"\n")
         # Preserve the child outcome before either contrast or ICANON assertions.
-        last_frames = rendered_frames(output, size, check_contrast=not options.frames_only)
+        last_frames = rendered_frames(output, size, check_contrast=not options.frames_only, resize_events=resize_events)
         rendered = b"\n".join(last_frames)
         if options.export_frames:
             diagnostic["frames"] = len(last_frames)
@@ -211,6 +240,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert termios.tcgetattr(master)[3] & termios.ICANON, "terminal raw mode was not restored: " + json.dumps(diagnostic)
         os.close(master)
         last_output = rendered
+        assert not pending_resizes and resize_keys is None, "resize sequence incomplete: " + json.dumps(diagnostic)
         assert code == (0 if valid and apply_exit == 0 else 1), output.decode(errors="replace")
         if bootstrap:
             if not valid:
@@ -324,9 +354,15 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert b"Tab: page" in last_output
     assert b"Up/down: move" in last_output
     assert b"Appearance updates immediately." in last_output
-    # The navigation affordance and controls fit a conventional 80-column TTY
-    # as well as the wider default; exercise a round trip at both sizes.
-    for size in ((24, 80), (24, 100), (36, 120)):
+    # Every page reaches the edges at minimum, wide, tall and large sizes.
+    def full_panel(frame, size):
+        rows, columns = size
+        lines = frame.decode().splitlines()
+        assert len(lines) == rows and all(len(line) == columns for line in lines)
+        assert lines[0][0] == "╭" and lines[0][-1] == "╮", size
+        assert lines[-1][0] == "╰" and lines[-1][-1] == "╯", size
+        assert all(line[0] == line[-1] == "│" for line in lines[1:-1]), size
+    for size in ((24, 80), (24, 160), (48, 80), (48, 160)):
         assert run(tab + tab + tab + b"\x1b", state(), size=size) == [["state"]]
         assert any(b"Icewine Appearance (2/3) | Tab: Widgets" in frame for frame in last_frames)
         assert b"Icewine Installer (1/3) | Tab: Appearance" in last_frames[-1]
@@ -336,6 +372,37 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                 assert b"[ Cancel ]" in frame
         appearance_frames = [frame for frame in last_frames if b"Icewine Appearance" in frame]
         assert any(b"Configure monitors" in frame for frame in appearance_frames)
+        for title in (b"Icewine Installer", b"Icewine Appearance", b"Icewine Widgets"):
+            frame = next(frame for frame in last_frames if title in frame)
+            full_panel(frame, size)
+            assert b"[ Cancel ]" in frame and b"Esc: cancel" in frame
+            if title == b"Icewine Widgets" and size[0] == 48:
+                assert b"Notification toasts" in frame and b"performance" in frame
+        # Focus reaches the last module and Save/Cancel at every aspect ratio.
+        run(tab*2+down*19+b" "+down+b"\r"+down+b"\r", state(), size=size)
+        assert "performance" not in next(field for call in last_widget_calls
+            if call[0] == "widgets-apply" for field in call if field.startswith("cardStacks="))
+        assert any(b"performance" in frame for frame in last_frames)
+    # Keep a pending Installer draft and last-module focus through growth,
+    # shrink below minimum, and recovery. Hidden input must not change pages
+    # or toggle the module; the next Space disables it exactly once.
+    assert applied(run(b" "+tab*2+down*19, state(), size=(24, 80), resize_steps=[
+        ((48, 160), b""), ((20, 70), b" "+tab),
+        ((24, 80), b" s"+tab+down*(visible+1)+b"\r"),
+    ]))["desktop"] == "true"
+    assert b"Icewine needs an 80 x 24 terminal." in last_output
+    for size in ((48, 160), (24, 80)):
+        frame = next(frame for frame in reversed(last_frames) if b"Icewine Widgets" in frame
+                     and len(frame.decode().splitlines()) == size[0])
+        full_panel(frame, size)
+        assert b"performance" in frame, "focused module lost after resize"
+    save = next(call for call in last_widget_calls if call[0] == "widgets-apply")
+    assert "performance" not in next(field for field in save if field.startswith("cardStacks="))
+    # Backend errors and both help lines remain visible with expanded layouts.
+    for size in ((24, 160), (48, 80)):
+        run(tab*2+b"s\x1b", state(), size=size, widget_fail=True)
+        assert any(b"preferences changed" in frame and b"Esc: cancel" in frame
+                   and b"[ Cancel ]" in frame for frame in last_frames)
     # The tallest Appearance form fits the minimum and wider reference panels.
     for size in ((24, 80), (36, 120)):
         assert run(tab + down*4 + b"\x1b[C\x1b", state(), auth=True, size=size) == [["state"]]
