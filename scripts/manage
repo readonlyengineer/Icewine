@@ -379,16 +379,26 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
 def main(argv):
     config, data = theme.xdg("XDG_CONFIG_HOME", ".config"), theme.xdg("XDG_DATA_HOME", ".local/share")
     state = theme.xdg("XDG_STATE_HOME", ".local/state") / "icewine"
-    if argv == ["file-state"]:
+    if argv == ["appearance-state"]:
+        themes = theme.installed(Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine")))
+        if theme.DEFAULT not in themes:
+            raise ValueError("Tokyo Night assets are missing")
+        selected, policy = theme.effective(state, themes)
         render = theme.render_readonly(config)
         wallpaper_data = Path(os.environ.get("ICEWINE_WALLPAPER_DATA_HOME") or data)
-        print(" ".join(f"{name}={str(bool(link)).lower()}" for name, link in {
+        fields = {
+            "themes": ",".join(sorted(themes)), "selected": selected,
+            "policy": str(policy).lower(), "level": theme.transparency_level(state),
+            "desktopLayout": theme.layout_default(state),
+        }
+        fields.update({name: str(bool(link)).lower() for name, link in {
             "theme": theme.symlinked(state / "theme") or render,
             "transparency": theme.symlinked(state / "transparency") or render,
             "wallpaper": theme.symlinked(wallpaper_data / "icewine/wallpapers/selection.img"),
             "monitors": theme.symlinked(config / "hypr/hyprland.lua") or theme.symlinked(config / "hypr/hyprmon.lua"),
             "layout": theme.symlinked(state / "layout"),
-        }.items()))
+        }.items()})
+        print(" ".join(f"{name}={value}" for name, value in fields.items()))
         return
     if argv == ["widgets-state"]:
         widgets(argv, config, state)

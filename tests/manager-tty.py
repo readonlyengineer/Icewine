@@ -73,7 +73,10 @@ with tempfile.TemporaryDirectory() as temporary:
     backend.write_text('#!' + sys.executable + '\n' + '''import json,os,sys
 with open(os.environ["TUI_LOG"],"a") as stream: stream.write(json.dumps(sys.argv[1:])+"\\n")
 if sys.argv[1:] == ["state"]: print(os.environ["TUI_STATE"])
-elif sys.argv[1:] == ["file-state"]: print(os.environ["TUI_FILE_STATE"])
+elif sys.argv[1:] == ["appearance-state"]:
+ with open(os.environ["TUI_APPEARANCE"]) as stream: saved=json.load(stream)
+ response=" ".join(["themes=dracula,tokyo-night", "selected="+saved["theme"], "policy="+str(os.environ["TUI_POLICY"]=="1").lower(), "level="+saved["transparency"], "desktopLayout="+saved["layout"], os.environ["TUI_FILE_STATE"]])
+ print(os.environ["TUI_APPEARANCE_WIRE"] or (response+" unknown=false" if os.environ["TUI_REFRESH_BAD"]=="1" and saved["theme"]!="tokyo-night" else response))
 elif sys.argv[1:] == ["widgets-state"]:
  if os.environ["TUI_WIDGET_POLICY"] == "invalid":
   print("invalid cardStacks policy; Widgets are read-only",file=sys.stderr); sys.exit(1)
@@ -96,11 +99,8 @@ elif sys.argv[1:] and sys.argv[1] == "apply": sys.exit(int(os.environ["TUI_APPLY
 args=sys.argv[1:]
 with open(os.environ["TUI_TOOLS"],"a") as stream: stream.write(json.dumps(["icewine",*args])+"\\n")
 with open(os.environ["TUI_APPEARANCE"]) as stream: saved=json.load(stream)
-if args == ["theme"]:
- print("Installed: dracula, tokyo-night")
- print("Effective: " + saved["theme"] + (" (Nix policy)" if os.environ["TUI_POLICY"] == "1" else ""))
-elif args == ["layout"]: print("Layout: " + saved["layout"] + " (desktop fallback)")
-elif args == ["transparency"]: print("Transparency: " + saved["transparency"] + " (off, low, med, high)")
+if len(args) == 1 and args[0] in ("theme", "transparency", "layout"):
+ print("human status must not be read by the manager",file=sys.stderr); sys.exit(1)
 elif args[0] in ("theme", "transparency", "layout"):
  saved[args[0]]=args[1]
  with open(os.environ["TUI_APPEARANCE"],"w") as stream: json.dump(saved,stream)
@@ -123,10 +123,10 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, incomplete=False, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, incomplete=False, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False):
         global last_output, last_frames, last_widget_calls, capture_number
         log.unlink(missing_ok=True)
-        tool_log.unlink(missing_ok=True)
+        tool_log.write_text("")  # A run may legitimately invoke no external tools.
         appearance_state = root / "appearance-state"
         appearance_state.write_text(json.dumps({"theme": "tokyo-night", "transparency": "med", "layout": layout}))
         data = root / "data/icewine/wallpapers"
@@ -140,7 +140,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
                    TUI_APPLY_EXIT=str(apply_exit), TUI_WIDGETS=str(widgets_state), TUI_WIDGET_SUPPORTED=str(widget_supported).lower(),
-                   TUI_FILE_STATE=file_state, TUI_WIDGET_LINKED=str(int(widget_linked)),
+                   TUI_FILE_STATE=file_state, TUI_APPEARANCE_WIRE=appearance_wire, TUI_REFRESH_BAD=str(int(refresh_bad)), TUI_WIDGET_LINKED=str(int(widget_linked)),
                    TUI_WIDGET_POLICY=widget_policy, TUI_WIDGET_FAIL=str(int(widget_fail)), TUI_TOOLS=str(tool_log), TUI_POLICY=str(int(policy)),
                    TUI_PICK=pick, TUI_PICK_EXIT=str(pick_exit), TUI_HYPRMON_EXIT=str(hyprmon_exit),
                    TUI_COMMAND_FAIL=str(int(command_fail)), TUI_DELIVERY_FAIL=str(int(delivery_fail)),
@@ -223,7 +223,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             return [] if not tool_log.exists() else [json.loads(line) for line in tool_log.read_text().splitlines()]
         if not valid:
             assert not sent
-            return [json.loads(line) for line in log.read_text().splitlines()]
+            return [call for line in log.read_text().splitlines() if (call := json.loads(line))[0] != "appearance-state"]
         assert sent, output.decode(errors="replace")
         if size[1] < 80 or size[0] < 24:
             assert b"Resize to continue; Esc: cancel." in rendered
@@ -234,7 +234,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert (b"Utility selections are read-only" in rendered) == ("readonly=true" in state.split())
         all_calls = [json.loads(line) for line in log.read_text().splitlines()]
         last_widget_calls = [call for call in all_calls if call[0].startswith("widgets-")]
-        return [call for call in all_calls if not call[0].startswith("widgets-") and call[0] != "file-state"]
+        return [call for call in all_calls if not call[0].startswith("widgets-") and call[0] != "appearance-state"]
     ids = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras")
     visible = 5 # Arch hides Login; Steam none hides its two children.
     def state(readonly=False, **selected):
@@ -491,8 +491,26 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert changes == [["icewine", "layout", "dwindle"], ["icewine", "layout", "master"]]
     assert any(b"Desktop layout default" in frame and b"< master >" in frame for frame in last_frames)
     assert b"live delivery failed after saving selection" in last_output
-    # Malformed layout responses fail before entering the terminal UI.
-    assert run(b"", state(), valid=False, layout="invalid") == [["state"]]
+    def test_appearance_protocol():
+        # Reject malformed fields before raw mode, including plausible unsafe ownership.
+        good = "themes=dracula,tokyo-night selected=tokyo-night policy=false level=med desktopLayout=scrolling theme=false transparency=false wallpaper=false monitors=false layout=false"
+        for wire in (good + " policy=true", good + " unknown=false", good.replace("policy=false", "policy=user"),
+                     good.replace("theme=false", "theme=user"), good.replace(" layout=false", ""),
+                     good.replace("selected=tokyo-night", "selected=missing"), good.replace("level=med", "level=invalid"),
+                     good.replace("themes=dracula,tokyo-night", "themes=dracula,dracula"),
+                     good.replace("themes=dracula,tokyo-night", "themes=,tokyo-night"),
+                     good.replace("themes=dracula,tokyo-night", "themes=bad/id,tokyo-night"),
+                     good.replace("desktopLayout=scrolling", "desktopLayout=invalid"), "broken"):
+            assert run(b"", state(), valid=False, appearance_wire=wire) == [["state"]]
+        assert run(b"", state(), valid=False, layout="invalid") == [["state"]]
+        assert run(b"\x1b", state()) == [["state"]]
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        assert calls.count(["appearance-state"]) == 1
+        assert not tools(), "startup still depends on public CLI prose"
+        assert run(b"\x1b", state(), appearance_wire=" ".join(reversed(good.split()))) == [["state"]]
+        assert run(tab+b"\x1b[C\x1b", state(), refresh_bad=True) == [["state"]]
+        assert b"Could not refresh appearance state: Unknown appearance field" in last_output
+    test_appearance_protocol()
     # Native chooser restores the terminal after success, cancel and failure.
     picked = str(root / "picture with spaces.png")
     for pick, exit_code, fail in ((picked+"\n", 0, False), ("", 0, False), (picked+"\n", 1, False), (picked+"\n", 0, True)):
@@ -504,7 +522,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         if fail: assert b"invalid image" in last_output
     (root / "yazi").chmod(0o600)
     try:
-        assert run(tab+b"\x1b[B\x1b[B\r\x1b", state()) == [["state"]]
+        assert run(tab+b"\x1b[B\x1b[B\r\x1b", state(), path=str(root)) == [["state"]]
         assert b"Yazi unavailable:" in last_output
     finally: (root / "yazi").chmod(0o755)
     # A historical auth image must not restore the retired presentation controls.
@@ -518,7 +536,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert b"HyprMon live/save changes remain after Cancel." in last_output
     (root / "hyprmon").chmod(0o600)
     try:
-        assert run(tab+b"\x1b[B"*3+b"\r\x1b", state()) == [["state"]]
+        assert run(tab+b"\x1b[B"*3+b"\r\x1b", state(), path=str(root)) == [["state"]]
         assert b"HyprMon unavailable: could not run hyprmon:" in last_output
     finally: (root / "hyprmon").chmod(0o755)
     (root / "hyprmon").rename(root / "hyprmon-hidden")

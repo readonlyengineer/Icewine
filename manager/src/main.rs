@@ -37,25 +37,26 @@ struct Appearance {
 
 impl Appearance {
     fn load() -> io::Result<Self> {
-        let theme = appearance_command(&["theme"])?;
-        let themes: Vec<String> = theme.lines().find_map(|line| line.strip_prefix("Installed: "))
-            .ok_or_else(|| io::Error::other("Missing installed themes"))?
-            .split(", ").map(str::to_owned).collect();
-        let effective = theme.lines().find_map(|line| line.strip_prefix("Effective: "))
-            .ok_or_else(|| io::Error::other("Missing effective theme"))?;
-        let policy = effective.ends_with(" (Nix policy)");
-        let selected = effective.trim_end_matches(" (Nix policy)");
-        let theme = themes.iter().position(|value| value == selected)
+        let response = widget_command(&["appearance-state".into()])?;
+        let mut fields = BTreeMap::new();
+        for field in response.split_whitespace() {
+            let (name, value) = field.split_once('=').ok_or_else(|| io::Error::other("Invalid appearance state"))?;
+            if fields.insert(name, value).is_some() { return Err(io::Error::other("Duplicate appearance field")); }
+        }
+        let themes: Vec<String> = fields.remove("themes").unwrap_or_default().split(',').map(str::to_owned).collect();
+        if themes.iter().any(|id| id.is_empty() || !id.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+            || !id.as_bytes()[0].is_ascii_alphanumeric()) || themes.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(io::Error::other("Invalid installed themes"));
+        }
+        let theme = fields.remove("selected").and_then(|selected| themes.iter().position(|value| value == selected))
             .ok_or_else(|| io::Error::other("Invalid effective theme"))?;
-        let level = appearance_command(&["transparency"])?;
-        let selected = level.strip_prefix("Transparency: ").and_then(|text| text.split_whitespace().next())
-            .ok_or_else(|| io::Error::other("Missing transparency"))?;
-        let transparency = TRANSPARENCY.iter().position(|value| *value == selected)
+        let policy = match fields.remove("policy") {
+            Some("true") => true, Some("false") => false,
+            _ => return Err(io::Error::other("Invalid theme policy")),
+        };
+        let transparency = fields.remove("level").and_then(|selected| TRANSPARENCY.iter().position(|value| *value == selected))
             .ok_or_else(|| io::Error::other("Invalid transparency"))?;
-        let layout = appearance_command(&["layout"])?;
-        let selected = layout.strip_prefix("Layout: ").and_then(|text| text.split_whitespace().next())
-            .ok_or_else(|| io::Error::other("Missing layout"))?;
-        let layout = LAYOUTS.iter().position(|value| *value == selected)
+        let layout = fields.remove("desktopLayout").and_then(|selected| LAYOUTS.iter().position(|value| *value == selected))
             .ok_or_else(|| io::Error::other("Invalid layout"))?;
         let data = std::env::var_os("ICEWINE_WALLPAPER_DATA_HOME")
             .or_else(|| std::env::var_os("XDG_DATA_HOME")).map(PathBuf::from)
@@ -63,12 +64,6 @@ impl Appearance {
         let directory = data.join("icewine/wallpapers");
         let wallpaper = if directory.join("selection.img").is_file() { directory.join("selection.img") }
             else { data.join("wallpapers/default.jpg") };
-        let ownership = widget_command(&["file-state".into()])?;
-        let mut fields = BTreeMap::new();
-        for field in ownership.split_whitespace() {
-            let (name, value) = field.split_once('=').ok_or_else(|| io::Error::other("Invalid file ownership"))?;
-            if fields.insert(name, value).is_some() { return Err(io::Error::other("Duplicate file ownership")); }
-        }
         let mut readonly = [false; 5];
         for (index, name) in ["theme", "transparency", "wallpaper", "monitors", "layout"].iter().enumerate() {
             readonly[index] = match fields.remove(name) {
@@ -76,7 +71,7 @@ impl Appearance {
                 _ => return Err(io::Error::other("Missing file ownership")),
             };
         }
-        if !fields.is_empty() { return Err(io::Error::other("Unknown file ownership")); }
+        if !fields.is_empty() { return Err(io::Error::other("Unknown appearance field")); }
         Ok(Self { themes, theme, policy, transparency, layout, wallpaper, readonly })
     }
 }

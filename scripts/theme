@@ -265,6 +265,12 @@ def transparency_level(state):
     return level
 
 
+def layout_default(state):
+    path = state / "layout"
+    value = path.read_text(encoding="utf-8").strip() if path.exists() else "scrolling"
+    return value if value in ("scrolling", "dwindle", "master", "monocle") else "scrolling"
+
+
 def effective(state, themes):
     policy = os.environ.get("ICEWINE_THEME_POLICY", "")
     for theme_id in (policy, selection(state) if not policy else None, DEFAULT):
@@ -655,9 +661,7 @@ def dispatch(argv):
     if command == "layout":
         path = state / "layout"
         layouts = ("scrolling", "dwindle", "master", "monocle")
-        value = path.read_text(encoding="utf-8").strip() if path.exists() else "scrolling"
-        if value not in layouts:
-            value = "scrolling"
+        value = layout_default(state)
         if args:
             value = args[0]
             if value not in layouts:

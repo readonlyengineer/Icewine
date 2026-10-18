@@ -19,6 +19,80 @@ manage = types.ModuleType("icewine_manage")
 manage.__file__ = str(source / "scripts/manage")
 importlib.machinery.SourceFileLoader(manage.__name__, manage.__file__).exec_module(manage)
 
+def test_appearance_state():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        state = root / "state/icewine"
+        config = root / "config"
+        env = dict(HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_DATA_HOME=str(root / "data"),
+                   XDG_STATE_HOME=str(state.parent), ICEWINE_THEME_ASSETS=str(source / "theme/assets"),
+                   ICEWINE_THEME_POLICY="", ICEWINE_WALLPAPER_DATA_HOME="")
+        def status(**extra):
+            with patch.dict(os.environ, env | extra), contextlib.redirect_stdout(io.StringIO()) as output:
+                manage.main(["appearance-state"])
+            return dict(field.split("=") for field in output.getvalue().split())
+        def rejects(message, **extra):
+            try: status(**extra)
+            except ValueError as error: assert message in str(error), str(error)
+            else: raise AssertionError("invalid appearance state accepted")
+        with patch.object(manage.subprocess, "run", side_effect=AssertionError("read performed host operation")):
+            initial = status()
+            assert initial == {
+                "themes": ",".join(sorted(path.stem for path in (source / "theme/assets/themes").glob("*.json"))),
+                "selected": manage.theme.DEFAULT, "policy": "false", "level": "high", "desktopLayout": "scrolling",
+                **dict.fromkeys(("theme", "transparency", "wallpaper", "monitors", "layout"), "false")}
+            assert not state.exists() and not config.exists()
+            state.mkdir(parents=True)
+            (state / "theme").write_text("dracula\n")
+            (state / "transparency").write_text("low\n")
+            (state / "layout").write_text("master\n")
+            assert status()["selected"] == "dracula" and status()["level"] == "low"
+            assert status()["desktopLayout"] == "master"
+            policy = status(ICEWINE_THEME_POLICY="nord")
+            assert policy["selected"] == "nord" and policy["policy"] == "true"
+            assert (state / "theme").read_text() == "dracula\n"
+            (state / "layout").write_text("invalid\n")
+            assert status()["desktopLayout"] == "scrolling"
+            for name, value in (("theme", "not-installed"), ("theme", "bad id"), ("transparency", "invalid")):
+                path = state / name
+                saved = path.read_bytes()
+                path.write_text(value)
+                rejects("not installed" if value == "not-installed" else "invalid saved")
+                path.write_bytes(saved)
+            rejects("not installed", ICEWINE_THEME_POLICY="not-installed")
+            rejects("assets are unavailable", ICEWINE_THEME_ASSETS=str(root / "missing"))
+            assets = root / "assets"
+            (assets / "themes").mkdir(parents=True)
+            (assets / "templates").mkdir()
+            rejects("Tokyo Night assets are missing", ICEWINE_THEME_ASSETS=str(assets))
+            # Broken links and linked parents retain action-specific ownership.
+            for path in (state / "theme", state / "transparency", state / "layout"):
+                path.unlink()
+                path.symlink_to(root / ("absent-" + path.name))
+            wallpaper = root / "wallpaper-data/icewine/wallpapers/selection.img"
+            wallpaper.parent.mkdir(parents=True)
+            wallpaper.symlink_to(root / "absent-image")
+            (config / "hypr").mkdir(parents=True)
+            (config / "hypr/hyprmon.lua").symlink_to(root / "absent-monitors")
+            linked = status(ICEWINE_WALLPAPER_DATA_HOME=str(root / "wallpaper-data"))
+            assert all(linked[name] == "true" for name in ("theme", "transparency", "layout", "wallpaper", "monitors"))
+            (config / "icewine").symlink_to(root / "absent-render")
+            (state / "theme").unlink()
+            (state / "transparency").unlink()
+            assert status()["theme"] == status()["transparency"] == "true"
+            (config / "icewine").unlink()
+            (state / "layout").unlink()
+            state.rename(root / "linked-state")
+            state.symlink_to(root / "linked-state")
+            assert all(status()[name] == "true" for name in ("theme", "transparency", "layout"))
+
+
+test_appearance_state()
+if sys.argv[2:] == ["--appearance-only"]:
+    print("PASS: real backend appearance fields, policy, validation, layout fallback and ownership")
+    sys.exit(0)
+
+
 with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as temporary:
     root = Path(temporary)
     defaults = root / "defaults"
@@ -308,8 +382,9 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         # A linked theme locks only that appearance action; queries never write.
         (widget_saved / "theme").symlink_to(root / "absent-declared-theme")
         with contextlib.redirect_stdout(io.StringIO()) as output:
-            manage.main(["file-state"])
-        assert dict(field.split("=") for field in output.getvalue().split()) == {
+            manage.main(["appearance-state"])
+        fields = dict(field.split("=") for field in output.getvalue().split())
+        assert {name: fields[name] for name in ("theme", "transparency", "wallpaper", "monitors", "layout")} == {
             "theme": "true", "transparency": "false", "wallpaper": "false", "monitors": "false", "layout": "false"}
         # Backend host policy cannot be bypassed by directly invoking Apply.
         with patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "nixos"}):
