@@ -1930,6 +1930,21 @@ ShellRoot {
                 file.reload()
                 input.tryCompare(Config.Settings, "notificationToasts", false)
                 input.compare(Config.Settings.cardStacks.length, 6)
+                input.compare(Config.Settings.barBehaviour, "keyboard")
+                input.compare(Config.Settings.barLocation, "above")
+                for (const behaviour of Cards.barBehaviours) for (const location of Cards.barLocations) {
+                    file.setText(JSON.stringify({barBehaviour: behaviour, barLocation: location}))
+                    file.reload()
+                    input.tryCompare(Config.Settings, "barBehaviour", behaviour)
+                    input.tryCompare(Config.Settings, "barLocation", location)
+                }
+                for (const invalid of [{barBehaviour: "unknown"}, {barLocation: false}]) {
+                    file.setText(JSON.stringify(invalid))
+                    file.reload()
+                    input.wait(30)
+                    input.compare(Config.Settings.barBehaviour, "always")
+                    input.compare(Config.Settings.barLocation, "bottom")
+                }
                 const mixed = [{id: "mixed", modules: ["notifications", "layout", "audio", "launcher"]}]
                 file.setText(JSON.stringify({notificationToasts: false, cardStacks: mixed}))
                 file.reload()

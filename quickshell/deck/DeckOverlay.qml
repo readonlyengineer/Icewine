@@ -157,7 +157,7 @@ Scope {
             keyboard?.toggle()
             return
         }
-        shell.handoff()
+        shell.handoff(entry.action === "screenshot")
         if (entry.action === "screenshot") {
             Qt.callLater(() => Quickshell.execDetached([
                 "flameshot", "screen", "--edit"

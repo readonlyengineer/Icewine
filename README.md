@@ -177,12 +177,23 @@ stack. The first member supplies the topbar icon. Rows show stack/member order
 and the primary, secondary, tertiary accent cycle; modules absent from stacks
 are disabled. These preferences describe configured membership, including cards
 that are temporarily unavailable.
+Bar Behaviour offers Autohide (Keyboard), Autohide (Keyboard & Mouse), Toggle
+(Keyboard), and Always Show. The default is keyboard hold-to-show; mouse mode
+also reveals at the screen edge. Bar Locations offers Above (default overlay),
+Top, and Bottom. Top/Bottom reserve space while visible; Bottom uses the bottom
+mouse edge and opens cards upward. Left/Right cycles these choices before Save.
+Always Show takes no keyboard focus by itself and remains visible after ordinary
+application/media handoffs. Explicit hide or capture handoff suppresses the bar until
+the next shortcut, widget or controller opening (mouse mode also permits a fresh
+edge entry); unlocking restores the selected mode.
 Notification toasts and the window switcher default to enabled. Disabling toasts
 keeps notification history and sounds; session and authentication controls remain.
 Preferences live in `$XDG_STATE_HOME/icewine/widgets.json` (normally
 `~/.local/state/icewine/widgets.json`); host persistence remains your policy.
 NixOS `services.icewine.widgets.notificationToasts` and `.windowSwitcher` default
 to null (user choice); true/false enforces policy in the manager and shell.
+`.barBehaviour` accepts `keyboard`, `keyboard-mouse`, `toggle`, or `always`;
+`.barLocation` accepts `above`, `top`, or `bottom`. Both default to null (user choice).
 The Widgets page requires shipped Settings.qml and a desktop/handheld entry;
 custom settings or entries are read-only here. Invalid non-null widget policy
 also makes the editor read-only and reports an error; repair the host policy

@@ -19,7 +19,7 @@ assert.match(barBackground, /MouseArea\s*\{\s*anchors\.fill: parent\s*acceptedBu
 assert.match(barBackground, /onWheel: event => event\.accepted = true/,
     "Bar background must consume scrolling rather than passing it underneath")
 
-const mask = topbar.match(/mask: Region \{([\s\S]*?)^            \}/m)[1]
+const mask = topbar.match(/mask: Region \{\n([\s\S]*?)^            \}/m)[1]
 assert.match(mask, /statusPopout\.shown \? statusPopout : null/, "Shared host supplies its input region")
 assert.doesNotMatch(mask, /\blauncher\b/, "Removed launcher cannot leave a dangling input-region binding")
 
@@ -258,6 +258,8 @@ shell.raiseMedia()
 shell.finishInteraction()
 flush()
 assert.equal(raises, 1)
+assert.equal(State.barVisible(shell.ui, false, false, "always"), true,
+    "Ordinary media completion must leave Always Show visible")
 assert.equal(focused.length, 0, "Media activation is not undone by focus restoration")
 shell.player = {canRaise: false, raise: () => assert.fail("Unsupported Raise")}
 shell.raiseMedia()
@@ -270,6 +272,8 @@ shell.ui = State.reduce(shell.ui, {type: "open", page: "switcher", engaged: true
 shell.beginInteraction()
 shell.activateSwitcherWindow(selected)
 assert.equal(shell.ui.page, "")
+assert.equal(State.barVisible(shell.ui, false, false, "always"), true,
+    "Instant window activation handoff must leave Always Show visible")
 assert.equal(focused.length, 0, "Activation waits until after handoff")
 flush()
 assert.deepEqual(focused, [selected])
@@ -357,11 +361,22 @@ const captures = []
 deck.Quickshell.execDetached = command => captures.push(Array.from(command))
 deck.activate({action: "screenshot"}, 0)
 assert.equal(captures.length, 0, "Dismiss the shell before capture")
+assert.equal(State.barVisible(shell.ui, false, false, "always"), false,
+    "The real controller screenshot caller must explicitly suppress Always Show")
 flush()
 assert.deepEqual(captures, [
     ["flameshot", "screen", "--edit"]
 ], "Open the native monitor editor after dismissing the shell")
 
+const controllerActions = []
+deck.compositor = {dispatch: command => controllerActions.push(command),
+    toggleFullscreen: () => controllerActions.push("fullscreen")}
+for (const action of ["close", "fullscreen"]) {
+    deck.activate({action}, 0)
+    assert.equal(State.barVisible(shell.ui, false, false, "always"), true,
+        `${action}: ordinary controller completion resumes Always Show`)
+}
+assert.equal(controllerActions.length, 2)
 let launches = 0
 deck.activate = () => launches++
 deck.requestClose({action: "screenshot"})
@@ -397,6 +412,8 @@ let pasteRequest = preparePaste()
 assert.equal(shell.pasteDelivery.running, false, "No paste before clipboard load confirmation")
 shell.clipboardLoaded(pasteRequest)
 assert.equal(shell.ui.page, "", "Paste releases the panel through ordinary handoff")
+assert.equal(State.barVisible(shell.ui, false, false, "always"), true,
+    "Confirmed clipboard handoff must leave passive Always Show chrome visible")
 flush()
 assert.equal(focused.at(-1), originalPasteWindow)
 shell.deliverClipboardPaste()
@@ -459,3 +476,88 @@ shell.ui.held = true
 shell.pasteClipboard("epoch:7")
 assert.equal(shell.clipboardPaste, null, "Held opening modifiers cannot reach paste delivery")
 shell.ui.held = false
+
+// All visibility modes share engagement/radial/handoff lifetime rules.
+for (const behaviour of Cards.barBehaviours) {
+    let mode = State.initial()
+    assert.equal(State.barVisible(mode, false, false, behaviour), behaviour === "always")
+    mode = State.reduce(mode, {type: "press", behaviour})
+    assert.equal(State.barVisible(mode, false, false, behaviour), true)
+    assert.equal(State.reduce(mode, {type: "press", behaviour}), mode, "Repeat press does not toggle twice")
+    mode = State.reduce(mode, {type: "release"})
+    assert.equal(State.barVisible(mode, false, false, behaviour), ["toggle", "always"].includes(behaviour))
+    if (behaviour === "toggle") {
+        mode = State.reduce(mode, {type: "press", behaviour})
+        assert.equal(State.barVisible(mode, false, false, behaviour), false, "Toggle hides on second press before release")
+        mode = State.reduce(mode, {type: "release"})
+    }
+    mode = State.reduce(mode, {type: "open", page: "audio", engaged: true, screen: "external"})
+    assert.equal(State.barVisible(mode, false, false, behaviour), true)
+    mode = State.reduce(mode, {type: "hide"})
+    assert.equal(State.barVisible(mode, false, true, behaviour), false, "Explicit handoff defeats hover and Always Show")
+    assert.equal(State.barVisible(mode, true, false, behaviour), true, "Controller can reopen after handoff")
+    mode = State.reduce(mode, {type: "resume"})
+    assert.equal(State.barVisible(mode, false, true, behaviour), true)
+}
+// Evaluate the shipped bindings, including Bottom popouts and native requests,
+// rather than implementing an alternative geometry model inside the test.
+const expression = (source, property) => source.match(new RegExp(`^ *${property}: (.+)$`, "m"))[1]
+const surfaceSource = topbar.split("id: surface")[1].split("// Consume")[0]
+const popoutSource = topbar.split("id: statusPopout")[1]
+const edgeSource = topbar.split("id: edge\n")[1].split("HoverHandler")[0]
+for (const behaviour of Cards.barBehaviours) for (const location of Cards.barLocations) {
+    for (const height of [80, 600, 1440]) for (const visible of [false, true]) {
+        const env = {root: {bottomBar: location === "bottom", barVisible: visible, barHeight: 38, sessionLocked: false},
+            Config: {Settings: {barBehaviour: behaviour, barLocation: location}},
+            panel: {height, width: 1280}, parent: {height}, height: 38, implicitHeight: 500}
+        const value = source => vm.runInNewContext(source, env)
+        const reservation = value(expression(topbar, "readonly property int reservation"))
+        assert.equal(reservation, visible && location !== "above" ? 38 : 0)
+        const y = value(expression(surfaceSource, "y"))
+        if (visible) assert.equal(y, location === "bottom" ? height - 38 : 0)
+        else assert.ok(y <= -38 || y >= height, "Hidden visual leaves the usable screen")
+        env.height = value(expression(popoutSource, "height"))
+        const popoutY = value(expression(popoutSource, "y"))
+        assert.ok(popoutY >= 0 && popoutY + env.height <= height, "Popout remains inside native usable height")
+        assert.equal(value(expression(edgeSource, "enabled")), behaviour === "keyboard-mouse")
+        env.height = 1
+        assert.equal(value(expression(edgeSource, "y")), location === "bottom" ? height - 1 : 0)
+        env.root.sessionLocked = true
+        assert.equal(value(expression(edgeSource, "enabled")), false, "Lock removes mouse edge input")
+    }
+}
+// Always-visible chrome must not prevent restoring focus after a widget closes.
+shell.ui = State.initial()
+shell.interactionWanted = false
+shell.barVisible = true
+shell.compositor.activeWindowAddress = originalPasteWindow.address
+shell.beginInteraction()
+shell.finishInteraction()
+flush()
+assert.equal(focused.at(-1), originalPasteWindow.address)
+console.log("bar modes: press/release/repeat, toggle, handoff, lock edge, all 12 placements and passive focus pass")
+
+// Execute the actual launcher caller and shared handoff, with only platform
+// launch/focus delivery substituted. No later focus/navigation event resumes it.
+shell.clipboardPaste = null
+focused.length = 0
+shell.openWidget("launcher", true, "external")
+flush()
+const launched = []
+const launcher = controller("../modules/topbar/LauncherCard.qml", {
+    active: true, LauncherSearch: require("../modules/topbar/LauncherSearch.js"),
+    handoffRequested: () => shell.handoff(),
+    Quickshell: {env: () => "/fixture", execDetached: options => launched.push(options)}
+})
+launcher.launch({command: ["fixture-app"]})
+shell.finishInteraction()
+flush()
+assert.equal(launched.length, 1)
+assert.equal(shell.ui.page, "")
+assert.equal(State.barVisible(shell.ui, false, false, "always"), true,
+    "Real launcher completion restores Always Show without any later event")
+assert.equal(focused.length, 0, "Launcher handoff still cancels stale focus restoration")
+shell.dismiss()
+assert.equal(State.barVisible(shell.ui, false, false, "always"), false,
+    "Explicit hide remains suppressed independently of ordinary handoffs")
+console.log("ordinary launcher/media/clipboard/window/controller handoffs preserve Always Show; capture/explicit hide still suppress")

@@ -12,7 +12,7 @@ const ROWS: &[(&str, &str, &str)] = &[
 ];
 
 #[derive(Clone, Copy, PartialEq)]
-enum Control { Theme, Transparency, Layout, Wallpaper, Monitors, Utility(&'static str), Widget(usize), Card(usize), Steam, Overwrite, Apply, Cancel }
+enum Control { Theme, Transparency, Layout, Wallpaper, Monitors, Utility(&'static str), Widget(usize), Bar(usize), Card(usize), Steam, Overwrite, Apply, Cancel }
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
 
@@ -86,14 +86,20 @@ const WIDGETS: &[(&str, &str, &str)] = &[
     ("windowSwitcher", "Window switcher", "Optional window list and shortcut"),
 ];
 
+const BAR_SETTINGS: &[(&str, &str, &[&str], &[&str])] = &[
+    ("barBehaviour", "Bar Behaviour", &["keyboard", "keyboard-mouse", "toggle", "always"],
+        &["Autohide (Keyboard)", "Autohide (Keyboard & Mouse)", "Toggle (Keyboard)", "Always Show"]),
+    ("barLocation", "Bar Locations", &["above", "top", "bottom"], &["Above", "Top", "Bottom"]),
+];
+
 const CARD_MODULES: &[&str] = &["launcher", "background", "layout", "media", "audio", "bluetooth",
     "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance"];
 
 struct CardStack { id: String, modules: Vec<usize> }
 
 struct Widgets {
-    enabled: [bool; 2], policy: [bool; 3], linked: [bool; 3], supported: bool, revision: String,
-    stacks: Vec<CardStack>,
+    enabled: [bool; 2], policy: [bool; 5], linked: [bool; 5], supported: bool, revision: String,
+    stacks: Vec<CardStack>, bar: [usize; 2],
 }
 
 fn widget_command(args: &[String]) -> io::Result<String> {
@@ -120,8 +126,8 @@ impl Widgets {
         let revision = fields.remove("revision").filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit()))
             .ok_or_else(|| io::Error::other("Invalid widget revision"))?.to_owned();
         let mut enabled = [true; 2];
-        let mut policy = [false; 3];
-        let mut linked = [false; 3];
+        let mut policy = [false; 5];
+        let mut linked = [false; 5];
         for (index, (id, _, _)) in WIDGETS.iter().enumerate() {
             let (value, owner) = fields.remove(id).and_then(|value| value.split_once(':'))
                 .ok_or_else(|| io::Error::other("Missing widget state"))?;
@@ -153,8 +159,18 @@ impl Widgets {
             }
             stacks.push(CardStack { id: id.to_owned(), modules });
         }
+        let mut bar = [0; 2];
+        for (index, (id, _, choices, _)) in BAR_SETTINGS.iter().enumerate() {
+            let (value, owner) = fields.remove(id).and_then(|value| value.split_once(':'))
+                .ok_or_else(|| io::Error::other("Missing bar setting"))?;
+            bar[index] = choices.iter().position(|choice| *choice == value)
+                .ok_or_else(|| io::Error::other("Invalid bar setting"))?;
+            policy[index + 3] = match owner { "policy" | "symlink" => true, "user" => false,
+                _ => return Err(io::Error::other("Invalid bar ownership")) };
+            linked[index + 3] = owner == "symlink";
+        }
         if !fields.is_empty() { return Err(io::Error::other("Unknown widget state")); }
-        Ok(Self { enabled, policy, linked, supported, revision, stacks })
+        Ok(Self { enabled, policy, linked, supported, revision, stacks, bar })
     }
 
     fn location(&self, module: usize) -> Option<(usize, usize)> {
@@ -222,6 +238,8 @@ impl Widgets {
         args.push(format!("cardStacks={}", self.stacks.iter().map(|stack|
             format!("{}/{}", stack.id, stack.modules.iter().map(|index| CARD_MODULES[*index]).collect::<Vec<_>>().join(",")))
             .collect::<Vec<_>>().join(";")));
+        args.extend(BAR_SETTINGS.iter().enumerate().map(|(index, (id, _, choices, _))|
+            format!("{id}={}", choices[self.bar[index]])));
         let text = widget_command(&args)?;
         *self = Self::load().map_err(|error| io::Error::other(format!("Save completed; refresh failed: {error}")))?;
         Ok(text)
@@ -260,7 +278,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     let mut appearance = Appearance::load()?;
     let (mut widgets, mut widget_message) = match Widgets::load() {
         Ok(value) => (value, String::new()),
-        Err(error) => (Widgets { enabled: [true; 2], policy: [true; 3], linked: [false; 3], supported: false, revision: String::new(), stacks: Vec::new() }, error.to_string()),
+        Err(error) => (Widgets { enabled: [true; 2], policy: [true; 5], linked: [false; 5], supported: false, revision: String::new(), stacks: Vec::new(), bar: [0; 2] }, error.to_string()),
     };
     let mut message = String::new();
     let mut page = 0;
@@ -282,6 +300,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             } else if page == 2 {
                 WIDGETS.iter().enumerate().filter(|(index, _)| widgets.supported && !widgets.policy[*index])
                     .map(|(index, _)| Control::Widget(index))
+                    .chain((0..BAR_SETTINGS.len()).filter(|index| widgets.supported && !widgets.policy[index + 3]).map(Control::Bar))
                     .chain((0..CARD_MODULES.len()).map(Control::Card))
                     .chain((widgets.supported && widgets.policy.iter().any(|locked| !locked)).then_some(Control::Apply)).chain([Control::Cancel]).collect()
             } else { rows.iter().filter(|(id, _, _)| !readonly
@@ -346,6 +365,10 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     let mut entries: Vec<_> = WIDGETS.iter().enumerate().map(|(index, (_, label, _))|
                         (Control::Widget(index), (*label).to_owned(), format!("[{}]{}",
                             if !widgets.supported { "?" } else if widgets.enabled[index] { "x" } else { " " }, owner(index)))).collect();
+                    entries.extend(BAR_SETTINGS.iter().enumerate().map(|(index, (_, label, _, labels))|
+                        (Control::Bar(index), (*label).to_owned(), if widgets.supported {
+                            format!("< {} >{}", labels[widgets.bar[index]], owner(index + 3))
+                        } else { "Unavailable".to_owned() })));
                     entries.extend(CARD_MODULES.iter().enumerate().map(|(index, name)| {
                         let value = if !widgets.supported { "Unavailable".to_owned() }
                             else if let Some((stack, position)) = widgets.location(index) {
@@ -360,7 +383,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     *table_state.offset_mut() = selected.unwrap_or(0).saturating_sub(utilities.height.saturating_sub(1) as usize);
                     frame.render_stateful_widget(Table::new(entries.into_iter().map(|(control, label, value)|
                         Row::new([Cell::from(label), Cell::from(value)]).style(if controls[focus] == control { focused }
-                            else if !widgets.supported || match control { Control::Widget(index) => widgets.policy[index], _ => widgets.policy[2] } { muted }
+                            else if !widgets.supported || match control { Control::Widget(index) => widgets.policy[index], Control::Bar(index) => widgets.policy[index + 3], _ => widgets.policy[2] } { muted }
                             else { Style::default() })), [Constraint::Length(21), Constraint::Min(20)]).column_spacing(1), utilities, &mut table_state);
                     frame.render_widget(Paragraph::new(widget_message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
                 } else {
@@ -419,6 +442,12 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     if matches!(controls[focus], Control::Card(_)) => {
                     if let Control::Card(index) = controls[focus] { widgets.edit(index, key.code); }
                 }
+                KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Bar(_)) => {
+                    if let Control::Bar(index) = controls[focus] {
+                        let count = BAR_SETTINGS[index].2.len();
+                        widgets.bar[index] = (widgets.bar[index] + if key.code == KeyCode::Right { 1 } else { count - 1 }) % count;
+                    }
+                }
                 KeyCode::Tab => { focuses[page] = focus; page = (page + 1) % 3; focus = focuses[page]; }
                 KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Theme | Control::Transparency | Control::Layout) => {
                     let (values, current, command) = if controls[focus] == Control::Theme {
@@ -459,6 +488,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 }
                 KeyCode::Char(' ') | KeyCode::Enter => match controls[focus] {
                     Control::Widget(index) => widgets.enabled[index] ^= true,
+                    Control::Bar(index) => widgets.bar[index] = (widgets.bar[index] + 1) % BAR_SETTINGS[index].2.len(),
                     Control::Card(index) => widgets.edit(index, key.code),
                     Control::Utility(id) => {
                         *selected.get_mut(id).unwrap() ^= true;

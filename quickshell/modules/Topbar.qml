@@ -29,6 +29,7 @@ Scope {
         && panels.instances.some(panel => panel.widgetHere && panel.layoutActive)
     readonly property int barHeight: 38
     readonly property int shadowDrop: 4
+    readonly property bool bottomBar: Config.Settings.barLocation === "bottom"
     readonly property var player: Mpris.players.values.find(candidate => candidate.isPlaying)
         ?? Mpris.players.values[0] ?? null
 
@@ -37,12 +38,15 @@ Scope {
     readonly property bool radialVisible: radial?.opened ?? false
     readonly property bool widgetEngaged: ui.engaged
     readonly property bool barVisible: !sessionLocked
-        && State.barVisible(ui, radialVisible, hoveredScreen !== "")
+        && State.barVisible(ui, radialVisible, hoveredScreen !== "", Config.Settings.barBehaviour)
     readonly property bool mouseBindsSuppressed: !sessionLocked
         && (radialVisible || widgetEngaged || (barVisible && hoveredScreen !== "")
             || panels.instances.some(panel => panel.widgetHere && panel.widgetHovered))
     onMouseBindsSuppressedChanged: compositor.supress_mouse_binds(mouseBindsSuppressed)
     Component.onCompleted: compositor.supress_mouse_binds(mouseBindsSuppressed)
+    readonly property bool interactionWanted: !sessionLocked && !ui.suppressed
+        && (ui.held || ui.latched || ui.page !== "" || radialVisible || hoveredScreen !== "")
+    onInteractionWantedChanged: if (!interactionWanted) finishInteraction()
     property bool interactionActive: false
     property string previousWindow: ""
     property var previousToplevel: null
@@ -167,6 +171,7 @@ Scope {
     function beginInteraction() {
         if (interactionActive || sessionLocked)
             return
+        ui = State.reduce(ui, { type: "resume" })
         keyboard?.hide()
         ++focusGeneration
         previousWindow = compositor.activeWindowAddress
@@ -178,7 +183,9 @@ Scope {
         if (sessionLocked) return
         cancelClipboardPaste()
         beginInteraction()
-        ui = State.reduce(ui, { type: "press" })
+        const closing = Config.Settings.barBehaviour === "toggle" && ui.latched && !ui.held
+        ui = State.reduce(ui, { type: "press", behaviour: Config.Settings.barBehaviour })
+        if (closing) { dismissWidget(); hoveredScreen = "" }
     }
 
     function releaseBar() {
@@ -197,7 +204,7 @@ Scope {
         // Let the layer release its keyboard ownership before restoring focus.
         Qt.callLater(() => {
             if (address && window && root.compositor.toplevels.includes(window)
-                    && generation === root.focusGeneration && !root.barVisible && !root.sessionLocked)
+                    && generation === root.focusGeneration && !root.interactionWanted && !root.sessionLocked)
                 root.compositor.activateWindow(address)
         })
     }
@@ -247,12 +254,12 @@ Scope {
         ui = State.reduce(ui, { type: "dismiss" })
     }
 
-    function dismiss() {
+    function dismiss(suppress = true) {
         if (clipboardPaste?.phase !== "handoff") cancelClipboardPaste()
         ++widgetFocusGeneration
         if (ui.engaged) radial?.drainInput()
         widgetDismissed()
-        ui = State.reduce(ui, { type: "reset" })
+        ui = State.reduce(ui, { type: suppress ? "hide" : "reset" })
         hoveredScreen = ""
         radial?.dismiss()
     }
@@ -262,9 +269,10 @@ Scope {
         ++focusGeneration
     }
 
-    function handoff() {
+    // Ordinary app handoffs release focus; capture/lock explicitly suppress chrome.
+    function handoff(suppress = false) {
         yieldFocus()
-        dismiss()
+        dismiss(suppress)
     }
 
     function instantHandoff() {
@@ -281,11 +289,15 @@ Scope {
         Qt.callLater(() => { if (media?.canRaise) media.raise() })
     }
 
-    onBarVisibleChanged: if (!barVisible) finishInteraction()
-    onSessionLockedChanged: if (sessionLocked) { cancelClipboardPaste(); handoff() }
+    onSessionLockedChanged: {
+        if (sessionLocked) { cancelClipboardPaste(); handoff(true) }
+        else ui = State.initial()
+    }
 
     Connections {
         target: Config.Settings
+        function onBarBehaviourChanged() { root.handoff(false) }
+        function onBarLocationChanged() { root.handoff(false) }
         function onCardStacksChanged() { root.dismissWidget() }
         function onWindowSwitcherChanged() {
             if (!Config.Settings.windowSwitcher && root.ui.page === "switcher")
@@ -294,8 +306,16 @@ Scope {
     }
 
     Connections {
+        target: Quickshell
+        function onScreensChanged() {
+            if (!Quickshell.screens.some(screen => screen.name === root.hoveredScreen)) root.hoveredScreen = ""
+            if (root.ui.page && !Quickshell.screens.some(screen => screen.name === root.ui.screen)) root.dismissWidget()
+        }
+    }
+
+    Connections {
         target: root.compositor
-        function onNavigationRequested() { root.cancelClipboardPaste(); root.handoff() }
+        function onNavigationRequested() { root.cancelClipboardPaste(); root.handoff(false) }
         function onActiveWindowAddressChanged() {
             const address = root.compositor.activeWindowAddress
             if (root.clipboardPaste && address && address !== root.clipboardPaste.window.address)
@@ -349,6 +369,33 @@ Scope {
             readonly property string keyboardScreen: root.widgetEngaged ? root.ui.screen : root.radial?.monitorName ?? ""
             readonly property string hoverPage: statusIcons.hoveredPage
             readonly property bool widgetHovered: statusPopout.hovered
+            readonly property int reservation: root.barVisible && Config.Settings.barLocation !== "above" ? root.barHeight : 0
+            readonly property bool pointerInside: barHover.hovered || edgeHover.hovered || (widgetHere && widgetHovered)
+            onPointerInsideChanged: {
+                if (pointerInside) {
+                    pointerLeave.stop()
+                    if (edgeHover.hovered) root.ui = State.reduce(root.ui, { type: "resume" })
+                    root.hoveredScreen = screen.name
+                } else pointerLeave.restart()
+            }
+            Timer {
+                id: pointerLeave
+                interval: 180
+                onTriggered: if (!panel.pointerInside && root.hoveredScreen === panel.screen.name) root.hoveredScreen = ""
+            }
+
+            property PanelWindow workArea: PanelWindow {
+                screen: panel.screen
+                visible: panel.reservation > 0
+                anchors { left: true; right: true; top: !root.bottomBar; bottom: root.bottomBar }
+                implicitHeight: root.barHeight
+                exclusiveZone: panel.reservation
+                color: "transparent"
+                mask: Region {}
+                WlrLayershell.namespace: "icewine:bar-reservation"
+                WlrLayershell.layer: WlrLayer.Top
+                WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+            }
 
             function focusWidget(openingPage) {
                 if (!widgetHere || !root.widgetEngaged) return
@@ -382,7 +429,9 @@ Scope {
                 }
             }
             anchors { top: true; bottom: true; left: true; right: true }
-            // Reserve nothing; respect an OSK's own reservation so it stays usable.
+            // Reclaim our own reservation, while respecting other native zones (e.g. OSK).
+            margins.top: root.bottomBar ? 0 : -reservation
+            margins.bottom: root.bottomBar ? -reservation : 0
             exclusiveZone: 0
             color: "transparent"
             WlrLayershell.namespace: "quickshell:topbar"
@@ -398,10 +447,11 @@ Scope {
                 onCleared: if (root.ui.page === "switcher") root.handoff()
             }
 
-            // Hidden means no input region, including at the top edge.
+            // Only mouse-autohide keeps a one-logical-pixel reveal edge while hidden.
             mask: Region {
                 Region { item: panel.modal && !root.oskVisible && !root.sessionLocked ? input : null }
                 Region { item: root.barVisible ? surface : null }
+                Region { item: edge.enabled ? edge : null }
                 Region { item: switcher.active ? switcher : null }
                 Region { item: statusPopout.shown ? statusPopout : null }
             }
@@ -442,7 +492,7 @@ Scope {
                 }
                 Loader {
                     id: dial
-                    anchors { fill: parent; topMargin: root.barHeight }
+                    anchors { fill: parent; topMargin: root.bottomBar ? 0 : root.barHeight; bottomMargin: root.bottomBar ? root.barHeight : 0 }
                     active: root.radialVisible && panel.screen.name === root.radial.monitorName
                     sourceComponent: root.radial?.view ?? null
                     onLoaded: if (!root.widgetEngaged) item.forceActiveFocus()
@@ -457,10 +507,19 @@ Scope {
                     }
                 }
 
+                Item {
+                    id: edge
+                    width: parent.width
+                    height: 1
+                    y: root.bottomBar ? parent.height - height : 0
+                    enabled: Config.Settings.barBehaviour === "keyboard-mouse" && !root.sessionLocked
+                    HoverHandler { id: edgeHover; enabled: edge.enabled }
+                }
+
                 Rectangle {
                     id: surface
                     anchors.horizontalCenter: parent.horizontalCenter
-                    y: root.barVisible ? 0 : -height
+                    y: root.bottomBar ? (root.barVisible ? parent.height - height : parent.height) : (root.barVisible ? 0 : -height)
                     width: root.fullWidth || root.radialVisible ? parent.width : Math.round(parent.width * 0.8)
                     height: root.barHeight
                     opacity: root.barVisible ? 1 : 0
@@ -475,8 +534,10 @@ Scope {
                         blurMax: 16
                         shadowVerticalOffset: root.shadowDrop
                     }
-                    bottomLeftRadius: root.radialVisible ? 0 : 10
-                    bottomRightRadius: root.radialVisible ? 0 : 10
+                    topLeftRadius: root.bottomBar && !root.radialVisible ? 10 : 0
+                    topRightRadius: topLeftRadius
+                    bottomLeftRadius: !root.bottomBar && !root.radialVisible ? 10 : 0
+                    bottomRightRadius: bottomLeftRadius
 
                     // Consume bar input below its controls, above outside-dismiss.
                     MouseArea {
@@ -506,11 +567,8 @@ Scope {
                         }
                     }
                     HoverHandler {
+                        id: barHover
                         enabled: root.barVisible
-                        onHoveredChanged: {
-                            if (hovered) root.hoveredScreen = panel.screen.name
-                            else if (root.hoveredScreen === panel.screen.name) root.hoveredScreen = ""
-                        }
                     }
                     Behavior on y { NumberAnimation { duration: root.instantBarHide ? 0 : 160; easing.type: Easing.OutCubic } }
                     Behavior on opacity { NumberAnimation { duration: root.instantBarHide ? 0 : 140 } }
@@ -554,9 +612,9 @@ Scope {
                     }
                     x: Math.max(8, Math.min(surface.x + surface.width - width,
                         panel.width - width - 8))
-                    y: root.barHeight + 4
-                    width: Math.min(implicitWidth, panel.width - 16)
-                    height: Math.min(implicitHeight, panel.height - y - 8)
+                    y: root.bottomBar ? Math.max(0, panel.height - root.barHeight - 4 - height) : root.barHeight + 4
+                    width: Math.max(0, Math.min(implicitWidth, panel.width - 16))
+                    height: Math.max(0, Math.min(implicitHeight, panel.height - root.barHeight - 12))
                     layoutsEnabled: root.layoutsEnabled
                     excludeSteamApps: root.excludeSteamApps
                     compositor: root.compositor

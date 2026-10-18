@@ -14,6 +14,16 @@ QtObject {
     readonly property bool notificationToasts: widgetEnabled("notificationToasts")
     readonly property bool windowSwitcher: widgetEnabled("windowSwitcher")
 
+    readonly property string barBehaviour: barChoice("barBehaviour", Cards.barBehaviours, "keyboard")
+    readonly property string barLocation: barChoice("barLocation", Cards.barLocations, "above")
+
+    function barChoice(name, choices, fallback) {
+        const policy = widgetPolicy[name]
+        if (policy !== undefined && policy !== null)
+            return choices.includes(policy) ? policy : fallback
+        return widgetSelections[name] ?? fallback
+    }
+
     readonly property var cardStacks: {
         if (widgetPolicy.cardStacks !== undefined && widgetPolicy.cardStacks !== null) {
             try { return Cards.validate(widgetPolicy.cardStacks) }

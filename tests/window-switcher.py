@@ -244,6 +244,55 @@ ShellRoot {
                         topbar.dismissWidget()
                     }
                 }
+                // Exercise the real QML controller and preference notifications
+                // for each mode/location, including passive Always Show focus.
+                for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"]) {
+                    for (const location of ["above", "top", "bottom"]) {
+                        Config.Settings.widgetsFile.setText(JSON.stringify({barBehaviour: behaviour, barLocation: location}))
+                        Config.Settings.widgetsFile.reload()
+                        tryCompare(Config.Settings, "barBehaviour", behaviour)
+                        tryCompare(Config.Settings, "barLocation", location)
+                        topbar.dismiss(false)
+                        compare(topbar.barVisible, behaviour === "always")
+                        verify(!topbar.interactionActive, "Passive visibility does not capture focus")
+                        topbar.pressBar()
+                        topbar.releaseBar()
+                        compare(topbar.barVisible, behaviour === "toggle" || behaviour === "always")
+                        if (behaviour === "toggle") {
+                            topbar.pressBar()
+                            verify(!topbar.barVisible)
+                            topbar.releaseBar()
+                        }
+                        topbar.openWidget("audio", true, "DP-1")
+                        topbar.dismissWidget()
+                        wait(1)
+                        verify(!topbar.interactionActive, "Closing Always Show widget finishes interaction")
+                        mockCompositor.restored = ""
+                        topbar.openWidget("launcher", true, "DP-1")
+                        topbar.handoff()
+                        wait(1)
+                        compare(topbar.barVisible, behaviour === "always", "Ordinary launcher handoff follows selected mode")
+                        verify(!topbar.ui.suppressed && !topbar.interactionActive && !topbar.widgetEngaged)
+                        compare(mockCompositor.restored, "", "Handoff never restores stale app focus")
+                        topbar.openWidget("audio", true, "DP-1")
+                        topbar.instantHandoff()
+                        wait(1)
+                        compare(topbar.barVisible, behaviour === "always", "Switcher/clipboard handoff follows selected mode")
+                        verify(!topbar.ui.suppressed && !topbar.instantBarHide)
+                        topbar.handoff(true)
+                        verify(!topbar.barVisible, "Capture handoff suppresses every mode")
+                        mockCompositor.navigationRequested()
+                        compare(topbar.barVisible, behaviour === "always", "Ordinary navigation resumes selected mode")
+                        mockSession.lockRequested = true
+                        verify(!topbar.barVisible)
+                        mockSession.lockRequested = false
+                        compare(topbar.barVisible, behaviour === "always", "Unlock restores selected mode")
+                    }
+                }
+                Config.Settings.widgetsFile.setText("{}")
+                Config.Settings.widgetsFile.reload()
+                tryCompare(Config.Settings, "barBehaviour", "keyboard")
+                tryCompare(Config.Settings, "barLocation", "above")
                 mockSession.lockRequested = true
                 verify(mockSession.locked, "Pending acquisition already guards UI")
                 topbar.pressBar()
@@ -422,7 +471,7 @@ Scope {
     assert not re.search(r'ReferenceError|TypeError|Binding loop|Unable to assign|not a type', output), output
     # One lightweight mixed policy case exercises both fixed directions against
     # opposing saved choices; nullable user choice was covered by the watcher.
-    (root / 'state/icewine/widgets.json').write_text('{"notificationToasts":false,"windowSwitcher":true}')
+    (root / 'state/icewine/widgets.json').write_text('{"notificationToasts":false,"windowSwitcher":true,"barBehaviour":"keyboard","barLocation":"above"}')
     (root / 'shell.qml').write_text("""import QtQuick
 import Quickshell
 import qs.config as Config
@@ -431,13 +480,14 @@ ShellRoot {
         interval: 100; running: true
         onTriggered: {
             Config.Settings.widgetsFile.waitForJob()
-            if (!Config.Settings.notificationToasts || Config.Settings.windowSwitcher) Qt.exit(1)
+            if (!Config.Settings.notificationToasts || Config.Settings.windowSwitcher
+                    || Config.Settings.barBehaviour !== "always" || Config.Settings.barLocation !== "bottom") Qt.exit(1)
             else { console.log("MIXED_POLICY_PASSED"); Qt.quit() }
         }
     }
 }
 """)
-    env["ICEWINE_WIDGET_POLICY"] = '{"notificationToasts":true,"windowSwitcher":false}'
+    env["ICEWINE_WIDGET_POLICY"] = '{"notificationToasts":true,"windowSwitcher":false,"barBehaviour":"always","barLocation":"bottom"}'
     result = subprocess.run(['qs', '-p', str(root), '--no-color'], env=env,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0 and 'MIXED_POLICY_PASSED' in result.stdout + result.stderr, result.stdout + result.stderr

@@ -40,7 +40,18 @@ in {
       type = lib.types.nullOr lib.types.bool;
       default = null;
       description = "Optional ${name} policy. Null permits the user's Widgets preference; true/false fixes enablement.";
-    });
+    }) // {
+      barBehaviour = lib.mkOption {
+        type = lib.types.nullOr (lib.types.enum [ "keyboard" "keyboard-mouse" "toggle" "always" ]);
+        default = null;
+        description = "Optional bar visibility policy; null permits the user preference (default keyboard autohide).";
+      };
+      barLocation = lib.mkOption {
+        type = lib.types.nullOr (lib.types.enum [ "above" "top" "bottom" ]);
+        default = null;
+        description = "Optional bar placement policy; above overlays, top/bottom reserve space while visible.";
+      };
+    };
     idle.enable = lib.mkEnableOption "Icewine idle locking and suspend" // { default = true; };
     battery.enable = lib.mkEnableOption "Icewine Quickshell battery warnings and sleep" // { default = true; };
     desktop.enable = lib.mkEnableOption "Hyprland desktop session with Icewine";

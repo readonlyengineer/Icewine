@@ -36,6 +36,9 @@ let
     boot.isContainer = true; # Evaluation fixture has no disk/bootloader configuration.
     services.icewine.login.enable = true;
   }]; }).config;
+  barPolicy = (desktopSystem.extendModules { modules = [{
+    services.icewine.widgets = { barBehaviour = "always"; barLocation = "bottom"; };
+  }]; }).config;
   loginOff = desktop;
   greeterSystem = desktopSystem.extendModules { modules = [{
     boot.isContainer = true;
@@ -229,6 +232,10 @@ in {
     assert !(hasPackage "gamescope" flatpakOnly.environment.systemPackages);
     assert builtins.elem "icewine.service" handheld.systemd.user.services.icewine-inputplumber-hyprland.before;
     assert handheld.services.inputplumber.enable && handheld.programs.steam.enable;
+    assert desktop.services.icewine.widgets.barBehaviour == null;
+    assert desktop.services.icewine.widgets.barLocation == null;
+    assert barPolicy.services.icewine.widgets.barBehaviour == "always";
+    assert barPolicy.services.icewine.widgets.barLocation == "bottom";
     assert !(handheld.systemd.user.services ? icewine-keyboard);
     assert hasPackage "wtype" optIn.environment.systemPackages;
     assert handheld.services.icewine.applications.steam == [ "steam" "-gamepadui" ];
