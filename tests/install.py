@@ -881,6 +881,8 @@ with tempfile.TemporaryDirectory() as temporary:
     command.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
     command.chmod(0o755)
     env = dict(os.environ, PATH=str(root) + ":" + os.environ["PATH"])
+    result = subprocess.run(["bash", str(source / "scripts/icewine")], env=env, capture_output=True, text=True)
+    assert result.returncode == 0 and result.stdout == "\n", result.stderr
     assert subprocess.run(["bash", str(source / "scripts/icewine"), "manage", "literal space"], env=env, capture_output=True, text=True).stdout == "literal space\n"
 print("PASS: explicit Apply, selections, ownership, overwrite, failures and read-only NixOS")
 

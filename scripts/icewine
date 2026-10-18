@@ -2,11 +2,15 @@
 
 usage() {
     cat >&2 <<'EOF'
-Usage: icewine {manage|theme [THEME_ID|status]|transparency [off|low|med|high]|layout [scrolling|dwindle|master|monocle]|autofullscreen [on|off]|wallpaper IMAGE}
+Usage: icewine [manage|theme [THEME_ID|status]|transparency [off|low|med|high]|layout [scrolling|dwindle|master|monocle]|autofullscreen [on|off]|wallpaper IMAGE]
+Run icewine without arguments to open the manager.
 EOF
 }
 
 case ${1:-} in
+    "")
+        exec icewine-manage
+        ;;
     manage)
         shift
         exec icewine-manage "$@"

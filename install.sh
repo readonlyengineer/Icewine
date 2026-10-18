@@ -13,7 +13,7 @@ ID=$(sed -n 's/^ID=//p' /etc/os-release) || fail 'Cannot identify the platform'
 ID=$(printf '%s' "$ID" | tr -d '"')
 case ${ID:-} in
     arch|cachyos) ;;
-    nixos) fail 'NixOS: import the Icewine module in your host configuration, rebuild, then icewine manage' ;;
+    nixos) fail 'NixOS: import the Icewine module in your host configuration, rebuild, then icewine' ;;
     *) fail 'Experimental bootstrap supports only Arch/CachyOS x86_64' ;;
 esac
 [ "$(uname -m)" = x86_64 ] || fail 'Experimental bootstrap supports only x86_64'

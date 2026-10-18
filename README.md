@@ -67,7 +67,7 @@ In your `flake.nix`:
 Use your existing host target and username. Keep your hardware, users, storage
 and persistence configuration. Disable the previous desktop and display manager;
 The template opts into the complete experience; optional integrations default off.
-Rebuild your host, run `icewine manage` as your desktop user from a TTY and Apply
+Rebuild your host, run `icewine` as your desktop user from a TTY and Apply
 to deploy editable defaults, then select **Hyprland (UWSM)** at login.
 
 ### Handheld
@@ -161,7 +161,7 @@ reopen it after Apply or changing themes.
 ### Manage integrations and dotfiles
 
 ```sh
-icewine manage
+icewine
 ```
 
 Tab cycles through Installer, Appearance and Widgets. Use Up/Down or
@@ -334,7 +334,7 @@ hl.workspace_rule({ workspace = "2", layout = "master" })
 
 #### Runtime changes
 
-Choose the persistent desktop layout fallback in `icewine manage` (Appearance),
+Choose the persistent desktop layout fallback in `icewine` (Appearance),
 or with `icewine layout scrolling|dwindle|master|monocle`. The Launcher stack's
 layout card (or Super+Shift+D) changes only the focused workspace; **Use default**
 removes its session choice. Choices survive locking, shell restarts and config reloads, and expire

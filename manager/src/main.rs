@@ -629,11 +629,11 @@ fn bootstrap(directory: &str, revision: &str) -> Result<ExitCode, Box<dyn std::e
 
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        return Err("A terminal is required; run icewine manage from a TTY".into());
+        return Err("A terminal is required; run icewine from a TTY".into());
     }
     let args = std::env::args().collect::<Vec<_>>();
     if args.len() == 4 && args[1] == "--bootstrap" { return bootstrap(&args[2], &args[3]); }
-    if args.len() != 1 { return Err("Usage: icewine manage".into()); }
+    if args.len() != 1 { return Err("Usage: icewine".into()); }
     let output = Command::new("icewine-manage-backend").arg("state").output()?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).into_owned().into());
