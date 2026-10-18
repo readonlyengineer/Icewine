@@ -58,6 +58,63 @@ ShellRoot {
         }
         return null
     }
+    function geometry(locked) {
+        session.lockRequested = locked
+        session.keyboardHost = lockView
+        // Dimensions are logical output sizes, including a 1920x1080 output at 1.5x.
+        for (const [width, height, scale] of [[2560,1440,2], [1920,1080,594/344],
+                [1280,720,396/344], [1280,800,1256/1040], [800,500,1], [640,360,1], [320,240,1]]) {
+            root.phase = (locked ? "lock" : "desktop") + " geometry " + width + "x" + height
+            win.width = width; win.height = height
+            check.wait(30)
+            owner.show()
+            const panel = owner.view
+            check.tryCompare(panel, "visible", true)
+            check.verify(Math.abs(panel.sizeScale-scale) < 0.001, "bounded linear scale")
+            check.verify(panel.width <= width-24 && panel.height <= height*0.55+0.01, "output fit")
+            check.verify(Math.abs(panel.keyHeight-44*scale) < 0.01, "key height scales with panel")
+            check.verify(Math.abs(panel.rowPitch-48*scale) < 0.01, "row pitch scales with panel")
+            if (scale === 2) { check.compare(panel.width, 2080); check.compare(panel.height, 688); check.compare(panel.pitch, 128.5) }
+            const pin = find(panel, "keyboardPin"), hide = find(panel, "keyboardHide")
+            for (const control of [pin, hide]) {
+                const point = control.mapToItem(panel, 0, 0)
+                check.verify(point.x >= 0 && point.x+control.width <= panel.width, "header control fits")
+                check.verify(point.y >= 0 && point.y+control.height <= panel.height, "header control height fits")
+                check.compare(control.height, panel.keyHeight)
+                check.verify(Math.abs(control.font.pixelSize-13*scale) <= 0.51, "header label scales")
+            }
+            check.mouseClick(pin); check.verify(!panel.pinned)
+            check.mouseDrag(panel, panel.width/2, panel.keyHeight/2, -70, -60)
+            check.verify(panel.x >= 0 && panel.y >= 0 && panel.x+panel.width <= width+0.01
+                && panel.y+panel.height <= height+0.01, "drag stays bounded")
+            check.mouseClick(pin); check.verify(panel.pinned)
+            check.compare(panel.x, (width-panel.width)/2)
+            for (const key of Model.keys) {
+                panel.selected = key.index; panel.revealSelected()
+                const button = find(panel, "oskKey"+key.index), viewport = button.parent.parent
+                const point = button.mapToItem(viewport, 0, 0)
+                const visibleWidth = Math.min(viewport.width, point.x+button.width) - Math.max(0, point.x)
+                // A wide Space key can exceed a narrow viewport; its visible part remains tappable.
+                check.verify(visibleWidth >= Math.min(button.width, viewport.width)-0.01
+                    && point.y >= -0.01 && point.y+button.height <= viewport.height+0.01,
+                    "selected key reachable: "+key.index)
+                check.compare(button.height, panel.keyHeight)
+                check.verify(Math.abs(button.contentItem.font.pixelSize-13*scale) <= 0.51, "key label scales")
+            }
+            panel.selected = 0
+            panel.controller({action:"ui_right", pressed:true})
+            panel.controller({action:"ui_right", pressed:false})
+            check.compare(panel.selected, 1, "controller navigation survives scaling")
+            const firstKey = find(panel, "oskKey0")
+            panel.selected = 0
+            firstKey.forceActiveFocus(); check.keyClick(Qt.Key_Right)
+            check.compare(panel.selected, 1, "keyboard navigation survives scaling")
+            check.mouseClick(hide); check.tryCompare(owner, "visible", false)
+        }
+        win.width = 1280; win.height = 800
+        session.lockRequested = false
+        check.wait(30)
+    }
     function headerHide(locked) {
         session.lockRequested = locked
         session.keyboardHost = lockView
@@ -204,6 +261,7 @@ ShellRoot {
             check.tryCompare(owner, "busy", false, 4000)
             check.compare(count(), 5, "fresh invocation recovers after failed startup")
             owner.hide()
+            geometry(false); geometry(true)
             headerHide(false); headerHide(true)
             console.log("KEYBOARD_OWNER_PASSED"); Qt.quit()
         } catch (error) { console.error("KEYBOARD_OWNER_FAILED phase="+root.phase, error.stack || error); Qt.exit(1) }
@@ -227,7 +285,7 @@ with tempfile.TemporaryDirectory(prefix="icewine-keyboard-") as directory:
     owner = owner.replace("    id: root\n", "    id: root\n    property alias deliveryProcess: delivery\n    property Item fixtureHost\n", 1)
     start = owner.index("    PanelWindow {")
     end = owner.index("        KeyboardView {", start)
-    owner = owner[:start] + "    Item { parent: root.fixtureHost; width: 1280; height: 800; visible: root.desktopVisible && !root.session.locked\n" + owner[end:]
+    owner = owner[:start] + "    Item { parent: root.fixtureHost; width: root.fixtureHost.width; height: root.fixtureHost.height; visible: root.desktopVisible && !root.session.locked\n" + owner[end:]
     (root / "owner/KeyboardController.qml").write_text(owner)
     (root / "bin").mkdir()
     (root / "empty-path").mkdir()
@@ -262,4 +320,4 @@ sys.exit(1 if pathlib.Path(os.environ["TEST_KEYBOARD_CONTROL"]).read_text() == "
     # This synthetic input is logged only by the explicit fake developer backend.
     commands = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
     assert commands == [["-M", "ctrl", "-k", "U0061", "-m", "ctrl"]] * 5, commands
-print("PASS: real delivery FailedToStart (0 started/0 exited) versus shell exit127 (1/1), constant production argv/stdin privacy, lock/busy/reopen/no-backlog exact fake-wtype argv, desktop/lock mouse/touch Hide pinned/unpinned/drag/repin/reopen and input cancellation")
+print("PASS: real delivery FailedToStart (0 started/0 exited) versus shell exit127 (1/1), constant production argv/stdin privacy, lock/busy/reopen/no-backlog exact fake-wtype argv, desktop/lock responsive geometry/all-key reachability/font and control scaling/controller and keyboard navigation, mouse/touch Hide pinned/unpinned/drag/repin/reopen and input cancellation")

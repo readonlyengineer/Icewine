@@ -251,7 +251,7 @@ ShellRoot {
                     keys.mouseClick(toggle)
                     keys.tryCompare(keyboardOwner, "keyboardVisible", true, 2000)
                     const panel = find(view, item => item.objectName === "sharedKeyboard")
-                    keys.verify(panel && panel.width <= Math.min(1040, win.width - 24)
+                    keys.verify(panel && panel.width <= Math.min(2080, win.width - 24)
                         && panel.height > 0 && panel.y + panel.height <= win.height, "shared keyboard bounds")
                     keys.wait(250)
                     keys.verify(toggle.x === 12 && toggle.y >= 0

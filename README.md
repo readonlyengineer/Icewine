@@ -124,7 +124,9 @@ need validation on each supported device and distribution.
 ### On-screen keyboard
 
 Use the topbar **Keyboard** button, or L5/the handheld radial's Keyboard action.
-The shared 84-key US keyboard opens pinned at the bottom of the active output;
+The shared 84-key US keyboard grows up to 2080×688 logical units on large outputs,
+with keys and labels scaled together. It stays within 55% of output height; small
+outputs retain scrollable keys. It opens pinned at the bottom of the active output;
 **Unpin** enables header dragging, and **Pin** restores its standard position.
 Small screens scroll the key grid. D-pad/stick selects a key, A activates and B
 hides; touch and pointer work alongside controller selection. Shift, Ctrl, Alt

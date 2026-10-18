@@ -18,14 +18,18 @@ Rectangle {
     property int armed: -1
     property bool repeated: false
     property string heldDirection: ""
-    readonly property real pitch: Math.max(48, (width - 12) / 16)
-    readonly property real keyHeight: 44
+    // Grow the whole keyboard up to 2x; retain scrollable 44-unit keys on small outputs.
+    readonly property real sizeScale: Math.max(1, Math.min(2, ((parent?.width ?? 0) - 24) / 1040,
+        (parent?.height ?? 0) * 0.55 / 344))
+    readonly property real pitch: Math.max(48 * sizeScale, (width - 12 * sizeScale) / 16)
+    readonly property real rowPitch: 48 * sizeScale
+    readonly property real keyHeight: 44 * sizeScale
     signal activated(var action)
     signal hideRequested()
     objectName: "sharedKeyboard"
-    width: Math.max(0, Math.min(1040, (parent?.width ?? 0) - 24))
-    height: Math.max(0, Math.min(344, (parent?.height ?? 0) * 0.55))
-    radius: 12
+    width: Math.max(0, Math.min(1040 * sizeScale, (parent?.width ?? 0) - 24))
+    height: Math.max(0, Math.min(344 * sizeScale, (parent?.height ?? 0) * 0.55))
+    radius: 12 * sizeScale
     color: Theme.Palette.alpha(Theme.Palette.backgroundDark, Theme.Palette.keyboardOpacity)
     border.color: Theme.Palette.border
     border.width: 1
@@ -73,9 +77,9 @@ Rectangle {
     }
     function revealSelected() {
         const key = Model.keys[selected]
-        const left = key.column * pitch, top = key.row * 48
+        const left = key.column * pitch, top = key.row * rowPitch
         viewport.contentX = Math.max(0, Math.min(left, Math.max(viewport.contentX, left + key.units*pitch - viewport.width)))
-        viewport.contentY = Math.max(0, Math.min(top, Math.max(viewport.contentY, top + 44 - viewport.height)))
+        viewport.contentY = Math.max(0, Math.min(top, Math.max(viewport.contentY, top + keyHeight - viewport.height)))
     }
     function controller(event) {
         const direction = /^ui_(left|right|up|down)$/.exec(event.action)
@@ -101,7 +105,9 @@ Rectangle {
 
     Row {
         id: header
-        x: 8; y: 2; height: 44; spacing: 4
+        x: 8 * root.sizeScale; y: 2 * root.sizeScale
+        width: Math.max(0, root.width - 16 * root.sizeScale)
+        height: root.keyHeight; spacing: 4 * root.sizeScale
         ToolButton {
             id: pinControl
             objectName: "keyboardPin"
@@ -109,15 +115,18 @@ Rectangle {
             Accessible.name: root.pinned ? qsTr("Unpin keyboard") : qsTr("Pin keyboard")
             palette.buttonText: Theme.Palette.foreground
             focusPolicy: Qt.TabFocus
-            height: 44
+            width: Math.max(0, Math.min(80 * root.sizeScale, (header.width - 2 * header.spacing) / 2))
+            height: root.keyHeight
+            font.pixelSize: 13 * root.sizeScale
             onClicked: root.pinned = !root.pinned
         }
         Label {
             text: root.error || qsTr("Keyboard")
             color: Theme.Palette.foreground
-            height: 44
+            height: root.keyHeight
+            font.pixelSize: 13 * root.sizeScale
             verticalAlignment: Text.AlignVCenter
-            width: Math.max(0, root.width - 180)
+            width: Math.max(0, header.width - pinControl.width - hideControl.width - 2 * header.spacing)
             elide: Text.ElideRight
             DragHandler {
                 target: root
@@ -127,12 +136,13 @@ Rectangle {
                 onActiveChanged: if (active) root.cancelGesture()
             }
         }
-        ToolButton { objectName: "keyboardHide"; text: qsTr("Hide"); palette.buttonText: Theme.Palette.foreground; focusPolicy: Qt.TabFocus; height: 44; onClicked: root.hideRequested() }
+        ToolButton { id: hideControl; objectName: "keyboardHide"; text: qsTr("Hide"); palette.buttonText: Theme.Palette.foreground; focusPolicy: Qt.TabFocus; width: Math.max(0, Math.min(80 * root.sizeScale, (header.width - 2 * header.spacing) / 2)); height: root.keyHeight; font.pixelSize: 13 * root.sizeScale; onClicked: root.hideRequested() }
     }
     Flickable {
         id: viewport
-        x: 8; y: 48; width: Math.max(0, parent.width-16); height: Math.max(0, parent.height-56)
-        contentWidth: 16*root.pitch-4; contentHeight: 284
+        x: 8 * root.sizeScale; y: root.rowPitch
+        width: Math.max(0, parent.width - 16 * root.sizeScale); height: Math.max(0, parent.height - 56 * root.sizeScale)
+        contentWidth: 16*root.pitch - 4 * root.sizeScale; contentHeight: 6 * root.rowPitch - 4 * root.sizeScale
         boundsBehavior: Flickable.StopAtBounds
         clip: true
         onMovementStarted: root.cancelGesture()
@@ -146,8 +156,8 @@ Rectangle {
                 required property var modelData
                 readonly property bool latched: modelData.caps ? root.caps : !!(root.modifiers & (modelData.modifier || 0))
                 objectName: "oskKey" + modelData.index
-                x: modelData.column*root.pitch; y: modelData.row*48
-                width: modelData.units*root.pitch-4; height: 44
+                x: modelData.column*root.pitch; y: modelData.row*root.rowPitch
+                width: modelData.units*root.pitch - 4 * root.sizeScale; height: root.keyHeight
                 text: modelData.text === " " ? qsTr("Space") : Model.text(modelData, root.modifiers, root.caps) || modelData.label
                 Accessible.name: text
                 focusPolicy: Qt.TabFocus
@@ -169,14 +179,14 @@ Rectangle {
                 }
                 Keys.onReleased: event => { if ([Qt.Key_Return, Qt.Key_Enter].includes(event.key)) { event.accepted = true; root.release(modelData.index) } }
                 background: Rectangle {
-                    radius: 6
+                    radius: 6 * root.sizeScale
                     color: root.armed === keyButton.modelData.index || keyButton.latched ? Theme.Palette.primary : Theme.Palette.surface
                     border.width: keyButton.activeFocus || root.selected === keyButton.modelData.index ? 2 : 1
                     border.color: keyButton.activeFocus || root.selected === keyButton.modelData.index ? Theme.Palette.primary : Theme.Palette.border
                     opacity: keyButton.enabled ? 1 : 0.4
                 }
                 contentItem: Text {
-                    text: keyButton.text; font.pixelSize: 13; elide: Text.ElideRight
+                    text: keyButton.text; font.pixelSize: 13 * root.sizeScale; elide: Text.ElideRight
                     color: root.armed === keyButton.modelData.index || keyButton.latched ? Theme.Palette.highlightedText : Theme.Palette.foreground
                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                 }
