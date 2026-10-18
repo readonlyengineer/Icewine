@@ -50,7 +50,7 @@ end
 local function fullscreen_of(win)
 	if not win then return false end
 	if win.fullscreen == true then return true end
-	return (tonumber(win.fullscreen) or 0) > 0
+	return tonumber(win.fullscreen) == 2
 end
 
 local function monitor_for(win)
@@ -113,14 +113,6 @@ local function opens_fullscreen_by_default(win)
 	return M.autofullscreen(win.workspace) and is_resizable(win) and monitor_opens_fullscreen(mon)
 end
 
-local function target_for(state, fallback_width, ws)
-	local width = state.width or fallback_width
-	local fullscreen = state.fullscreen
-	if fullscreen == nil then fullscreen = M.autofullscreen(ws) and same_number(fallback_width, 1.0) end
-
-	return width, fullscreen
-end
-
 local function single_tiled_window(ws, exclude)
 	local count = 0
 	for _, win in ipairs(hl.get_workspace_windows(ws)) do
@@ -132,23 +124,51 @@ local function single_tiled_window(ws, exclude)
 	return count == 1
 end
 
-local function window_target(win, singleton)
-	local state, layout = state_for(win), win.workspace.tiled_layout or "scrolling"
-	local off = state.fullscreen_off
-	if off and (win.workspace ~= off.workspace or layout ~= "scrolling" or win.floating) then
-		state.fullscreen = off.fullscreen
-		state.fullscreen_off = nil
+-- Only context that changes the fullscreen decision belongs here. A native
+-- transition may emit fullscreen-off before publishing these new properties.
+local function fullscreen_context(win)
+	local ws = win.workspace
+	local layout = ws.tiled_layout or "scrolling"
+	local focused = hl.get_active_window()
+	local automatic = (states[key_for(win)] or {}).fullscreen == nil
+	return {
+		workspace = ws, layout = layout, floating = not not win.floating,
+		enabled = automatic and M.autofullscreen(ws),
+		focused = layout == "monocle" and (focused and focused.workspace == ws and focused or ws.last_window) or false,
+		width = automatic and layout == "scrolling" and default_width(win),
+		singleton = (layout == "dwindle" or layout == "master") and single_tiled_window(ws),
+	}
+end
+
+local function same_context(win, context)
+	local current = fullscreen_context(win)
+	for key, value in pairs(current) do
+		if context[key] ~= value then return false end
 	end
-	if win.floating then return nil, state.fullscreen or false end
-	if layout == "scrolling" then return target_for(state, default_width(win), win.workspace) end
-	if state.fullscreen ~= nil then return nil, state.fullscreen end
-	if not M.autofullscreen(win.workspace) then return nil, false end
+	return true
+end
+
+local function fullscreen_intent(win, state)
+	local off = state.fullscreen_off
+	if off and same_context(win, off.context) then return false end
+	return state.fullscreen -- nil = automatic; boolean = explicit choice.
+end
+
+-- Pure decision tree: explicit choice, eligibility, setting, then layout rule.
+local function window_target(win, singleton)
+	local state, ws = states[key_for(win)] or {}, win.workspace
+	local layout = ws.tiled_layout or "scrolling"
+	local width = layout == "scrolling" and not win.floating and (state.width or default_width(win)) or nil
+	local intent = fullscreen_intent(win, state)
+	if intent ~= nil then return width, intent end
+	if win.floating or not M.autofullscreen(ws) then return width, false end
+	if layout == "scrolling" then return width, same_number(default_width(win), 1.0) end
 	if layout == "monocle" then
 		local focused = hl.get_active_window()
-		return nil, win == (focused and focused.workspace == win.workspace and focused or win.workspace.last_window)
+		return width, win == (focused and focused.workspace == ws and focused or ws.last_window)
 	end
-	if singleton == nil then singleton = single_tiled_window(win.workspace) end
-	return nil, singleton -- Dwindle/master: autofullscreen and exactly one tiled window.
+	if singleton == nil then singleton = single_tiled_window(ws) end
+	return width, singleton -- Dwindle/master: exactly one tiled window.
 end
 
 local function intended_width(win, state)
@@ -226,6 +246,7 @@ end
 
 local function apply_window(win, singleton)
 	if not is_policy_window(win) then return false end
+	state_for(win)
 
 	local width, fullscreen = window_target(win, singleton)
 	local was_fullscreen = fullscreen_of(win)
@@ -289,14 +310,18 @@ local function reconcile_visible()
 end
 
 local function adopt_existing_windows()
+	local previous = states
 	states = {}
 	pending_fullscreen = {}
 	steam_placeholder = nil
 
 	for _, win in ipairs(hl.get_windows()) do
 		if win.mapped and win.initial_title == steam_placeholder_title then steam_placeholder = win end
-		local state = state_for(win)
-		if is_policy_window(win) then
+		local key = key_for(win)
+		local known = previous[key]
+		local state = known or { workspace = win.workspace }
+		states[key] = state
+		if not known and is_policy_window(win) then
 			local measured = not fullscreen_of(win) and current_width(win) or nil
 			if is_resizable(win) and measured and not same_number(measured, default_width(win)) then
 				state.width = measured
@@ -348,8 +373,9 @@ function M.toggle_fullscreen()
 	end
 
 	local state = state_for(win)
+	local fullscreen = not select(2, window_target(win))
 	state.fullscreen_off = nil
-	state.fullscreen = not select(2, window_target(win))
+	state.fullscreen = fullscreen
 	apply_window(win)
 end
 
@@ -472,24 +498,22 @@ hl.on("window.fullscreen", function(win)
 		if expected == fullscreen then return end
 	end
 
-	-- Mapping another tiled window can clear the compositor's fullscreen
-	-- owner before window.open. Keep a matching automatic target automatic.
+	-- An observation matching the automatic target does not change intent.
 	if state.fullscreen == nil and fullscreen == select(2, window_target(win)) then return end
-	if not fullscreen and is_resizable(win) then
-		-- Scrolling removal emits off before the new layout is published. Keep
-		-- the previous intent until this synchronous migration has completed.
-		-- Otherwise the one-shot confirms a genuine external off; no polling.
-		-- Ponytail: an unlabelled external off batched with a layout change is
-		-- indistinguishable from teardown; a native reason/pre-layout event
-		-- is needed to separate those requests within the same callback turn.
-		local off = { fullscreen = state.fullscreen, workspace = win.workspace }
+	if not fullscreen and is_policy_window(win) then
+		-- Suppress restoration while the native context is unchanged. A layout,
+		-- focus, move, float or singleton transition retains the original intent.
+		-- Ponytail: external off batched with such a transition is indistinguishable
+		-- from teardown without a native event reason; retain intent in that case.
+		local off = { context = fullscreen_context(win) }
 		state.fullscreen_off = off
 		hl.timer(function()
 			if states[key] ~= state or state.fullscreen_off ~= off then return end
+			local deliberate = same_context(win, off.context) and not fullscreen_of(win)
+			state.fullscreen_off = nil
+			if deliberate then state.fullscreen = false end
 			apply_window(win)
-			if state.fullscreen_off == off then state.fullscreen_off = nil end
 		end, { timeout = 1, type = "oneshot" })
-		state.fullscreen = false
 		return
 	end
 	state.fullscreen = fullscreen

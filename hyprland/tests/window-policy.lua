@@ -525,7 +525,7 @@ switched.windows, empty.windows = { floating, manual_off, manual_on, splash }, {
 automatic.workspace = empty
 events["window.move_to_workspace"](automatic)
 assert(automatic.fullscreen and not manual_off.fullscreen and manual_on.fullscreen)
--- Reload adoption deliberately treats current on/off states as user choices.
+-- Reload retains known automatic intent and explicit user choices.
 events["config.reloaded"]()
 empty.tiled_layout = "scrolling"; events["config.props_refreshed"]()
 assert(automatic.fullscreen and not manual_off.fullscreen and manual_on.fullscreen)
@@ -547,3 +547,110 @@ background.tiled_layout = "scrolling"; events["config.props_refreshed"]()
 assert(math.abs(resized.size.w / wide.width - 0.7) < 0.001 and not resized.fullscreen)
 assert(active == nil and active_workspace == blank, "background resize stole empty-workspace focus")
 print("layout switches: saved scrolling width and empty-workspace focus pass")
+
+-- Native focus clears the old fullscreen owner before publishing window.active.
+workspaces, windows, setting = {}, {}, "on\n"
+policy = dofile(arg[1])
+local monocle = workspace("monocle")
+local underneath, foreground = tiled(monocle), tiled(monocle)
+local function native_monocle_focus(win)
+	if active ~= win and active.fullscreen then
+		active.fullscreen = false
+		events["window.fullscreen"](active)
+	end
+	active, monocle.last_window = win, win
+	events["window.active"](win)
+	settle()
+end
+for _ = 1, 2 do
+	native_monocle_focus(underneath)
+	assert(underneath.fullscreen and not foreground.fullscreen, "monocle refocus lost automatic fullscreen")
+	native_monocle_focus(foreground)
+	assert(foreground.fullscreen and not underneath.fullscreen, "monocle return pinned native teardown as manual off")
+end
+events["window.close"](foreground)
+foreground.mapped, foreground.fullscreen = false, false
+native_monocle_focus(underneath)
+assert(underneath.fullscreen, "monocle close did not fullscreen the app underneath")
+-- A genuine external off with unchanged focus must still remain deliberate.
+underneath.fullscreen = false
+events["window.fullscreen"](underneath)
+settle()
+events["window.active"](underneath)
+assert(not underneath.fullscreen, "monocle genuine external off was ignored")
+-- A setting change during deferred focus handling must not become manual intent.
+workspaces, windows = {}, {}
+policy = dofile(arg[1])
+local pending_monocle = tiled(workspace("monocle"))
+pending_monocle.fullscreen = false
+events["window.fullscreen"](pending_monocle)
+setting = "off\n"; policy.refresh_autofullscreen(); settle()
+setting = "on\n"; policy.refresh_autofullscreen()
+assert(pending_monocle.fullscreen, "monocle setting change pinned a deferred off")
+print("monocle native focus: repeated switches, close-to-underneath and deliberate off pass")
+
+-- Every layout distinguishes stable external off from native layout teardown.
+for _, layout in ipairs({ "scrolling", "dwindle", "master", "monocle" }) do
+	workspaces, windows, setting = {}, {}, "on\n"
+	policy = dofile(arg[1])
+	local ws = workspace(layout)
+	local win = tiled(ws)
+	win.fullscreen = false
+	events["window.fullscreen"](win)
+	events["workspace.active"](ws)
+	assert(not win.fullscreen, layout .. ": pending external off was undone")
+	settle()
+	policy.refresh_autofullscreen()
+	assert(not win.fullscreen, layout .. ": stable external off lost intent")
+
+	workspaces, windows = {}, {}
+	policy = dofile(arg[1])
+	ws = workspace(layout)
+	win = tiled(ws)
+	win.fullscreen = false
+	events["window.fullscreen"](win)
+	ws.tiled_layout = layout == "master" and "dwindle" or "master"
+	events["config.props_refreshed"]()
+	settle()
+	assert(win.fullscreen, layout .. ": native teardown became explicit off")
+end
+-- Known intent survives reload; an unknown existing window is still adopted.
+workspaces, windows, setting = {}, {}, "on\n"
+policy = dofile(arg[1])
+local reload_ws = workspace("dwindle")
+local reload_auto = tiled(reload_ws)
+events["config.reloaded"]()
+local reload_other = tiled(reload_ws)
+assert(not reload_auto.fullscreen and not reload_other.fullscreen, "reload pinned automatic singleton fullscreen")
+policy.toggle_fullscreen()
+events["config.reloaded"]()
+setting = "off\n"; policy.refresh_autofullscreen()
+assert(reload_other.fullscreen, "reload lost explicit fullscreen")
+active = reload_auto
+policy.toggle_fullscreen(); policy.toggle_fullscreen()
+events["config.reloaded"]()
+setting = "on\n"; policy.refresh_autofullscreen()
+assert(not reload_auto.fullscreen, "reload lost explicit off")
+-- A stale one-shot must not replace a newer explicit command or a closed window.
+for _, layout in ipairs({ "scrolling", "dwindle", "master", "monocle" }) do
+	workspaces, windows = {}, {}
+	policy = dofile(arg[1])
+	local win = tiled(workspace(layout))
+	win.fullscreen = false; events["window.fullscreen"](win)
+	policy.toggle_fullscreen(); settle()
+	assert(win.fullscreen, layout .. ": delayed off overwrote newer explicit on")
+	win.fullscreen = false; events["window.fullscreen"](win)
+	events["window.close"](win); win.mapped = false
+	settle()
+	assert(not win.fullscreen, layout .. ": delayed off touched closed window")
+end
+-- Hyprland exposes 0=normal, 1=maximized and 2=fullscreen.
+workspaces, windows, setting = {}, {}, "on\n"
+policy = dofile(arg[1])
+local maximized = window(normal, 1, 1)
+events["window.open"](maximized)
+assert(maximized.fullscreen == true, "maximized was mistaken for fullscreen")
+local native_fullscreen = window(wide, 1, 2)
+events["window.open"](native_fullscreen)
+assert(native_fullscreen.fullscreen == 2, "native fullscreen was not recognized")
+print("shared fullscreen model: external off, teardown, reload, stale callbacks and native modes pass")
