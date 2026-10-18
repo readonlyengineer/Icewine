@@ -457,7 +457,7 @@ Scope {
             readonly property bool widgetHere: root.ui.page !== "" && root.ui.screen === screen.name
             readonly property bool modal: root.radialVisible || root.widgetEngaged
             readonly property string keyboardScreen: root.widgetEngaged ? root.ui.screen : root.radial?.monitorName ?? ""
-            readonly property string hoverPage: logo.visible && logo.hovered ? "launcher" : statusIcons.hoveredPage
+            readonly property string hoverPage: logo.visible && logo.hovered ? "launcher" : nowPlaying.visible && nowPlaying.hovered ? "media" : statusIcons.hoveredPage
             readonly property bool widgetHovered: statusPopout.hovered
             readonly property int reservation: root.barVisible && Config.Settings.barLocation !== "above" ? root.barExtent : 0
             readonly property bool pointerInside: barHover.hovered || edgeHover.hovered || (widgetHere && widgetHovered)
@@ -671,23 +671,33 @@ Scope {
                         anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
                         width: Math.min(contentWidth, surface.controlWidth)
                         height: 29
-                        contentWidth: statusIcons.implicitWidth
+                        contentWidth: statusRow.implicitWidth
                         contentHeight: height
                         clip: true
                         boundsBehavior: Flickable.StopAtBounds
                         flickableDirection: Flickable.HorizontalFlick
                         ScrollBar.horizontal: ScrollBar {}
-                        Bar.StatusIcons {
-                            id: statusIcons
-                            cardStacks: Config.Settings.cardStacks.filter(stack => stack.modules[0] !== "launcher")
-                            notificationService: root.notificationService
-                            player: root.player
-                            layoutsEnabled: root.layoutsEnabled
-                            backgroundCount: statusPopout.backgroundCount
-                            backgroundAttention: statusPopout.backgroundAttention
-                            onKeyboardRequested: root.showKeyboard("topbar")
-                            onMediaRequested: root.raiseMedia()
-                            onPopoutActivated: page => root.openWidget(page, true, panel.screen.name)
+                        Row {
+                            id: statusRow
+                            spacing: 4
+                            Bar.NowPlaying {
+                                id: nowPlaying
+                                player: Config.Settings.cardStacks.some(stack => stack.modules[0] === "media") ? root.player : null
+                                onPopoutActivated: root.openWidget("media", true, panel.screen.name)
+                                onMediaRequested: root.raiseMedia()
+                            }
+                            Bar.StatusIcons {
+                                id: statusIcons
+                                cardStacks: Config.Settings.cardStacks.filter(stack => stack.modules[0] !== "launcher" && stack.modules[0] !== "media")
+                                notificationService: root.notificationService
+                                player: root.player
+                                layoutsEnabled: root.layoutsEnabled
+                                backgroundCount: statusPopout.backgroundCount
+                                backgroundAttention: statusPopout.backgroundAttention
+                                onKeyboardRequested: root.showKeyboard("topbar")
+                                onMediaRequested: root.raiseMedia()
+                                onPopoutActivated: page => root.openWidget(page, true, panel.screen.name)
+                            }
                         }
                     }
                     HoverHandler {

@@ -53,15 +53,25 @@ ShellRoot {
     property bool instantBarHide: true
     property int shadowDrop: 4
     property bool layoutsEnabled: true
-    property var player: null
+    property var player: testPlayer
+    property string openedPage: ""
+    property bool openedEngaged: false
+    property int raiseCount: 0
+    QtObject {
+        id: testPlayer
+        property string trackTitle: "A track with a long title for overflow geometry"
+        property string identity: "Fixture player"
+        property bool isPlaying: true
+        property bool canRaise: true
+    }
     property var notificationService: ({count: 0, highestUrgency: 0, doNotDisturb: false, pulseToken: 0})
     property var compositor: ({
         monitorFor: screen => ({activeWorkspace: {id: 1}}),
         workspaceIdsForMonitor: monitor => [1,2,3,4,5,6,7,8,9,10],
         toplevelsForWorkspace: id => [], activateWorkspace: id => {}
     })
-    function raiseMedia() {}
-    function openWidget(page, engaged, screen) {}
+    function raiseMedia() { raiseCount++ }
+    function openWidget(page, engaged, screen) { openedPage = page; openedEngaged = engaged }
     __PROPERTIES__
     QtObject { id: clock; property date date: new Date(2026, 9, 18, 12, 30) }
     Window {
@@ -73,6 +83,7 @@ ShellRoot {
             width: 1280; height: 800
             property var screen: ({name: "fixture"})
             readonly property int reservation: __RESERVATION__
+            readonly property string hoverPage: __HOVER_PAGE__
             __SURFACE__
             Rectangle {
                 id: statusPopout
@@ -133,6 +144,65 @@ ShellRoot {
                         verify(surface.y + surface.height <= 0 || surface.y >= panel.height)
                     }
                 }
+                // Media-leading stacks use the retained independent capsule and routing.
+                panel.width = 1280
+                Config.Settings.widgetSelections = {barWidth: 100}
+                root.barVisible = true
+                wait(200)
+                verify(nowPlaying.visible)
+                compare(nowPlaying.parent, statusIcons.parent)
+                verify(nowPlaying.x + nowPlaying.width + 4 <= statusIcons.x)
+                verify(!statusIcons.cardStacks.some(stack => stack.modules[0] === "media"))
+                verify(logo.visible, "Launcher remains separate on the left")
+                const content = nowPlaying.children[0]
+                const icon = content.children[0].children[0]
+                const title = content.children[1]
+                compare(title.text, testPlayer.trackTitle)
+                compare(icon.text, "")
+                testPlayer.isPlaying = false
+                testPlayer.trackTitle = "Updated track"
+                wait(200)
+                compare(title.text, "Updated track"); compare(icon.text, "")
+                testPlayer.trackTitle = ""
+                wait(200)
+                compare(title.text, "Fixture player")
+                mouseMove(nowPlaying, 10, 10)
+                wait(50)
+                compare(panel.hoverPage, "media")
+                mouseClick(content.children[0], 12, 14)
+                compare(root.openedPage, "media"); verify(root.openedEngaged)
+                mouseClick(title, 10, 14)
+                compare(root.raiseCount, 1)
+                testPlayer.canRaise = false
+                mouseClick(title, 10, 14)
+                compare(root.raiseCount, 1)
+                mouseMove(surface, surface.width / 2, 1)
+                root.player = null
+                wait(200)
+                verify(!nowPlaying.visible); compare(nowPlaying.implicitWidth, 0)
+                verify(panel.hoverPage !== "media")
+                root.player = testPlayer
+                for (const stacks of [[], [{id: "audio", modules: ["audio", "media"]}]]) {
+                    Config.Settings.widgetSelections = {cardStacks: stacks}
+                    wait(200)
+                    verify(!nowPlaying.visible)
+                    compare(statusIcons.cardStacks.length, stacks.length)
+                    if (stacks.length) {
+                        const button = statusIcons.children[0].children.find(item => item.page === "audio")
+                        compare(button.page, "audio")
+                        mouseMove(button, 10, 10)
+                        wait(50)
+                        compare(panel.hoverPage, "audio")
+                        mouseClick(button, 10, 10)
+                        compare(root.openedPage, "audio")
+                    } else verify(!statusIcons.visible)
+                }
+                Config.Settings.widgetSelections = {cardStacks: [{id: "mixed", modules: ["media", "audio"]}]}
+                wait(200)
+                verify(nowPlaying.visible); verify(!statusIcons.visible)
+                mouseMove(nowPlaying, 10, 10)
+                wait(50)
+                compare(panel.hoverPage, "media")
                 // Native Flickables expose otherwise overflowing real controls by dragging.
                 Config.Settings.widgetSelections = {barWidth: 50, barStyle: "floating"}
                 panel.width = 640; root.barVisible = true
@@ -161,6 +231,7 @@ ShellRoot {
 '''
 for key, value in {'PROPERTIES': properties, 'SURFACE': surface,
                    'RESERVATION': binding('readonly property int reservation'),
+                   'HOVER_PAGE': binding('readonly property string hoverPage'),
                    'POPOUT_X': binding('x', popout), 'POPOUT_Y': binding('y', popout),
                    'POPOUT_HEIGHT': binding('height', popout)}.items():
     qml = qml.replace('__' + key + '__', value)
