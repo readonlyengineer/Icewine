@@ -104,6 +104,27 @@ ShellRoot {
                 keys.compare(field.echoMode, TextInput.NoEcho)
                 keys.compare(field.opacity, 0, "no secret or length display")
                 const clock = find(view, item => item.objectName === "lockClock")
+                function luminance(rgb) {
+                    return rgb.map(v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+                        .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0)
+                }
+                function checkTheme() {
+                    const scrim = find(view, item => item.objectName === "lockScrim").color
+                    const foreground = Theme.Palette.foreground
+                    const a = luminance([foreground.r, foreground.g, foreground.b])
+                    for (const wallpaper of [0, 1]) {
+                        const b = luminance([scrim.r, scrim.g, scrim.b].map(v => v * scrim.a + wallpaper * (1 - scrim.a)))
+                        keys.verify((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) >= 4.5,
+                            "text contrast over black/white wallpaper extremes")
+                    }
+                    for (const name of ["lockClock", "lockDate", "lockStatus", "lockKeyboard"]) {
+                        const item = find(view, item => item.objectName === name)
+                        keys.compare(item.font.family, "JetBrainsMono Nerd Font", name + " shared font")
+                        keys.compare(name === "lockKeyboard" ? item.palette.buttonText : item.color,
+                            Theme.Palette.foreground, name + " live foreground")
+                    }
+                }
+                checkTheme()
                 const image = find(view, item => item.objectName === "lockWallpaper")
                 keys.tryCompare(wallpaperOwner, "selectionAvailable", false)
                 keys.tryCompare(image, "status", Image.Ready)
@@ -121,28 +142,28 @@ ShellRoot {
                 keys.verify(field.activeFocus, "first printable key restores focus")
                 keys.compare(field.text, "a", "first character arrives once")
                 keys.compare(session.password, "a")
-                keys.verify(String(clock.color) !== "#ffffff", "edit gives colour feedback")
+                keys.verify(clock.color !== Theme.Palette.foreground, "edit gives colour feedback")
                 if (Theme.Palette.animate) {
                     keys.tryVerify(() => clock.scale > 1, 100, "clock pulse starts")
                     keys.verify(clock.scale <= 1.0251, "clock pulse is bounded")
                 } else keys.compare(clock.scale, 1, "reduced motion changes colour only")
                 keys.keyClick(Qt.Key_B)
                 keys.wait(100)
-                keys.verify(String(clock.color) !== "#ffffff", "rapid typing extends one feedback window")
+                keys.verify(clock.color !== Theme.Palette.foreground, "rapid typing extends one feedback window")
                 keys.wait(220)
                 keys.fuzzyCompare(clock.scale, 1, 0.0001)
-                keys.compare(String(clock.color), "#ffffff")
+                keys.compare(clock.color, Theme.Palette.foreground)
                 keys.keyPress(Qt.Key_Shift); keys.keyRelease(Qt.Key_Shift)
-                keys.compare(String(clock.color), "#ffffff", "navigation is not an edit")
+                keys.compare(clock.color, Theme.Palette.foreground, "navigation is not an edit")
                 keys.keyClick(Qt.Key_Backspace)
                 keys.compare(field.text, "a")
-                keys.verify(String(clock.color) !== "#ffffff", "edit gives colour feedback")
+                keys.verify(clock.color !== Theme.Palette.foreground, "edit gives colour feedback")
                 keys.keyClick(Qt.Key_Escape)
                 keys.compare(field.text, "")
                 keys.compare(session.password, "")
                 keys.wait(320)
                 keys.keyClick(Qt.Key_Backspace)
-                keys.compare(String(clock.color), "#ffffff", "empty backspace does not pulse")
+                keys.compare(clock.color, Theme.Palette.foreground, "empty backspace does not pulse")
                 keys.keyClick(Qt.Key_A)
                 keys.keyClick(Qt.Key_U, Qt.ControlModifier)
                 keys.compare(field.text, "", "Ctrl+U clears")
@@ -201,6 +222,7 @@ ShellRoot {
                 keys.verify(session.locked && session.failed && !field.text, "failed retry preserves lock and clears secret")
                 const toggle = find(view, item => item.text === "Virtual Keyboard")
                 for (const size of [[1920,1080], [1280,800], [800,600], [320,480]]) {
+                    checkTheme()
                     root.phase = "shared keyboard " + size.join("x")
                     win.width = size[0]; win.height = size[1]
                     keys.wait(100)
@@ -323,8 +345,10 @@ ShellRoot {
                     root.phase = "live theme with keyboard " + size.join("x")
                     Theme.Palette.snapshot = JSON.parse(Quickshell.env("ICEWINE_LIGHT_PALETTE"))
                     keys.wait(250)
+                    checkTheme()
+                    keys.wait(250)
                     keys.compare(field.text, before, "theme change retains input")
-                    keys.compare(String(clock.color), "#ffffff", "clock remains readable on dim wallpaper with light theme")
+                    keys.compare(clock.color, Theme.Palette.foreground, "clock follows live light theme")
                     keys.verify(field.activeFocus, "theme change retains focus")
                     keys.mouseClick(toggle)
                     keys.tryCompare(keyboardOwner, "keyboardVisible", false)

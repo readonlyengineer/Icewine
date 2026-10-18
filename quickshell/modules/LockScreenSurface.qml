@@ -26,7 +26,7 @@ FocusScope {
     Rectangle {
         objectName: "lockBackdrop"
         anchors.fill: parent
-        color: "#101014"
+        color: Theme.Palette.backgroundDark
     }
     Image {
         id: wallpaper
@@ -52,7 +52,9 @@ FocusScope {
     }
     Rectangle {
         anchors.fill: parent
-        color: "#99000000"
+        objectName: "lockScrim"
+        // Keep foreground text readable with both light and dark palettes.
+        color: Theme.Palette.alpha(Theme.Palette.background, 0.9)
     }
     SystemClock { id: time; precision: SystemClock.Minutes }
     Timer { id: editFeedback; interval: 180 }
@@ -66,11 +68,12 @@ FocusScope {
             objectName: "lockClock"
             anchors.horizontalCenter: parent.horizontalCenter
             text: Qt.formatTime(time.date, Qt.locale().timeFormat(Locale.ShortFormat))
+            font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: Math.min(112, root.width / 5, Math.max(28, (root.height-root.keyboardInset)/3))
             font.weight: Font.Light
-            // A pale accent keeps the large clock readable over any dimmed image.
+            // Preserve the bounded edit tint using the current theme foreground.
             color: editFeedback.running
-                ? Qt.tint("#ffffff", Theme.Palette.alpha(Theme.Palette.primary, 0.25)) : "#ffffff"
+                ? Qt.tint(Theme.Palette.foreground, Theme.Palette.alpha(Theme.Palette.primary, 0.25)) : Theme.Palette.foreground
             scale: root.animationsEnabled && editFeedback.running ? 1.025 : 1
             Behavior on scale { NumberAnimation { duration: root.animationsEnabled ? 120 : 0 } }
         }
@@ -79,8 +82,9 @@ FocusScope {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: Qt.formatDate(time.date, Qt.locale().dateFormat(Locale.LongFormat))
+            font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 20
-            color: "#ffffff"
+            color: Theme.Palette.foreground
             wrapMode: Text.WordWrap
         }
         TextInput {
@@ -129,8 +133,9 @@ FocusScope {
             text: root.session.authenticating ? qsTr("Authenticating…")
                 : root.session.failed ? qsTr("Incorrect password")
                 : !root.session.authenticationRequired ? qsTr("Tap or press Enter to unlock") : ""
+            font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: 16
-            color: "#ffffff"
+            color: Theme.Palette.foreground
             wrapMode: Text.WordWrap
         }
     }
@@ -145,6 +150,8 @@ FocusScope {
         anchors.bottom: parent.bottom
         anchors.margins: 12
         anchors.bottomMargin: 12 + root.keyboardInset
+        font.family: "JetBrainsMono Nerd Font"
+        palette.buttonText: Theme.Palette.foreground
         text: qsTr("Virtual Keyboard")
         Accessible.name: text
         focusPolicy: Qt.TabFocus
