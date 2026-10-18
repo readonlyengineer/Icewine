@@ -30,6 +30,7 @@ Scope {
         && panels.instances.some(panel => panel.widgetHere && panel.layoutActive)
     readonly property int barHeight: 38
     readonly property int shadowDrop: 4
+    readonly property int shadowExtent: shadowDrop + 16 // Match MultiEffect.blurMax below.
     readonly property bool fullBar: fullWidth || radialVisible || Config.Settings.barWidth === 100
     readonly property bool floatingBar: !fullWidth && !radialVisible && Config.Settings.barStyle === "floating"
     readonly property int barGap: floatingBar ? 4 : 0
@@ -474,131 +475,23 @@ Scope {
                 onTriggered: if (!panel.pointerInside && root.hoveredScreen === panel.screen.name) root.hoveredScreen = ""
             }
 
-            property PanelWindow workArea: PanelWindow {
+            // The bar owns its native edge and reservation; the widget overlay
+            // below receives the remaining usable area, including other panels.
+            property PanelWindow barWindow: PanelWindow {
                 screen: panel.screen
-                visible: panel.reservation > 0
+                visible: !root.sessionLocked
                 anchors { left: true; right: true; top: !root.bottomBar; bottom: root.bottomBar }
-                implicitHeight: root.barExtent
+                implicitHeight: root.barExtent + root.shadowExtent
                 exclusiveZone: panel.reservation
                 color: "transparent"
-                mask: Region {}
-                WlrLayershell.namespace: "icewine:bar-reservation"
-                WlrLayershell.layer: WlrLayer.Top
+                // Hidden mouse-autohide retains only a one-logical-pixel reveal edge.
+                mask: Region {
+                    Region { item: root.barVisible ? surface : null }
+                    Region { item: edge.enabled ? edge : null }
+                }
+                WlrLayershell.namespace: "quickshell:topbar"
+                WlrLayershell.layer: WlrLayer.Overlay
                 WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-            }
-
-            function focusWidget(openingPage) {
-                if (!widgetHere || !root.widgetEngaged) return
-                if (switcher.item) switcher.item.forceActiveFocus()
-                else {
-                    if (openingPage) statusPopout.openPage(openingPage)
-                    statusPopout.focusInitial()
-                }
-            }
-
-            onHoverPageChanged: {
-                previewOpen.stop()
-                if (hoverPage && (!root.widgetEngaged || root.ui.page === "switcher"))
-                    previewOpen.restart()
-            }
-
-            IdleInhibitor {
-                window: panel
-                enabled: root.keepAwake
-            }
-
-            screen: modelData
-            visible: true
-            RenderReady {
-                item: panel.contentItem
-                onReady: {
-                    if (!root.reportedRender) {
-                        root.reportedRender = true
-                        root.rendered()
-                    }
-                }
-            }
-            anchors { top: true; bottom: true; left: true; right: true }
-            // Reclaim our own reservation, while respecting other native zones (e.g. OSK).
-            margins.top: root.bottomBar ? 0 : -reservation
-            margins.bottom: root.bottomBar ? -reservation : 0
-            exclusiveZone: 0
-            color: "transparent"
-            WlrLayershell.namespace: "quickshell:topbar"
-            WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.keyboardFocus: modal && root.ui.page !== "switcher"
-                && screen.name === keyboardScreen && !root.sessionLocked
-                ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
-
-            HyprlandFocusGrab {
-                windows: [panel]
-                active: panel.widgetHere && root.ui.page === "switcher"
-                    && root.widgetEngaged && !root.sessionLocked
-                onCleared: if (root.ui.page === "switcher") {
-                    root.yieldFocus()
-                    root.dismissWidget()
-                }
-            }
-
-            // Only mouse-autohide keeps a one-logical-pixel reveal edge while hidden.
-            mask: Region {
-                Region { item: panel.modal && !root.oskVisible && !root.sessionLocked ? input : null }
-                Region { item: root.barVisible ? surface : null }
-                Region { item: edge.enabled ? edge : null }
-                Region { item: switcher.active ? switcher : null }
-                Region { item: statusPopout.shown ? statusPopout : null }
-            }
-
-            Timer {
-                id: previewOpen
-                interval: 150
-                onTriggered: {
-                    if (panel.hoverPage && root.barVisible)
-                        root.openWidget(panel.hoverPage, false, panel.screen.name)
-                }
-            }
-            Timer {
-                interval: 180
-                running: panel.widgetHere && !root.widgetEngaged && !panel.hoverPage && !panel.widgetHovered
-                onTriggered: root.dismissWidget()
-            }
-
-            FocusScope {
-                id: input
-                anchors.fill: parent
-                focus: true
-
-                Rectangle {
-                    anchors.fill: parent
-                    visible: root.radialVisible
-                    color: Theme.Palette.alpha(Theme.Palette.backgroundDark, 0.82)
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: panel.modal
-                    acceptedButtons: Qt.AllButtons
-                    onClicked: {
-                        if (root.ui.page) root.dismissWidget()
-                        else root.radial?.dismiss()
-                    }
-                    onWheel: event => event.accepted = true
-                }
-                Loader {
-                    id: dial
-                    anchors { fill: parent; topMargin: root.bottomBar ? 0 : root.barHeight; bottomMargin: root.bottomBar ? root.barHeight : 0 }
-                    active: root.radialVisible && panel.screen.name === root.radial.monitorName
-                    sourceComponent: root.radial?.view ?? null
-                    onLoaded: if (!root.widgetEngaged) item.forceActiveFocus()
-                    Connections {
-                        target: root
-                        function onWidgetDismissed() {
-                            Qt.callLater(() => {
-                                if (dial.item && !root.widgetEngaged)
-                                    dial.item.forceActiveFocus()
-                            })
-                        }
-                    }
-                }
 
                 Item {
                     id: edge
@@ -708,12 +601,126 @@ Scope {
                     Behavior on opacity { NumberAnimation { duration: root.instantBarHide ? 0 : 140 } }
                 }
 
+            }
+
+            function focusWidget(openingPage) {
+                if (!widgetHere || !root.widgetEngaged) return
+                if (switcher.item) switcher.item.forceActiveFocus()
+                else {
+                    if (openingPage) statusPopout.openPage(openingPage)
+                    statusPopout.focusInitial()
+                }
+            }
+
+            onHoverPageChanged: {
+                previewOpen.stop()
+                if (hoverPage && (!root.widgetEngaged || root.ui.page === "switcher"))
+                    previewOpen.restart()
+            }
+
+            IdleInhibitor {
+                window: panel
+                enabled: root.keepAwake
+            }
+
+            screen: modelData
+            visible: true
+            RenderReady {
+                item: panel.contentItem
+                onReady: {
+                    if (!root.reportedRender) {
+                        root.reportedRender = true
+                        root.rendered()
+                    }
+                }
+            }
+            anchors { top: true; bottom: true; left: true; right: true }
+            // Native exclusion keeps every widget inside the available screen area.
+            exclusionMode: ExclusionMode.Normal
+            exclusiveZone: 0
+            color: "transparent"
+            WlrLayershell.namespace: "icewine:widgets"
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.keyboardFocus: modal && root.ui.page !== "switcher"
+                && screen.name === keyboardScreen && !root.sessionLocked
+                ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+
+            HyprlandFocusGrab {
+                windows: [panel, panel.barWindow]
+                active: panel.widgetHere && root.ui.page === "switcher"
+                    && root.widgetEngaged && !root.sessionLocked
+                onCleared: if (root.ui.page === "switcher") {
+                    root.yieldFocus()
+                    root.dismissWidget()
+                }
+            }
+
+            // Active widget content and modal dismissal own the overlay input.
+            mask: Region {
+                Region { item: panel.modal && !root.oskVisible && !root.sessionLocked ? input : null }
+                Region { item: switcher.active ? switcher : null }
+                Region { item: statusPopout.shown ? statusPopout : null }
+            }
+
+            Timer {
+                id: previewOpen
+                interval: 150
+                onTriggered: {
+                    if (panel.hoverPage && root.barVisible)
+                        root.openWidget(panel.hoverPage, false, panel.screen.name)
+                }
+            }
+            Timer {
+                interval: 180
+                running: panel.widgetHere && !root.widgetEngaged && !panel.hoverPage && !panel.widgetHovered
+                onTriggered: root.dismissWidget()
+            }
+
+            FocusScope {
+                id: input
+                anchors.fill: parent
+                // Above mode overlays windows, so only it needs a content inset.
+                anchors.topMargin: Config.Settings.barLocation === "above" ? root.barExtent : 0
+                focus: true
+
+                Rectangle {
+                    anchors.fill: parent
+                    visible: root.radialVisible
+                    color: Theme.Palette.alpha(Theme.Palette.backgroundDark, 0.82)
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: panel.modal
+                    acceptedButtons: Qt.AllButtons
+                    onClicked: {
+                        if (root.ui.page) root.dismissWidget()
+                        else root.radial?.dismiss()
+                    }
+                    onWheel: event => event.accepted = true
+                }
+                Loader {
+                    id: dial
+                    anchors.fill: parent
+                    active: root.radialVisible && panel.screen.name === root.radial.monitorName
+                    sourceComponent: root.radial?.view ?? null
+                    onLoaded: if (!root.widgetEngaged) item.forceActiveFocus()
+                    Connections {
+                        target: root
+                        function onWidgetDismissed() {
+                            Qt.callLater(() => {
+                                if (dial.item && !root.widgetEngaged)
+                                    dial.item.forceActiveFocus()
+                            })
+                        }
+                    }
+                }
+
                 Loader {
                     id: switcher
                     active: Config.Settings.windowSwitcher === true && panel.widgetHere && root.ui.page === "switcher" && !root.sessionLocked
                     anchors.centerIn: parent
                     width: Math.max(0, Math.min(1000, panel.width - 2 * Math.min(24, panel.width / 20), implicitWidth))
-                    height: Math.max(0, Math.min(720, panel.height - 2 * Math.min(24, panel.height / 20), implicitHeight))
+                    height: Math.max(0, Math.min(720, input.height - 2 * Math.min(24, input.height / 20), implicitHeight))
                     onLoaded: item.forceActiveFocus()
                     sourceComponent: WindowSwitcher {
                         compositor: root.compositor
@@ -747,9 +754,9 @@ Scope {
                     x: Math.max(8, Math.min(statusPopout.configuration?.modules[0] === "launcher"
                         ? surface.x : surface.x + surface.width - width,
                         panel.width - width - 8))
-                    y: root.bottomBar ? Math.max(0, panel.height - root.barExtent - 4 - height) : root.barExtent + 4
+                    y: root.bottomBar ? Math.max(0, input.height - 4 - height) : 4
                     width: Math.max(0, Math.min(implicitWidth, panel.width - 16))
-                    height: Math.max(0, Math.min(implicitHeight, panel.height - root.barExtent - 12))
+                    height: Math.max(0, Math.min(implicitHeight, input.height - 12))
                     layoutsEnabled: root.layoutsEnabled
                     excludeSteamApps: root.excludeSteamApps
                     compositor: root.compositor

@@ -19,7 +19,7 @@ assert.match(barBackground, /MouseArea\s*\{\s*anchors\.fill: parent\s*acceptedBu
 assert.match(barBackground, /onWheel: event => event\.accepted = true/,
     "Bar background must consume scrolling rather than passing it underneath")
 
-const mask = topbar.match(/mask: Region \{\n([\s\S]*?)^            \}/m)[1]
+const mask = topbar.slice(topbar.indexOf('WlrLayershell.namespace: "icewine:widgets"')).match(/mask: Region \{\n([\s\S]*?)^            \}/m)[1]
 assert.match(mask, /statusPopout\.shown \? statusPopout : null/, "Shared host supplies its input region")
 assert.doesNotMatch(mask, /\blauncher\b/, "Removed launcher cannot leave a dangling input-region binding")
 
@@ -543,7 +543,7 @@ for (const behaviour of Cards.barBehaviours) for (const location of Cards.barLoc
     for (const height of [80, 600, 1440]) for (const visible of [false, true]) {
         const env = {root: {bottomBar: location === "bottom", barVisible: visible, barHeight: 38, barGap: 0, barExtent: 38, sessionLocked: false},
             Config: {Settings: {barBehaviour: behaviour, barLocation: location}},
-            panel: {height, width: 1280}, parent: {height}, height: 38, implicitHeight: 500}
+            panel: {height, width: 1280}, input: {height}, parent: {height}, height: 38, implicitHeight: 500}
         const value = source => vm.runInNewContext(source, env)
         const reservation = value(expression(topbar, "readonly property int reservation"))
         assert.equal(reservation, visible && location !== "above" ? 38 : 0)

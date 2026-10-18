@@ -790,7 +790,7 @@ Scope {
     loader_start = native_topbar.index("                Loader {\n                    id: switcher")
     loader_end = native_topbar.index("                Bar.StatusPopout {", loader_start)
     sizing_loader = native_topbar[loader_start:loader_end].replace("id: switcher", "id: sizedLoader")
-    sizing_loader = sizing_loader.replace("root.", "topbar.").replace("panel.", "geometryHost.")
+    sizing_loader = sizing_loader.replace("root.", "topbar.").replace("panel.", "geometryHost.").replace("input.", "geometryHost.")
     sizing_loader = sizing_loader.replace("sourceComponent: WindowSwitcher {", "sourceComponent: Modules.WindowSwitcher {")
     panel_start = native_topbar.index("    Variants {")
     panel_end = native_topbar.index("    IpcHandler {", panel_start)
