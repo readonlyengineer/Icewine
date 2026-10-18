@@ -111,6 +111,7 @@ Rectangle {
         ToolButton {
             id: pinControl
             objectName: "keyboardPin"
+            hoverEnabled: true
             text: root.pinned ? qsTr("Unpin") : qsTr("Pin")
             Accessible.name: root.pinned ? qsTr("Unpin keyboard") : qsTr("Pin keyboard")
             palette.buttonText: Theme.Palette.foreground
@@ -118,6 +119,21 @@ Rectangle {
             width: Math.max(0, Math.min(80 * root.sizeScale, (header.width - 2 * header.spacing) / 2))
             height: root.keyHeight
             font.pixelSize: 13 * root.sizeScale
+            background: Rectangle {
+                radius: 6 * root.sizeScale
+                color: pinControl.down ? Theme.Palette.primary
+                    : pinControl.hovered ? Theme.Palette.selection : root.pinned ? Theme.Palette.surface : "transparent"
+                border.width: pinControl.activeFocus ? 2 : root.pinned ? 1 : 0
+                border.color: Theme.Palette.primary
+            }
+            contentItem: Text {
+                text: pinControl.text
+                font: pinControl.font
+                color: pinControl.down ? Theme.Palette.highlightedText : Theme.Palette.foreground
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
             onClicked: root.pinned = !root.pinned
         }
         Label {
@@ -136,7 +152,33 @@ Rectangle {
                 onActiveChanged: if (active) root.cancelGesture()
             }
         }
-        ToolButton { id: hideControl; objectName: "keyboardHide"; text: qsTr("Hide"); palette.buttonText: Theme.Palette.foreground; focusPolicy: Qt.TabFocus; width: Math.max(0, Math.min(80 * root.sizeScale, (header.width - 2 * header.spacing) / 2)); height: root.keyHeight; font.pixelSize: 13 * root.sizeScale; onClicked: root.hideRequested() }
+        ToolButton {
+            id: hideControl
+            objectName: "keyboardHide"
+            hoverEnabled: true
+            text: qsTr("Hide")
+            palette.buttonText: Theme.Palette.foreground
+            focusPolicy: Qt.TabFocus
+            width: Math.max(0, Math.min(80 * root.sizeScale, (header.width - 2 * header.spacing) / 2))
+            height: root.keyHeight
+            font.pixelSize: 13 * root.sizeScale
+            onClicked: root.hideRequested()
+            background: Rectangle {
+                radius: 6 * root.sizeScale
+                color: hideControl.down ? Theme.Palette.primary
+                    : hideControl.hovered ? Theme.Palette.selection : "transparent"
+                border.width: hideControl.activeFocus ? 2 : 0
+                border.color: Theme.Palette.primary
+            }
+            contentItem: Text {
+                text: hideControl.text
+                font: hideControl.font
+                color: hideControl.down ? Theme.Palette.highlightedText : Theme.Palette.foreground
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
+        }
     }
     Flickable {
         id: viewport

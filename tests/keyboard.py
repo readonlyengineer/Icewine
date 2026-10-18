@@ -19,6 +19,7 @@ import Quickshell.Io
 import "icewine/modules" as Modules
 import "owner" as Owner
 import "icewine/modules/KeyboardModel.js" as Model
+import "icewine/theme" as Theme
 ShellRoot {
     id: root
     property string phase: "startup"
@@ -115,6 +116,55 @@ ShellRoot {
         session.lockRequested = false
         check.wait(30)
     }
+    function headerStyle() {
+        owner.show(); check.wait(50)
+        const panel = owner.view
+        const pin = find(panel, "keyboardPin"), hide = find(panel, "keyboardHide")
+        function capture(name) {
+            const directory = Quickshell.env("TEST_KEYBOARD_PREVIEWS")
+            if (!directory) return
+            let done = false
+            check.verify(panel.grabToImage(result => {
+                check.verify(result.saveToFile(directory + "/" + name + ".png"))
+                done = true
+            }))
+            check.tryVerify(() => done)
+        }
+        const baseline = Quickshell.env("TEST_KEYBOARD_BASELINE") !== ""
+        for (const pinned of [false, true]) {
+            panel.pinned = pinned
+            pin.focus = false; hide.focus = false; win.contentItem.forceActiveFocus(); check.mouseMove(panel, panel.width/2, panel.height-2)
+            check.wait(30); capture(pinned ? "pinned" : "normal")
+            for (const control of [pin, hide]) {
+                if (!baseline) {
+                    check.compare(control.background.color, control === pin && pinned ? Theme.Palette.surface : "transparent")
+                    check.compare(control.contentItem.color, Theme.Palette.foreground)
+                }
+                control.forceActiveFocus(); check.wait(20)
+                if (!baseline) check.compare(control.background.border.width, 2, "focus outline")
+                capture(control.objectName + "-focus-" + pinned)
+                control.focus = false; win.contentItem.forceActiveFocus()
+                check.mouseMove(control, control.width/2, control.height/2); check.wait(30)
+                if (!baseline) check.verify(control.hovered, "header hover enabled")
+                if (!baseline) check.compare(control.background.color, Theme.Palette.selection)
+                capture(control.objectName + "-hover-" + pinned)
+                check.mousePress(control, control.width/2, control.height/2); check.wait(20)
+                if (!baseline) {
+                    check.compare(control.background.color, Theme.Palette.primary)
+                    check.compare(control.contentItem.color, Theme.Palette.highlightedText)
+                }
+                capture(control.objectName + "-pressed-" + pinned)
+                // Release outside to inspect both controls without activating Hide.
+                check.mouseRelease(control, -10, -10)
+                check.mouseMove(panel, panel.width/2, panel.height-2)
+            }
+        }
+        // Native ToolButton keyboard activation remains intact.
+        pin.forceActiveFocus(); const pinned = panel.pinned
+        check.keyClick(Qt.Key_Space); check.compare(panel.pinned, !pinned)
+        hide.forceActiveFocus(); check.keyClick(Qt.Key_Space)
+        check.tryCompare(owner, "visible", false)
+    }
     function headerHide(locked) {
         session.lockRequested = locked
         session.keyboardHost = lockView
@@ -184,6 +234,10 @@ ShellRoot {
     }
     Timer { interval: 200; running: true; onTriggered: {
         try {
+            headerStyle()
+            if (Quickshell.env("TEST_KEYBOARD_STYLE_ONLY") === "1") {
+                console.log("KEYBOARD_OWNER_PASSED"); Qt.quit(); return
+            }
             const action = Model.action(Model.keys.find(key => key.text === "a"), Model.control, false)
             const process = owner.deliveryProcess
             const productionCommand = Array.from(process.command)
@@ -273,14 +327,14 @@ with tempfile.TemporaryDirectory(prefix="icewine-keyboard-") as directory:
     (root / "icewine").mkdir()
     (root / "icewine/modules").symlink_to(source / "quickshell/modules")
     (root / "icewine/theme").symlink_to(root / "theme")
-    config = theme_fixture(source, root)
+    config = theme_fixture(source, root, os.environ.get("TEST_KEYBOARD_THEME", "tokyo-night"))
     # Offscreen has no layer-shell PanelWindow backend. Substitute only that
     # platform surface, keeping every owner handler/Process/Timer unchanged.
     # A fixture-only alias exposes the real Process for native signal counting
     # and a unique missing absolute executable; no production switch/fake error.
     (root / "owner").mkdir()
     for name in ("KeyboardView.qml", "KeyboardModel.js"):
-        (root / "owner" / name).symlink_to(source / "quickshell/modules" / name)
+        (root / "owner" / name).symlink_to(Path(os.environ["TEST_KEYBOARD_BASELINE"]) if name == "KeyboardView.qml" and os.environ.get("TEST_KEYBOARD_BASELINE") else source / "quickshell/modules" / name)
     owner = (source / "quickshell/modules/KeyboardController.qml").read_text()
     owner = owner.replace("    id: root\n", "    id: root\n    property alias deliveryProcess: delivery\n    property Item fixtureHost\n", 1)
     start = owner.index("    PanelWindow {")
@@ -313,6 +367,9 @@ sys.exit(1 if pathlib.Path(os.environ["TEST_KEYBOARD_CONTROL"]).read_text() == "
     result = subprocess.run([os.environ.get("ICEWINE_TEST_QS", "qs"), "-p", str(root), "--no-color"], env=env, capture_output=True, text=True, timeout=45)
     output = result.stdout + result.stderr
     assert result.returncode == 0 and "KEYBOARD_OWNER_PASSED" in output, output
+    if os.environ.get("TEST_KEYBOARD_STYLE_ONLY") == "1":
+        print("PASS: actual-QML header normal/pinned/focus/hover/pressed and Space activation, " + os.environ.get("TEST_KEYBOARD_THEME", "tokyo-night"))
+        sys.exit(0)
     startup_warnings = [line for line in output.splitlines()
                         if "Process failed to start" in line and str(missing_executable) in line]
     assert len(startup_warnings) == 1, output
