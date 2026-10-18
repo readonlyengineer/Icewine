@@ -75,15 +75,17 @@ with open(os.environ["TUI_LOG"],"a") as stream: stream.write(json.dumps(sys.argv
 if sys.argv[1:] == ["state"]: print(os.environ["TUI_STATE"])
 elif sys.argv[1:] == ["file-state"]: print(os.environ["TUI_FILE_STATE"])
 elif sys.argv[1:] == ["widgets-state"]:
+ if os.environ["TUI_WIDGET_POLICY"] == "invalid":
+  print("invalid cardStacks policy; Widgets are read-only",file=sys.stderr); sys.exit(1)
  with open(os.environ["TUI_WIDGETS"]) as stream: saved=json.load(stream)
  print("supported="+os.environ["TUI_WIDGET_SUPPORTED"], "revision="+"a"*64, *[
-  name+"="+str(saved[name]).lower()+":"+("symlink" if os.environ["TUI_WIDGET_LINKED"] == "1" else "policy" if name in os.environ["TUI_WIDGET_POLICY"].split(",") else "user")
-  for name in ("notificationToasts","windowSwitcher")])
+  name+"="+(saved[name] if name == "cardStacks" else str(saved[name]).lower())+":"+("symlink" if os.environ["TUI_WIDGET_LINKED"] == "1" else "policy" if name in os.environ["TUI_WIDGET_POLICY"].split(",") else "user")
+  for name in ("notificationToasts","windowSwitcher","cardStacks")])
 elif sys.argv[1] == "widgets-apply":
  if os.environ["TUI_WIDGET_FAIL"] == "1":
   print("Widget preferences changed; reopen the manager before saving",file=sys.stderr); sys.exit(1)
  saved=dict(field.split("=") for field in sys.argv[3:])
- with open(os.environ["TUI_WIDGETS"],"w") as stream: json.dump({name:value=="true" for name,value in saved.items()},stream)
+ with open(os.environ["TUI_WIDGETS"],"w") as stream: json.dump({name:value if name == "cardStacks" else value=="true" for name,value in saved.items()},stream)
  print("Widget preferences saved; the shipped shell watches this file.")
 elif sys.argv[1:] and sys.argv[1] == "apply": sys.exit(int(os.environ["TUI_APPLY_EXIT"]))
 ''')
@@ -132,7 +134,8 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         (data / "auth.img").unlink(missing_ok=True)
         if auth: (data / "auth.img").write_bytes(b"fixture")
         widgets_state = root / "widgets-state"
-        widgets_state.write_text(json.dumps(widgets or {"notificationToasts": True, "windowSwitcher": True}))
+        widgets_state.write_text(json.dumps({"notificationToasts": True, "windowSwitcher": True,
+            "cardStacks": "launcher/launcher,background,layout;media/media;audio/audio,bluetooth;screenshot/screenshot,clipboard;network/network,tailscale,ssh;notifications/notifications;battery/battery,performance"} | (widgets or {})))
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
@@ -249,7 +252,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             run(tab + b"\x1b", state(), size=size, capture="pages")
             run(tab + b"\x1b", state(readonly=True, desktop=True, steam="native", gamescope=True, handheld=True),
                 policy=True, auth=True, size=size, capture="readonly-auth")
-            run(tab*2+b" "+down*2+b"\r\x1b", state(), size=size, capture="widgets-save")
+            run(tab*2+b" s\x1b", state(), size=size, capture="widgets-save")
             if size[1] != 80: continue
             run(down*3+b"\x1b[C"+down*5+b"\x1b", state(desktop=True), size=size, capture="installer-actions")
             (root / "hyprmon").rename(root / "hyprmon-hidden")
@@ -258,7 +261,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             finally: (root / "hyprmon-hidden").rename(root / "hyprmon")
             run(tab+down*2+b"\r\x1b", state(), size=size, command_fail=True,
                 pick=str(root/"picture with spaces.png")+"\n", capture="picker-error")
-            run(tab*2+b" "+down*2+b"\r\x1b", state(), size=size, widget_fail=True, capture="widgets-error")
+            run(tab*2+b" s\x1b", state(), size=size, widget_fail=True, capture="widgets-error")
             run(tab*2+b"\x1b", state(), size=size, widget_supported=False, capture="widgets-unavailable")
             run(tab*2+b"\x1b", state(), size=size, widget_policy="notificationToasts,windowSwitcher", capture="widgets-policy")
         print("PASS: completed visual frames exported; semantic suite not run")
@@ -352,21 +355,72 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert run(tab*2+b" "+tab*3+b"\x1b", state(), size=(24, 80)) == [["state"]]
     assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
     assert b"Icewine Widgets (3/3)" in last_output
-    assert run(b" "+tab*2+b" "+down*2+b"\r\x1b", state(), size=(24, 80)) == [["state"]]
+    assert run(b" "+tab*2+b" s\x1b", state(), size=(24, 80)) == [["state"]]
     save = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    assert save[-2:] == ["notificationToasts=false", "windowSwitcher=true"]
+    assert save[2:4] == ["notificationToasts=false", "windowSwitcher=true"]
     # A preloaded effective mixed policy skips its owned row. Persistence itself
     # is exercised by the real backend, not this reset-per-run mock.
-    assert run(tab*2+b" "+down+b"\r\x1b", state(readonly=True),
+    assert run(tab*2+b" s\x1b", state(readonly=True),
                widgets={"notificationToasts": False, "windowSwitcher": False},
                widget_policy="notificationToasts") == [["state"]]
     save = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    assert save[-2:] == ["notificationToasts=false", "windowSwitcher=true"]
-    assert run(tab*2+b" "+down*2+b"\r\x1b", state(), widget_fail=True) == [["state"]]
+    assert save[2:4] == ["notificationToasts=false", "windowSwitcher=true"]
+    assert run(tab*2+b" s\x1b", state(), widget_fail=True) == [["state"]]
     assert any(call[0] == "widgets-apply" for call in last_widget_calls)
     assert b"preferences changed" in last_output and b"Widget preferences saved" not in last_output
-    assert run(tab*2+b" \r", state(), widget_supported=False) == [["state"]]
+    # Unavailable card rows remain focusable for inspection; Space/Enter do
+    # nothing there. Save is disabled too; cancel explicitly rather than waiting.
+    assert run(tab*2+b" \rs\x1b", state(), widget_supported=False) == [["state"]]
     assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+    assert b"Unavailable" in last_output
+    # Real key handling edits one in-memory draft; persistence validation is
+    # covered by install.py against the real backend rather than this TTY mock.
+    def saved_stacks():
+        call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
+        return next(field.removeprefix("cardStacks=") for field in call if field.startswith("cardStacks="))
+    right, left, delete = b"\x1b[C", b"\x1b[D", b"\x1b[3~"
+    for size in ((24, 80), (36, 120)):
+        # Reorder a member, move it to another stack, make it that stack's
+        # icon, and move that stack before the original one.
+        run(tab*2+down*2+b"+"+right+b"-[s\x1b", state(), size=size,
+            widgets={"cardStacks": "a/launcher,background,layout,media;b/audio"})
+        assert saved_stacks() == "b/launcher,audio;a/background,layout,media"
+        assert any(b"1. b / 1 icon (primary)" in frame for frame in last_frames)
+        # New stack, join an existing stack, and move a new singleton stack.
+        run(tab*2+down*2+b" "+down+right+down+b"n[s\x1b", state(), size=size,
+            widgets={"cardStacks": ""})
+        assert saved_stacks() == "stack-2/layout;stack-1/launcher,background"
+        # Removing the configured first member makes the next member the icon;
+        # disable the final member without retaining an empty stack.
+        run(tab*2+down*2+b" "+down+b" s\x1b", state(), size=size,
+            widgets={"cardStacks": "a/launcher,background"})
+        assert saved_stacks() == ""
+        # Remove a whole stack, then explicitly re-enable a module.
+        run(tab*2+down*2+delete+b" s\x1b", state(), size=size,
+            widgets={"cardStacks": "a/launcher,background;b/audio"})
+        assert saved_stacks() == "b/audio;stack-1/launcher"
+        # Focus scrolls to the last module; its configured fourth accent repeats.
+        run(tab*2+down*15+b"s\x1b", state(), size=size,
+            widgets={"cardStacks": "mixed/launcher,audio,clipboard,performance"})
+        assert saved_stacks() == "mixed/launcher,audio,clipboard,performance"
+        assert any(b"performance" in frame and b"4 (primary)" in frame for frame in last_frames)
+    # Moving a singleton into its previous stack must remove the old stack
+    # without losing or misindexing the destination. Save button remains usable.
+    run(tab*2+down*2+left+down*14+b"\r\x1b", state(), size=(24, 80),
+        widgets={"cardStacks": "a/launcher;b/audio"})
+    assert saved_stacks() == "b/audio,launcher"
+    # Tab keeps the draft; Cancel never writes it.
+    run(tab*2+down*2+delete+tab*3+b"\x1b", state())
+    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+    # Policy locks stack operations but leaves ordinary boolean settings editable.
+    run(tab*2+down*2+b"n+-[]"+right+delete+b" s\x1b", state(),
+        widgets={"cardStacks": "host/launcher"}, widget_policy="cardStacks")
+    assert saved_stacks() == "host/launcher"
+    run(tab*2+b"ns\x1b", state(), widget_policy="notificationToasts,windowSwitcher,cardStacks")
+    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+    run(tab*2+b"ns\x1b", state(), widget_policy="invalid")
+    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
+    assert b"invalid cardStacks policy" in last_output
     # Delivery can fail after committing a choice: display/next cycle follow saved state.
     assert run(tab+b"\x1b[C\x1b[C\x1b[B\x1b[C\x1b[C\x1b", state(), delivery_fail=True) == [["state"]]
     changes = [call for call in tools() if call[0] == "icewine" and len(call) == 3]

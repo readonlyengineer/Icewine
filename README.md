@@ -168,7 +168,15 @@ Tab cycles through Installer, Appearance and Widgets. Use Up/Down or
 Shift-Tab to navigate rows, Space to select, and Enter on Apply or Cancel.
 Left/right cycles Steam, Theme or Transparency. Theme/transparency changes and
 wallpaper selections apply immediately; Installer/Appearance Apply affects utility choices.
-Widgets Save commits only widget preferences; Cancel/Esc discards unsaved drafts.
+Widgets Save (`s`) commits only widget preferences; Cancel/Esc discards unsaved drafts.
+The module list scrolls with focus. Space toggles a card module; Left/right moves
+it to the previous/next stack, and `n` moves it to a new stack. `-`/`+` moves it
+within its stack; `[`/`]` moves its stack; Delete removes the whole stack.
+Removing a stack disables its members; removing its last member deletes the empty
+stack. The first member supplies the topbar icon. Rows show stack/member order
+and the primary, secondary, tertiary accent cycle; modules absent from stacks
+are disabled. These preferences describe configured membership, including cards
+that are temporarily unavailable.
 Notification toasts and the window switcher default to enabled. Disabling toasts
 keeps notification history and sounds; session and authentication controls remain.
 Preferences live in `$XDG_STATE_HOME/icewine/widgets.json` (normally
@@ -176,7 +184,9 @@ Preferences live in `$XDG_STATE_HOME/icewine/widgets.json` (normally
 NixOS `services.icewine.widgets.notificationToasts` and `.windowSwitcher` default
 to null (user choice); true/false enforces policy in the manager and shell.
 The Widgets page requires shipped Settings.qml and a desktop/handheld entry;
-custom settings or entries are read-only here.
+custom settings or entries are read-only here. Invalid non-null widget policy
+also makes the editor read-only and reports an error; repair the host policy
+before saving.
 Wallpaper pickers use optional Yazi; Configure monitors opens optional HyprMon.
 HyprMon owns its live/save actions, which Cancel does not undo.
 NixOS utility selections reflect the module options and are read-only. Apply

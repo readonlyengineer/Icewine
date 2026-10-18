@@ -79,12 +79,14 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 manage.main(["widgets-state"])
             return dict(field.split("=") for field in output.getvalue().split())
-        def save_widgets(revision, toasts="false", switcher="false"):
+        def save_widgets(revision, toasts="false", switcher="false", stacks=None):
             manage.main(["widgets-apply", "revision=" + revision,
-                         "notificationToasts=" + toasts, "windowSwitcher=" + switcher])
+                         "notificationToasts=" + toasts, "windowSwitcher=" + switcher,
+                         "cardStacks=" + (widget_status()["cardStacks"].split(":")[0] if stacks is None else stacks)])
         initial = widget_status()
         assert initial["supported"] == "true"
         assert initial["notificationToasts"] == initial["windowSwitcher"] == "true:user"
+        assert initial["cardStacks"] == manage.stack_text(manage.CARD_DEFAULTS) + ":user"
         # Do not save yet: widget_saved remains absent (Cancel's backend contract).
         assert not (widget_saved / "widgets.json").exists()
         # A draft loaded while absent must not overwrite malformed empty state.
@@ -100,7 +102,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         before = (widget_saved / "widgets.json").read_bytes()
         for request in (
                 lambda: save_widgets(initial["revision"], "true"),
-                lambda: manage.main(["widgets-apply", "revision=" + widget_status()["revision"], "unknown=false", "windowSwitcher=false"])):
+                lambda: manage.main(["widgets-apply", "revision=" + widget_status()["revision"], "unknown=false", "windowSwitcher=false", "cardStacks="])):
             try: request()
             except ValueError: pass
             else: raise AssertionError("accepted stale/invalid widget save")
@@ -111,10 +113,67 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             except ValueError: pass
             else: raise AssertionError("mutable widget_saved overrode Nix policy")
             save_widgets(widget_status()["revision"], "true", "true")
-            assert json.loads((widget_saved / "widgets.json").read_text()) == {"notificationToasts": False, "windowSwitcher": True}
+            assert json.loads((widget_saved / "widgets.json").read_text()) == {"notificationToasts": False, "windowSwitcher": True, "cardStacks": manage.CARD_DEFAULTS}
+        # A mixed stack round-trips order and disabled modules without touching
+        # old boolean preferences. Empty top-level list disables every card.
+        mixed = [{"id": "mixed", "modules": ["ssh", "audio", "clipboard", "launcher"]}]
+        save_widgets(widget_status()["revision"], "false", "true", "mixed/ssh,audio,clipboard,launcher")
+        assert json.loads((widget_saved / "widgets.json").read_text()) == {
+            "notificationToasts": False, "windowSwitcher": True, "cardStacks": mixed}
+        assert widget_status()["cardStacks"] == "mixed/ssh,audio,clipboard,launcher:user"
+        # A policy override may be empty. It is immutable, and saving other
+        # settings must preserve the user's hidden stack choice for later.
+        for policy in ([], [{"id": "host", "modules": ["battery"]}]):
+            with patch.dict(os.environ, {"ICEWINE_WIDGET_POLICY": json.dumps({"cardStacks": policy})}):
+                assert widget_status()["cardStacks"] == manage.stack_text(policy) + ":policy"
+                before = (widget_saved / "widgets.json").read_bytes()
+                try: save_widgets(widget_status()["revision"], stacks="mixed/ssh")
+                except ValueError as error: assert "policy changed" in str(error)
+                else: raise AssertionError("card stack policy bypassed")
+                assert (widget_saved / "widgets.json").read_bytes() == before
+                save_widgets(widget_status()["revision"], "false", "true")
+                assert json.loads((widget_saved / "widgets.json").read_text())["cardStacks"] == mixed
+        with patch.dict(os.environ, {"ICEWINE_WIDGET_POLICY": '{"cardStacks":null}'}):
+            assert widget_status()["cardStacks"].endswith(":user")
+            save_widgets(widget_status()["revision"], "false", "true", "")
+        assert json.loads((widget_saved / "widgets.json").read_text())["cardStacks"] == []
+        before = (widget_saved / "widgets.json").read_bytes()
+        invalid = [None, {}, [None], [[]], [{"id": "", "modules": ["audio"]}],
+                   [{"id": "A", "modules": ["audio"]}], [{"id": "a" * 33, "modules": ["audio"]}],
+                   [{"id": "audio", "modules": []}], [{"id": "a", "modules": ["unknown"]}],
+                   [{"id": "a", "modules": ["audio", "audio"]}],
+                   [{"id": "a", "modules": ["audio"]}, {"id": "b", "modules": ["audio"]}],
+                   [{"id": "a", "modules": ["audio"]}, {"id": "a", "modules": ["ssh"]}],
+                   [{"id": "a", "modules": ["audio"], "enabled": True}]]
+        for value in invalid:
+            (widget_saved / "widgets.json").write_text(json.dumps({"cardStacks": value}))
+            invalid_bytes = (widget_saved / "widgets.json").read_bytes()
+            try: save_widgets(widget_status()["revision"])
+            except ValueError: pass
+            else: raise AssertionError("accepted invalid/stale card stacks")
+            assert (widget_saved / "widgets.json").read_bytes() == invalid_bytes
+            (widget_saved / "widgets.json").write_bytes(before)
+            if value is None: continue  # null policy is explicitly unmanaged.
+            with patch.dict(os.environ, {"ICEWINE_WIDGET_POLICY": json.dumps({"cardStacks": value})}):
+                for request in (["widgets-state"], ["widgets-apply", "revision=x"]):
+                    try: manage.main(request)
+                    except ValueError as error: assert "policy" in str(error) and "read-only" in str(error)
+                    else: raise AssertionError("invalid policy became editable")
+                assert (widget_saved / "widgets.json").read_bytes() == before
+        for text in ("a", "a/", "A/audio", "a/unknown", "a/audio,audio", "a/audio;b/audio", "a/audio;a/ssh", "a/audio;"):
+            try: save_widgets(widget_status()["revision"], stacks=text)
+            except ValueError: pass
+            else: raise AssertionError("accepted malformed card stack request")
+            assert (widget_saved / "widgets.json").read_bytes() == before
+        # Old two-boolean files migrate on the next Save, retaining both values.
+        (widget_saved / "widgets.json").write_text('{"notificationToasts":false,"windowSwitcher":true}')
+        assert widget_status()["cardStacks"] == initial["cardStacks"]
+        save_widgets(widget_status()["revision"], "false", "true")
+        assert json.loads((widget_saved / "widgets.json").read_text()) == {
+            "notificationToasts": False, "windowSwitcher": True, "cardStacks": manage.CARD_DEFAULTS}
         before = (widget_saved / "widgets.json").read_bytes()
         with patch.object(manage.theme, "atomic_text", side_effect=PermissionError("fixture save denied")):
-            try: save_widgets(widget_status()["revision"], "true", "true")
+            try: save_widgets(widget_status()["revision"], "true", "true", "attempt/ssh")
             except PermissionError: pass
             else: raise AssertionError("failed widget save reported success")
         assert (widget_saved / "widgets.json").read_bytes() == before

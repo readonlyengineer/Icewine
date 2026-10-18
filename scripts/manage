@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import platform
 import pwd
+import re
 import subprocess
 import sys
 import tempfile
@@ -61,21 +62,65 @@ def selections(state):
     return theme.symlinked(path) is not None, saved | {"login": False}
 
 
-WIDGETS = ("notificationToasts", "windowSwitcher")
+WIDGETS = ("notificationToasts", "windowSwitcher", "cardStacks")
+CARD_MODULES = ("launcher", "background", "layout", "media", "audio", "bluetooth",
+                "screenshot", "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance")
+CARD_DEFAULTS = [{"id": names[0], "modules": list(names)} for names in (
+    ("launcher", "background", "layout"), ("media",), ("audio", "bluetooth"),
+    ("screenshot", "clipboard"), ("network", "tailscale", "ssh"), ("notifications",), ("battery", "performance"))]
+
+
+def validate_stacks(stacks):
+    if not isinstance(stacks, list):
+        raise ValueError("invalid card stacks")
+    ids, members = set(), set()
+    for stack in stacks:
+        if (not isinstance(stack, dict) or set(stack) != {"id", "modules"}
+                or not isinstance(stack["id"], str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", stack["id"])
+                or stack["id"] in ids or not isinstance(stack["modules"], list) or not stack["modules"]):
+            raise ValueError("invalid card stack")
+        ids.add(stack["id"])
+        for name in stack["modules"]:
+            if name not in CARD_MODULES or name in members:
+                raise ValueError("invalid card module")
+            members.add(name)
+    return stacks
+
+
+def stack_text(stacks):
+    # IDs cannot contain these delimiters; keep the existing whitespace protocol.
+    return ";".join(stack["id"] + "/" + ",".join(stack["modules"]) for stack in stacks)
+
+
+def parse_stacks(text):
+    stacks = []
+    for entry in text.split(";") if text else []:
+        name, separator, members = entry.partition("/")
+        if not separator:
+            raise ValueError("invalid card stack request")
+        stacks.append({"id": name, "modules": members.split(",")})
+    return validate_stacks(stacks)
 
 
 def widget_state(config, state):
     policy = json.loads(os.environ.get("ICEWINE_WIDGET_POLICY", "{}"))
     if (not isinstance(policy, dict) or set(policy) - set(WIDGETS)
-            or any(value is not None and type(value) is not bool for value in policy.values())):
-        raise ValueError("invalid widget policy")
+            or any(value is not None and name != "cardStacks" and type(value) is not bool for name, value in policy.items())):
+        raise ValueError("invalid widget policy; Widgets are read-only")
+    if policy.get("cardStacks") is not None:
+        try:
+            validate_stacks(policy["cardStacks"])
+        except ValueError as error:
+            raise ValueError("invalid cardStacks policy; Widgets are read-only") from error
     path = state / "widgets.json"
     contents = path.read_bytes() if path.exists() else None
     saved = json.loads(contents) if contents is not None else {}
     revision = hashlib.sha256(contents or b"").hexdigest()
     if (not isinstance(saved, dict) or set(saved) - set(WIDGETS)
-            or any(type(value) is not bool for value in saved.values())):
+            or any(name != "cardStacks" and type(value) is not bool for name, value in saved.items())):
         raise ValueError("invalid widget selections; repair widgets.json before saving")
+    if "cardStacks" in saved:
+        validate_stacks(saved["cardStacks"])
     settings = config / "quickshell/config/Settings.qml"
     # Custom settings remain editable; do not promise delivery through an
     # unknown implementation. Restore shipped settings to enable these controls.
@@ -96,18 +141,19 @@ def widgets(argv, config, state):
     linked = theme.symlinked(state / "widgets.json") is not None
     if argv == ["widgets-state"]:
         print("supported=" + str(supported).lower(), "revision=" + revision, *[
-            f"{name}={str(policy.get(name) if policy.get(name) is not None else saved.get(name, True)).lower()}:{'policy' if policy.get(name) is not None else 'symlink' if linked else 'user'}"
-            for name in WIDGETS])
+            f"{name}={stack_text(value) if name == 'cardStacks' else str(value).lower()}:{'policy' if policy.get(name) is not None else 'symlink' if linked else 'user'}"
+            for name in WIDGETS
+            for value in [policy[name] if policy.get(name) is not None else saved.get(name, CARD_DEFAULTS if name == "cardStacks" else True)]])
         return
     theme.writable(state / "widgets.json")
-    if len(argv) != 4 or argv[1] != "revision=" + revision:
+    if len(argv) != 5 or argv[1] != "revision=" + revision:
         raise ValueError("Widget preferences changed; reopen the manager before saving")
     fields = {}
     for field in argv[2:]:
         name, separator, value = field.partition("=")
-        if not separator or name in fields or name not in WIDGETS or value not in {"true", "false"}:
+        if not separator or name in fields or name not in WIDGETS or (name != "cardStacks" and value not in {"true", "false"}):
             raise ValueError("invalid widget request")
-        fields[name] = value == "true"
+        fields[name] = parse_stacks(value) if name == "cardStacks" else value == "true"
     if set(fields) != set(WIDGETS) or not supported:
         raise ValueError("widget settings unavailable; restore shipped Settings.qml through Installer")
     if any(policy.get(name) is not None and fields[name] != policy[name] for name in WIDGETS):
