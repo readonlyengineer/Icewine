@@ -420,6 +420,57 @@ ShellRoot {
                             verify(!topbar.barVisible)
                             topbar.releaseBar()
                         }
+                        // Super+W has its own release callback; Super releases through
+                        // topbarModifier without a topbarHold press. Cover both orders.
+                        for (const visible of [false, true]) for (const modifierFirst of [false, true]) {
+                            topbar.dismiss(false)
+                            if (visible) topbar.pressBar()
+                            if (behaviour === "toggle") topbar.releaseBar()
+                            const latched = topbar.ui.latched
+                            const before = topbar.barVisible
+                            topbar.barModifiersHeld = 1
+                            if (modifierFirst) {
+                                topbar.barModifiersHeld = 0
+                                topbar.releaseBar()
+                            }
+                            const expected = modifierFirst && behaviour !== "toggle"
+                                ? behaviour === "always" : before
+                            topbar.toggleSwitcher()
+                            compare(topbar.ui.page, "switcher")
+                            compare(topbar.ui.latched, latched)
+                            compare(topbar.barVisible, expected, "Switcher adds no bar visibility reason")
+                            if (!modifierFirst) {
+                                topbar.barModifiersHeld = 0
+                                topbar.releaseBar()
+                            }
+                            compare(topbar.barVisible, behaviour === "always" || latched)
+                            topbar.toggleSwitcher()
+                            compare(topbar.ui.page, "")
+                            compare(topbar.ui.latched, latched, "Toggle-close preserves bar latch")
+                            mockCompositor.restored = ""
+                            topbar.toggleSwitcher()
+                            topbar.dismissWidget() // Same callback as Escape.
+                            compare(topbar.ui.latched, latched, "Cancel preserves bar latch")
+                            wait(1)
+                            verify(!topbar.interactionActive || latched)
+                            if (!latched) compare(mockCompositor.restored, mockCompositor.activeWindowAddress)
+                            topbar.toggleSwitcher()
+                            topbar.activateSwitcherWindow(b)
+                            compare(topbar.ui.page, "")
+                            compare(topbar.ui.latched, latched, "Selection preserves bar latch")
+                            compare(topbar.barVisible, behaviour === "always" || latched)
+                            wait(1)
+                            compare(mockCompositor.restored, b.address, "Selection activates chosen window")
+                        }
+                        topbar.dismiss(false)
+                        if (behaviour === "keyboard-mouse") {
+                            topbar.hoveredScreen = "DP-1"
+                            topbar.toggleSwitcher()
+                            verify(topbar.barVisible, "Mouse edge remains independent")
+                            topbar.hoveredScreen = ""
+                            verify(!topbar.barVisible, "Switcher cannot sustain a departed mouse edge")
+                            topbar.dismissWidget()
+                        }
                         topbar.openWidget("audio", true, "DP-1")
                         topbar.dismissWidget()
                         wait(1)

@@ -313,7 +313,8 @@ Scope {
     function activateSwitcherWindow(window) {
         if (sessionLocked || !compositor.toplevels.includes(window))
             return
-        instantHandoff()
+        yieldFocus()
+        dismissWidget()
         const generation = focusGeneration
         Qt.callLater(() => {
             if (!root.sessionLocked && generation === root.focusGeneration && !root.ui.page)
@@ -533,7 +534,10 @@ Scope {
                 windows: [panel]
                 active: panel.widgetHere && root.ui.page === "switcher"
                     && root.widgetEngaged && !root.sessionLocked
-                onCleared: if (root.ui.page === "switcher") root.handoff()
+                onCleared: if (root.ui.page === "switcher") {
+                    root.yieldFocus()
+                    root.dismissWidget()
+                }
             }
 
             // Only mouse-autohide keeps a one-logical-pixel reveal edge while hidden.

@@ -41,7 +41,7 @@ function reduce(state, event) {
 function barVisible(state, radialVisible, hovered, behaviour) {
     if (state.suppressed && !radialVisible) return false
     return behaviour === "always" || (behaviour === "toggle" ? state.latched : state.held)
-        || radialVisible || state.page !== "" || hovered
+        || radialVisible || (state.page !== "" && state.page !== "switcher") || hovered
 }
 
 if (typeof module !== "undefined")

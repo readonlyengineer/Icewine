@@ -500,6 +500,39 @@ for (const behaviour of Cards.barBehaviours) {
     mode = State.reduce(mode, {type: "resume"})
     assert.equal(State.barVisible(mode, false, true, behaviour), true)
 }
+// Switcher intent must not become an independent reason to reveal the bar.
+for (const behaviour of Cards.barBehaviours) for (const held of [false, true]) {
+    for (const latched of [false, true]) for (const hovered of [false, true]) {
+        for (const radial of [false, true]) {
+            let mode = Object.assign(State.initial(), {held, latched})
+            const visible = State.barVisible(mode, radial, hovered, behaviour)
+            mode = State.reduce(mode, {type: "open", page: "switcher", engaged: true, screen: "external"})
+            assert.equal(State.barVisible(mode, radial, hovered, behaviour), visible)
+            mode = State.reduce(mode, {type: "dismiss"})
+            assert.equal(State.barVisible(mode, radial, hovered, behaviour), visible)
+            assert.equal(mode.held, held)
+            assert.equal(mode.latched, latched)
+        }
+    }
+}
+// Run the shipped focus-grab dismissal callback as well as selection.
+const clearSwitcher = topbar.match(/onCleared: ([\s\S]*?)^            \}/m)[1]
+for (const close of [() => shell.dismissWidget(), () => shell.activateSwitcherWindow(shell.compositor.toplevels[0]),
+    () => vm.runInNewContext(clearSwitcher, {root: shell})]) {
+    shell.Config.Settings.barBehaviour = "toggle"
+    shell.ui = State.reduce(State.initial(), {type: "press", behaviour: "toggle"})
+    shell.ui = State.reduce(shell.ui, {type: "release"})
+    shell.openWidget("switcher", true, "external")
+    close()
+    assert.equal(shell.ui.page, "")
+    assert.equal(shell.ui.latched, true, "Switcher exit preserves independent toggle latch")
+    assert.equal(State.barVisible(shell.ui, false, false, "toggle"), true)
+    flush()
+    shell.handoff()
+    shell.finishInteraction()
+    flush()
+}
+console.log("switcher visibility preserves independent hold, toggle, hover, radial and Always Show reasons")
 // Evaluate the shipped bindings, including Bottom popouts and native requests,
 // rather than implementing an alternative geometry model inside the test.
 const expression = (source, property) => source.match(new RegExp(`^ *${property}: (.+)$`, "m"))[1]
