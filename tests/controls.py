@@ -1235,7 +1235,7 @@ ShellRoot {
         for (const width of [380, 280, 200]) {
             networkWindow.width = width
             networkKeys.wait(20)
-            const title = root.findAccessible(page, "<b>Fixture laptop</b> · Connected")
+            const title = root.findAccessible(page, "Connected")
             const titleEnd = title.mapToItem(page, title.width, 0).x
             const switchStart = connection.mapToItem(page, 0, 0).x
             if (titleEnd > switchStart || switchStart + connection.width > page.width
@@ -1245,7 +1245,7 @@ ShellRoot {
         networkWindow.width = 280
         const settled = page.data
         const device = root.findAccessible(page, "Home gateway, online, 100.64.0.2")
-        const title = root.findAccessible(page, "<b>Fixture laptop</b> · Connected")
+        const title = root.findAccessible(page, "Connected")
         if (!device || !descendants(page, item => item.Accessible.name === "<b>Fixture laptop</b>, online, 100.64.0.3").length)
             throw new Error("Device identity fixture lost the distinct equal-name remote")
         if (descendants(page, item => item.Accessible.name === "Local duplicate, online, 100.64.0.4").length)
@@ -1262,7 +1262,7 @@ ShellRoot {
         networkKeys.tryCompare(page, "busy", true, 6000)
         if (!connection.enabled || !picker.enabled)
             throw new Error("Background read disabled mutation controls for presentation")
-        if (title.text !== "<b>Fixture laptop</b> · Connected")
+        if (title.text !== "Connected")
             throw new Error("Background read replaced the settled headline")
         networkKeys.tryCompare(page, "busy", false)
         const after = root.refreshSnapshot(page)
@@ -1295,6 +1295,7 @@ ShellRoot {
                 networkKeys.tryVerify(() => page.request?.kind === "connection")
                 tailscaleMode.setText("")
             } else networkKeys.tryCompare(page, "busy", true)
+            networkKeys.tryCompare(title, "text", "Changing connection…")
             if (connection.checked !== wasChecked || connection.enabled || picker.enabled)
                 throw new Error("Connection must retain confirmed state and serialize input while busy")
             page.toggleConnection()
@@ -1302,6 +1303,7 @@ ShellRoot {
             networkKeys.tryCompare(page, "busy", false)
             networkKeys.tryCompare(page, "confirming", "")
             networkKeys.tryCompare(connection, "enabled", true)
+            networkKeys.tryCompare(title, "text", page.data.label)
             if (connection.checked === wasChecked || connection.Accessible.checked !== connection.checked || page.error)
                 throw new Error("Connection input did not confirm a state change: " + input + " / " + page.error)
             if (connection.checked && (page.data.selected !== "fixture-sydney-best"
@@ -1498,9 +1500,10 @@ ShellRoot {
             networkKeys.tryCompare(picker, "enabled", true)
             const page = picker.parent.parent.parent
             networkKeys.tryVerify(() => page.data.peers.length === 3)
-            const localLabel = root.findAccessible(page, "<b>Fixture laptop</b> · Connected")
-            if (!localLabel || localLabel.textFormat !== Text.PlainText)
-                throw new Error("Local device name must appear as plain text in the status title")
+            const statusLabel = root.findAccessible(page, "Connected")
+            if (!statusLabel || statusLabel.textFormat !== Text.PlainText
+                    || root.findAccessible(page, page.data.selfName + " · " + page.data.label))
+                throw new Error("Status title must retain connection feedback without the local hostname")
             if (picker.text !== "None") throw new Error("Initial exit-node choice is not None")
             picker.click()
             const closureMenu = Array.from(picker.data).find(child => child.title !== undefined && child.count !== undefined)
