@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls as Controls
 import qs.icewine.theme as Theme
+import qs.config as Config
 
 Item {
     id: root
@@ -37,11 +38,22 @@ Item {
             onClicked: root.history.request("clear")
         }
     }
-    Text {
-        id: hint
+    Controls.ComboBox {
+        id: expiry
         x: 12; y: header.y + header.height + 8
         width: parent.width - 24
-        text: "Session only · text/PNG · 50 items, 5 MB each\nClick to load; ↑ sends Ctrl+V to the original app.\nX/Clear remove history; current clipboard is kept."
+        model: ["Expire history: Off", "Expire history: 5 minutes", "Expire history: 30 minutes",
+            "Expire history: 1 hour", "Expire history: 24 hours"]
+        currentIndex: Config.Settings.clipboardExpiryChoices.indexOf(Config.Settings.clipboardExpiry)
+        Accessible.name: "Clipboard history age limit"
+        enabled: root.history.available && !root.history.busy && !root.pasteBusy
+        onActivated: Config.Settings.setClipboardExpiry(Config.Settings.clipboardExpiryChoices[currentIndex])
+    }
+    Text {
+        id: hint
+        x: 12; y: expiry.y + expiry.height + 8
+        width: parent.width - 24
+        text: "Session only · text/PNG · 50 items, 5 MB each\nClick to load; ↑ sends Ctrl+V to the original app.\nAge starts on copy; loading does not renew it.\nShorter limits apply now; current clipboard is kept."
         textFormat: Text.PlainText
         color: Theme.Palette.muted
         font { family: "JetBrainsMono Nerd Font"; pixelSize: 10 }

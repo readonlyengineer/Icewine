@@ -14,6 +14,7 @@ import time
 import re
 
 LIMIT = 5_000_000
+EXPIRY_SECONDS = (0, 300, 1800, 3600, 86400)
 TYPES = ("text/plain;charset=utf-8", "text/plain", "image/png")
 
 
@@ -122,6 +123,22 @@ class History:
         self.observed = None
         self.owner = None
         self.error = ""
+        self.expiry = 0
+
+    def expire(self):
+        if not self.expiry:
+            return False
+        expired = [key for key, meta in self.metadata.items()
+                   if time.monotonic() - meta[2] >= self.expiry]
+        for key in expired:
+            self.remove(key)
+        return bool(expired)
+
+    def remove(self, ident):
+        run(self.command + ["delete"], ident.split(":", 1)[1].encode())
+        self.rows = [row for row in self.rows if row["id"] != ident]
+        del self.metadata[ident]
+        self.prune_thumbnails()
 
     def thumbnail(self, key, data):
         # Bound Qt's decoder input and advertised allocation before exposing a URL.
@@ -176,7 +193,7 @@ class History:
                 ident, preview = line.split("\t", 1)
                 key = self.epoch + ":" + ident
                 if index == 0:
-                    self.metadata[key] = (identity, mime)
+                    self.metadata[key] = (identity, mime, time.monotonic())
                 if key not in self.metadata:
                     raise ValueError("Clipboard history identity unavailable")
                 # Preview is plain data: suppress control/bidi formatting, bound after decoding.
@@ -189,7 +206,7 @@ class History:
             self.rows = rows
             self.metadata = {row["id"]: self.metadata[row["id"]] for row in rows}
             self.prune_thumbnails()
-        # Ponytail: identical events cannot recreate an X/Cleared item until the
+        # Ponytail: identical events cannot recreate a removed/expired item until the
         # content changes. Native offer serials would distinguish recopy from a
         # delayed own-copy event; wl-paste's callback does not expose them.
         if remember:
@@ -198,7 +215,16 @@ class History:
     def change(self, request):
         self.error = ""
         action, ident = request.get("action"), request.get("id")
-        if action == "clear":
+        if action == "expiry":
+            seconds = request.get("seconds")
+            if type(seconds) is not int or seconds not in EXPIRY_SECONDS:
+                raise ValueError("Invalid clipboard expiry")
+            self.expiry = seconds
+        if action != "clear":
+            self.expire()
+        if action == "expiry":
+            pass
+        elif action == "clear":
             run(self.command + ["wipe"])
             self.rows = []
             self.metadata = {}
@@ -208,12 +234,9 @@ class History:
                 raise ValueError("Clipboard entry is no longer available")
             raw_id = ident.split(":", 1)[1].encode()
             if action == "remove":
-                run(self.command + ["delete"], raw_id)
-                self.rows = [row for row in self.rows if row["id"] != ident]
-                del self.metadata[ident]
-                self.prune_thumbnails()
+                self.remove(ident)
             else:
-                identity, mime = self.metadata[ident]
+                identity, mime, _ = self.metadata[ident]
                 data = run(self.command + ["decode"], raw_id)
                 if len(data) > LIMIT or fingerprint(mime, data) != identity:
                     raise ValueError("Clipboard entry changed")
@@ -236,6 +259,9 @@ class History:
                             # Suppress only the confirmed own copy, never competing
                             # external bytes encountered during confirmation polls.
                             self.observed = identity
+                            self.expire()
+                            if ident not in self.metadata:
+                                raise ValueError("Clipboard entry expired during load")
                             return True
                         if self.owner.poll() is not None:
                             break
@@ -291,7 +317,15 @@ def serve():
                 ready.register(watcher.stdout, selectors.EVENT_READ)
                 emit(history.snapshot())
                 while True:
-                    for key, _ in ready.select():
+                    # Bounded retry also recovers from a transient delete failure.
+                    try:
+                        if history.expire():
+                            history.error = ""
+                            emit(history.snapshot())
+                    except (ValueError, OSError, subprocess.SubprocessError):
+                        history.error = "Clipboard expiry failed; retrying"
+                        emit(history.snapshot())
+                    for key, _ in ready.select(1 if history.expiry else None):
                         line = key.fileobj.readline()
                         if not line:
                             if key.fileobj is sys.stdin:
@@ -304,6 +338,7 @@ def serve():
                                 request = message.get("request", 0)
                                 loaded = history.change(message)
                             else:
+                                history.expire()
                                 history.observe(state=line.decode().strip())
                                 loaded = False
                             history.error = ""

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import Quickshell
 import Quickshell.Io
+import qs.config as Config
 
 Scope {
     id: root
@@ -50,6 +51,14 @@ Scope {
             root.error = "Clipboard backend unavailable"
         }
     }
+
+    property int expirySeconds: Config.Settings.clipboardExpiry
+    function configureExpiry() {
+        if (available && !locked)
+            backend.write(JSON.stringify({action: "expiry", seconds: expirySeconds}) + "\n")
+    }
+    onExpirySecondsChanged: configureExpiry()
+    onAvailableChanged: if (available) configureExpiry()
 
     onLockedChanged: if (locked) {
         entries = []

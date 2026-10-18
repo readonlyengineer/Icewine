@@ -62,6 +62,32 @@ QtObject {
         onLoadFailed: root.widgetSelections = ({})
     }
 
+    readonly property var clipboardExpiryChoices: [0, 300, 1800, 3600, 86400]
+    property int clipboardExpiry: 0
+
+    function setClipboardExpiry(seconds) {
+        if (!clipboardExpiryChoices.includes(seconds)) return
+        clipboardFile.setText(JSON.stringify({expirySeconds: seconds}))
+    }
+
+    property FileView clipboardFile: FileView {
+        path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state")
+            + "/icewine/clipboard.json"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        function applyExpiry() {
+            try {
+                const value = JSON.parse(text()).expirySeconds
+                if (!root.clipboardExpiryChoices.includes(value)) throw new Error("Invalid age limit")
+                root.clipboardExpiry = value
+            } catch (error) { console.warn("Clipboard preference unchanged:", error) }
+        }
+        onLoaded: applyExpiry()
+        onSaved: applyExpiry()
+        onLoadFailed: root.clipboardExpiry = 0
+    }
+
     readonly property bool authenticationRequired: Quickshell.env("ICEWINE_AUTHENTICATION_REQUIRED") !== "false"
     readonly property int batteryLow: 20
     readonly property int batteryCritical: 10

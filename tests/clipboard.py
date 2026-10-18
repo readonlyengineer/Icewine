@@ -155,6 +155,69 @@ with tempfile.TemporaryDirectory() as directory:
         except ValueError: return
         raise AssertionError("Failed operation was accepted")
     with patch.dict(os.environ, env):
+        expiry_dir = runtime / "expiry"
+        expiry_dir.mkdir()
+        aged = clipboard.History(expiry_dir)
+        with patch.object(clipboard.time, "monotonic", return_value=100) as clock:
+            select(b"aged text")
+            aged.observe()
+            text_id = aged.rows[0]["id"]
+            clock.return_value = 110
+            select(png(), "image/png")
+            aged.observe()
+            image_id = aged.rows[0]["id"]
+            image_path = thumbnail_path(aged.rows[0])
+            clock.return_value = 400
+            assert not aged.expire() and len(aged.rows) == 2, "Off expired history"
+            for invalid in (-1, 1, 300.0, True, "300", None):
+                fails(lambda: aged.change(dict(action="expiry", seconds=invalid)))
+            aged.change(dict(action="expiry", seconds=300))
+            assert text_id not in aged.metadata and image_path.exists(), "Age boundary/individual expiry"
+            fails(lambda: aged.change(dict(action="load", id=text_id)))
+            # Delayed notifications of the same offer never renew age.
+            clock.return_value = 409.99
+            aged.observe()
+            assert aged.metadata[image_id][2] == 110 and not aged.expire()
+            clock.return_value = 410
+            (root / "fail").write_text("delete")
+            fails(aged.expire)
+            assert image_id in aged.metadata and image_path.exists(), "Failed delete lost bookkeeping"
+            (root / "fail").unlink()
+            assert aged.expire() and not aged.metadata and not image_path.exists()
+            aged.observe()
+            assert not aged.rows, "Delayed current offer recreated expired image"
+            fails(lambda: aged.change(dict(action="load", id=image_id)))
+            assert clipboard.current_selection() == ("image/png", png()), "Expiry changed system clipboard"
+            clock.return_value = 500
+            select(b"new copy")
+            aged.observe()
+            aged.change(dict(action="expiry", seconds=3600))
+            clock.return_value = 800
+            assert not aged.expire()
+        with patch.object(clipboard.time, "monotonic", return_value=800):
+            aged.change(dict(action="expiry", seconds=300))
+            assert not aged.rows, "Shortening did not immediately expire old entries"
+            select(b"disabled again")
+            aged.observe()
+            aged.change(dict(action="expiry", seconds=0))
+        with patch.object(clipboard.time, "monotonic", return_value=90000):
+            assert not aged.expire()
+        aged.change(dict(action="clear"))
+        with patch.object(clipboard.time, "monotonic", return_value=100000) as clock:
+            select(png(), "image/png")
+            aged.observe()
+            image_path = thumbnail_path(aged.rows[0])
+            aged.change(dict(action="expiry", seconds=300))
+            clock.return_value = 100300
+            (root / "fail").write_text("delete")
+            try:
+                fails(aged.expire)
+                aged.change(dict(action="clear"))
+                assert not aged.rows and not aged.metadata and not image_path.exists(), "Clear could not recover from failed expiry deletion"
+                assert not json.loads((expiry_dir / "db.fixture").read_text())["items"], "Clear retained backend entries"
+                assert clipboard.current_selection() == ("image/png", png()), "Clear changed current clipboard"
+            finally:
+                (root / "fail").unlink()
         history = clipboard.History(history_dir)
         try:
             original = b"  <b>plain</b>; $(never-run)\nsecond line\n"
@@ -174,7 +237,9 @@ with tempfile.TemporaryDirectory() as directory:
             target = history.rows[0]["id"]
             select(b"other")
             history.observe()
+            stored_at = history.metadata[target][2]
             assert history.change(dict(action="load", id=target))
+            assert history.metadata[target][2] == stored_at
             assert base64.b64decode(json.loads((root / "selection").read_text())["data"]) == original
             assert history.snapshot()["active"] == target, "Load marker did not follow confirmed selection"
             # Confirmation reads must not acknowledge an unstored stable external copy.
@@ -379,7 +444,18 @@ with (root / "transfer-fifo").open("wb", buffering=0) as output:
                 clipboard.stop(callback)
         # Exercise real watcher/request plumbing and runtime cleanup on shell stop/lock.
         select(b"session fixture")
-        process = subprocess.Popen([sys.executable, str(source / "scripts/clipboard")],
+        clock_file = root / "clock-offset"
+        clock_file.write_text("0")
+        serve_code = """
+import pathlib, runpy, signal, sys, time
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+clock_file = pathlib.Path(sys.argv[2])
+clock = time.monotonic
+time.monotonic = lambda: clock() + float(clock_file.read_text())
+adapter = runpy.run_path(sys.argv[1], run_name="clipboard_fixture")
+adapter["serve"]()
+"""
+        process = subprocess.Popen([sys.executable, "-c", serve_code, str(source / "scripts/clipboard"), str(clock_file)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=os.environ, bufsize=0)
         def message(predicate):
             with selectors.DefaultSelector() as ready:
@@ -413,10 +489,20 @@ with (root / "transfer-fifo").open("wb", buffering=0) as output:
             state = message(lambda state: state["entries"] and state["entries"][0]["image"])
             session_image = thumbnail_path(state["entries"][0])
             assert session_image.read_bytes() == png()
+            image_id = state["entries"][0]["id"]
+            process.stdin.write(b'{"action":"expiry","seconds":300,"request":2}\n')
+            message(lambda state: state["request"] == 2)
+            clock_file.write_text("301")
+            state = message(lambda state: not state["entries"])
+            assert not state["active"] and not session_image.exists(), "Idle expiry missed cleanup/refresh"
+            assert clipboard.current_selection() == ("image/png", png())
+            process.stdin.write((json.dumps(dict(action="load", id=image_id, request=3)) + "\n").encode())
+            state = message(lambda state: state["request"] == 3)
+            assert not state["loaded"] and state["error"], "Stale paste/load was confirmed"
         finally:
             process.terminate()
             process.wait(timeout=4)
         assert not list(runtime.glob("icewine-clipboard-*")), "Runtime history survived orderly stop"
         assert not session_image.exists(), "Image bytes survived backend stop/lock"
         assert process.stderr.read() == b"", "Normal operation leaked into logs"
-    print("PASS clipboard: real adapter ordering/dedupe, identities, external/active state, literal bytes, PNG, bounds, deletion failures, sensitive hints, guarded finite input, owned waiter/reader cleanup on timeout/cancel/completion and runtime cleanup")
+    print("PASS clipboard: expiry age boundaries, Off/changed limits, idle cleanup, stale load rejection, duplicate suppression, failed-delete retry; real adapter ordering/dedupe, identities, external/active state, literal bytes, PNG, bounds, deletion failures, sensitive hints, guarded finite input, owned waiter/reader cleanup on timeout/cancel/completion and runtime cleanup")

@@ -19,6 +19,7 @@ import Quickshell
 import Quickshell.Services.UPower
 import Quickshell.Io
 import ControlFixtures as Fixtures
+import qs.config as Config
 import "icewine/deck" as Deck
 import "icewine/modules" as Modules
 import "icewine/modules/topbar" as Bar
@@ -1691,6 +1692,15 @@ ShellRoot {
         const page = descendants(clipboardPages, item => item.history === clipboardFixture)[0]
         if (!page || !root.findVisible(page, item => item.text === "No clipboard history"))
             throw new Error("Clipboard empty state missing")
+        const expiry = root.findAccessible(page, "Clipboard history age limit")
+        if (!expiry || expiry.currentIndex !== 0 || expiry.count !== 5)
+            throw new Error("Clipboard age choices/Off default missing")
+        expiry.currentIndex = 2
+        expiry.activated(2)
+        Config.Settings.clipboardFile.waitForJob()
+        toggleKeys.tryCompare(Config.Settings, "clipboardExpiry", 1800)
+        Config.Settings.setClipboardExpiry(1)
+        toggleKeys.compare(Config.Settings.clipboardExpiry, 1800, "Invalid preference changed age limit")
         clipboardFixture.entries = Array.from({length: 12}, (_, i) => ({id: "epoch:" + i,
             preview: i === 0 ? "<b>literal</b> & fixture" : "Entry " + i,
             image: i >= 1 && i <= 4,
@@ -1772,8 +1782,8 @@ ShellRoot {
             throw new Error("Clipboard operation failure is hidden")
         clipboardFixture.entries = []
         toggleKeys.wait(20)
-        if (descendants(page, item => item instanceof Image).length)
-            throw new Error("Cleared clipboard retained image delegates")
+        if (descendants(page, item => item.modelData?.id !== undefined).length)
+            throw new Error("Cleared clipboard retained entry delegates")
         clipboardPages.openPage("notifications")
         toggleKeys.tryCompare(stack, "selectedCard", 0)
         clipboardWindow.visible = false
@@ -2924,7 +2934,7 @@ state = dict(entries=[dict(id="fixture:1", preview="<b>fixture</b>")], active=""
 print(json.dumps(state), flush=True)
 for line in sys.stdin:
     request = json.loads(line)
-    state.update(request=request["request"], loaded=request["action"] == "load", active="fixture:1", selection=["text/plain;charset=utf-8", "a" * 64])
+    state.update(request=request.get("request", 0), loaded=request["action"] == "load", active="fixture:1", selection=["text/plain;charset=utf-8", "a" * 64])
     print(json.dumps(state), flush=True)
 ''')
     clipboard_command.chmod(0o755)
@@ -3013,7 +3023,11 @@ print(json.dumps(dict(available=True, error="", entries=[dict(public="ssh-ed2551
                XDG_STATE_HOME=str(root / "state"), ICEWINE_WIDGET_POLICY="{}",
                PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
     env["XDG_CONFIG_HOME"] = fixture_config
-    (root / "state/icewine").mkdir(parents=True)
+    if "--clipboard-only" in sys.argv:
+        (root / "state").mkdir()
+        assert not (root / "state/icewine").exists(), "First-use fixture must lack the preference directory"
+    else:
+        (root / "state/icewine").mkdir(parents=True)
     if "--ssh-only" in sys.argv:
         (root / "shell.qml").write_text(QML.replace("property bool sshOnly: false", "property bool sshOnly: true"))
         result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
@@ -3031,6 +3045,23 @@ print(json.dumps(dict(available=True, error="", entries=[dict(public="ssh-ed2551
         output = result.stdout + result.stderr
         assert result.returncode == 0 and "CLIPBOARD_CHECK_PASSED" in output, output
         assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
+        import json
+        assert json.loads((root / "state/icewine/clipboard.json").read_text()) == {"expirySeconds": 1800}
+        # A fresh shell must load the saved duration without opening a card.
+        (root / "shell.qml").write_text("""import QtQuick
+import Quickshell
+import qs.config as Config
+ShellRoot {
+    Timer { interval: 100; running: true; repeat: true
+        onTriggered: if (Config.Settings.clipboardExpiry === 1800) {
+            console.log("CLIPBOARD_PREFERENCE_RESTART_PASSED"); Qt.quit()
+        }
+    }
+}
+""")
+        restarted = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                                   capture_output=True, text=True, timeout=10)
+        assert restarted.returncode == 0 and "CLIPBOARD_PREFERENCE_RESTART_PASSED" in restarted.stdout + restarted.stderr
         print("notification/clipboard stack, row actions, image previews, scrolling and adapter checks pass")
         sys.exit(0)
     (root / "shell.qml").write_text(STACKS_QML)

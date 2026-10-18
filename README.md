@@ -398,7 +398,13 @@ clipboard/focus change can race delivery; it is not an atomic transaction.
 History holds up to 50 plain UTF-8 text/PNG entries, at most 5 MB each, in private
 runtime storage. It resets on lock, shell restart and logout; sensitive hints are
 respected but do not identify every secret. X and **Clear history** remove stored
-entries while keeping the current clipboard. Original multi-format selections
+entries while keeping the current clipboard. The card's age limit defaults to
+Off; choose 5 minutes, 30 minutes, 1 hour or 24 hours. The preference survives
+shell restarts. Age uses elapsed session time (excluding suspend), starting when
+content is stored. Loading or repeated notifications of the same selection do
+not renew it; copying different content and then copying it again starts a new
+age. Shortening the limit removes already-old entries immediately. Expiry also
+keeps the current clipboard. Original multi-format selections
 and other content types are not retained. The regular single-seat Wayland
 clipboard (including Xwayland bridging) is used; primary selection is not recorded.
 Crash remnants stay private until
