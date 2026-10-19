@@ -363,11 +363,18 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     for size in ((24,80), (24,160), (48,80), (48,160)):
         run(esc, state(), size=size)
         assert b"Utilities" in last_output and b"Appearance" in last_output and b"Hotkeys" in last_output
+        frame = last_frames[-1].decode().splitlines()
+        assert all(line[20:22] == "  " for line in frame), "Page panes lost their two-cell gap"
+        assert frame[2].startswith("├" + "─"*18 + "┤  ├"), "Title separator lost its crossbar junctions"
+
         assert b"[ Review and Apply ]" in last_output and b"[ Setup Monitors... ]" in last_output
         run(page(1)+esc, state(), size=size)
         assert b"Default layout" in last_output and b"Notifications" in last_output
         run(page(2)+right+down+esc, state(), size=size)
         assert b"Unassigned" in last_output and b"Import (coming soon)" in last_output
+        if size == (24,80):
+            assert all(name.encode() in last_frames[-1] for name in ("Launcher", "Media", "Audio", "Network", "Notifications", "Battery")), "Default Widgets grid must show all six stacks"
+
         run(page(3)+right+down*5+esc, state(), size=size)
         assert b"Common" in last_output and b"Applications" in last_output
         assert not saves()
@@ -452,12 +459,15 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert not any(field.startswith("cardStacks=") for field in saves()[0])
     assert "stack-1/launcher" in save_field("cardStacks")
     # Real mouse targets: select page, enter/remove a member, save; import is inert.
-    run(click(5,9)+click(23,7)+b"s"+esc*2, state(), size=(24,80))
+    run(click(5,9)+click(26,5)+b"s"+esc*2, state(), size=(24,80))
     assert saves()
     run(page(3)+right*4+down*10+esc, state())
     assert b"Desktop / session" in last_output
     run(page(3)+esc, state(), widgets={"barBehaviour":"toggle"})
     assert b"toggle on press" in last_output and b"toggle on release" not in last_output
+    taskbar_line = next(line for line in last_frames[-1].decode().splitlines() if "Show/Toggle Taskbar" in line)
+    assert taskbar_line.index("Show/Toggle Taskbar") < taskbar_line.index("Super+"), "Hotkeys must put the action before its chord"
+
     # File read-only indicators skip the action, independently of host utility policy.
     run(page(1)+right+esc, state(readonly=True), policy=True)
     assert not any(call[:2] == ["icewine","theme"] for call in tools())

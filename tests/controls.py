@@ -972,6 +972,15 @@ ShellRoot {
         networkKeys.tryCompare(ssh, "busy", false)
         networkKeys.tryCompare(ssh, "available", true)
         root.findAccessible(ssh, "Import SSH key").click()
+        const primaryImport = root.findAccessible(ssh, "Import SSH key")
+        if (!primaryImport.primary || primaryImport.height !== 34
+                || primaryImport.background.color.toString() !== Theme.Palette.primary.toString())
+            throw new Error("SSH Import lost its primary action hierarchy")
+        if (root.findAccessible(ssh, "Refresh SSH keys").text !== "↻")
+            throw new Error("SSH Refresh must use its reference icon")
+        if (!descendants(ssh, item => item instanceof Text && item.visible && item.text === "Import key").length
+                || !descendants(ssh, item => item instanceof Text && item.visible && item.text === "Private key text").length)
+            throw new Error("SSH import lost its visible heading or field label")
         const path = root.findAccessible(ssh, "SSH key path")
         const phrase = root.findAccessible(ssh, "SSH key passphrase")
         const fileMode = root.findAccessible(ssh, "Import SSH key from file")
@@ -1062,7 +1071,7 @@ ShellRoot {
         networkKeys.tryCompare(ssh, "message", "Selected file import received")
         const publicButton = root.findAccessible(ssh, "Show public SSH key SHA256:fixture")
         let identity = publicButton.parent.parent.parent
-        if (identity.color.toString() !== Theme.Palette.surface.toString() || identity.radius !== 9
+        if (identity.color.toString() === publicButton.background.color.toString() || identity.radius !== 9
                 || identity.width > ssh.width || identity.height <= publicButton.height)
             throw new Error("SSH identity is not a constrained individual card")
         publicButton.forceActiveFocus()
@@ -1070,6 +1079,10 @@ ShellRoot {
         if (ssh.publicKey !== "ssh-ed25519 fixture-public") throw new Error("Keyboard public-key display failed")
         const publicText = descendants(identity, item => item instanceof Text && item.text === "ssh-ed25519 fixture-public")[0]
         if (!publicText || !publicText.visible) throw new Error("Public key escaped its identity")
+        if (publicText.parent.parent.color.toString() !== Theme.Palette.backgroundDark.toString()
+                || publicText.parent.parent.radius !== 8)
+            throw new Error("Public key disclosure lost its inset surface")
+
         const copy = root.findAccessible(identity, "Copy public SSH key SHA256:fixture")
         for (let step = 0; step < 4 && !copy.activeFocus; step++) networkKeys.keyClick(Qt.Key_Down)
         if (!copy.activeFocus || page.selectedCard !== 2) throw new Error("Down did not reach inline Copy")

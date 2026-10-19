@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls as Controls
+import QtQuick.Window
 import Quickshell
 import Quickshell.Io
 import qs.icewine.theme as Theme
@@ -18,8 +19,8 @@ Flickable {
     property string message: ""
     property string publicKey: ""
     property string expectedFingerprint: ""
-    implicitHeight: 480
-    contentHeight: content.implicitHeight + 24
+    implicitHeight: 471
+    contentHeight: content.implicitHeight + 16
     boundsBehavior: Flickable.StopAtBounds
     clip: true
 
@@ -85,6 +86,13 @@ Flickable {
         contentY = Math.max(0, Math.min(Math.max(0, contentHeight - height),
             Math.min(top, Math.max(contentY, top + item.height - height))))
     }
+    function revealFocused() {
+        const focused = root.Window.window?.activeFocusItem
+        for (let item = focused; item; item = item.parent) {
+            if (item === root) { root.reveal(focused); break }
+        }
+    }
+    onContentHeightChanged: Qt.callLater(root.revealFocused)
     onActiveChanged: {
         if (!active) cancel()
         else if (!busy) request("status")
@@ -144,235 +152,301 @@ Flickable {
     }
     Timer { interval: 5000; repeat: true; running: root.active && !root.form && !root.busy; onTriggered: root.request("status") }
 
+    component SshButton: ActionButton {
+        id: button
+        property bool primary: false
+        property bool small: false
+        implicitWidth: label.implicitWidth + (small ? 18 : 24)
+        implicitHeight: small ? 30 : 34
+        font.pixelSize: small ? 10 : 12
+        background: Rectangle {
+            radius: 9
+            color: button.down ? Theme.Palette.primaryDark : button.hovered ? Theme.Palette.selection
+                : button.primary ? Theme.Palette.primary : Theme.Palette.surface
+            border.width: button.activeFocus ? 2 : 0
+            border.color: Theme.Palette.primary
+        }
+        contentItem: Text {
+            id: label
+            text: button.text
+            font: button.font
+            color: !button.enabled ? Theme.Palette.muted : button.primary ? Theme.Palette.highlightedText : Theme.Palette.foreground
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+        onActiveFocusChanged: if (activeFocus) { root.reveal(this); Qt.callLater(root.revealFocused) }
+    }
+    component KeyField: Controls.TextField {
+        id: field
+        implicitHeight: 40
+        font: importButton.font
+        color: Theme.Palette.foreground
+        placeholderTextColor: Theme.Palette.foregroundDark
+        padding: 10
+        selectByMouse: true
+        background: Rectangle {
+            radius: 7
+            color: Theme.Palette.backgroundDark
+            border.width: field.activeFocus ? 2 : 1
+            border.color: field.activeFocus ? Theme.Palette.primary : Theme.Palette.border
+        }
+        onActiveFocusChanged: if (activeFocus) { root.reveal(this); Qt.callLater(root.revealFocused) }
+    }
+    component KeyCheck: Controls.CheckBox {
+        id: check
+        font: importButton.font
+        spacing: 8
+        padding: 0
+        indicator: Rectangle {
+            x: 0; y: (check.height - height) / 2
+            width: 16; height: 16; radius: 3
+            color: check.checked ? Theme.Palette.primary : Theme.Palette.backgroundDark
+            border.color: check.activeFocus ? Theme.Palette.primary : Theme.Palette.border
+            border.width: check.activeFocus ? 2 : 1
+            Text { anchors.centerIn: parent; text: check.checked ? "✓" : ""; color: Theme.Palette.highlightedText; font: check.font }
+        }
+        contentItem: Text {
+            leftPadding: check.indicator.width + check.spacing
+            text: check.text; font: check.font
+            color: check.enabled ? Theme.Palette.foreground : Theme.Palette.muted
+            verticalAlignment: Text.AlignVCenter
+        }
+        onActiveFocusChanged: if (activeFocus) { root.reveal(this); Qt.callLater(root.revealFocused) }
+    }
+    component FieldLabel: Text {
+        font: importButton.font
+        color: Theme.Palette.foreground
+        topPadding: 14
+        bottomPadding: 6
+    }
+
     Column {
         id: content
-        x: 12; y: 12; width: parent.width - 24
-        spacing: 8
+        x: 16; width: parent.width - 32
+        spacing: 0
         Text {
+            visible: text !== ""
             width: parent.width
+            bottomPadding: 12
             text: root.error || (root.busy ? "Working…" : root.message || (!root.available ? "Local agent unavailable" : ""))
             textFormat: Text.PlainText
-            color: root.error ? Theme.Palette.error : Theme.Palette.muted
+            color: root.error ? Theme.Palette.error : Theme.Palette.foregroundDark
             font: importButton.font
             wrapMode: Text.WrapAnywhere
             Accessible.role: Accessible.StaticText
             Accessible.name: text
         }
-        Row {
+        Column {
             visible: root.form === ""
-            width: parent.width; spacing: 6
-            ActionButton { id: importButton; width: (parent.width - 12) / 3; text: "Import key"; Accessible.name: "Import SSH key"; enabled: root.active && root.available && !root.busy; onClicked: root.openForm("import") }
-            ActionButton { width: (parent.width - 12) / 3; text: "Generate"; Accessible.name: "Generate SSH key"; enabled: root.active && root.available && !root.busy; onClicked: root.openForm("generate") }
-            ActionButton { width: (parent.width - 12) / 3; text: "Refresh"; Accessible.name: "Refresh SSH keys"; enabled: root.active && !root.busy; onClicked: root.request("status") }
+            width: parent.width
+            Row {
+                width: parent.width; spacing: 8
+                SshButton { id: importButton; width: (parent.width - 16) / 3; text: "Import key"; primary: true; Accessible.name: "Import SSH key"; enabled: root.active && root.available && !root.busy; onClicked: root.openForm("import") }
+                SshButton { width: (parent.width - 16) / 3; text: "Generate"; Accessible.name: "Generate SSH key"; enabled: root.active && root.available && !root.busy; onClicked: root.openForm("generate") }
+                SshButton { width: (parent.width - 16) / 3; text: "↻"; Accessible.name: "Refresh SSH keys"; enabled: root.active && !root.busy; onClicked: root.request("status") }
+            }
+            Item { width: 1; height: 20 }
+            Text {
+                visible: root.entries.length > 0
+                text: "IDENTITIES · " + root.entries.length
+                font { family: importButton.font.family; pixelSize: 10; letterSpacing: 1 }
+                color: Theme.Palette.foregroundDark
+                bottomPadding: 8
+            }
+            Text {
+                visible: !root.busy && root.entries.length === 0
+                width: parent.width; wrapMode: Text.Wrap
+                text: "No identities discovered.\nImport an existing key or generate a new one."
+                color: Theme.Palette.foregroundDark; font: importButton.font
+            }
+            Repeater {
+                model: root.form ? [] : root.entries
+                delegate: Column {
+                    id: identity
+                    required property var modelData
+                    width: parent.width
+                    Rectangle {
+                        width: parent.width; height: details.implicitHeight + 24
+                        radius: 9; color: Qt.tint(Theme.Palette.background, Qt.rgba(Theme.Palette.dark ? 1 : 0, Theme.Palette.dark ? 1 : 0, Theme.Palette.dark ? 1 : 0, 0.045))
+                        Column {
+                            id: details
+                            x: 12; y: 12; width: parent.width - 24
+                            Row {
+                                width: parent.width; spacing: 8
+                                Text {
+                                    width: parent.width - status.width - 8
+                                    text: identity.modelData.paths.length ? identity.modelData.paths[0].split("/").pop() : identity.modelData.temporary ? "Temporary identity" : "Agent identity"
+                                    elide: Text.ElideMiddle; textFormat: Text.PlainText
+                                    color: Theme.Palette.foreground
+                                    font { family: importButton.font.family; pixelSize: 12; bold: true }
+                                }
+                                Text {
+                                    id: status
+                                    text: identity.modelData.loaded ? "Loaded" : "On disk"
+                                    color: identity.modelData.loaded ? Theme.Palette.success : Theme.Palette.foregroundDark
+                                    font { family: importButton.font.family; pixelSize: 10 }
+                                }
+                            }
+                            Text {
+                                width: parent.width
+                                text: (identity.modelData.paths.length ? identity.modelData.paths.join("\n") : "Agent only") + " · " + identity.modelData.type
+                                textFormat: Text.PlainText; color: Theme.Palette.foregroundDark
+                                font { family: importButton.font.family; pixelSize: 10 }
+                                topPadding: 5; bottomPadding: 5; wrapMode: Text.WrapAnywhere
+                            }
+                            Text {
+                                width: parent.width; text: identity.modelData.fingerprint
+                                textFormat: Text.PlainText; color: Theme.Palette.foregroundDark
+                                font { family: importButton.font.family; pixelSize: 10 }
+                                wrapMode: Text.WrapAnywhere
+                            }
+                            Item { width: 1; height: 12 }
+                            Row {
+                                spacing: 8
+                                SshButton {
+                                    small: true; text: "Public key"; visible: !!identity.modelData.public
+                                    Accessible.name: "Show public SSH key " + identity.modelData.fingerprint
+                                    onClicked: root.publicKey = root.publicKey === identity.modelData.public ? "" : identity.modelData.public
+                                }
+                                SshButton {
+                                    small: true; text: "Unload"; visible: identity.modelData.loaded && identity.modelData.temporary
+                                    Accessible.name: "Unload SSH key " + identity.modelData.fingerprint
+                                    enabled: root.active && root.available && !root.busy
+                                    onClicked: root.request("remove", identity.modelData.public)
+                                }
+                                SshButton {
+                                    small: true; text: "Load"; visible: !identity.modelData.loaded && !!identity.modelData.importPath
+                                    Accessible.name: "Load SSH key " + identity.modelData.fingerprint
+                                    enabled: root.active && root.available && !root.busy
+                                    onClicked: root.openForm("import", identity.modelData.importPath, identity.modelData.fingerprint)
+                                }
+                            }
+                            Item { visible: disclosure.visible; width: 1; height: 10 }
+                            Rectangle {
+                                id: disclosure
+                                visible: !!identity.modelData.public && root.publicKey === identity.modelData.public
+                                width: parent.width; height: publicContent.implicitHeight + 24
+                                radius: 8; color: Theme.Palette.backgroundDark
+                                Column {
+                                    id: publicContent
+                                    x: 12; y: 12; width: parent.width - 24; spacing: 8
+                                    Text {
+                                        width: parent.width; text: identity.modelData.public
+                                        textFormat: Text.PlainText; color: Theme.Palette.foreground
+                                        font { family: importButton.font.family; pixelSize: 10 }
+                                        wrapMode: Text.WrapAnywhere
+                                    }
+                                    SshButton {
+                                        small: true; text: "Copy public key"
+                                        Accessible.name: "Copy public SSH key " + identity.modelData.fingerprint
+                                        enabled: !copy.running
+                                        onYChanged: if (activeFocus) Qt.callLater(() => { if (activeFocus) root.reveal(this) })
+                                        onClicked: { copy.value = identity.modelData.public; copy.stdinEnabled = true; copy.running = true }
+                                    }
+                                }
+                                onHeightChanged: Qt.callLater(() => {
+                                    const focused = root.Window.window?.activeFocusItem
+                                    if (focused && publicContent.children.includes(focused)) root.reveal(focused)
+                                })
+                            }
+                        }
+                    }
+                    Item { width: 1; height: 8 }
+                }
+            }
         }
         Column {
             visible: root.form !== ""
-            width: parent.width; spacing: 6
-            Text {
-                visible: root.form === "import"
-                width: parent.width
-                text: "Load a temporary key."
-                textFormat: Text.PlainText
-                color: Theme.Palette.muted
-                font: importButton.font
-                wrapMode: Text.Wrap
+            width: parent.width
+            SshButton {
+                id: back
+                text: "← Identities"; Accessible.name: "Back to SSH identities"
+                implicitWidth: contentItem.implicitWidth
+                background: Rectangle { color: "transparent"; radius: 3; border.width: back.activeFocus ? 2 : 0; border.color: Theme.Palette.primary }
+                font.pixelSize: 12
+                onClicked: root.cancel()
             }
-            Controls.CheckBox {
+            Text {
+                width: parent.width; topPadding: 14
+                text: root.form === "import" ? "Import key" : "Generate key"
+                font { family: importButton.font.family; pixelSize: 15 }
+                color: Theme.Palette.primary
+            }
+            Text {
+                width: parent.width; topPadding: 12; bottomPadding: 14
+                text: root.form === "import" ? "Load a temporary key."
+                    : permanent.checked ? "Save a key file for later import. It survives reboot and is not loaded automatically."
+                    : "Load into the agent and discard the generated private key. Unload or reboot removes it."
+                textFormat: Text.PlainText; color: Theme.Palette.foregroundDark
+                font: importButton.font; wrapMode: Text.Wrap
+            }
+            KeyCheck {
                 id: fromFile
                 visible: root.form === "import"
-                text: "Import from file"
-                Accessible.name: "Import SSH key from file"
-                font: importButton.font
+                text: "Import from file"; Accessible.name: "Import SSH key from file"
                 onCheckedChanged: { root.expectedFingerprint = ""; privateKey.clear(); keyPath.clear(); passphrase.clear() }
-                onActiveFocusChanged: if (activeFocus) root.reveal(this)
             }
+            KeyCheck {
+                id: permanent
+                visible: root.form === "generate"
+                text: "Save permanently to a new file"; Accessible.name: "Save SSH key permanently"
+            }
+            FieldLabel { visible: privateInput.visible; text: "Private key text" }
             Controls.ScrollView {
                 id: privateInput
-                width: parent.width
-                height: 120
+                width: parent.width; height: 110
                 visible: root.form === "import" && !fromFile.checked
-                contentWidth: availableWidth
-                clip: true
+                contentWidth: availableWidth; clip: true
                 Controls.ScrollBar.horizontal.policy: Controls.ScrollBar.AlwaysOff
                 Controls.TextArea {
                     id: privateKey
-                    placeholderText: "Paste multiline private key"
-                    Accessible.name: "Pasted SSH private key"
-                    textFormat: TextEdit.PlainText
-                    wrapMode: TextEdit.WrapAnywhere
-                    selectByMouse: true
+                    placeholderText: "Paste multiline private key"; Accessible.name: "Pasted SSH private key"
+                    textFormat: TextEdit.PlainText; wrapMode: TextEdit.WrapAnywhere; selectByMouse: true
                     inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
                     Keys.onTabPressed: event => { passphrase.forceActiveFocus(); event.accepted = true }
-                    font: importButton.font
+                    font: importButton.font; color: Theme.Palette.foreground; placeholderTextColor: Theme.Palette.foregroundDark; padding: 10
+                    background: Rectangle {
+                        radius: 7; color: Theme.Palette.backgroundDark
+                        border.width: privateKey.activeFocus ? 2 : 1
+                        border.color: privateKey.activeFocus ? Theme.Palette.primary : Theme.Palette.border
+                    }
                     onActiveFocusChanged: if (activeFocus) root.reveal(privateInput)
                 }
             }
-            Controls.CheckBox {
-                id: permanent
-                font: importButton.font
-                onActiveFocusChanged: if (activeFocus) root.reveal(this)
-                visible: root.form === "generate"
-                text: checked ? "Permanent · save a key file" : "Temporary · agent only"
-                Accessible.name: "Save SSH key permanently"
-            }
-            Controls.TextField {
+            FieldLabel { visible: keyPath.visible; text: root.form === "import" ? "Existing private key path" : "Save to a new key path" }
+            KeyField {
                 id: keyPath
                 width: parent.width
-                visible: (root.form === "import" && fromFile.checked) || permanent.checked
-                placeholderText: root.form === "import" ? "Existing private key: absolute path" : "Save to: absolute new key path"
+                visible: (root.form === "import" && fromFile.checked) || (root.form === "generate" && permanent.checked)
+                placeholderText: root.form === "import" ? "/absolute/path/to/key" : "/absolute/path/to/new/key"
                 Accessible.name: "SSH key path"
                 onTextChanged: root.expectedFingerprint = ""
                 onAccepted: passphrase.forceActiveFocus()
-                selectByMouse: true
-                font: importButton.font
-                onActiveFocusChanged: if (activeFocus) root.reveal(this)
             }
-            Controls.TextField {
+            FieldLabel { text: "Passphrase" }
+            KeyField {
                 id: passphrase
-                width: parent.width
-                placeholderText: "Passphrase"
-                Accessible.name: "SSH key passphrase"
-                onAccepted: {
-                    if (root.form === "import") root.request("import")
-                    else confirmation.forceActiveFocus()
-                }
+                width: parent.width; placeholderText: "Passphrase"; Accessible.name: "SSH key passphrase"
+                onAccepted: { if (root.form === "import") root.request("import"); else confirmation.forceActiveFocus() }
                 echoMode: TextInput.Password
-                selectByMouse: true
-                font: importButton.font
-                onActiveFocusChanged: if (activeFocus) root.reveal(this)
             }
-            Controls.TextField {
+            FieldLabel { visible: confirmation.visible; text: "Confirm passphrase" }
+            KeyField {
                 id: confirmation
-                width: parent.width
-                visible: root.form === "generate"
-                placeholderText: "Confirm passphrase"
-                Accessible.name: "Confirm SSH passphrase"
-                onAccepted: root.request("generate")
-                echoMode: TextInput.Password
-                selectByMouse: true
-                font: importButton.font
-                onActiveFocusChanged: if (activeFocus) root.reveal(this)
+                width: parent.width; visible: root.form === "generate"
+                placeholderText: "Confirm passphrase"; Accessible.name: "Confirm SSH passphrase"
+                onAccepted: root.request("generate"); echoMode: TextInput.Password
             }
-            Controls.CheckBox {
-                id: unprotected
-                font: importButton.font
-                onActiveFocusChanged: if (activeFocus) root.reveal(this)
-                visible: root.form === "generate"
-                text: "I choose no passphrase"
-                Accessible.name: "Generate SSH key without passphrase"
-            }
-            Text {
-                visible: root.form === "generate"
-                width: parent.width
-                text: permanent.checked ? "Saved files survive reboot. Load them later using Import. Unload never deletes them."
-                    : "The generated private key is discarded after loading. Unload or reboot removes it from the agent."
-                textFormat: Text.PlainText
-                color: Theme.Palette.muted
-                font: importButton.font
-                wrapMode: Text.Wrap
-            }
+            Item { visible: unprotected.visible; width: 1; height: 14 }
+            KeyCheck { id: unprotected; visible: root.form === "generate"; text: "Use no passphrase"; Accessible.name: "Generate SSH key without passphrase" }
+            Item { width: 1; height: 20 }
             Row {
-                spacing: 6
-                ActionButton { onActiveFocusChanged: if (activeFocus) root.reveal(this); text: "Confirm"; Accessible.name: "Confirm SSH key action"; enabled: root.active && root.available && !root.busy; onClicked: root.request(root.form) }
-                ActionButton { onActiveFocusChanged: if (activeFocus) root.reveal(this); text: "Cancel"; Accessible.name: "Cancel SSH key action"; onClicked: root.cancel() }
+                width: parent.width; spacing: 8
+                SshButton { width: (parent.width - 8) / 2; primary: true; text: root.form === "import" ? "Import key" : "Generate key"; Accessible.name: "Confirm SSH key action"; enabled: root.active && root.available && !root.busy; onClicked: root.request(root.form) }
+                SshButton { width: (parent.width - 8) / 2; text: "Cancel"; Accessible.name: "Cancel SSH key action"; onClicked: root.cancel() }
             }
         }
-        ActionButton {
-            visible: root.busy
-            text: "Cancel"; Accessible.name: "Cancel pending SSH action"
-            onClicked: root.cancel()
-        }
-        Text {
-            visible: !root.form && !root.busy && root.entries.length === 0
-            width: parent.width
-            wrapMode: Text.Wrap
-            text: "No identities discovered.\nImport an existing key or generate a new one."
-            color: Theme.Palette.muted
-            font: importButton.font
-        }
-        Repeater {
-            model: root.form ? [] : root.entries
-            delegate: Rectangle {
-                id: identity
-                required property var modelData
-                width: parent.width
-                height: details.implicitHeight + 20
-                radius: 9
-                color: Theme.Palette.surface
-                Column {
-                    id: details
-                    x: 10; y: 10; width: parent.width - 20; spacing: 6
-                    Row {
-                        width: parent.width
-                        Text {
-                            width: parent.width - status.width - 6
-                            text: identity.modelData.paths.length ? identity.modelData.paths[0].split("/").pop() : identity.modelData.temporary ? "Temporary identity" : "Agent identity"
-                            elide: Text.ElideMiddle
-                            textFormat: Text.PlainText
-                            color: Theme.Palette.foreground
-                            font: importButton.font
-                        }
-                        Text {
-                            id: status
-                            text: identity.modelData.loaded ? "Loaded" : "On disk"
-                            color: identity.modelData.loaded ? Theme.Palette.success : Theme.Palette.muted
-                            font: importButton.font
-                        }
-                    }
-                    Text {
-                        width: parent.width
-                        text: (identity.modelData.paths.length ? identity.modelData.paths.join("\n") : "Agent only")
-                            + " · " + identity.modelData.type + "\n" + identity.modelData.fingerprint
-                        textFormat: Text.PlainText
-                        color: Theme.Palette.muted
-                        font: importButton.font
-                        wrapMode: Text.WrapAnywhere
-                    }
-                    Row {
-                        spacing: 6
-                        ActionButton {
-                            text: "Public key"; visible: !!identity.modelData.public
-                            Accessible.name: "Show public SSH key " + identity.modelData.fingerprint
-                            onActiveFocusChanged: if (activeFocus) root.reveal(this)
-                            onClicked: root.publicKey = root.publicKey === identity.modelData.public ? "" : identity.modelData.public
-                        }
-                        ActionButton {
-                            text: "Unload"; visible: identity.modelData.loaded && identity.modelData.temporary
-                            Accessible.name: "Unload SSH key " + identity.modelData.fingerprint
-                            enabled: root.active && root.available && !root.busy
-                            onActiveFocusChanged: if (activeFocus) root.reveal(this)
-                            onClicked: root.request("remove", identity.modelData.public)
-                        }
-                        ActionButton {
-                            text: "Load"
-                            visible: !identity.modelData.loaded && !!identity.modelData.importPath
-                            Accessible.name: "Load SSH key " + identity.modelData.fingerprint
-                            enabled: root.active && root.available && !root.busy
-                            onActiveFocusChanged: if (activeFocus) root.reveal(this)
-                            onClicked: root.openForm("import", identity.modelData.importPath, identity.modelData.fingerprint)
-                        }
-                    }
-                    Text {
-                        visible: !!identity.modelData.public && root.publicKey === identity.modelData.public
-                        width: parent.width
-                        text: identity.modelData.public
-                        textFormat: Text.PlainText
-                        color: Theme.Palette.foreground
-                        font: importButton.font
-                        wrapMode: Text.WrapAnywhere
-                    }
-                    ActionButton {
-                        visible: !!identity.modelData.public && root.publicKey === identity.modelData.public
-                        text: "Copy public key"
-                        Accessible.name: "Copy public SSH key " + identity.modelData.fingerprint
-                        enabled: !copy.running
-                        onActiveFocusChanged: if (activeFocus) root.reveal(this)
-                        // Disclosure layout can finish after Down has focused Copy.
-                        onYChanged: if (activeFocus) Qt.callLater(() => { if (activeFocus) root.reveal(this) })
-                        onClicked: { copy.value = identity.modelData.public; copy.stdinEnabled = true; copy.running = true }
-                    }
-                }
-            }
-        }
+        SshButton { visible: root.busy; text: "Cancel"; Accessible.name: "Cancel pending SSH action"; onClicked: root.cancel() }
     }
 }

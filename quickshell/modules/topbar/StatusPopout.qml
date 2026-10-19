@@ -199,6 +199,7 @@ Widget {
                             : moduleLoader.modelData === "background" ? "Background applications"
                             : moduleLoader.modelData[0].toUpperCase() + moduleLoader.modelData.slice(1)) + " card"
                         implicitWidth: moduleLoader.modelData === "background" ? 400 : 380
+                        color: moduleLoader.modelData === "ssh" ? Theme.Palette.background : Theme.Palette.backgroundDark
                         implicitHeight: body.item?.implicitHeight ?? 0
                         readonly property bool navigationBlocked: body.item?.navigationBlocked ?? false
                         initialFocus: body.item?.initialFocus?.enabled ? body.item.initialFocus : selector
@@ -240,10 +241,10 @@ Widget {
                             Popouts.Tailscale { id: page; anchors.fill: parent; anchors.topMargin: 44; active: card.active }
                         } }
                         Component { id: ssh; Item {
-                            implicitHeight: page.implicitHeight + 44
-                            Text { x: 12; y: 12; text: "SSH"; color: card.accent
-                                font { family: "JetBrainsMono Nerd Font"; pixelSize: 15; bold: true } }
-                            Popouts.Ssh { id: page; anchors.fill: parent; anchors.topMargin: 44; active: card.active }
+                            implicitHeight: page.implicitHeight + 53
+                            Text { x: 16; y: 18; text: "SSH"; color: card.accent
+                                font { family: "JetBrainsMono Nerd Font"; pixelSize: 15 } }
+                            Popouts.Ssh { id: page; anchors.fill: parent; anchors.topMargin: 53; active: card.active }
                         } }
                         Component { id: clipboard; Popouts.Clipboard {
                             accent: card.accent; history: root.clipboardHistory; pasteBusy: root.pasteBusy

@@ -12,7 +12,7 @@ const ROWS: &[(&str, &str, &str)] = &[
 #[derive(Clone, Copy, PartialEq)]
 enum Control { Theme, Preview(usize), Taskbar, Transparency, Layout, Wallpaper, Monitors,
     Utility(&'static str), Widget(usize), Bar(usize), BarWidth, Back, Card(usize), Stack(usize),
-    GridAction(usize), Category, Steam, Screenshot, Overwrite, Apply }
+    GridAction(usize), GridTools, Category, Steam, Screenshot, Overwrite, Apply }
 const SCREENSHOTS: &[&str] = &["none", "simple", "advanced"];
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
@@ -296,6 +296,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     let mut remembered = 0usize;
     let mut placement = None;
     let mut grid_start = 0usize;
+    let mut grid_tools = false;
     let mut hot_category = 0usize;
     let mut hot_scroll = 0usize;
     let effective_screenshot = *screenshot;
@@ -308,7 +309,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             let mut rows = Vec::new();
             if subpage == 1 {
                 for (index, id) in appearance.themes.iter().enumerate() {
-                    rows.push(row(id, if index == preview { "Preview" } else if index == appearance.theme { "Current" } else { "" }.into(), Control::Preview(index), true));
+                    rows.push(row(id, if index == appearance.theme { "Current" } else { "" }.into(), Control::Preview(index), true));
                 }
                 rows.extend([row("[ Use theme ]", "".into(), Control::Apply, !appearance.readonly[0] && !appearance.policy), row("[ Back ]", "".into(), Control::Back, true)]);
             } else if subpage == 2 {
@@ -353,6 +354,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 if editable(1) { controls.push(Control::Widget(1)); }
                 if editable(2) { controls.extend((0..8).map(Control::GridAction)); }
                 if editable(1) || editable(2) { controls.push(Control::Apply); }
+                controls.push(Control::GridTools);
             }
             if page == 3 && subpage == 0 { controls = vec![Control::Category]; }
             if controls.is_empty() { controls.push(Control::Back); }
@@ -360,6 +362,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             stack = stack.min(widgets.stacks.len());
             if let Some(module) = member { if widgets.location(module).map(|v| v.0).unwrap_or(widgets.stacks.len()) != stack { member = None; } }
             let current = controls[focus];
+            if page == 2 && matches!(current, Control::Widget(_) | Control::GridAction(0 | 1 | 3..=7)) { grid_tools = true; }
             let mut hits: Vec<(Rect, Control)> = Vec::new();
             let mut page_hits = Vec::new();
             let mut grid_columns = 2usize;
@@ -374,13 +377,13 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 let muted = normal.fg(colours[3]);
                 let highlighted = normal.fg(colours[2]).bg(colours[0]).bold();
                 frame.render_widget(Block::default().style(normal), area);
-                let [sidebar, content] = Layout::horizontal([Constraint::Length(18), Constraint::Min(1)]).areas(area);
+                let [sidebar, content] = Layout::horizontal([Constraint::Length(20), Constraint::Min(1)]).spacing(2).areas(area);
                 for (rect, active) in [(sidebar, !pane), (content, pane)] {
                     frame.render_widget(Block::bordered().border_type(BorderType::Rounded).border_style(if active { accent } else { muted }), rect);
                 }
                 let left = Rect::new(sidebar.x + 2, sidebar.y + 1, sidebar.width - 4, sidebar.height - 2);
                 frame.render_widget(Paragraph::new("Icewine").style(accent), Rect::new(left.x, left.y, left.width, 1));
-                frame.render_widget(Paragraph::new("─".repeat(left.width as usize)).style(muted), Rect::new(left.x, left.y + 1, left.width, 1));
+                frame.render_widget(Paragraph::new(format!("├{}┤", "─".repeat(sidebar.width.saturating_sub(2) as usize))).style(if pane { muted } else { accent }), Rect::new(sidebar.x, sidebar.y + 2, sidebar.width, 1));
                 for (index, name) in ["Utilities", "Appearance", "Widgets", "Hotkeys"].iter().enumerate() {
                     let rect = Rect::new(left.x, left.y + 3 + index as u16 * 2, left.width, 1);
                     frame.render_widget(Paragraph::new(*name).style(if index == page { if !pane { highlighted } else { accent } } else { normal }), rect);
@@ -389,14 +392,22 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 let inner = Rect::new(content.x + 2, content.y + 1, content.width - 4, content.height - 2);
                 let title = if subpage == 1 { "Appearance / Theme" } else if subpage == 2 { "Appearance / Taskbar" } else { ["Utilities", "Appearance", "Widgets", "Hotkeys"][page] };
                 frame.render_widget(Paragraph::new(title).style(accent), Rect::new(inner.x, inner.y, inner.width, 1));
-                frame.render_widget(Paragraph::new("─".repeat(inner.width as usize)).style(muted), Rect::new(inner.x, inner.y + 1, inner.width, 1));
+                frame.render_widget(Paragraph::new(format!("├{}┤", "─".repeat(content.width.saturating_sub(2) as usize))).style(if pane { accent } else { muted }), Rect::new(content.x, content.y + 2, content.width, 1));
                 let footer = Rect::new(inner.x, inner.bottom() - 1, inner.width, 1);
-                frame.render_widget(Paragraph::new(if subpage > 0 { "Tab: Switch pane   Esc: Back" } else { "Tab: Switch pane   Esc: Close" }).style(muted), footer);
-                frame.render_widget(Paragraph::new(message.as_str()).style(accent).wrap(Wrap { trim: false }), Rect::new(inner.x, footer.y - 2, inner.width, 2));
-                let body = Rect::new(inner.x, inner.y + 3, inner.width, inner.height - 6);
+                if page != 2 || subpage != 0 {
+                    frame.render_widget(Paragraph::new(if subpage > 0 { "Tab: Switch pane   Esc: Back" } else { "Tab: Switch pane   Esc: Close" }).style(muted), footer);
+                }
+                let message_y = if subpage > 0 { footer.y - 4 } else if page == 2 { footer.y - 3 } else { footer.y - 2 };
+                frame.render_widget(Paragraph::new(message.as_str()).style(accent).wrap(Wrap { trim: false }), Rect::new(inner.x, message_y, inner.width, 2));
+                let body = if page == 2 && subpage == 0 {
+                    Rect::new(inner.x, content.y + 3, inner.width, content.height - 4)
+                } else {
+                    Rect::new(inner.x, inner.y + if page == 0 && subpage == 0 { 2 } else { 3 }, inner.width, inner.height - if page == 0 && subpage == 0 { 5 } else { 6 })
+                };
                 if page == 2 && subpage == 0 {
                     let unassigned: Vec<_> = (0..CARD_MODULES.len()).filter(|module| widgets.location(*module).is_none()).collect();
-                    let grid_height = body.height.saturating_sub(9);
+                    let reserved = if grid_tools { 9 } else { 5 } + if message.is_empty() { 0 } else { 2 };
+                    let grid_height = body.height.saturating_sub(reserved);
                     visible_grid_rows = (grid_height / 5).max(1) as usize;
                     grid_columns = if body.width >= 90 { 3 } else { 2 };
                     let selected_row = stack / grid_columns;
@@ -404,13 +415,13 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         if selected_row < grid_start { grid_start = selected_row; }
                         if selected_row >= grid_start + visible_grid_rows { grid_start = selected_row + 1 - visible_grid_rows; }
                     }
-                    let cell_width = body.width / grid_columns as u16;
+                    let cell_width = (body.width - (grid_columns as u16 - 1) * 2) / grid_columns as u16;
                     for index in grid_start * grid_columns..((grid_start + visible_grid_rows) * grid_columns).min(widgets.stacks.len()) {
                         let value = &widgets.stacks[index];
-                        let rect = Rect::new(body.x + (index % grid_columns) as u16 * cell_width, body.y + 1 + (index / grid_columns - grid_start) as u16 * 5, cell_width, 5);
+                        let rect = Rect::new(body.x + (index % grid_columns) as u16 * (cell_width + 2), body.y + u16::from(grid_tools) + (index / grid_columns - grid_start) as u16 * 5, cell_width, 5);
                         let active = pane && stack == index;
                         let title = icons.split_whitespace().find_map(|field| field.split_once('=').filter(|(id, _)| *id == CARD_MODULES[value.modules[0]]).map(|(_, icon)| icon)).unwrap_or("·");
-                        frame.render_widget(Block::bordered().title(format!(" {title} ")).border_type(if active { BorderType::Double } else { BorderType::Plain }).border_style(if active { accent } else { muted }), rect);
+                        frame.render_widget(Block::bordered().title(format!(" {title} ")).border_type(if active { BorderType::Double } else { BorderType::Rounded }).border_style(if active { accent } else { muted }), rect);
                         hits.push((rect, Control::Stack(index)));
                         let selected_pos = member.and_then(|m| value.modules.iter().position(|v| *v == m)).unwrap_or(0);
                         let start = selected_pos.saturating_sub(2);
@@ -418,14 +429,15 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                             let selected = active && member == Some(*module) && placement.is_none();
                             let label = format!("{}{}{}", if selected { "›" } else { " " }, if offset == 0 { "" } else { "  " }, CARD_LABELS[*module]);
                             let r = Rect::new(rect.x + 1, rect.y + 1 + (offset - start) as u16, rect.width - 2, 1);
-                            frame.render_widget(Paragraph::new(label).style(if selected { highlighted } else { normal.fg([colours[0], colours[4], colours[5]][offset % 3]) }), r);
+                            frame.render_widget(Paragraph::new(label).style(if selected { highlighted } else { if offset == 0 { accent } else { normal } }), r);
                             hits.push((r, Control::Card(*module)));
                         }
                     }
-                    let unrect = Rect::new(body.x, body.y + 1 + visible_grid_rows as u16 * 5, body.width, 4);
+                    let unrect = Rect::new(body.x, body.y + u16::from(grid_tools) + visible_grid_rows as u16 * 5, body.width, 4);
                     let active = pane && stack == widgets.stacks.len() && placement.is_none();
-                    frame.render_widget(Block::bordered().title(format!(" Unassigned ({}) ", unassigned.len())).border_type(if active { BorderType::Double } else { BorderType::Plain }).border_style(if active { accent } else { muted }), unrect);
+                    frame.render_widget(Block::bordered().title(format!(" Unassigned ({}) ", unassigned.len())).border_type(if active { BorderType::Double } else { BorderType::Rounded }).border_style(if active { accent } else { muted }), unrect);
                     hits.push((unrect, Control::Stack(widgets.stacks.len())));
+                    if unassigned.is_empty() { frame.render_widget(Paragraph::new("None").style(muted), Rect::new(unrect.x + 1, unrect.y + 1, unrect.width - 2, 1)); }
                     let position = member.and_then(|m| unassigned.iter().position(|v| *v == m)).unwrap_or(0);
                     for (offset, module) in unassigned.iter().enumerate().skip(position.saturating_sub(1)).take(2) {
                         let r = Rect::new(unrect.x + 1, unrect.y + 1 + (offset - position.saturating_sub(1)) as u16, unrect.width - 2, 1);
@@ -433,58 +445,82 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         frame.render_widget(Paragraph::new(format!("{} {}", if selected { "›" } else { " " }, CARD_LABELS[*module])).style(if selected { highlighted } else { normal }), r);
                         hits.push((r, Control::Card(*module)));
                     }
-                    let switcher_rect = Rect::new(body.x, body.y, body.width, 1);
-                    frame.render_widget(Paragraph::new(format!("Window switcher {}{}", tick(widgets.enabled[1]), if editable(1) { "" } else { " - Read Only" })).style(if pane && current == Control::Widget(1) { highlighted } else if editable(1) { normal } else { muted }), switcher_rect);
-                    if editable(1) { hits.push((switcher_rect, Control::Widget(1))); }
+                    if grid_tools {
+                        let switcher_rect = Rect::new(body.x, body.y, body.width, 1);
+                        frame.render_widget(Paragraph::new(format!("Window switcher {}{}", tick(widgets.enabled[1]), if editable(1) { "" } else { " - Read Only" })).style(if pane && current == Control::Widget(1) { highlighted } else if editable(1) { normal } else { muted }), switcher_rect);
+                        if editable(1) { hits.push((switcher_rect, Control::Widget(1))); }
+                    }
                     let mut x = body.x;
                     let mut y = unrect.bottom();
-                    for control in controls.iter().filter(|c| !matches!(c, Control::Stack(_) | Control::Widget(_))) {
+                    for control in controls.iter().filter(|c| !matches!(c, Control::Stack(_) | Control::Widget(_))
+                            && (grid_tools || matches!(c, Control::GridAction(2) | Control::Apply | Control::GridTools))) {
+                        if *control == Control::GridTools {
+                            if x + 24 > body.right() { x = body.x; y += 1; }
+                            frame.render_widget(Paragraph::new("[ Import (coming soon) ]").style(muted), Rect::new(x, y, 23, 1));
+                            x += 24;
+                        }
                         let label: String = match control {
-                            Control::Widget(_) => format!("Window switcher {}", tick(widgets.enabled[1])),
-                            Control::GridAction(index) => ["New stack", "Remove stack", "Make primary", "Member -", "Member +", "Stack [", "Stack ]", "Unassign"][*index].into(),
-                            _ => "Save".into(),
+                            Control::GridAction(index) => format!("[ {} ]", ["New stack", "Remove stack", "Make primary", "Member -", "Member +", "Stack [", "Stack ]", "Unassign"][*index]),
+                            Control::GridTools => "[⋯]".into(),
+                            _ => "[ Save ]".into(),
                         };
-                        let label = format!("[ {label} ]");
                         let width = label.chars().count() as u16;
                         if x + width > body.right() { x = body.x; y += 1; }
                         let rect = Rect::new(x, y, width.min(body.width), 1);
                         frame.render_widget(Paragraph::new(label).style(if pane && *control == current { highlighted } else { accent }), rect);
                         hits.push((rect, *control)); x += width + 1;
                     }
-                    // The unavailable import stays visible and has no hit target.
-                    if x + 25 > body.right() { x = body.x; y += 1; }
-                    frame.render_widget(Paragraph::new("[ Import (coming soon) ]").style(muted), Rect::new(x, y, 25.min(body.width), 1));
                 } else if page == 3 && subpage == 0 {
                     let category = ["Common", "Applications", "Windows", "Workspaces", "Desktop / session"][hot_category];
                     let rect = Rect::new(body.x, body.y, body.width, 1);
                     frame.render_widget(Paragraph::new(format!("‹ {category} ›")).style(if pane { highlighted } else { accent }), rect);
                     hits.push((rect, Control::Category));
                     let text = hotkeys(hot_category, &widgets, effective_screenshot);
-                    frame.render_widget(Paragraph::new(text).style(normal).wrap(Wrap { trim: false }).scroll((hot_scroll as u16, 0)), Rect::new(body.x, body.y + 2, body.width, body.height.saturating_sub(2)));
+                    frame.render_widget(Paragraph::new(text).style(normal).wrap(Wrap { trim: false }).scroll((hot_scroll as u16, 0)), Rect::new(body.x, body.y + 3, body.width, body.height.saturating_sub(3)));
                 } else {
-                    let mut top = body.y;
+                    let mut top = body.y + if subpage == 2 { 2 } else { 0 };
                     if page == 0 && subpage == 0 {
                         frame.render_widget(Paragraph::new("Selected utilities are installed and configured by Icewine.").style(muted).wrap(Wrap { trim: false }), Rect::new(body.x, top, body.width, 2));
                         top += if body.width >= 57 { 2 } else { 3 };
                     }
                     let selected_row = rows.iter().position(|row| row.control == current).unwrap_or(0);
                     let step = if page == 1 || subpage == 2 { 2 } else { 1 };
-                    let capacity = ((body.bottom() - top) / step).max(1) as usize;
-                    let start = if rows.len() > capacity { selected_row.saturating_sub(capacity - 1) } else { 0 };
-                    for (index, value) in rows.iter().enumerate().skip(start).take(capacity) {
-                        let gap = if page == 0 && subpage == 0 && index >= 6 && start < 6 { 1 } else { 0 };
+                    let list_bottom = if subpage == 1 { body.y + 12 } else { body.bottom() };
+                    let capacity = ((list_bottom - top) / step).max(1) as usize;
+                    let row_count = rows.len().saturating_sub(if subpage > 0 { 2 } else { 0 });
+                    let selected_row = selected_row.min(row_count.saturating_sub(1));
+                    let start = if row_count > capacity { selected_row.saturating_sub(capacity - 1) } else { 0 };
+                    for (index, value) in rows.iter().take(row_count).enumerate().skip(start).take(capacity) {
+                        let gap = u16::from(page == 0 && subpage == 0 && index >= 6 && start < 6) + u16::from(page == 0 && subpage == 0 && index >= 9 && start < 9);
                         let y = top + ((index - start) * step as usize) as u16 + gap;
                         if y >= body.bottom() { break; }
                         let rect = Rect::new(body.x, y, body.width, 1);
                         let style = if !value.enabled { muted } else if pane && value.control == current { highlighted } else { normal };
                         let parts: Vec<_> = value.label.split('\t').collect();
+                        let displayed = if value.enabled && matches!(value.control, Control::Steam | Control::Screenshot | Control::Utility("handheld") | Control::Transparency | Control::Layout | Control::Bar(_) | Control::BarWidth) {
+                            format!("‹ {} ›", value.value)
+                        } else if value.enabled && matches!(value.control, Control::Theme | Control::Wallpaper | Control::Taskbar) {
+                            format!("{}  ›", value.value)
+                        } else { value.value.clone() };
                         let text = if parts.len() == 2 {
-                            let value_width = if readonly { 24 } else { 12 };
-                            let detail_width = (body.width as usize).saturating_sub(17 + value_width);
-                            format!("{:<17}{:<detail_width$}{:^value_width$}", parts[0], parts[1].chars().take(detail_width).collect::<String>(), value.value)
-                        } else { format!("{:<20}{}", value.label, value.value) };
+                            let value_width = if readonly { 24 } else { 14 };
+                            let detail_width = (body.width as usize).saturating_sub(18 + value_width);
+                            format!("{:<18}{:<detail_width$}{:^value_width$}", parts[0], parts[1].chars().take(detail_width).collect::<String>(), displayed)
+                        } else if value.control == Control::Overwrite { format!("{} {}", value.value, value.label) } else { format!("{:<20}{}", value.label, displayed) };
                         frame.render_widget(Paragraph::new(text).style(style), rect);
                         if value.enabled { hits.push((rect, value.control)); }
+                    }
+                    if subpage > 0 {
+                        if subpage == 1 {
+                            frame.render_widget(Paragraph::new(Line::from(vec![Span::styled("Aa  Normal text     ", normal), Span::styled("Accent     ", accent), Span::styled("Supporting text", muted)])), Rect::new(body.x, content.y + 16, body.width, 1));
+                        }
+                        let mut x = body.x;
+                        for value in rows.iter().skip(row_count) {
+                            let rect = Rect::new(x, content.y + 20, value.label.chars().count() as u16, 1);
+                            frame.render_widget(Paragraph::new(value.label.as_str()).style(if !value.enabled { muted } else if pane && current == value.control { highlighted } else { accent }), rect);
+                            if value.enabled { hits.push((rect, value.control)); }
+                            x = rect.right() + 3;
+                        }
                     }
                 }
             })?;
@@ -520,8 +556,8 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                                 KeyCode::Enter
                             } else { continue; }
                         }
-                        event::MouseEventKind::ScrollDown => { pane = mouse.column >= 18; KeyCode::Down },
-                        event::MouseEventKind::ScrollUp => { pane = mouse.column >= 18; KeyCode::Up },
+                        event::MouseEventKind::ScrollDown => { pane = mouse.column >= 22; KeyCode::Down },
+                        event::MouseEventKind::ScrollUp => { pane = mouse.column >= 22; KeyCode::Up },
                         _ => continue,
                     }
                 }
@@ -613,6 +649,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                             if let Some(module) = member { remembered = module; }
                         }
                     }
+                    Control::GridTools => { grid_tools = !grid_tools; if !grid_tools { focus = stack; } },
                     Control::Widget(1) => widgets.enabled[1] = !widgets.enabled[1],
                     Control::GridAction(index) if editable(2) => {
                         match index {
@@ -694,9 +731,10 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
 }
 fn hotkeys(category: usize, widgets: &Widgets, screenshot: usize) -> String {
     let taskbar = match widgets.bar[0] { 2 => "toggle on press", 3 => "legacy always visible", _ => "hold to show; release hides" };
-    let switcher = "Super+W  Window switcher (when enabled)";
+    let switcher = "Super+W  Window switcher";
     let capture = ["Super+Print  Screenshot (disabled)", "Super+Print  Hyprshot region", "Super+Print  Flameshot editor"][screenshot];
-    let common = format!("Super+`  Show/Toggle Taskbar ({taskbar})\nSuper+Space  Launcher\nSuper+Enter  Terminal\nSuper+E  File manager\n{switcher}\nSuper+Q  Close window\nSuper+Arrows  Focus window\nSuper+F  Fullscreen\nSuper+1–0  Workspace 1–10\nSuper+Shift+1–0  Move to workspace\n{capture}\nSuper+L  Lock screen");
+    let taskbar_key = if widgets.bar[0] == 2 { "Super+` (toggle on press)" } else { "Super+`" };
+    let common = format!("{taskbar_key}  Show/Toggle Taskbar\nSuper+Space  Launcher\nSuper+Enter  Terminal\nSuper+E  File manager\n{switcher}\nSuper+Q  Close window\nSuper+Arrows  Focus window\nSuper+F  Fullscreen\nSuper+1–0  Workspace 1–10\nSuper+Shift+1–0  Move to workspace\n{capture}\nSuper+L  Lock screen");
     let text = match category {
         0 => common,
         1 => format!("Super+Enter  Configured terminal\nSuper+Space  Launcher\nSuper+E  Configured file manager\nSuper+B  Browser (if configured)\n{switcher}\n{capture}"),
@@ -704,7 +742,10 @@ fn hotkeys(category: usize, widgets: &Widgets, screenshot: usize) -> String {
         3 => "Super+1–0  Switch workspace 1–10\nSuper+Shift+1–0  Move window\nSuper+PageUp/PageDown  Relative workspace\nSuper+Shift+PageUp/PageDown  Move window\nSuper+Tab  Next populated workspace\nSuper+Shift+Tab  Move to next populated\nSuper+Home/End  First/last populated\nSuper+Shift+Home/End  Move window".into(),
         _ => "Super+L  Lock\nSuper+Shift+L  End session\nSuper+Ctrl+R  Reload Hyprland\nSuper+Shift+W  Wake displays\nSuper+Shift+wheel  Zoom\nSuper+Shift+Z  Reset zoom\nSuper+Shift+B/N/A/J/P/D  Bluetooth/network/audio/battery/performance/layout\nMedia keys  Player and audio\nBrightness keys  Focused display brightness".into(),
     };
-    format!("{text}\n\nShipped Icewine bindings. Host/user overrides can change them; optional tools and the active layout affect availability. Up/Down scrolls.")
+    let text = text.lines().map(|line| match line.split_once("  ") {
+        Some((chord, label)) => format!("{label:<25}{chord}"), None => line.into(),
+    }).collect::<Vec<_>>().join("\n");
+    format!("{text}\n\nTaskbar: {taskbar}. Window switcher requires its preference enabled.\nShipped Icewine bindings. Host/user overrides can change them; optional tools and the active layout affect availability. Up/Down scrolls.")
 }
 
 fn executable(name: &str) -> bool {
