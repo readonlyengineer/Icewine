@@ -82,6 +82,7 @@ parser.add_argument("binary", type=Path)
 parser.add_argument("--export-frames", type=Path, help="write complete text frames and raw terminal cells for developer inspection")
 parser.add_argument("--preview-only", action="store_true", help="run the existing native Theme preview/cancel/commit regression group")
 parser.add_argument("--frames-only", action="store_true", help="capture representative visual states without repeating the semantic suite")
+parser.add_argument("--spacing-only", action="store_true", help="check page geometry, wrapping and action placement with synthetic data")
 options = parser.parse_args()
 if options.frames_only and not options.export_frames: parser.error("--frames-only requires --export-frames")
 binary = options.binary.resolve()
@@ -293,7 +294,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         else:
             assert b"Utilities" in rendered
             assert b"Overwrite existing dotfiles" in rendered
-            assert b"[ Review and Apply ]" in rendered
+            assert b"Selected utilities are installed" in rendered
         all_calls = [json.loads(line) for line in log.read_text().splitlines()]
         all_last_calls = all_calls
         last_widget_calls = [call for call in all_calls if call[0].startswith("widgets-")]
@@ -328,6 +329,74 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         previews = [call for call in all_last_calls if call[0] == "theme-preview"]
         assert previews[-1] == ["theme-preview", "tokyo-night"]
         assert not any(call[:2] == ["icewine", "theme"] for call in tools())
+    def test_spacing():
+        visual = state(desktop=True, terminal=True, filemanager=True, texteditor=True,
+                       shellExtras=True, steam="flatpak", gamescope=True, screenshot="advanced")
+        def frame_for(title):
+            return next(frame.decode().splitlines() for frame in reversed(last_frames)
+                        if title in frame.decode().splitlines()[1])
+        taskbar = page(1)+down*4+enter
+        for size in ((24,80), (30,100), (24,160), (48,80)):
+            for name, keys, title in (
+                    ("utilities", esc, "Utilities"),
+                    ("appearance", page(1)+esc, "Appearance"),
+                    ("theme", page(1)+enter+esc*2, "Appearance / Theme"),
+                    ("taskbar", taskbar+esc*2, "Appearance / Taskbar"),
+                    ("widgets", page(2)+esc, "Widgets")):
+                run(keys, visual, size=size, capture=name)
+                frame = frame_for(title)
+                assert all(line[20:22] == "  " for line in frame), (name, size, frame)
+                assert all(line[-1] == ("╮" if y == 0 else "╯" if y == size[0]-1 else "┤" if y == 2 else "│")
+                           for y, line in enumerate(frame)), (name, size, frame)
+                if name in ("theme", "taskbar"):
+                    action = "[ Use theme ]" if name == "theme" else "[ Save ]"
+                    assert action in frame[size[0]-4], (name, size, frame)
+                if name == "utilities":
+                    selected_rows = [i for i, line in enumerate(frame) if any(label in line for label in ("Desktop session", "Steam", "Overwrite existing"))]
+                    assert len(selected_rows) >= 3
+                if name == "widgets" and size == (24,80):
+                    assert all(label in "\n".join(frame) for label in ("Launcher", "Media", "Audio", "Network", "Notifications", "Battery", "Unassigned"))
+            for category in range(5):
+                run(page(3)+right*category+esc, visual, size=size, capture=f"hotkeys-{category}")
+                frame = frame_for("Hotkeys")
+                assert "←/→ Category" in frame[size[0]-4], (category, size, frame)
+                for line in frame[7:size[0]-5]:
+                    if "Super+" in line:
+                        assert line.index("Super+") == 49, (category, size, line)
+        run(page(2)+up+esc, visual, size=(24,80), capture="widgets-tools")
+        frame = frame_for("Widgets")
+        assert "Window switcher" in "\n".join(frame) and "[ New stack ]" in "\n".join(frame)
+        assert all(line[-1] == "│" for line in frame[3:-1]), frame
+        long_theme = "a-very-long-installed-theme-name-with-a-variant"
+        wire = f"themes={long_theme},tokyo-night selected={long_theme} policy=false level=med desktopLayout=scrolling theme=false transparency=false wallpaper=false monitors=false layout=false"
+        run(page(1)+enter+esc*2, visual, size=(24,80), appearance_wire=wire, capture="theme-long")
+        frame = frame_for("Appearance / Theme")
+        assert "Current" in "\n".join(frame)
+        assert next(line.index("Current") for line in frame if "Current" in line) == 44
+        assert "Variant" in "\n".join(frame), frame
+        run(esc, state(readonly=True), size=(24,80), capture="utilities-readonly")
+        frame = frame_for("Utilities - Read Only")
+        assert "Hyprland + Quickshell" in "\n".join(frame) and "Neovim + LazyVIM" in "\n".join(frame)
+        run(taskbar+esc*2, visual, size=(24,80), widgets={"barBehaviour":"keyboard-mouse"},
+            widget_policy="barBehaviour", capture="taskbar-readonly")
+        frame = frame_for("Appearance / Taskbar")
+        assert "Read Only" in "\n".join(frame) and "Keyboard + Mouse" in "\n".join(frame)
+        run(page(2)+b"s"+esc, visual, size=(24,80), widget_fail=True, capture="widgets-error")
+        frame = frame_for("Widgets")
+        assert "Widget preferences changed" in "\n".join(frame[-4:-1])
+        assert "[ Save ]" in "\n".join(frame[:-4])
+        run(tab+down*10+enter, visual, size=(24,80), confirm=False, capture="review")
+        frame = frame_for("Utilities / Review")
+        assert "[ Apply ]   [ Back ]" in frame[20] and frame[0].startswith("╭")
+        assert not any(call[0] == "apply" for call in all_last_calls)
+        run(tab+down*9+enter, state(), size=(24,80), widget_policy="invalid", confirm=False, capture="utilities-startup-error")
+        assert any(b"[ Review and Apply ]" in frame for frame in last_frames)
+        assert not any(call[0] == "apply" for call in all_last_calls)
+        run(esc, "", bootstrap=True, size=(24,80), capture="bootstrap")
+        print("PASS: spacing, wrapping, read-only values, status/action separation and native captures")
+    if options.spacing_only:
+        test_spacing()
+        sys.exit(0)
     if options.preview_only:
         test_theme_preview()
         print("PASS: native Theme preview cancel/commit and keyboard preview exit")
@@ -378,6 +447,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         run(page(3)+right+down*5+esc, state(), size=size)
         assert b"Common" in last_output and b"Applications" in last_output
         assert not saves()
+    test_spacing()
     # Pane focus and keyboard utility Apply identify fields independently of wire order.
     run(tab+b" "+down*9+enter, state())
     choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])

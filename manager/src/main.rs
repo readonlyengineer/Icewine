@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fs::{self, OpenOptions}, io::{self, IsTerminal}, os::unix::fs::OpenOptionsExt, path::PathBuf, process::{Command, ExitCode}};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::{prelude::*, widgets::{Block, BorderType, Padding, Paragraph, Wrap}};
+use ratatui::{prelude::*, widgets::{Block, BorderType, Paragraph, Wrap}};
 
 const ROWS: &[(&str, &str, &str)] = &[
     ("desktop", "Desktop session", "Hyprland + Quickshell"), ("terminal", "Terminal", "Kitty"),
@@ -263,6 +263,45 @@ struct ViewRow { label: String, value: String, control: Control, enabled: bool }
 fn row(label: &str, value: String, control: Control, enabled: bool) -> ViewRow {
     ViewRow { label: label.into(), value: if enabled { value } else { format!("{value} - Read Only") }, control, enabled }
 }
+// Keep wrapped labels and values within their terminal columns.
+fn wrap_cells(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        let mut line = String::new();
+        for word in paragraph.split_whitespace() {
+            if !line.is_empty() && Line::from(format!("{line} {word}")).width() > width {
+                lines.push(std::mem::take(&mut line));
+            }
+            if !line.is_empty() { line.push(' '); }
+            for character in word.chars() {
+                if !line.is_empty() && Line::from(format!("{line}{character}")).width() > width {
+                    lines.push(std::mem::take(&mut line));
+                }
+                line.push(character);
+            }
+        }
+        lines.push(line);
+    }
+    lines
+}
+
+fn columns(label: &str, value: &str, label_width: usize, width: usize) -> Vec<String> {
+    let labels = wrap_cells(label, label_width);
+    let values = wrap_cells(value, width.saturating_sub(label_width + 2).max(1));
+    (0..labels.len().max(values.len())).map(|index| {
+        let label = labels.get(index).map(String::as_str).unwrap_or("");
+        let padding = " ".repeat(label_width + 2 - Line::from(label).width());
+        format!("{label}{padding}{}", values.get(index).map(String::as_str).unwrap_or(""))
+    }).collect()
+}
+
+fn display_name(id: &str) -> String {
+    id.split('-').map(|word| {
+        let mut characters = word.chars();
+        characters.next().map(|first| first.to_uppercase().collect::<String>() + characters.as_str()).unwrap_or_default()
+    }).collect::<Vec<_>>().join(" ")
+}
+
 fn tick(value: bool) -> String { if value { "[x]" } else { "[ ]" }.into() }
 fn cycle(value: &mut usize, count: usize, forward: bool) { *value = (*value + if forward { 1 } else { count - 1 }) % count; }
 fn theme_colours(id: &str) -> io::Result<[Color; 6]> {
@@ -309,7 +348,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             let mut rows = Vec::new();
             if subpage == 1 {
                 for (index, id) in appearance.themes.iter().enumerate() {
-                    rows.push(row(id, if index == appearance.theme { "Current" } else { "" }.into(), Control::Preview(index), true));
+                    rows.push(row(&display_name(id), if index == appearance.theme { "Current" } else { "" }.into(), Control::Preview(index), true));
                 }
                 rows.extend([row("[ Use theme ]", "".into(), Control::Apply, !appearance.readonly[0] && !appearance.policy), row("[ Back ]", "".into(), Control::Back, true)]);
             } else if subpage == 2 {
@@ -333,7 +372,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         "gamescope" if *steam == 0 => "Requires Steam",
                         "handheld" if !handheld_available(*steam, selected) => "Requires Steam native", _ => detail,
                     };
-                    rows.push(ViewRow { label: format!("{label}\t{detail}"), value: if readonly { format!("{value} - Read Only") } else { value },
+                    rows.push(ViewRow { label: format!("{label}\t{detail}"), value,
                         control: if *id == "steam" { Control::Steam } else if *id == "screenshot" { Control::Screenshot } else { Control::Utility(id) }, enabled });
                 }
                 rows.extend([row("Overwrite existing dotfiles", tick(overwrite), Control::Overwrite, true),
@@ -341,10 +380,10 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         value: "".into(), control: Control::Monitors, enabled: !appearance.readonly[3] && executable("hyprmon") },
                     row("[ Review and Apply ]", "".into(), Control::Apply, true)]);
             } else if page == 1 {
-                rows = vec![row("Theme", appearance.themes[appearance.theme].clone(), Control::Theme, !appearance.readonly[0] && !appearance.policy),
-                    row("Transparency", TRANSPARENCY[appearance.transparency].into(), Control::Transparency, !appearance.readonly[1]),
+                rows = vec![row("Theme", display_name(&appearance.themes[appearance.theme]), Control::Theme, !appearance.readonly[0] && !appearance.policy),
+                    row("Transparency", ["Off", "Low", "Medium", "High"][appearance.transparency].into(), Control::Transparency, !appearance.readonly[1]),
                     row("Wallpaper", filename(&appearance.wallpaper), Control::Wallpaper, !appearance.readonly[2]),
-                    row("Default layout", LAYOUTS[appearance.layout].into(), Control::Layout, !appearance.readonly[4]),
+                    row("Default layout", display_name(LAYOUTS[appearance.layout]), Control::Layout, !appearance.readonly[4]),
                     row("Taskbar", "Configure…".into(), Control::Taskbar, true),
                     row("Notifications", tick(widgets.enabled[0]), Control::Widget(0), editable(0))];
             }
@@ -390,23 +429,38 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     page_hits.push((rect, index));
                 }
                 let inner = Rect::new(content.x + 2, content.y + 1, content.width - 4, content.height - 2);
-                let title = if subpage == 1 { "Appearance / Theme" } else if subpage == 2 { "Appearance / Taskbar" } else { ["Utilities", "Appearance", "Widgets", "Hotkeys"][page] };
+                let title = if subpage == 1 { "Appearance / Theme" } else if subpage == 2 { "Appearance / Taskbar" } else if page == 0 && readonly { "Utilities - Read Only" } else { ["Utilities", "Appearance", "Widgets", "Hotkeys"][page] };
                 frame.render_widget(Paragraph::new(title).style(accent), Rect::new(inner.x, inner.y, inner.width, 1));
                 frame.render_widget(Paragraph::new(format!("├{}┤", "─".repeat(content.width.saturating_sub(2) as usize))).style(if pane { accent } else { muted }), Rect::new(content.x, content.y + 2, content.width, 1));
                 let footer = Rect::new(inner.x, inner.bottom() - 1, inner.width, 1);
-                if page != 2 || subpage != 0 {
+                if (page != 2 || subpage != 0) && subpage != 1 {
                     frame.render_widget(Paragraph::new(if subpage > 0 { "Tab: Switch pane   Esc: Back" } else { "Tab: Switch pane   Esc: Close" }).style(muted), footer);
                 }
-                let message_y = if subpage > 0 { footer.y - 4 } else if page == 2 { footer.y - 3 } else { footer.y - 2 };
-                frame.render_widget(Paragraph::new(message.as_str()).style(accent).wrap(Wrap { trim: false }), Rect::new(inner.x, message_y, inner.width, 2));
-                let body = if page == 2 && subpage == 0 {
-                    Rect::new(inner.x, content.y + 3, inner.width, content.height - 4)
-                } else {
-                    Rect::new(inner.x, inner.y + if page == 0 && subpage == 0 { 2 } else { 3 }, inner.width, inner.height - if page == 0 && subpage == 0 { 5 } else { 6 })
-                };
+                let status_bottom = if page == 2 && subpage == 0 { footer.y + 1 } else if subpage > 0 { footer.y - 3 } else { footer.y - 1 };
+                let content_bottom = if message.is_empty() { status_bottom } else { status_bottom - 3 };
+                let body_y = content.y + if subpage == 0 && matches!(page, 0 | 2) { 3 } else { 4 };
+                let body = Rect::new(inner.x, body_y, inner.width, content_bottom.saturating_sub(body_y));
                 if page == 2 && subpage == 0 {
                     let unassigned: Vec<_> = (0..CARD_MODULES.len()).filter(|module| widgets.location(*module).is_none()).collect();
-                    let reserved = if grid_tools { 9 } else { 5 } + if message.is_empty() { 0 } else { 2 };
+                    let mut actions = Vec::new();
+                    for control in controls.iter().filter(|c| !matches!(c, Control::Stack(_) | Control::Widget(_))
+                            && (grid_tools || matches!(c, Control::GridAction(2) | Control::Apply | Control::GridTools))) {
+                        if *control == Control::GridTools { actions.push((None, "[ Import (coming soon) ]".to_string())); }
+                        let label = match control {
+                            Control::GridAction(index) => format!("[ {} ]", ["New stack", "Remove stack", "Make primary", "Member -", "Member +", "Stack [", "Stack ]", "Unassign"][*index]),
+                            Control::GridTools => "[⋯]".into(),
+                            _ => "[ Save ]".into(),
+                        };
+                        actions.push((Some(*control), label));
+                    }
+                    let mut toolbar_rows = 1u16;
+                    let mut toolbar_x = 0;
+                    for (_, label) in &actions {
+                        let width = Line::from(label.as_str()).width() as u16;
+                        if toolbar_x + width > body.width { toolbar_rows += 1; toolbar_x = 0; }
+                        toolbar_x += width + 1;
+                    }
+                    let reserved = 4 + toolbar_rows + u16::from(grid_tools);
                     let grid_height = body.height.saturating_sub(reserved);
                     visible_grid_rows = (grid_height / 5).max(1) as usize;
                     grid_columns = if body.width >= 90 { 3 } else { 2 };
@@ -415,10 +469,13 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         if selected_row < grid_start { grid_start = selected_row; }
                         if selected_row >= grid_start + visible_grid_rows { grid_start = selected_row + 1 - visible_grid_rows; }
                     }
-                    let cell_width = (body.width - (grid_columns as u16 - 1) * 2) / grid_columns as u16;
+                    let available_width = body.width - (grid_columns as u16 - 1) * 2;
+                    let cell_width = available_width / grid_columns as u16;
+                    let extra = available_width % grid_columns as u16;
                     for index in grid_start * grid_columns..((grid_start + visible_grid_rows) * grid_columns).min(widgets.stacks.len()) {
                         let value = &widgets.stacks[index];
-                        let rect = Rect::new(body.x + (index % grid_columns) as u16 * (cell_width + 2), body.y + u16::from(grid_tools) + (index / grid_columns - grid_start) as u16 * 5, cell_width, 5);
+                        let column = (index % grid_columns) as u16;
+                        let rect = Rect::new(body.x + column * (cell_width + 2) + column.min(extra), body.y + u16::from(grid_tools) + (index / grid_columns - grid_start) as u16 * 5, cell_width + u16::from(column < extra), 5);
                         let active = pane && stack == index;
                         let title = icons.split_whitespace().find_map(|field| field.split_once('=').filter(|(id, _)| *id == CARD_MODULES[value.modules[0]]).map(|(_, icon)| icon)).unwrap_or("·");
                         frame.render_widget(Block::bordered().title(format!(" {title} ")).border_type(if active { BorderType::Double } else { BorderType::Rounded }).border_style(if active { accent } else { muted }), rect);
@@ -451,77 +508,92 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         if editable(1) { hits.push((switcher_rect, Control::Widget(1))); }
                     }
                     let mut x = body.x;
-                    let mut y = unrect.bottom();
-                    for control in controls.iter().filter(|c| !matches!(c, Control::Stack(_) | Control::Widget(_))
-                            && (grid_tools || matches!(c, Control::GridAction(2) | Control::Apply | Control::GridTools))) {
-                        if *control == Control::GridTools {
-                            if x + 24 > body.right() { x = body.x; y += 1; }
-                            frame.render_widget(Paragraph::new("[ Import (coming soon) ]").style(muted), Rect::new(x, y, 23, 1));
-                            x += 24;
-                        }
-                        let label: String = match control {
-                            Control::GridAction(index) => format!("[ {} ]", ["New stack", "Remove stack", "Make primary", "Member -", "Member +", "Stack [", "Stack ]", "Unassign"][*index]),
-                            Control::GridTools => "[⋯]".into(),
-                            _ => "[ Save ]".into(),
-                        };
-                        let width = label.chars().count() as u16;
+                    let mut y = body.bottom() - toolbar_rows;
+                    for (control, label) in actions {
+                        let width = Line::from(label.as_str()).width() as u16;
                         if x + width > body.right() { x = body.x; y += 1; }
-                        let rect = Rect::new(x, y, width.min(body.width), 1);
-                        frame.render_widget(Paragraph::new(label).style(if pane && *control == current { highlighted } else { accent }), rect);
-                        hits.push((rect, *control)); x += width + 1;
+                        let rect = Rect::new(x, y, width, 1);
+                        frame.render_widget(Paragraph::new(label).style(if control.is_none() { muted } else if pane && control == Some(current) { highlighted } else { accent }), rect);
+                        if let Some(control) = control { hits.push((rect, control)); }
+                        x += width + 1;
                     }
                 } else if page == 3 && subpage == 0 {
                     let category = ["Common", "Applications", "Windows", "Workspaces", "Desktop / session"][hot_category];
                     let rect = Rect::new(body.x, body.y, body.width, 1);
                     frame.render_widget(Paragraph::new(format!("‹ {category} ›")).style(if pane { highlighted } else { accent }), rect);
                     hits.push((rect, Control::Category));
-                    let text = hotkeys(hot_category, &widgets, effective_screenshot);
-                    frame.render_widget(Paragraph::new(text).style(normal).wrap(Wrap { trim: false }).scroll((hot_scroll as u16, 0)), Rect::new(body.x, body.y + 3, body.width, body.height.saturating_sub(3)));
+                    let text = hotkeys(hot_category, &widgets, effective_screenshot, body.width as usize);
+                    frame.render_widget(Paragraph::new(text).style(normal).wrap(Wrap { trim: false }).scroll((hot_scroll as u16, 0)), Rect::new(body.x, body.y + 3, body.width, body.height.saturating_sub(5)));
+                    frame.render_widget(Paragraph::new("←/→ Category").style(muted), Rect::new(body.x, body.bottom() - 1, body.width, 1));
                 } else {
-                    let mut top = body.y + if subpage == 2 { 2 } else { 0 };
+                    let mut top = body.y;
                     if page == 0 && subpage == 0 {
-                        frame.render_widget(Paragraph::new("Selected utilities are installed and configured by Icewine.").style(muted).wrap(Wrap { trim: false }), Rect::new(body.x, top, body.width, 2));
-                        top += if body.width >= 57 { 2 } else { 3 };
+                        let introduction = wrap_cells("Selected utilities are installed and configured by Icewine.", body.width as usize);
+                        frame.render_widget(Paragraph::new(introduction.join("\n")).style(muted), Rect::new(body.x, top, body.width, introduction.len() as u16));
+                        top += introduction.len() as u16 + 1;
                     }
-                    let selected_row = rows.iter().position(|row| row.control == current).unwrap_or(0);
-                    let step = if page == 1 || subpage == 2 { 2 } else { 1 };
-                    let list_bottom = if subpage == 1 { body.y + 12 } else { body.bottom() };
-                    let capacity = ((list_bottom - top) / step).max(1) as usize;
+                    let sample_y = body.bottom().saturating_sub(3);
+                    let list_bottom = if subpage == 1 { sample_y.saturating_sub(1) } else { body.bottom() };
                     let row_count = rows.len().saturating_sub(if subpage > 0 { 2 } else { 0 });
-                    let selected_row = selected_row.min(row_count.saturating_sub(1));
-                    let start = if row_count > capacity { selected_row.saturating_sub(capacity - 1) } else { 0 };
-                    for (index, value) in rows.iter().take(row_count).enumerate().skip(start).take(capacity) {
-                        let gap = u16::from(page == 0 && subpage == 0 && index >= 6 && start < 6) + u16::from(page == 0 && subpage == 0 && index >= 9 && start < 9);
-                        let y = top + ((index - start) * step as usize) as u16 + gap;
-                        if y >= body.bottom() { break; }
-                        let rect = Rect::new(body.x, y, body.width, 1);
-                        let style = if !value.enabled { muted } else if pane && value.control == current { highlighted } else { normal };
+                    let mut laid_out = Vec::new();
+                    let mut offset = 0u16;
+                    for (index, value) in rows.iter().take(row_count).enumerate() {
+                        if page == 0 && subpage == 0 && matches!(index, 6 | 9) { offset += 1; }
                         let parts: Vec<_> = value.label.split('\t').collect();
-                        let displayed = if value.enabled && matches!(value.control, Control::Steam | Control::Screenshot | Control::Utility("handheld") | Control::Transparency | Control::Layout | Control::Bar(_) | Control::BarWidth) {
-                            format!("‹ {} ›", value.value)
+                        let plain_value = value.value.strip_suffix(" - Read Only").unwrap_or(&value.value);
+                        let mut displayed = if matches!(value.control, Control::Steam | Control::Screenshot | Control::Utility("handheld") | Control::Transparency | Control::Layout | Control::Bar(_) | Control::BarWidth) {
+                            format!("‹ {plain_value} ›")
                         } else if value.enabled && matches!(value.control, Control::Theme | Control::Wallpaper | Control::Taskbar) {
-                            format!("{}  ›", value.value)
-                        } else { value.value.clone() };
+                            format!("{plain_value}  ›")
+                        } else { plain_value.to_string() };
+                        if plain_value != value.value {
+                            displayed.push_str(if Line::from(displayed.as_str()).width() + 12 > body.width as usize - 20 { "\n- Read Only" } else { " - Read Only" });
+                        }
                         let text = if parts.len() == 2 {
-                            let value_width = if readonly { 24 } else { 14 };
-                            let detail_width = (body.width as usize).saturating_sub(18 + value_width);
-                            format!("{:<18}{:<detail_width$}{:^value_width$}", parts[0], parts[1].chars().take(detail_width).collect::<String>(), displayed)
-                        } else if value.control == Control::Overwrite { format!("{} {}", value.value, value.label) } else { format!("{:<20}{}", value.label, displayed) };
-                        frame.render_widget(Paragraph::new(text).style(style), rect);
+                            let detail_width = body.width as usize - 18 - 14;
+                            let details = wrap_cells(parts[1], detail_width);
+                            let padding = 14usize.saturating_sub(Line::from(displayed.as_str()).width()) / 2;
+                            details.iter().enumerate().map(|(line, detail)| {
+                                let label = if line == 0 { parts[0] } else { "" };
+                                format!("{label:<18}{detail}{}{}{}", " ".repeat(detail_width - Line::from(detail.as_str()).width()), " ".repeat(padding), if line == 0 { displayed.as_str() } else { "" })
+                            }).collect::<Vec<_>>()
+                        } else if value.control == Control::Overwrite {
+                            wrap_cells(&format!("{} {}", value.value, value.label), body.width as usize)
+                        } else if value.value.is_empty() {
+                            wrap_cells(&value.label, body.width as usize)
+                        } else { columns(&value.label, &displayed, 18, body.width as usize) };
+                        let height = text.len() as u16;
+                        laid_out.push((offset, height, text));
+                        offset += height + u16::from(page == 1 || subpage == 2);
+                    }
+                    let selected_row = rows.iter().take(row_count).position(|row| row.control == current).unwrap_or(0);
+                    let available = list_bottom.saturating_sub(top);
+                    let scroll = if let Some((y, height, _)) = laid_out.get(selected_row) {
+                        (y + height).saturating_sub(available)
+                    } else { 0 };
+                    for (index, (offset, height, text)) in laid_out.iter().enumerate() {
+                        if *offset < scroll || offset + height > scroll + available { continue; }
+                        let value = &rows[index];
+                        let rect = Rect::new(body.x, top + offset - scroll, body.width, *height);
+                        let style = if !value.enabled { muted } else if pane && value.control == current { highlighted } else { normal };
+                        frame.render_widget(Paragraph::new(text.join("\n")).style(style), rect);
                         if value.enabled { hits.push((rect, value.control)); }
                     }
                     if subpage > 0 {
                         if subpage == 1 {
-                            frame.render_widget(Paragraph::new(Line::from(vec![Span::styled("Aa  Normal text     ", normal), Span::styled("Accent     ", accent), Span::styled("Supporting text", muted)])), Rect::new(body.x, content.y + 16, body.width, 1));
+                            frame.render_widget(Paragraph::new(Line::from(vec![Span::styled("Aa  Normal text     ", normal), Span::styled("Accent     ", accent), Span::styled("Supporting text", muted)])), Rect::new(body.x, sample_y, body.width, 1));
                         }
                         let mut x = body.x;
                         for value in rows.iter().skip(row_count) {
-                            let rect = Rect::new(x, content.y + 20, value.label.chars().count() as u16, 1);
+                            let rect = Rect::new(x, footer.y - 2, value.label.chars().count() as u16, 1);
                             frame.render_widget(Paragraph::new(value.label.as_str()).style(if !value.enabled { muted } else if pane && current == value.control { highlighted } else { accent }), rect);
                             if value.enabled { hits.push((rect, value.control)); }
                             x = rect.right() + 3;
                         }
                     }
+                }
+                if !message.is_empty() {
+                    frame.render_widget(Paragraph::new(message.as_str()).style(accent).wrap(Wrap { trim: false }), Rect::new(inner.x, status_bottom - 2, inner.width, 2));
                 }
             })?;
             if !event::poll(std::time::Duration::from_secs(2))? {
@@ -729,7 +801,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     ratatui::restore();
     result
 }
-fn hotkeys(category: usize, widgets: &Widgets, screenshot: usize) -> String {
+fn hotkeys(category: usize, widgets: &Widgets, screenshot: usize, width: usize) -> String {
     let taskbar = match widgets.bar[0] { 2 => "toggle on press", 3 => "legacy always visible", _ => "hold to show; release hides" };
     let switcher = "Super+W  Window switcher";
     let capture = ["Super+Print  Screenshot (disabled)", "Super+Print  Hyprshot region", "Super+Print  Flameshot editor"][screenshot];
@@ -740,10 +812,10 @@ fn hotkeys(category: usize, widgets: &Widgets, screenshot: usize) -> String {
         1 => format!("Super+Enter  Configured terminal\nSuper+Space  Launcher\nSuper+E  Configured file manager\nSuper+B  Browser (if configured)\n{switcher}\n{capture}"),
         2 => format!("{switcher}\nSuper+Q  Close\nSuper+V  Toggle floating\nSuper+F  Fullscreen\nSuper+M  Toggle width\nSuper+P  Pseudo tile\nSuper+J  Join/split column (scrolling only)\nSuper+Arrows  Focus\nSuper+Shift+Arrows  Swap\nSuper+Ctrl+Arrows  Resize\nAlt+Tab  Cycle and raise\nSuper+mouse drag  Move/resize\n\nScrolling left/right uses columns. Monocle focus cycles; directional swap and resize have no effect."),
         3 => "Super+1–0  Switch workspace 1–10\nSuper+Shift+1–0  Move window\nSuper+PageUp/PageDown  Relative workspace\nSuper+Shift+PageUp/PageDown  Move window\nSuper+Tab  Next populated workspace\nSuper+Shift+Tab  Move to next populated\nSuper+Home/End  First/last populated\nSuper+Shift+Home/End  Move window".into(),
-        _ => "Super+L  Lock\nSuper+Shift+L  End session\nSuper+Ctrl+R  Reload Hyprland\nSuper+Shift+W  Wake displays\nSuper+Shift+wheel  Zoom\nSuper+Shift+Z  Reset zoom\nSuper+Shift+B/N/A/J/P/D  Bluetooth/network/audio/battery/performance/layout\nMedia keys  Player and audio\nBrightness keys  Focused display brightness".into(),
+        _ => "Super+L  Lock\nSuper+Shift+L  End session\nSuper+Ctrl+R  Reload Hyprland\nSuper+Shift+W  Wake displays\nSuper+Shift+wheel  Zoom\nSuper+Shift+Z  Reset zoom\nSuper+Shift+B/N/A/J/P/D  Widget cards\nMedia keys  Player and audio\nBrightness keys  Focused display brightness\n\nCards: Bluetooth, network, audio, battery, performance and layout.".into(),
     };
     let text = text.lines().map(|line| match line.split_once("  ") {
-        Some((chord, label)) => format!("{label:<25}{chord}"), None => line.into(),
+        Some((chord, label)) => columns(label, chord, 23, width).join("\n"), None => wrap_cells(line, width).join("\n"),
     }).collect::<Vec<_>>().join("\n");
     format!("{text}\n\nTaskbar: {taskbar}. Window switcher requires its preference enabled.\nShipped Icewine bindings. Host/user overrides can change them; optional tools and the active layout affect availability. Up/Down scrolls.")
 }
@@ -767,12 +839,14 @@ fn review_utilities(lines: Vec<String>) -> io::Result<bool> {
                 if frame.area().width < 80 || frame.area().height < 24 {
                     frame.render_widget(Paragraph::new("Icewine needs an 80 x 24 terminal.\nResize to continue; Esc: cancel."), frame.area()); return;
                 }
-                let block = Block::bordered().title(" Utilities / Review ").padding(Padding::uniform(1));
-                let inner = block.inner(frame.area());
-                frame.render_widget(block, frame.area());
-                let body = Rect::new(inner.x, inner.y, inner.width, inner.height - 3);
+                let area = frame.area();
+                let inner = Rect::new(area.x + 2, area.y + 1, area.width - 4, area.height - 2);
+                frame.render_widget(Block::bordered().border_type(BorderType::Rounded), area);
+                frame.render_widget(Paragraph::new("Utilities / Review"), Rect::new(inner.x, inner.y, inner.width, 1));
+                frame.render_widget(Paragraph::new(format!("├{}┤", "─".repeat(area.width as usize - 2))), Rect::new(area.x, area.y + 2, area.width, 1));
+                let body = Rect::new(inner.x, area.y + 4, inner.width, inner.height - 7);
                 frame.render_widget(Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).scroll((scroll, 0)), body);
-                buttons = [Rect::new(inner.x, inner.bottom() - 2, 11, 1), Rect::new(inner.x + 14, inner.bottom() - 2, 10, 1)];
+                buttons = [Rect::new(inner.x, inner.bottom() - 3, 9, 1), Rect::new(inner.x + 12, inner.bottom() - 3, 8, 1)];
                 for (index, label) in ["[ Apply ]", "[ Back ]"].iter().enumerate() {
                     frame.render_widget(Paragraph::new(*label).style(if apply == (index == 0) { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default().fg(Color::Cyan) }), buttons[index]);
                 }
@@ -815,10 +889,13 @@ fn confirm(title: &str, lines: Vec<String>) -> io::Result<bool> {
                     frame.render_widget(Paragraph::new("Icewine needs an 80 x 24 terminal.\nResize to continue; Esc: cancel."), frame.area());
                     return;
                 }
-                let block = Block::bordered().title(title).padding(Padding::uniform(1));
-                let inner = block.inner(frame.area());
-                frame.render_widget(block, frame.area());
-                let [body, help] = Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).areas(inner);
+                let area = frame.area();
+                let inner = Rect::new(area.x + 2, area.y + 1, area.width - 4, area.height - 2);
+                frame.render_widget(Block::bordered().border_type(BorderType::Rounded), area);
+                frame.render_widget(Paragraph::new(title.trim()), Rect::new(inner.x, inner.y, inner.width, 1));
+                frame.render_widget(Paragraph::new(format!("├{}┤", "─".repeat(area.width as usize - 2))), Rect::new(area.x, area.y + 2, area.width, 1));
+                let body = Rect::new(inner.x, area.y + 4, inner.width, inner.height - 6);
+                let help = Rect::new(inner.x, inner.bottom() - 2, inner.width, 2);
                 frame.render_widget(Paragraph::new(lines.join("\n"))
                     .wrap(ratatui::widgets::Wrap { trim: false }).scroll((scroll, 0)), body);
                 frame.render_widget(Paragraph::new("Up/down: scroll   I: continue\nEsc/Q/Ctrl+C: cancel"), help);
