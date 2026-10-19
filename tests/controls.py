@@ -1305,7 +1305,8 @@ ShellRoot {
         }
     }
     FileView { id: tailscaleRelease; path: Qt.resolvedUrl("tailscale-release") }
-    FileView { id: tailscaleMode; path: Qt.resolvedUrl("tailscale-mode") }
+    // Each mode must reach disk before the next fake CLI process reads it.
+    FileView { id: tailscaleMode; path: Qt.resolvedUrl("tailscale-mode"); blockWrites: true }
     function checkTailscaleLifetime() {
         const connection = root.findAccessible(networkPages, "Tailscale connection")
         const picker = root.findAccessible(networkPages, "Exit node")

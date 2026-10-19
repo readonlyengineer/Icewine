@@ -1,5 +1,8 @@
 // Run: node quickshell/tests/metrics.js
 const assert = require("node:assert/strict")
+const fs = require("node:fs")
+const path = require("node:path")
+const vm = require("node:vm")
 const m = require("../modules/topbar/Metrics.js")
 
 const line = (name, rx, tx) => `${name}: ${rx} 0 0 0 0 0 0 0 ${tx} 0 0 0 0 0 0 0`
@@ -40,6 +43,7 @@ const definitions = m.sensorDefinitions([
     "temperature\t/sys/class/drm/card0/device/hwmon/hwmon2/temp1_input\tgpu\t0000:03:00.0\tamdgpu\tedge",
     "temperature\t/sys/class/drm/card1/device/hwmon/hwmon3/temp1_input\tgpu\t0000:04:00.0\tnouveau\tGPU",
     "temperature\t/sys/class/hwmon/hwmon4/temp1_input\tgpu\tbad\tamdgpu\tedge",
+    "usage\t/sys/class/drm/card2/device/gpu_busy_percent\tgpu\t0000:05:00.0\tdrm\tUsage",
     "broken"
 ].join("\n"))
 assert.deepEqual(definitions, [
@@ -50,16 +54,50 @@ assert.deepEqual(definitions, [
     { kind: "temperature", path: "/sys/class/drm/card0/device/hwmon/hwmon2/temp1_input",
         role: "gpu", device: "0000:03:00.0", title: "GPU 0000:03:00.0", label: "Edge" },
     { kind: "temperature", path: "/sys/class/drm/card1/device/hwmon/hwmon3/temp1_input",
-        role: "gpu", device: "0000:04:00.0", title: "GPU 0000:04:00.0", label: "GPU" }
+        role: "gpu", device: "0000:04:00.0", title: "GPU 0000:04:00.0", label: "GPU" },
+    { kind: "usage", path: "/sys/class/drm/card2/device/gpu_busy_percent", role: "gpu",
+        device: "0000:05:00.0", title: "GPU 0000:05:00.0", label: "Usage" }
 ])
-const samplers = definitions.map(definition => ({ ...definition,
-    kind: definition.kind === "usage" ? "gpu" : definition.kind }))
+// Exercise the real delegate bindings and sampler method, without a second
+// implementation of the definition-to-sampler contract.
+const systemMetrics = fs.readFileSync(path.join(__dirname, "../modules/topbar/SystemMetrics.qml"), "utf8")
+const delegate = systemMetrics.match(/delegate: MetricSampler \{[\s\S]*?^        \}/m)[0]
+const samplerSource = fs.readFileSync(path.join(__dirname, "../modules/topbar/MetricSampler.qml"), "utf8")
+const record = samplerSource.match(/    function record\(text\) \{[\s\S]*?^    \}/m)[0]
+const samplers = definitions.map(modelData => {
+    const sampler = vm.createContext({ modelData, Metrics: m, history: [], current: null,
+        previous: null, previousTime: 0, busy: false })
+    for (const property of ["kind", "path", "title", "role", "device", "label"]) {
+        const binding = delegate.match(new RegExp(`^            (?:readonly property string )?${property}: (.+)$`, "m"))[1]
+        sampler[property] = vm.runInContext(binding, sampler)
+        assert.equal(sampler[property], modelData[property])
+    }
+    vm.runInContext(record, sampler)
+    return sampler
+})
+for (const sampler of samplers) sampler.record(sampler.kind === "usage" ? "42\n" : "45000\n")
+assert.equal(samplers[1].current, 42)
+assert.equal(samplers[2].current, 45)
+assert.equal(samplers[1].history[0].values[0], 42)
+assert.equal(samplers[2].history[0].values[0], 45)
 assert.deepEqual(m.gpuGroups(samplers), [
     { device: "0000:03:00.0", title: "GPU 0000:03:00.0",
         usage: samplers[1], temperature: samplers[2] },
     { device: "0000:04:00.0", title: "GPU 0000:04:00.0",
-        usage: null, temperature: samplers[3] }
+        usage: null, temperature: samplers[3] },
+    { device: "0000:05:00.0", title: "GPU 0000:05:00.0",
+        usage: samplers[4], temperature: null }
 ])
+samplers[1].record("101")
+const unavailable = m.gpuGroups(samplers)
+assert.equal(unavailable[0].usage, samplers[1])
+assert.equal(unavailable[0].usage.current, null)
+assert.equal(unavailable[0].usage.history.at(-1).values[0], null)
+assert.equal(unavailable[0].temperature.current, 45)
+assert.equal(unavailable[1].usage, null)
+assert.equal(unavailable[1].temperature.current, 45)
+assert.equal(unavailable[2].usage.current, 42)
+assert.equal(unavailable[2].temperature, null)
 assert.equal(m.sensor("45000\n", true), 45)
 assert.equal(m.sensor("-5000\n", true), -5)
 assert.equal(m.sensor("-300000\n", true), null)

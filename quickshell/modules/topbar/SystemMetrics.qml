@@ -99,7 +99,7 @@ Scope {
             readonly property string label: modelData.label
             clock: root
             path: modelData.path
-            kind: modelData.kind === "usage" ? "gpu" : modelData.kind
+            kind: modelData.kind
         }
         onObjectAdded: (index, object) => root.sensors = root.sensors.concat([object])
         onObjectRemoved: (index, object) => root.sensors = root.sensors.filter(sensor => sensor !== object)

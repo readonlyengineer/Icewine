@@ -110,7 +110,7 @@ function gpuGroups(sensors) {
             .map(sensor => sensor.device))].map(device => ({
         device,
         title: sensors.find(sensor => sensor.device === device).title,
-        usage: sensors.find(sensor => sensor.device === device && sensor.kind === "gpu") ?? null,
+        usage: sensors.find(sensor => sensor.device === device && sensor.kind === "usage") ?? null,
         temperature: sensors.find(sensor => sensor.device === device
             && sensor.kind === "temperature") ?? null
     }))
