@@ -633,7 +633,12 @@ fn bootstrap(directory: &str, revision: &str) -> Result<ExitCode, Box<dyn std::e
     let archives = fs::read_dir(&directory)?.filter_map(Result::ok).map(|entry| entry.path())
         .filter(|path| path.file_name().is_some_and(|name| {
             let name = name.to_string_lossy();
-            name.starts_with("icewine-0.1-1-x86_64.pkg.tar.") && !name.ends_with(".sig")
+            name.strip_prefix("icewine-")
+                .and_then(|name| name.split_once("-x86_64.pkg.tar."))
+                .and_then(|(version, extension)| version.rsplit_once('-').filter(|_| !extension.is_empty()))
+                .is_some_and(|(version, release)| [version, release].iter().all(|value|
+                    value.split('.').all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit()))))
+                && !name.ends_with(".sig")
         })).collect::<Vec<_>>();
     if archives.len() != 1 || !archives[0].is_file() || archives[0].is_symlink() {
         return Err("Expected one regular Icewine base archive; preparation incomplete".into());

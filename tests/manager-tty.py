@@ -138,7 +138,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, incomplete=False, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None):
         global last_output, last_frames, last_widget_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.write_text("")  # A run may legitimately invoke no external tools.
@@ -163,13 +163,15 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                    ICEWINE_WALLPAPER_DATA_HOME=str(root / "data"), TMPDIR=str(root))
         arguments = [str(binary)]
         if bootstrap:
-            package_dir = root / "packages"
-            package_dir.mkdir(exist_ok=True)
+            package_dir = Path(tempfile.mkdtemp(dir=root))
             (package_dir / "source-revision").write_text("a"*40+"\n")
-            archive = package_dir / "icewine-0.1-1-x86_64.pkg.tar.zst"
-            archive.unlink(missing_ok=True)
-            if not incomplete: archive.write_bytes(b"synthetic package")
-            arguments += ["--bootstrap", str(package_dir), "a"*40]
+            for name, kind in ({"icewine-0.1-1-x86_64.pkg.tar.zst": "file"} if archives is None else archives).items():
+                archive = package_dir / name
+                if kind == "symlink": archive.symlink_to(package_dir / "source-revision")
+                elif kind == "directory": archive.mkdir()
+                elif kind == "fifo": os.mkfifo(archive)
+                else: archive.write_bytes(b"synthetic package")
+            arguments += ["--bootstrap", str(package_dir), revision]
         process = subprocess.Popen(arguments, stdin=slave, stdout=slave, stderr=slave, env=env)
         os.close(slave)
         output = bytearray()
@@ -245,12 +247,14 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert code == (0 if valid and apply_exit == 0 else 1), output.decode(errors="replace")
         if bootstrap:
             if not valid:
-                assert not sent and b"preparation incomplete" in output
+                assert not sent and (b"preparation incomplete" in output or b"Invalid prepared source revision" in output)
+                assert tool_log.read_text() == ""
                 return []
             if size[1] < 80 or size[0] < 24:
                 assert sent and b"Resize to continue; Esc: cancel." in rendered
             else:
                 assert sent
+            if apply_exit: assert b"Base installation failed; packages may have changed" in output
             return [] if not tool_log.exists() else [json.loads(line) for line in tool_log.read_text().splitlines()]
         if not valid:
             assert not sent
@@ -300,7 +304,24 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         sys.exit(0)
     no_tty = subprocess.run([str(binary)], stdin=subprocess.DEVNULL, capture_output=True)
     assert no_tty.returncode == 1 and b"A terminal is required" in no_tty.stderr
-    assert run(b"", "", valid=False, bootstrap=True, incomplete=True) == []
+    assert run(b"", "", valid=False, bootstrap=True, archives={}) == []
+    base = "icewine-12.34.5-6.2-x86_64.pkg.tar.zst"
+    ignored = {name: "file" for name in (
+        "icewine-session-12.34.5-6.2-x86_64.pkg.tar.zst",
+        "icewine-handheld-12.34.5-6.2-x86_64.pkg.tar.zst",
+        base+".sig", "icewine-12.34.5-6.2-aarch64.pkg.tar.zst",
+        "icewine-next-1-x86_64.pkg.tar.zst", "icewine-1..2-1-x86_64.pkg.tar.zst",
+        "icewine-1--x86_64.pkg.tar.zst", "icewine-1-1-x86_64.pkg.tar.")}
+    assert run(b"", "", valid=False, bootstrap=True, archives=ignored) == []
+    calls = run(b"i", "", bootstrap=True, archives={base: "file", **ignored})
+    assert calls[0][:3] == ["sudo", "pacman", "-U"] and Path(calls[0][3]).name == base
+    assert len(calls) == 2 and calls[1] == ["icewine-manage"]
+    assert run(b"", "", valid=False, bootstrap=True,
+               archives={base: "file", "icewine-0.1-1-x86_64.pkg.tar.xz": "file"}) == []
+    for kind in ("symlink", "directory", "fifo"):
+        assert run(b"", "", valid=False, bootstrap=True, archives={base: kind}) == []
+    for revision in ("a"*39, "A"*40, "g"*40, "b"*40):
+        assert run(b"", "", valid=False, bootstrap=True, revision=revision) == []
     assert run(b"\x1b", "", bootstrap=True) == []
     assert run(b"\x03", "", bootstrap=True) == []
     assert run(b"i\x1b", "", bootstrap=True, size=(24, 79)) == []
