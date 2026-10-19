@@ -285,12 +285,25 @@ class Backend:
                 entry.update(fingerprint=fingerprint(public), type=public.split()[0])
             record = self.records.get(public, {})
             entry.update(origin=record.get("origin", ""), temporary=record.get("temporary", False))
+            entry["importPath"] = ""
+            for candidate in entry["paths"]:
+                try:
+                    info = os.stat(candidate, follow_symlinks=False)
+                    if (Path(candidate).is_absolute() and not candidate.endswith(".pub")
+                            and stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+                            and not info.st_mode & 0o077):
+                        entry["importPath"] = candidate
+                        break
+                except OSError:
+                    pass
             result.append(entry)
         return dict(entries=result, available=available, error=error)
 
-    def add(self, fd, phrase, origin, path=""):
+    def add(self, fd, phrase, origin, path="", expected=""):
         public = public_fields(native(["ssh-keygen", "-y", "-f", f"/proc/self/fd/{fd}"],
                                       phrase=phrase, descriptors=(fd,)))
+        if expected and fingerprint(public) != expected:
+            raise Unavailable("Selected identity changed. Refresh and choose the key again.")
         before = self.loaded()
         if public in before:
             return "Already loaded; existing identity kept", public
@@ -436,6 +449,9 @@ class Backend:
             message, public, saved = "", "", ""
             if action == "import":
                 path = request.get("path", "")
+                expected = request.get("expectedFingerprint", "")
+                if not isinstance(expected, str) or (expected and not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", expected)):
+                    raise Unavailable("Invalid selected SSH identity")
                 if "private" in request:
                     if path:
                         raise Unavailable("Choose pasted text or a file, not both")
@@ -455,7 +471,7 @@ class Backend:
                     raise Unavailable("Private key is empty or too large")
                 with memory(private) as fd:
                     del private
-                    message, public = self.add(fd, request.get("passphrase", ""), "Imported temporarily", path)
+                    message, public = self.add(fd, request.get("passphrase", ""), "Imported temporarily", path, expected)
             elif action == "generate":
                 message, public, saved = self.generate(request)
             elif action == "remove":
@@ -489,7 +505,7 @@ def main():
         del raw
         if not isinstance(request, dict):
             raise Unavailable("Invalid SSH request")
-        for name in ("private", "passphrase", "confirmation", "path", "public"):
+        for name in ("private", "passphrase", "confirmation", "path", "public", "expectedFingerprint"):
             if not isinstance(request.get(name, ""), str):
                 raise Unavailable("Invalid SSH input")
         if any(c in request.get("passphrase", "") for c in "\r\n\0") or len(request.get("passphrase", "").encode()) > 1000:

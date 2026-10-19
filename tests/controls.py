@@ -12,6 +12,8 @@ import subprocess
 import sys
 import tempfile
 
+SSH_PUBLIC = "ssh-rsa " + "A" * 700
+
 QML = """import QtQuick
 import QtQuick.Window
 import QtTest
@@ -972,12 +974,19 @@ ShellRoot {
         root.findAccessible(ssh, "Import SSH key").click()
         const path = root.findAccessible(ssh, "SSH key path")
         const phrase = root.findAccessible(ssh, "SSH key passphrase")
-        const pasteMode = root.findAccessible(ssh, "Import SSH key from pasted text")
+        const fileMode = root.findAccessible(ssh, "Import SSH key from file")
         const privateInput = root.findAccessible(ssh, "Pasted SSH private key")
-        pasteMode.checked = true
+        networkKeys.tryCompare(privateInput, "activeFocus", true)
+        if (fileMode.checked || path.visible || !privateInput.visible) throw new Error("Import is not paste-default")
         privateInput.text = "synthetic private key\nsecond line"
-        pasteMode.checked = false
-        if (privateInput.text) throw new Error("Switching SSH input retained private text")
+        phrase.text = "fixture secret"
+        fileMode.checked = true
+        if (privateInput.text || phrase.text) throw new Error("Switching SSH input retained secrets")
+        path.text = "/synthetic/private-key"
+        phrase.text = "fixture secret"
+        fileMode.checked = false
+        if (path.text || phrase.text) throw new Error("Returning to paste retained file secrets")
+        fileMode.checked = true
         path.text = "/synthetic/private-key"
         phrase.text = "fixture secret"
         if (phrase.echoMode !== TextInput.Password) throw new Error("SSH passphrase is visible")
@@ -989,13 +998,17 @@ ShellRoot {
         settleCards(page)
         networkKeys.tryCompare(ssh, "busy", false)
         root.findAccessible(ssh, "Import SSH key").click()
-        pasteMode.checked = true
         privateInput.text = "synthetic private key\nsecond line"
         phrase.text = "fixture secret"
         root.findAccessible(ssh, "Cancel SSH key action").click()
         if (privateInput.text || phrase.text || ssh.form) throw new Error("Cancel retained pasted SSH input")
         root.findAccessible(ssh, "Import SSH key").click()
-        pasteMode.checked = true
+        networkKeys.tryCompare(privateInput, "activeFocus", true)
+        privateInput.text = "synthetic private key\nsecond line"
+        phrase.text = "fixture secret"
+        networkKeys.keyClick(Qt.Key_Escape)
+        if (privateInput.text || phrase.text || ssh.form) throw new Error("Escape retained SSH input")
+        root.findAccessible(ssh, "Import SSH key").click()
         privateInput.text = "synthetic private key\nsecond line"
         phrase.text = "fixture secret"
         networkWindow.height = 350
@@ -1011,6 +1024,42 @@ ShellRoot {
         networkKeys.tryCompare(ssh, "busy", false)
         networkKeys.tryCompare(ssh, "message", "Pasted import received")
         if (ssh.pending || ssh.publicKey.includes("private")) throw new Error("Private input escaped to public state")
+        const disk = {public: "ssh-ed25519 disk-public", paths: ["/synthetic/selected-key"], importPath: "/synthetic/selected-key",
+            loaded: false, temporary: false, type: "ssh-ed25519", fingerprint: "SHA256:disk"}
+        ssh.entries = [ssh.entries[0], disk, Object.assign({}, disk, {public: "ssh-ed25519 public-only", paths: ["/missing/private"], importPath: "", fingerprint: "SHA256:public-only"})]
+        let load = root.findAccessible(ssh, "Load SSH key SHA256:disk")
+        if (!load.visible || root.findAccessible(ssh, "Load SSH key SHA256:public-only").visible)
+            throw new Error("Load did not guard public-only inventory")
+        ssh.available = false
+        ssh.request("import")
+        if (ssh.busy || ssh.pending) throw new Error("Unavailable keyboard request was accepted")
+        if (load.enabled) throw new Error("Unavailable agent allows Load")
+        ssh.available = true
+        ssh.busy = true
+        if (load.enabled) throw new Error("Busy agent allows Load")
+        ssh.busy = false
+        load.click()
+        networkKeys.tryCompare(phrase, "activeFocus", true)
+        if (!fileMode.checked || path.text !== disk.importPath || privateInput.text || ssh.expectedFingerprint !== disk.fingerprint)
+            throw new Error("Selected-file Load targeted the wrong path/input")
+        path.text = "/synthetic/intentional-edit"
+        if (ssh.expectedFingerprint) throw new Error("Path edit retained selected identity")
+        ssh.openForm("import", disk.importPath, disk.fingerprint)
+        fileMode.checked = false
+        if (ssh.expectedFingerprint) throw new Error("Source edit retained selected identity")
+        root.findAccessible(ssh, "Cancel SSH key action").click()
+        load = root.findAccessible(ssh, "Load SSH key SHA256:disk")
+        load.click()
+        networkKeys.tryCompare(phrase, "activeFocus", true)
+        root.findAccessible(ssh, "Cancel SSH key action").click()
+        if (ssh.expectedFingerprint) throw new Error("Cancel retained selected identity")
+        root.findAccessible(ssh, "Load SSH key SHA256:disk").click()
+        networkKeys.tryCompare(phrase, "activeFocus", true)
+        phrase.text = "fixture secret"
+        networkKeys.keyClick(Qt.Key_Return)
+        if (path.text || phrase.text || ssh.form || ssh.expectedFingerprint) throw new Error("File submit retained secrets")
+        networkKeys.tryCompare(ssh, "busy", false)
+        networkKeys.tryCompare(ssh, "message", "Selected file import received")
         const publicButton = root.findAccessible(ssh, "Show public SSH key SHA256:fixture")
         let identity = publicButton.parent.parent.parent
         if (identity.color.toString() !== Theme.Palette.surface.toString() || identity.radius !== 9
@@ -1019,6 +1068,28 @@ ShellRoot {
         publicButton.forceActiveFocus()
         networkKeys.keyClick(Qt.Key_Return)
         if (ssh.publicKey !== "ssh-ed25519 fixture-public") throw new Error("Keyboard public-key display failed")
+        const publicText = descendants(identity, item => item instanceof Text && item.text === "ssh-ed25519 fixture-public")[0]
+        if (!publicText || !publicText.visible) throw new Error("Public key escaped its identity")
+        const copy = root.findAccessible(identity, "Copy public SSH key SHA256:fixture")
+        for (let step = 0; step < 4 && !copy.activeFocus; step++) networkKeys.keyClick(Qt.Key_Down)
+        if (!copy.activeFocus || page.selectedCard !== 2) throw new Error("Down did not reach inline Copy")
+        networkKeys.wait(30)
+        const copyTop = copy.mapToItem(ssh, 0, 0).y
+        if (identity.height <= ssh.height || copyTop < 0 || copyTop + copy.height > ssh.height + 1)
+            throw new Error("Long public-key Copy focus is clipped: y=" + copyTop + " height=" + copy.height + " viewport=" + ssh.height + " identity=" + identity.height + " contentY=" + ssh.contentY + " contentHeight=" + ssh.contentHeight)
+        networkKeys.keyClick(Qt.Key_Return)
+        ssh.publicKey = "ssh-ed25519 different-public"
+        networkKeys.tryCompare(ssh, "message", "Public key copied")
+        publicButton.click()
+        publicButton.click()
+        if (publicText.visible || copy.visible) throw new Error("Public key disclosure did not collapse")
+        ssh.entries = []
+        if (!descendants(ssh, item => item instanceof Text && item.visible && item.text.startsWith("No identities discovered." )).length)
+            throw new Error("Missing empty inventory guidance")
+        ssh.error = "Synthetic agent error"
+        if (!descendants(ssh, item => item instanceof Text && item.visible && item.text === ssh.error).length)
+            throw new Error("Agent error hidden")
+        ssh.error = ""
         root.findAccessible(ssh, "Generate SSH key").click()
         phrase.text = "fixture secret"
         root.findAccessible(ssh, "Confirm SSH passphrase").text = "fixture secret"
@@ -1034,7 +1105,6 @@ ShellRoot {
         networkKeys.tryCompare(ssh, "available", true)
         if (ssh.entries.length !== 1) throw new Error("Reopened SSH did not refresh public inventory")
         root.findAccessible(ssh, "Import SSH key").click()
-        pasteMode.checked = true
         privateInput.text = "synthetic private key\nsecond line"
         phrase.text = "fixture secret"
         networkPages.currentPage = "audio"
@@ -2889,6 +2959,8 @@ for action in ["Lock", "Sleep", "Reboot", "Shutdown"]:
 bluetooth = (source / "quickshell/modules/topbar/popouts/Bluetooth.qml").read_text()
 assert re.search(r'ActionButton\s*\{\s*id: forget', bluetooth)
 assert 'Accessible.name: "Forget "' in bluetooth and 'onClicked: deviceRow.forgotten()' in bluetooth
+QML = QML.replace("ssh-ed25519 fixture-public", SSH_PUBLIC)
+
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     (root / "icewine").mkdir()
@@ -2944,15 +3016,21 @@ for line in sys.stdin:
 request = json.load(sys.stdin)
 if request["action"] == "generate": time.sleep(2)
 message = ""
+if request["action"] == "import" and "path" in request:
+    assert request["path"] == "/synthetic/selected-key" and request["passphrase"] == "fixture secret" and request["expectedFingerprint"] == "SHA256:disk", "Selected path mismatch"
+    message = "Selected file import received"
 if request["action"] == "import" and "private" in request:
     assert request["private"] == "synthetic private key\\nsecond line", "Pasted transport mismatch"
-    assert request["passphrase"] == "fixture secret" and not request.get("path"), "Pasted request mismatch"
+    assert request["passphrase"] == "fixture secret" and not request.get("path") and not request.get("expectedFingerprint"), "Pasted request mismatch"
     message = "Pasted import received"
 print(json.dumps(dict(available=True, error="", entries=[dict(public="ssh-ed25519 fixture-public",
     paths=[], loaded=True, temporary=True, origin="Generated temporarily", type="ssh-ed25519",
     fingerprint="SHA256:fixture")], message=message)))
-''')
+'''.replace("ssh-ed25519 fixture-public", SSH_PUBLIC))
     ssh_command.chmod(0o755)
+    copy_public = root / "bin/wl-copy"
+    copy_public.write_text("#!" + sys.executable + "\nimport sys\nassert sys.argv[1:] == ['--type', 'text/plain']\nassert sys.stdin.read() == 'ssh-ed25519 fixture-public'\n".replace("ssh-ed25519 fixture-public", SSH_PUBLIC))
+    copy_public.chmod(0o755)
     mock = root / "bin/icewine-monitor-brightness"
     mock.write_text("#!" + shutil.which("bash") + '\nprintf "%s\\n" "$1" >> "' + str(root / "brightness-calls") + '"\necho "${2:-37}"\n')
     mock.chmod(0o755)

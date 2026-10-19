@@ -17,14 +17,16 @@ Flickable {
     property string error: ""
     property string message: ""
     property string publicKey: ""
+    property string expectedFingerprint: ""
     implicitHeight: 480
     contentHeight: content.implicitHeight + 24
     boundsBehavior: Flickable.StopAtBounds
     clip: true
 
     function clearSecrets() {
+        expectedFingerprint = ""
         privateKey.clear()
-        pasted.checked = false
+        fromFile.checked = false
         keyPath.text = ""
         passphrase.text = ""
         confirmation.text = ""
@@ -35,16 +37,19 @@ Flickable {
         clearSecrets()
         form = ""
         contentY = 0
+        publicKey = ""
         pending = null
         if (backend.running) backend.signal(15)
     }
     function request(action, publicValue = "") {
-        if (busy || !active) return
+        if (busy || !active || (action !== "status" && !available)) return
         pending = {action: action}
         if (action === "remove") pending.public = publicValue
         if (action === "import" || action === "generate") {
-            if (action === "import" && pasted.checked) pending.private = privateKey.text
+            if (action === "import" && !fromFile.checked) pending.private = privateKey.text
             else pending.path = keyPath.text
+            if (action === "import" && fromFile.checked && expectedFingerprint)
+                pending.expectedFingerprint = expectedFingerprint
             pending.passphrase = passphrase.text
             if (action === "generate") {
                 pending.storage = permanent.checked ? "permanent" : "temporary"
@@ -61,14 +66,18 @@ Flickable {
         deadline.restart()
         backend.running = true
     }
-    function openForm(kind) {
+    function openForm(kind, path = "", fingerprint = "") {
+        if (!active || busy || !available) return
         clearSecrets()
         form = kind
+        fromFile.checked = kind === "import" && path !== ""
+        keyPath.text = path
+        expectedFingerprint = fingerprint
         publicKey = ""
         contentY = 0
         Qt.callLater(() => {
             if (root.active && root.form === kind)
-                (kind === "import" ? keyPath : passphrase).forceActiveFocus()
+                (kind === "import" && !path ? privateKey : passphrase).forceActiveFocus()
         })
     }
     function reveal(item) {
@@ -126,9 +135,10 @@ Flickable {
     }
     Process {
         id: copy
+        property string value: ""
         command: ["wl-copy", "--type", "text/plain"]
         stdinEnabled: true
-        onStarted: { write(root.publicKey); stdinEnabled = false }
+        onStarted: { write(value); value = ""; stdinEnabled = false }
         onExited: (code, status) => root.message = code === 0 && status === 0
             ? "Public key copied" : "Could not copy the public key"
     }
@@ -138,15 +148,6 @@ Flickable {
         id: content
         x: 12; y: 12; width: parent.width - 24
         spacing: 8
-        Text {
-            width: parent.width
-            visible: root.form === ""
-            text: "X unloads a temporary identity from the agent. Files, remote authorisation and existing connections are kept."
-            textFormat: Text.PlainText
-            color: Theme.Palette.muted
-            font: importButton.font
-            wrapMode: Text.Wrap
-        }
         Text {
             width: parent.width
             text: root.error || (root.busy ? "Working…" : root.message || (!root.available ? "Local agent unavailable" : ""))
@@ -160,7 +161,7 @@ Flickable {
         Row {
             visible: root.form === ""
             width: parent.width; spacing: 6
-            ActionButton { id: importButton; width: (parent.width - 12) / 3; text: "Import"; Accessible.name: "Import SSH key"; enabled: root.active && root.available && !root.busy; onClicked: root.openForm("import") }
+            ActionButton { id: importButton; width: (parent.width - 12) / 3; text: "Import key"; Accessible.name: "Import SSH key"; enabled: root.active && root.available && !root.busy; onClicked: root.openForm("import") }
             ActionButton { width: (parent.width - 12) / 3; text: "Generate"; Accessible.name: "Generate SSH key"; enabled: root.active && root.available && !root.busy; onClicked: root.openForm("generate") }
             ActionButton { width: (parent.width - 12) / 3; text: "Refresh"; Accessible.name: "Refresh SSH keys"; enabled: root.active && !root.busy; onClicked: root.request("status") }
         }
@@ -170,26 +171,26 @@ Flickable {
             Text {
                 visible: root.form === "import"
                 width: parent.width
-                text: "Import temporarily · agent only. Existing key files are kept; pasted keys are not saved."
+                text: "Load a temporary key."
                 textFormat: Text.PlainText
                 color: Theme.Palette.muted
                 font: importButton.font
                 wrapMode: Text.Wrap
             }
             Controls.CheckBox {
-                id: pasted
+                id: fromFile
                 visible: root.form === "import"
-                text: "Paste private key text"
-                Accessible.name: "Import SSH key from pasted text"
+                text: "Import from file"
+                Accessible.name: "Import SSH key from file"
                 font: importButton.font
-                onCheckedChanged: { privateKey.clear(); keyPath.clear() }
+                onCheckedChanged: { root.expectedFingerprint = ""; privateKey.clear(); keyPath.clear(); passphrase.clear() }
                 onActiveFocusChanged: if (activeFocus) root.reveal(this)
             }
             Controls.ScrollView {
                 id: privateInput
                 width: parent.width
                 height: 120
-                visible: root.form === "import" && pasted.checked
+                visible: root.form === "import" && !fromFile.checked
                 contentWidth: availableWidth
                 clip: true
                 Controls.ScrollBar.horizontal.policy: Controls.ScrollBar.AlwaysOff
@@ -217,9 +218,10 @@ Flickable {
             Controls.TextField {
                 id: keyPath
                 width: parent.width
-                visible: (root.form === "import" && !pasted.checked) || permanent.checked
+                visible: (root.form === "import" && fromFile.checked) || permanent.checked
                 placeholderText: root.form === "import" ? "Existing private key: absolute path" : "Save to: absolute new key path"
                 Accessible.name: "SSH key path"
+                onTextChanged: root.expectedFingerprint = ""
                 onAccepted: passphrase.forceActiveFocus()
                 selectByMouse: true
                 font: importButton.font
@@ -262,8 +264,8 @@ Flickable {
             Text {
                 visible: root.form === "generate"
                 width: parent.width
-                text: permanent.checked ? "Saved files survive reboot. Load them later using Import. X never deletes them."
-                    : "The generated private key is discarded after loading. X or reboot removes it from the agent."
+                text: permanent.checked ? "Saved files survive reboot. Load them later using Import. Unload never deletes them."
+                    : "The generated private key is discarded after loading. Unload or reboot removes it from the agent."
                 textFormat: Text.PlainText
                 color: Theme.Palette.muted
                 font: importButton.font
@@ -271,7 +273,7 @@ Flickable {
             }
             Row {
                 spacing: 6
-                ActionButton { onActiveFocusChanged: if (activeFocus) root.reveal(this); text: "Confirm"; Accessible.name: "Confirm SSH key action"; enabled: root.active && !root.busy; onClicked: root.request(root.form) }
+                ActionButton { onActiveFocusChanged: if (activeFocus) root.reveal(this); text: "Confirm"; Accessible.name: "Confirm SSH key action"; enabled: root.active && root.available && !root.busy; onClicked: root.request(root.form) }
                 ActionButton { onActiveFocusChanged: if (activeFocus) root.reveal(this); text: "Cancel"; Accessible.name: "Cancel SSH key action"; onClicked: root.cancel() }
             }
         }
@@ -281,22 +283,10 @@ Flickable {
             onClicked: root.cancel()
         }
         Text {
-            visible: root.form === "" && root.publicKey !== ""
-            width: parent.width
-            text: root.publicKey
-            textFormat: Text.PlainText
-            color: Theme.Palette.foreground
-            font: importButton.font
-            wrapMode: Text.WrapAnywhere
-        }
-        ActionButton {
-            visible: root.form === "" && root.publicKey !== ""
-            text: "Copy public key"; enabled: !copy.running
-            onClicked: { copy.stdinEnabled = true; copy.running = true }
-        }
-        Text {
             visible: !root.form && !root.busy && root.entries.length === 0
-            text: "No discoverable client identities"
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "No identities discovered.\nImport an existing key or generate a new one."
             color: Theme.Palette.muted
             font: importButton.font
         }
@@ -312,14 +302,29 @@ Flickable {
                 Column {
                     id: details
                     x: 10; y: 10; width: parent.width - 20; spacing: 6
+                    Row {
+                        width: parent.width
+                        Text {
+                            width: parent.width - status.width - 6
+                            text: identity.modelData.paths.length ? identity.modelData.paths[0].split("/").pop() : identity.modelData.temporary ? "Temporary identity" : "Agent identity"
+                            elide: Text.ElideMiddle
+                            textFormat: Text.PlainText
+                            color: Theme.Palette.foreground
+                            font: importButton.font
+                        }
+                        Text {
+                            id: status
+                            text: identity.modelData.loaded ? "Loaded" : "On disk"
+                            color: identity.modelData.loaded ? Theme.Palette.success : Theme.Palette.muted
+                            font: importButton.font
+                        }
+                    }
                     Text {
                         width: parent.width
-                        text: identity.modelData.type + " · " + identity.modelData.fingerprint + "\n"
-                            + (identity.modelData.loaded ? "Loaded" : "On disk; agent " + (root.available ? "not loaded" : "unknown"))
-                            + (identity.modelData.origin ? " · " + identity.modelData.origin : "")
-                            + (identity.modelData.paths.length ? "\n" + identity.modelData.paths.join("\n") : "")
+                        text: (identity.modelData.paths.length ? identity.modelData.paths.join("\n") : "Agent only")
+                            + " · " + identity.modelData.type + "\n" + identity.modelData.fingerprint
                         textFormat: Text.PlainText
-                        color: Theme.Palette.foreground
+                        color: Theme.Palette.muted
                         font: importButton.font
                         wrapMode: Text.WrapAnywhere
                     }
@@ -328,16 +333,43 @@ Flickable {
                         ActionButton {
                             text: "Public key"; visible: !!identity.modelData.public
                             Accessible.name: "Show public SSH key " + identity.modelData.fingerprint
-                            onActiveFocusChanged: if (activeFocus) root.reveal(identity)
-                            onClicked: { root.publicKey = identity.modelData.public; root.contentY = 0 }
+                            onActiveFocusChanged: if (activeFocus) root.reveal(this)
+                            onClicked: root.publicKey = root.publicKey === identity.modelData.public ? "" : identity.modelData.public
                         }
                         ActionButton {
-                            text: "×"; visible: identity.modelData.loaded && identity.modelData.temporary
+                            text: "Unload"; visible: identity.modelData.loaded && identity.modelData.temporary
                             Accessible.name: "Unload SSH key " + identity.modelData.fingerprint
-                            enabled: root.available && !root.busy
-                            onActiveFocusChanged: if (activeFocus) root.reveal(identity)
+                            enabled: root.active && root.available && !root.busy
+                            onActiveFocusChanged: if (activeFocus) root.reveal(this)
                             onClicked: root.request("remove", identity.modelData.public)
                         }
+                        ActionButton {
+                            text: "Load"
+                            visible: !identity.modelData.loaded && !!identity.modelData.importPath
+                            Accessible.name: "Load SSH key " + identity.modelData.fingerprint
+                            enabled: root.active && root.available && !root.busy
+                            onActiveFocusChanged: if (activeFocus) root.reveal(this)
+                            onClicked: root.openForm("import", identity.modelData.importPath, identity.modelData.fingerprint)
+                        }
+                    }
+                    Text {
+                        visible: !!identity.modelData.public && root.publicKey === identity.modelData.public
+                        width: parent.width
+                        text: identity.modelData.public
+                        textFormat: Text.PlainText
+                        color: Theme.Palette.foreground
+                        font: importButton.font
+                        wrapMode: Text.WrapAnywhere
+                    }
+                    ActionButton {
+                        visible: !!identity.modelData.public && root.publicKey === identity.modelData.public
+                        text: "Copy public key"
+                        Accessible.name: "Copy public SSH key " + identity.modelData.fingerprint
+                        enabled: !copy.running
+                        onActiveFocusChanged: if (activeFocus) root.reveal(this)
+                        // Disclosure layout can finish after Down has focused Copy.
+                        onYChanged: if (activeFocus) Qt.callLater(() => { if (activeFocus) root.reveal(this) })
+                        onClicked: { copy.value = identity.modelData.public; copy.stdinEnabled = true; copy.running = true }
                     }
                 }
             }

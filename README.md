@@ -360,14 +360,14 @@ Desktop controls support scrolling, dwindle, master and monocle.
 
 ### SSH identities
 
-The network stack's third card is SSH (Tab cycles cards). Import reads an
-explicit existing private-key path with owner-only permissions and a concealed
-passphrase; it keeps the original file. Generate offers Temporary (agent only)
-or Permanent (an absolute new file path and passphrase confirmation). Permanent
-files are saved for later import, without automatic loading. Public keys can be
+The network stack's third card is SSH (Tab cycles cards). Import reads
+pasted private-key text by default; Import from file selects an existing
+owner-only private-key path and keeps the original file. Passphrases are concealed.
+Generate offers Temporary (agent only) or Permanent (an absolute new file path
+and passphrase confirmation). Permanent files are saved for later import, without automatic loading. Public keys can be
 displayed/copied; private keys are never displayed or copied.
 
-X unloads only a temporary identity added by the card. It preserves files,
+Unload removes only a temporary identity added by the card. It preserves files,
 remote authorisation and existing SSH connections. Reboot removes temporary
 identities; shell/card reopening keeps them. Ordinary platform memory policy
 (including swap, hibernation and core dumps) still applies.

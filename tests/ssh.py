@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix="icewine-ssh-launcher-") as tools, tempf
                 assert "PRIVATE KEY" not in repr((args, kwargs.get("env", {})))
                 return popen(args, **kwargs)
 
-            def parse(fd, phrase, origin, path):
+            def parse(fd, phrase, origin, path, expected=""):
                 assert stat.S_IMODE(os.fstat(fd).st_mode) == 0o600
                 assert os.readlink(f"/proc/self/fd/{fd}").startswith("/memfd:")
                 observed.append(path)
@@ -121,6 +121,38 @@ with tempfile.TemporaryDirectory(prefix="icewine-ssh-launcher-") as tools, tempf
             ssh.native(["ssh-keygen", "-q", "-t", "ed25519", "-f", str(imported)], phrase=phrase, repeats=2)
             original = imported.read_bytes()
             public = ssh.public_fields(Path(str(imported) + ".pub").read_text())
+
+            # Selected-row identity survives stale sidecars and replacement after discovery.
+            expected = ssh.fingerprint(public)
+            selected = next(e for e in backend.status()["entries"] if e["public"] == public)
+            replacement = keys / "replacement"
+            ssh.native(["ssh-keygen", "-q", "-t", "ed25519", "-f", str(replacement)], phrase=phrase, repeats=2)
+            imported.write_bytes(replacement.read_bytes())
+            stale = next(e for e in backend.status()["entries"] if e["public"] == public)
+            assert stale["importPath"] == str(imported)
+            additions = []
+            real_native = ssh.native
+
+            def observe_add(args, **kwargs):
+                if args[:4] == ["ssh-add", "-q", "-k", "-"]:
+                    additions.append(True)
+                return real_native(args, **kwargs)
+
+            with mock.patch.object(ssh, "native", observe_add):
+                for row in (selected, stale):
+                    rejected(lambda: backend.dispatch(dict(action="import", path=row["importPath"],
+                             passphrase=phrase, expectedFingerprint=row["fingerprint"])), "Selected identity replacement accepted")
+                for invalid in (False, [], "SHA256:bad", "x" * 10000):
+                    rejected(lambda: backend.dispatch(dict(action="import", path=str(imported),
+                             passphrase=phrase, expectedFingerprint=invalid)), "Invalid selected identity accepted")
+                assert not additions and not backend.loaded(), "Mismatch reached ssh-add"
+                imported.write_bytes(original)
+                matching = backend.dispatch(dict(action="import", path=selected["importPath"],
+                                            passphrase=phrase, expectedFingerprint=expected))
+                assert matching["public"] == public and additions == [True]
+            backend.dispatch(dict(action="remove", public=public))
+            assert not backend.loaded()
+            print("PASS selected-row stale/replaced identity rejected before ssh-add; matching identity and bounded input")
 
             # Real SIGTERM at the final response boundary, after add() returned.
             handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
@@ -315,6 +347,22 @@ with tempfile.TemporaryDirectory(prefix="icewine-ssh-launcher-") as tools, tempf
             assert saved["public"] not in reloaded.loaded()
             assert any(e["paths"] == [str(dest)] and not e["loaded"] and not e["temporary"]
                        for e in saved["entries"] if e["public"] == saved["public"])
+            assert next(e for e in saved["entries"] if e["public"] == saved["public"])["importPath"] == str(dest)
+            # Sidecar-only discovery stays visible, but cannot offer selected-file Load.
+            dest.rename(home / "held-private")
+            assert next(e for e in reloaded.dispatch({"action": "status"})["entries"]
+                        if e["public"] == saved["public"])["importPath"] == ""
+            (home / "held-private").rename(dest)
+            dest.chmod(0o644)
+            assert next(e for e in reloaded.dispatch({"action": "status"})["entries"]
+                        if e["public"] == saved["public"])["importPath"] == ""
+            dest.chmod(0o600)
+            dest.rename(home / "held-private")
+            dest.symlink_to(home / "held-private")
+            assert next(e for e in reloaded.dispatch({"action": "status"})["entries"]
+                        if e["public"] == saved["public"])["importPath"] == ""
+            dest.unlink()
+            (home / "held-private").rename(dest)
             saved_bytes = dest.read_bytes()
             before_cancel = set(reloaded.loaded())
             real_native = ssh.native
