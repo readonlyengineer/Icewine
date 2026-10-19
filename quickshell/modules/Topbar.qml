@@ -491,7 +491,8 @@ Scope {
                     Region { item: edge.enabled ? edge : null }
                 }
                 WlrLayershell.namespace: "quickshell:topbar"
-                WlrLayershell.layer: WlrLayer.Overlay
+                // Keep the bar and its reveal edge below fullscreen, except in Above mode.
+                WlrLayershell.layer: Config.Settings.barLocation === "above" ? WlrLayer.Overlay : WlrLayer.Top
                 WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
                 Item {

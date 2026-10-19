@@ -49,6 +49,7 @@ import QtQuick.Controls
 import QtQuick.Effects
 import QtTest
 import Quickshell
+import Quickshell.Wayland
 import Quickshell.Wayland._WlrLayerShell as Native
 import qs.config as Config
 import "icewine/modules/topbar" as Bar
@@ -90,6 +91,8 @@ ShellRoot {
     Native.WlrLayershell {
         id: barRequest
         visible: false
+        layer: __BAR_LAYER__
+        keyboardFocus: __BAR_FOCUS__
         __BAR_ANCHORS__
         implicitHeight: __BAR_HEIGHT__
         exclusiveZone: __BAR_ZONE__
@@ -98,6 +101,7 @@ ShellRoot {
     Native.WlrLayershell {
         id: overlayRequest
         visible: false
+        layer: __OVERLAY_LAYER__
         __OVERLAY_ANCHORS__
         exclusionMode: __OVERLAY_MODE__
         exclusiveZone: __OVERLAY_ZONE__
@@ -164,6 +168,9 @@ ShellRoot {
                     function send(type) { root.ui = State.reduce(root.ui, {type: type, behaviour: behaviour}) }
                     function settled(visible) {
                         compare(root.barVisible, visible)
+                        compare(barRequest.layer, location === "above" ? WlrLayer.Overlay : WlrLayer.Top)
+                        compare(barRequest.keyboardFocus, WlrKeyboardFocus.None)
+                        compare(overlayRequest.layer, WlrLayer.Overlay, "Explicit widgets and radial retain their overlay")
                         tryCompare(surface, "opacity", visible ? 1 : 0)
                         tryCompare(surface, "y", root.bottomBar ? (visible
                             ? barHost.height - surface.height - root.barGap : barHost.height)
@@ -353,6 +360,9 @@ ShellRoot {
 '''
 for key, value in {'PROPERTIES': properties, 'SURFACE': surface,
                    'EDGE': block('                Item {\n                    id: edge'),
+                   'BAR_LAYER': binding('WlrLayershell.layer', bar_window),
+                   'BAR_FOCUS': binding('WlrLayershell.keyboardFocus', bar_window),
+                   'OVERLAY_LAYER': binding('WlrLayershell.layer', overlay),
                    'BAR_ANCHORS': anchors(bar_window),
                    'BAR_HEIGHT': binding('implicitHeight', bar_window),
                    'BAR_MARGINS': '\n'.join(re.findall(r'^ *margins\.[a-z]+: .+$', bar_window, re.M)),
@@ -393,4 +403,4 @@ for theme in ('tokyo-night', 'gruvbox-light'):
         output = result.stdout + result.stderr
         if result.returncode or 'BAR_GEOMETRY_PASSED' not in output or re.search(r'(ReferenceError|TypeError|FAIL!|Cannot assign)', output):
             raise AssertionError(theme + '\n' + output)
-print('bar geometry: real surface, corners, native edge/reservation/available-area requests, captured output bounds, animated transitions, foreign zones, overflow dragging, live settings, handheld/radial, dark/light at 1x/1.5x pass')
+print('bar geometry: real surface, corners, live native layer/focus and edge/reservation/available-area requests, captured output bounds, animated transitions, foreign zones, overflow dragging, live settings, handheld/radial, dark/light at 1x/1.5x pass')
