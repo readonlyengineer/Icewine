@@ -172,34 +172,36 @@ reopen it after Apply or changing themes.
 icewine
 ```
 
-Tab cycles through Installer, Appearance and Widgets. Use Up/Down or
-Shift-Tab to navigate rows, Space to select, and Enter on Apply or Cancel.
-Left/right cycles Steam, Theme or Transparency. Theme/transparency changes and
-wallpaper selections apply immediately; Installer/Appearance Apply affects utility choices.
-Widgets Save (`s`) commits only widget preferences; Cancel/Esc discards unsaved drafts.
-The module list scrolls with focus. Space toggles a card module; Left/right moves
-it to the previous/next stack, and `n` moves it to a new stack. `-`/`+` moves it
-within its stack; `[`/`]` moves its stack; Delete removes the whole stack.
-Removing a stack disables its members; removing its last member deletes the empty
-stack. The first member supplies the topbar icon. Rows show stack/member order
-and the primary, secondary, tertiary accent cycle; modules absent from stacks
-are disabled. These preferences describe configured membership, including cards
-that are temporarily unavailable.
+Select Utilities, Appearance, Widgets or Hotkeys on the left. Tab switches pane
+focus; Up/Down navigates and Enter/Space acts. Utilities Review and Apply shows
+the package/configuration plan before execution; overwrite starts unchecked.
+Theme previews locally until Use theme. Taskbar Save commits its local draft;
+Back/Escape discards it. Notifications saves immediately without changing
+history or sounds. Hotkeys describes shipped bindings and their conditions;
+host overrides can change them.
+
+Widgets shows a scrolling grid of stacks and a full-width Unassigned box.
+Arrows navigate stacks; Enter/Space enters members, Up/Down moves within them,
+and Left/Right changes stack. Escape returns to stacks. Space/click unassigns a
+member; activate an unassigned member, select a highlighted destination and
+Enter/Space/click adds it. Escape cancels placement. Toolbar controls provide
+New stack, Remove stack, Make primary, member/stack ordering and Save; `n`,
+Delete, `-`/`+`, `[`/`]` and `s` remain shortcuts. Removing an empty stack drops
+it; absent members are disabled. Stack counts and member lists scroll without
+fixed six-stack or three-member limits. The first member supplies the taskbar
+icon; live shell glyphs are used when available. Window switcher remains a
+separate checkbox. Import is unavailable.
 
 Bar Width selects 50–100% of the output (default 80%). Bar Style selects Anchored
 (default, flush edge) or Floating (pill corners with a 4-pixel gap). At 100%,
 both styles have square corners; 99% retains rounding. Overflowing workspace
 and status rows scroll horizontally by dragging or using their scrollbars.
 
-Bar Behaviour offers Autohide (Keyboard), Autohide (Keyboard & Mouse), Toggle
-(Keyboard), and Always Show. The default is keyboard hold-to-show; mouse mode
-also reveals at the screen edge. Bar Locations offers Above (default overlay),
-Top, and Bottom. Top/Bottom reserve space while visible; Bottom uses the bottom
-mouse edge and opens cards upward. Left/Right cycles these choices before Save.
-Always Show takes no keyboard focus by itself and remains visible after ordinary
-application/media handoffs. Explicit hide or capture handoff suppresses the bar until
-the next shortcut, widget or controller opening (mouse mode also permits a fresh
-edge entry); unlocking restores the selected mode.
+Taskbar Behaviour offers Autohide (Keyboard), Autohide (Keyboard + Mouse), and
+Toggle. Keyboard hold-to-show is the default; mouse mode also reveals at the
+screen edge. Existing `always` values appear as legacy and are preserved until
+explicitly changed; host policy can still enforce `always`. Position offers
+Above (default overlay), Top, and Bottom; Top/Bottom reserve space while visible.
 Notification toasts and the window switcher default to enabled. Disabling toasts
 keeps notification history and sounds; session and authentication controls remain.
 Onscreen Keyboard Access offers None (default), Launcher, or Topbar. Launcher
@@ -229,12 +231,13 @@ and symlinked parent directories are preserved even with overwrite enabled,
 including dangling links. Apply reports each skipped path. Host persistence
 remains host policy; package, service and login choices remain host-owned on NixOS.
 
-Appearance and Widgets use file ownership on every supported distribution:
-linked preferences are shown read-only, while unrelated ordinary files remain
-editable. Icewine's generated theme and implementation links keep working.
-Theme policy and widget policy still take precedence. Configure monitors is
-disabled when its main entry or HyprMon sidecar is linked; HyprMon otherwise
-owns its own live/save behaviour.
+Appearance and Widgets check file permissions at action time. Writable setting
+targets remain editable through symlinks; writes preserve links and modes.
+Read-only, dangling or unsupported targets show “- Read Only”. Default-file
+installation, ownership records and generated implementation links retain their
+separate strict preservation rules. Theme/widget policy still takes precedence.
+Setup Monitors hands the terminal to a Lua-compatible HyprMon, which owns its
+live/save behaviour and must preserve writable links.
 
 Home Manager may supply ordinary configuration or preference links without any
 Icewine Home Manager module. For example, with the normal XDG state directory:
@@ -384,8 +387,12 @@ host-dependent paths or unavailable public metadata may require explicit import.
 
 ### Screenshots
 
-Press Super+Print to open Flameshot directly, then drag to select an area.
-The handheld Screenshot action opens the monitor editor without delay.
+Utilities offers None, Simple (Hyprshot), or Advanced (Flameshot). Advanced is
+the fresh Arch default; NixOS selects it for the desktop by default and can set
+`services.icewine.screenshot = "none"` / `"simple"` / `"advanced"` declaratively.
+Super+Print uses the selected utility for region capture; the handheld action
+uses output capture. None launches no capture tool. Deselection keeps installed
+packages and each tool's personal configuration.
 
 In Flameshot, select the area to crop, then use arrows, shapes, freehand, text and
 undo. Use an opaque filled rectangle to cover sensitive content; blur/pixelation
@@ -436,7 +443,8 @@ Browser profiles and themes belong to you; Icewine uses the host browser.
 
 ### Steam and Flatpak
 
-Steam defaults to none. Choose native or Flatpak with left/right in the manager,
+Fresh Arch utilities default to Flatpak Steam; existing selections are preserved.
+The NixOS module defaults to none. Choose native or Flatpak with left/right in the manager,
 or set `steam = "native";` / `steam = "flatpak";` under `services.icewine`.
 Gamescope defaults on for a selected client and can be disabled independently
 with `gamescope.enable = false;`; Steam then launches normally. Handheld defaults
@@ -455,9 +463,13 @@ Hyprland opens terminals through `xdg-terminal-exec`, directories through
 `~/.config/xdg-terminals.list`, or customise shortcuts in `hypr/hyprland.lua`.
 
 
-Install replacement applications and their configuration in your host. Neovim
-plugins and language servers are host-owned; Icewine generates the optional
-`icewine/current/nvim-theme.lua` appearance adapter and signals themed instances.
+Terminal Editor provides `icewine-editor` (Neovim + LazyVim) in its own
+`icewine-nvim` config/data/cache/state namespace. NixOS opts in with
+`services.icewine.texteditor.enable = true`; plugins/tools come from native Nix
+packages. Arch first launch downloads LazyVim plugins into that private data
+directory and needs network access. Personal `nvim` configuration, plugin trees,
+lockfiles and host EDITOR/VISUAL choices are preserved. Icewine's generated
+`icewine/current/nvim-theme.lua` adapter supplies appearance.
 
 On NixOS, `services.icewine.login.greeter.enable = true` opts into native
 greetd/tuigreet with the Icewine Hyprland UWSM session and session selection.

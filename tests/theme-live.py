@@ -162,14 +162,20 @@ ShellRoot {
         declared = root / "declared-theme"
         declared.write_text("nord\n")
         selected.symlink_to(declared)
+        declared.chmod(0o640)
+        call("select", "nord")
+        until("applied: nord")
+        assert selected.is_symlink() and declared.read_text() == "nord\n"
+        call("select", "dracula")
+        until("applied: dracula")
+        assert selected.is_symlink() and declared.read_text() == "dracula\n"
+        assert declared.stat().st_mode & 0o777 == 0o640
+        declared.chmod(0o444)
         call("select", "nord")
         until("failed: selection could not be saved")
-        assert selected.is_symlink() and declared.read_text() == "nord\n"
-        call("select", "dracula")
-        until("failed: selection could not be saved")
-        assert selected.is_symlink() and declared.read_text() == "nord\n"
+        assert selected.is_symlink() and declared.read_text() == "dracula\n"
         declared.unlink()
-        call("select", "dracula")
+        call("select", "nord")
         until("failed: selection could not be saved")
         assert selected.is_symlink() and not declared.exists()
     finally:

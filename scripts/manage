@@ -18,31 +18,37 @@ import types
 theme = types.ModuleType("icewine_theme")
 theme.__file__ = os.environ.get("ICEWINE_THEME_SCRIPT", str(Path(__file__).with_name("theme")))
 importlib.machinery.SourceFileLoader(theme.__name__, theme.__file__).exec_module(theme)
-FEATURES = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras")
+FEATURES = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras", "texteditor", "screenshot")
 APPS = {
     "desktop": ("hypr", "uwsm", "gtk", "user-dirs", "applications"),
     "terminal": ("kitty",), "filemanager": ("yazi",),
     "steam": (), "gamescope": ("gamescope",), "handheld": (), "login": (),
-    "shellExtras": ("starship", "fastfetch", "btop"),
+    "shellExtras": ("starship", "fastfetch", "btop"), "texteditor": (), "screenshot": (),
 }
 PACKAGES = {
     "desktop": ("icewine-session",), "terminal": ("kitty",),
     "filemanager": ("yazi", "xdg-terminal-exec", "ffmpegthumbnailer", "7zip", "gvfs", "udisks2"),
     "steam": (), "gamescope": ("gamescope",), "handheld": ("icewine-handheld", "icewine-controller-idle", "inputplumber"),
-    "login": (), "shellExtras": ("starship", "fastfetch"),
+    "login": (), "shellExtras": ("starship", "fastfetch"), "texteditor": ("neovim", "git", "gcc", "make", "ripgrep", "fd", "unzip"), "screenshot": (),
 }
 
 
 def validate(value, *, saved=False):
+    original = value
     legacy = {"desktop", "terminal", "filemanager", "gaming", "flatpak", "login", "shellExtras"}
     if saved and isinstance(value, dict) and set(value) in (legacy, legacy | {"texteditor"}) and all(type(bit) is bool for bit in value.values()):
         value = {name: value[name] for name in legacy - {"gaming", "flatpak"}} | {
             "steam": ("flatpak" if value["flatpak"] else "native") if value["gaming"] else "none",
             "gamescope": value["gaming"], "handheld": False,
         }
+    previous = set(FEATURES) - {"texteditor", "screenshot"}
+    if saved and isinstance(value, dict) and set(value) == previous:
+        value = value | {"texteditor": original.get("texteditor", False),
+                         "screenshot": "advanced" if value["desktop"] else "none"}
     if (not isinstance(value, dict) or set(value) != set(FEATURES)
             or value["steam"] not in ("none", "native", "flatpak")
-            or any(type(bit) is not bool for name, bit in value.items() if name != "steam")):
+            or value["screenshot"] not in ("none", "simple", "advanced")
+            or any(type(bit) is not bool for name, bit in value.items() if name not in {"steam", "screenshot"})):
         raise ValueError("invalid manager selections")
     if value["steam"] == "none" and (value["gamescope"] or value["handheld"]):
         raise ValueError("Gamescope and Handheld require Steam")
@@ -58,8 +64,8 @@ def selections(state):
     if platform.freedesktop_os_release().get("ID") not in {"arch", "cachyos"}:
         raise ValueError("Icewine manager supports Arch/CachyOS or the NixOS module")
     path = state / "manage.json"
-    saved = validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, False) | {"steam": "none"}
-    return theme.symlinked(path) is not None, saved | {"login": False}
+    saved = validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, True) | {"steam": "flatpak", "handheld": False, "login": False, "screenshot": "advanced"}
+    return theme.setting_readonly(path), saved | {"login": False}
 
 
 WIDGETS = ("notificationToasts", "windowSwitcher", "cardStacks", "barBehaviour", "barLocation", "barStyle", "barWidth", "oskAccess")
@@ -155,15 +161,15 @@ def widget_state(config, state):
 
 def widgets(argv, config, state):
     saved, policy, supported, revision = widget_state(config, state)
-    linked = theme.symlinked(state / "widgets.json") is not None
+    readonly = theme.setting_readonly(state / "widgets.json")
     if argv == ["widgets-state"]:
         print("supported=" + str(supported).lower(), "revision=" + revision, *[
-            f"{name}={stack_text(value) if name == 'cardStacks' else str(value).lower()}:{'policy' if policy.get(name) is not None else 'symlink' if linked else 'user'}"
+            f"{name}={stack_text(value) if name == 'cardStacks' else str(value).lower()}:{'policy' if policy.get(name) is not None else 'readonly' if readonly else 'user'}"
             for name in WIDGETS
             for value in [policy[name] if policy.get(name) is not None else saved.get(name, widget_default(name))]])
         return
-    theme.writable(state / "widgets.json")
-    if len(argv) != len(WIDGETS) + 2 or argv[1] != "revision=" + revision:
+    theme.setting_target(state / "widgets.json")
+    if len(argv) < 3 or argv[1] != "revision=" + revision:
         raise ValueError("Widget preferences changed; reopen the manager before saving")
     fields = {}
     for field in argv[2:]:
@@ -175,14 +181,14 @@ def widgets(argv, config, state):
         fields[name] = int(value) if name == "barWidth" else parse_stacks(value) if name == "cardStacks" else value if name in BAR_CHOICES else value == "true"
         if not valid_widget(name, fields[name]):
             raise ValueError("invalid widget request")
-    if set(fields) != set(WIDGETS) or not supported:
+    if not fields or not supported:
         raise ValueError("widget settings unavailable; restore shipped Settings.qml through Installer")
-    if any(policy.get(name) is not None and fields[name] != policy[name] for name in WIDGETS):
+    if any(policy.get(name) is not None and fields[name] != policy[name] for name in fields):
         raise ValueError("Nix widget policy changed; reopen the manager")
     # Re-read under the existing defaults lock; preserve values owned by policy.
     theme.atomic_text(state / "widgets.json", json.dumps(saved | {
-        name: fields[name] for name in WIDGETS if policy.get(name) is None
-    }, sort_keys=True) + "\n")
+        name: fields[name] for name in fields if policy.get(name) is None
+    }, sort_keys=True) + "\n", setting=True, signature=revision)
     print("Widget preferences saved; the shipped shell watches this file.")
 
 
@@ -250,20 +256,22 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
     if not readonly and platform.freedesktop_os_release().get("ID") not in {"arch", "cachyos"}:
         raise ValueError("host package/service changes are supported only on Arch/CachyOS")
     for name in ("applied.json", "default-files.json", "handheld-rules.sha256", *(() if readonly else ("manage.json",))):
-        theme.writable(state / name)
+        (theme.setting_target if name == "manage.json" else theme.writable)(state / name)
     # Read the previous explicit Apply on NixOS too: rebuilds never touch dotfiles.
     applied_path = state / "applied.json"
     if applied_path.is_symlink():
         raise ValueError("refusing symlinked applied-selection record")
-    applied = validate(json.loads(applied_path.read_text()), saved=True) if applied_path.exists() else previous
+    applied = validate(json.loads(applied_path.read_text()), saved=True) if applied_path.exists() else previous if (state / "manage.json").exists() else dict.fromkeys(FEATURES, False) | {"steam": "none", "screenshot": "none"}
     if not readonly and selected["login"]:
         raise ValueError("Login configuration belongs to the host; login styling is NixOS-only")
     if not readonly:
-        packages = [package for feature in FEATURES if selected[feature] and feature != "steam" for package in PACKAGES[feature]]
+        packages = [package for feature in FEATURES if selected[feature] and feature not in {"steam", "screenshot"} for package in PACKAGES[feature]]
         if selected["steam"] == "native":
             packages.append("steam")
         if selected["steam"] == "flatpak":
             packages.append("flatpak")
+        if selected["screenshot"] != "none":
+            packages.append("hyprshot" if selected["screenshot"] == "simple" else "flameshot")
         local = []
         package_dir = os.environ.get("ICEWINE_PACKAGE_DIR")
         for package in ("icewine-session", "icewine-handheld", "icewine-keyboard", "icewine-controller-idle"):
@@ -367,7 +375,7 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         raise
     theme.atomic_text(applied_path, json.dumps(selected, sort_keys=True) + "\n")
     if not readonly:
-        theme.atomic_text(state / "manage.json", json.dumps(selected, sort_keys=True) + "\n")
+        theme.atomic_text(state / "manage.json", json.dumps(selected, sort_keys=True) + "\n", setting=True)
     print("Applied Icewine selections. Reopen with icewine; existing dotfiles are preserved by default.")
     if selected["desktop"]:
         print("Keep your fallback desktop. Next login: Hyprland (UWSM) on NixOS; Icewine on Arch/CachyOS, or icewine-session from a logged-in TTY.")
@@ -379,6 +387,41 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
 def main(argv):
     config, data = theme.xdg("XDG_CONFIG_HOME", ".config"), theme.xdg("XDG_DATA_HOME", ".local/share")
     state = theme.xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    if argv == ["widget-icons"]:
+        try:
+            result = subprocess.run(["qs", "ipc", "call", "topbar", "icons"], capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                # Only transport printable single glyphs for known modules.
+                fields = dict(field.split("=", 1) for field in result.stdout.split())
+                if set(fields) == set(CARD_MODULES) and all(len(value) == 1 and value.isprintable() for value in fields.values()):
+                    print(result.stdout.strip())
+                    return
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+        assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine/theme"))
+        themes = theme.installed(assets)
+        theme_id, _ = theme.effective(state, themes)
+        glyph = json.loads(theme.render_theme(assets, themes[theme_id])["palette.json"])["osGlyph"]
+        print(" ".join(f"{name}={icon}" for name, icon in zip(CARD_MODULES,
+            (glyph, "󰀻", "󰕰", "", "", "", "󰅌", "󰯡", "󰒍", "󰣀", "󰂜", "󰐥", "󰓅"))))
+        return
+    if len(argv) == 2 and argv[0] == "theme-preview":
+        assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine/theme"))
+        themes = theme.installed(assets)
+        if argv[1] not in themes:
+            raise ValueError("theme is not installed")
+        palette = json.loads(theme.render_theme(assets, themes[argv[1]], theme.transparency_level(state))["palette.json"])
+        print(" ".join(f"{name}={palette[name]}" for name in ("primary", "foreground", "background", "muted", "secondary", "tertiary")))
+        return
+    if argv in (["screenshot"], ["screenshot", "screen"]):
+        _, selected = selections(state)
+        mode = selected["screenshot"]
+        if mode == "none":
+            raise ValueError("Screenshot is disabled in Utilities")
+        command = (["hyprshot", "-m", "output" if len(argv) == 2 else "region"] if mode == "simple"
+                   else ["flameshot", "screen", "--edit"] if len(argv) == 2 else ["flameshot", "gui"])
+        run(command)
+        return
     if argv == ["appearance-state"]:
         themes = theme.installed(Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine")))
         if theme.DEFAULT not in themes:
@@ -392,11 +435,11 @@ def main(argv):
             "desktopLayout": theme.layout_default(state),
         }
         fields.update({name: str(bool(link)).lower() for name, link in {
-            "theme": theme.symlinked(state / "theme") or render,
-            "transparency": theme.symlinked(state / "transparency") or render,
-            "wallpaper": theme.symlinked(wallpaper_data / "icewine/wallpapers/selection.img"),
-            "monitors": theme.symlinked(config / "hypr/hyprland.lua") or theme.symlinked(config / "hypr/hyprmon.lua"),
-            "layout": theme.symlinked(state / "layout"),
+            "theme": theme.setting_readonly(state / "theme") or render,
+            "transparency": theme.setting_readonly(state / "transparency") or render,
+            "wallpaper": theme.setting_readonly(wallpaper_data / "icewine/wallpapers/selection.img"),
+            "monitors": theme.setting_readonly(config / "hypr/hyprland.lua") or theme.setting_readonly(config / "hypr/hyprmon.lua"),
+            "layout": theme.setting_readonly(state / "layout"),
         }.items()})
         print(" ".join(f"{name}={value}" for name, value in fields.items()))
         return
@@ -414,18 +457,19 @@ def main(argv):
         fields = {}
         for field in argv[1:]:
             name, separator, value = field.partition("=")
-            if not separator or name in fields or value not in ({"none", "native", "flatpak"} if name == "steam" else {"true", "false"}):
+            if not separator or name in fields or value not in ({"none", "native", "flatpak"} if name == "steam" else {"none", "simple", "advanced"} if name == "screenshot" else {"true", "false"}):
                 raise ValueError("invalid manager request")
-            fields[name] = value if name == "steam" else value == "true"
+            fields[name] = value if name in {"steam", "screenshot"} else value == "true"
         if "overwrite" not in fields:
             raise ValueError("missing overwrite choice")
         overwrite = fields.pop("overwrite")
         selected = validate(fields)
     if os.getuid() == 0:
         raise ValueError("run icewine as your desktop user")
-    theme.writable(state / "defaults.lock")
+    lock_path = (state.resolve() if widget_request else state) / "defaults.lock"
+    theme.writable(lock_path)
     state.mkdir(parents=True, exist_ok=True)
-    fd = os.open(state / "defaults.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "r+") as lock:
         # Ponytail: one lock serialises explicit Apply; split by root if contention matters.
         fcntl.flock(lock, fcntl.LOCK_EX)

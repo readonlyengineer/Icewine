@@ -61,27 +61,34 @@ for error in (subprocess.TimeoutExpired('qs ipc', 10), FileNotFoundError('qs una
         selector.select([str(source)])
     assert selection.read_bytes() == source.read_bytes()
     assert len(calls) == 1 and 'saved' in warning.getvalue() and 'next launch' in warning.getvalue()
-# Leaf and parent links are preserved before validation or image publication.
+# Writable targets keep links and permissions; read-only/dangling targets fail before validation.
 external = selection.parent.parent / 'declared-wallpaper'
-external.write_bytes(previous)
+external.write_bytes(b'old wallpaper')
+external.chmod(0o640)
 selection.unlink()
 selection.symlink_to(external)
+selector.select([str(source)])
+assert selection.is_symlink() and external.read_bytes() == source.read_bytes()
+assert external.stat().st_mode & 0o777 == 0o640
+external.chmod(0o444)
 for dangling in (False, True):
     if dangling: external.unlink()
     with patch.object(selector, 'validate', side_effect=AssertionError('validated read-only selection')):
         try: selector.select([str(source)])
-        except ValueError as error: assert 'read-only symlink' in str(error)
-        else: raise AssertionError('replaced linked wallpaper')
+        except (ValueError, OSError): pass
+        else: raise AssertionError('wrote read-only/dangling wallpaper target')
     assert selection.is_symlink()
-    assert not external.exists() if dangling else external.read_bytes() == previous
+    assert not external.exists() if dangling else external.read_bytes() == source.read_bytes()
 selection.unlink()
 directory = selection.parent
 external_directory = directory.with_name('external-wallpapers')
 directory.rename(external_directory)
 directory.symlink_to(external_directory)
-try: selector.select([str(source)])
-except ValueError as error: assert 'read-only symlink' in str(error)
-else: raise AssertionError('followed linked wallpaper directory')
+with patch.object(selector, 'validate', side_effect=AssertionError('validated missing linked selection')):
+    try: selector.select([str(source)])
+    except (ValueError, OSError): pass
+    else: raise AssertionError('followed linked wallpaper directory')
+assert directory.is_symlink() and directory.resolve() == external_directory
 assert not (external_directory / 'selection.img').exists()
 PY
 echo 'PASS: desktop selection, private mode, validation, atomic failure recovery and retired auth commands'

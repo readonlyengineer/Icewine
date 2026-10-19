@@ -86,6 +86,12 @@ in {
       enable = lib.mkEnableOption "Starship/Fastfetch defaults and btop styling";
       git.enable = lib.mkEnableOption "Starship Git prompt modules" // { default = true; };
     };
+    texteditor.enable = lib.mkEnableOption "optional isolated Neovim + LazyVim utility (icewine-editor)";
+    screenshot = lib.mkOption {
+      type = lib.types.enum [ "none" "simple" "advanced" ];
+      default = if cfg.desktop.enable then "advanced" else "none";
+      description = "Screenshot utility: None, Hyprshot (Simple), or Flameshot (Advanced).";
+    };
     applications = {
       steam = command "Steam command used inside Gamescope."
         (if cfg.steam == "flatpak" then [ "flatpak" "run" "com.valvesoftware.Steam" ]
@@ -159,11 +165,14 @@ in {
     fonts.packages = with pkgs; [ dejavu_fonts nerd-fonts.jetbrains-mono noto-fonts-color-emoji ];
     environment.systemPackages = (with pkgs; [ quickshell glib jq systemd libnotify libcanberra-gtk3
       adwaita-icon-theme papirus-icon-theme brightnessctl xdg-utils gtk3 ]) ++ launchers
-      ++ lib.optionals cfg.desktop.enable (with pkgs; [ hyprshutdown hyprpolkitagent flameshot hypridle xdg-terminal-exec wtype ])
+      ++ lib.optionals cfg.desktop.enable (with pkgs; [ hyprshutdown hyprpolkitagent hypridle xdg-terminal-exec wtype ])
       ++ lib.optional (cfg.steam != "none" && cfg.gamescope.enable) pkgs.gamescope
+      ++ lib.optional (cfg.screenshot == "simple") pkgs.hyprshot
+      ++ lib.optional (cfg.screenshot == "advanced") pkgs.flameshot
       ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
     users.users.${cfg.user}.packages = lib.optional cfg.terminal.enable pkgs.kitty
       ++ lib.optionals cfg.shellExtras.enable [ pkgs.starship pkgs.fastfetch ]
-      ++ lib.optional cfg.monitors.enable cfg.monitors.package;
+      ++ lib.optional cfg.monitors.enable cfg.monitors.package
+      ++ lib.optional cfg.texteditor.enable (import ../editor/package.nix { inherit pkgs; });
   };
 }

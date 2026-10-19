@@ -366,8 +366,8 @@ assert.equal(State.barVisible(shell.ui, false, false, "always"), false,
     "The real controller screenshot caller must explicitly suppress Always Show")
 flush()
 assert.deepEqual(captures, [
-    ["flameshot", "screen", "--edit"]
-], "Open the native monitor editor after dismissing the shell")
+    ["icewine", "screenshot", "screen"]
+], "Dispatch the selected output-capture utility after dismissing the shell")
 
 const controllerActions = []
 deck.compositor = {dispatch: command => controllerActions.push(command),

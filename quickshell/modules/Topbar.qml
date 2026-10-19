@@ -454,6 +454,7 @@ Scope {
         PanelWindow {
             id: panel
             required property var modelData
+            readonly property string managerIcons: statusIcons.iconSnapshot()
             readonly property bool layoutActive: statusPopout.layoutActive
             readonly property bool widgetHere: root.ui.page !== "" && root.ui.screen === screen.name
             readonly property bool modal: root.radialVisible || root.widgetEngaged
@@ -789,6 +790,7 @@ Scope {
 
     IpcHandler {
         target: "topbar"
+        function icons(): string { return panels.instances[0]?.managerIcons ?? "" }
         function mediaNext(): void { if (root.player?.canGoNext) root.player.next() }
         function mediaPrevious(): void { if (root.player?.canGoPrevious) root.player.previous() }
         function mediaToggle(): void { if (root.player?.canTogglePlaying) root.player.togglePlaying() }

@@ -118,6 +118,8 @@ let
       export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_ASSETS=${../theme/assets}
+      export ICEWINE_EDITOR_INIT=${../editor/init.lua}
+      export ICEWINE_EDITOR_DEFAULTS=${../editor/defaults.lua}
       export ICEWINE_DEFAULT_FILES=${defaults}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
@@ -145,9 +147,10 @@ let
       export XDG_CONFIG_HOME=''${XDG_CONFIG_HOME:-${configHome}}
       export XDG_STATE_HOME=''${XDG_STATE_HOME:-${stateHome}}
       export ICEWINE_MANAGE_SELECTIONS=${lib.escapeShellArg (builtins.toJSON ((lib.genAttrs
-        [ "desktop" "terminal" "filemanager" "handheld" "login" "shellExtras" ]
+        [ "desktop" "terminal" "filemanager" "handheld" "login" "shellExtras" "texteditor" ]
         (name: cfg.${name}.enable)) // {
           steam = cfg.steam;
+          screenshot = cfg.screenshot;
           gamescope = cfg.steam != "none" && cfg.gamescope.enable;
         }))}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}

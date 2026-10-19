@@ -1,18 +1,19 @@
 use std::{collections::BTreeMap, fs::{self, OpenOptions}, io::{self, IsTerminal}, os::unix::fs::OpenOptionsExt, path::PathBuf, process::{Command, ExitCode}};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::{prelude::*, widgets::{Block, BorderType, Cell, Padding, Paragraph, Row, Table, TableState, Wrap}};
+use ratatui::{prelude::*, widgets::{Block, BorderType, Padding, Paragraph, Wrap}};
 
 const ROWS: &[(&str, &str, &str)] = &[
-    ("desktop", "Desktop session", "Hyprland + Icewine Quickshell"),
-    ("terminal", "Terminal", "Kitty"),
-    ("filemanager", "File manager", "Yazi"),
-    ("steam", "Steam (unfree)", ""),
-    ("gamescope", " +- Gamescope", ""), ("handheld", " \u{005c}- Handheld", "Needs Desktop + native Steam + Gamescope"),
-    ("login", "Login styling", "tuigreet (host configuration)"), ("shellExtras", "Shell Extras", "Starship + Fastfetch + btop theme"),
+    ("desktop", "Desktop session", "Hyprland + Quickshell"), ("terminal", "Terminal", "Kitty"),
+    ("filemanager", "File manager", "Yazi"), ("texteditor", "Terminal Editor", "Neovim + LazyVIM"),
+    ("shellExtras", "Shell extras", "Starship / Fastfetch"), ("screenshot", "Screenshot", ""),
+    ("steam", "Steam", ""), ("gamescope", "Gamescope", "Nested Steam session"),
+    ("handheld", "Handheld", "Handheld UI"), ("login", "Login styling", "Host configuration"),
 ];
-
 #[derive(Clone, Copy, PartialEq)]
-enum Control { Theme, Transparency, Layout, Wallpaper, Monitors, Utility(&'static str), Widget(usize), Bar(usize), BarWidth, Arrangement, Back, Card(usize), Steam, Overwrite, Apply, Cancel }
+enum Control { Theme, Preview(usize), Taskbar, Transparency, Layout, Wallpaper, Monitors,
+    Utility(&'static str), Widget(usize), Bar(usize), BarWidth, Back, Card(usize), Stack(usize),
+    GridAction(usize), Category, Steam, Screenshot, Overwrite, Apply }
+const SCREENSHOTS: &[&str] = &["none", "simple", "advanced"];
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
 
@@ -82,21 +83,26 @@ const WIDGETS: &[(&str, &str, &str)] = &[
 ];
 
 const BAR_SETTINGS: &[(&str, &str, &[&str], &[&str])] = &[
-    ("barBehaviour", "Bar Behaviour", &["keyboard", "keyboard-mouse", "toggle", "always"],
-        &["Autohide (Keyboard)", "Autohide (Keyboard & Mouse)", "Toggle (Keyboard)", "Always Show"]),
-    ("barLocation", "Bar Locations", &["above", "top", "bottom"], &["Above", "Top", "Bottom"]),
-    ("barStyle", "Bar Style", &["anchored", "floating"], &["Anchored", "Floating"]),
-    ("oskAccess", "Onscreen Keyboard Access", &["none", "launcher", "topbar"], &["None", "Launcher", "Topbar"]),
+    ("barBehaviour", "Behaviour", &["keyboard", "keyboard-mouse", "toggle", "always"],
+        &["Autohide (Keyboard)", "Autohide (Keyboard + Mouse)", "Toggle", "Always show (legacy)"]),
+    ("barLocation", "Position", &["above", "top", "bottom"], &["Above", "Top", "Bottom"]),
+    ("barStyle", "Style", &["anchored", "floating"], &["Anchored", "Floating"]),
+    ("oskAccess", "Onscreen Keyboard", &["none", "launcher", "topbar"], &["None", "Launcher", "Taskbar"]),
 ];
 
 const CARD_MODULES: &[&str] = &["launcher", "background", "layout", "media", "audio", "bluetooth",
     "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance"];
 
+const CARD_LABELS: &[&str] = &["Launcher", "Background apps", "Layout", "Media", "Audio", "Bluetooth",
+    "Clipboard", "Network", "Tailscale", "SSH", "Notifications", "Battery", "Performance"];
+
+#[derive(Clone)]
 struct CardStack { id: String, modules: Vec<usize> }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Ownership { User, Policy, Symlink }
+enum Ownership { User, Policy, Readonly }
 
+#[derive(Clone)]
 struct Widgets {
     enabled: [bool; 2], ownership: [Ownership; 8], supported: bool, revision: String,
     stacks: Vec<CardStack>, bar: [usize; 4], width: u8,
@@ -131,12 +137,12 @@ impl Widgets {
             let (value, owner) = fields.remove(id).and_then(|value| value.split_once(':'))
                 .ok_or_else(|| io::Error::other("Missing widget state"))?;
             enabled[index] = boolean(Some(value))?;
-            ownership[index] = match owner { "policy" => Ownership::Policy, "symlink" => Ownership::Symlink, "user" => Ownership::User,
+            ownership[index] = match owner { "policy" => Ownership::Policy, "readonly" | "symlink" => Ownership::Readonly, "user" => Ownership::User,
                 _ => return Err(io::Error::other("Invalid widget ownership")) };
         }
         let (value, owner) = fields.remove("cardStacks").and_then(|value| value.split_once(':'))
             .ok_or_else(|| io::Error::other("Missing card stacks"))?;
-        ownership[2] = match owner { "policy" => Ownership::Policy, "symlink" => Ownership::Symlink, "user" => Ownership::User,
+        ownership[2] = match owner { "policy" => Ownership::Policy, "readonly" | "symlink" => Ownership::Readonly, "user" => Ownership::User,
             _ => return Err(io::Error::other("Invalid card ownership")) };
         let mut stacks: Vec<CardStack> = Vec::new();
         let mut seen = Vec::new();
@@ -162,14 +168,14 @@ impl Widgets {
                 .ok_or_else(|| io::Error::other("Missing bar setting"))?;
             bar[index] = choices.iter().position(|choice| *choice == value)
                 .ok_or_else(|| io::Error::other("Invalid bar setting"))?;
-            ownership[index + 3] = match owner { "policy" => Ownership::Policy, "symlink" => Ownership::Symlink, "user" => Ownership::User,
+            ownership[index + 3] = match owner { "policy" => Ownership::Policy, "readonly" | "symlink" => Ownership::Readonly, "user" => Ownership::User,
                 _ => return Err(io::Error::other("Invalid bar ownership")) };
         }
         let (value, owner) = fields.remove("barWidth").and_then(|value| value.split_once(':'))
             .ok_or_else(|| io::Error::other("Missing bar width"))?;
         let width = value.parse::<u8>().ok().filter(|width| (50..=100).contains(width) && value == width.to_string())
             .ok_or_else(|| io::Error::other("Invalid bar width"))?;
-        ownership[7] = match owner { "policy" => Ownership::Policy, "symlink" => Ownership::Symlink, "user" => Ownership::User,
+        ownership[7] = match owner { "policy" => Ownership::Policy, "readonly" | "symlink" => Ownership::Readonly, "user" => Ownership::User,
             _ => return Err(io::Error::other("Invalid bar width ownership")) };
         if !fields.is_empty() { return Err(io::Error::other("Unknown widget state")); }
         Ok(Self { enabled, ownership, supported, revision, stacks, bar, width })
@@ -194,52 +200,16 @@ impl Widgets {
         self.stacks.push(CardStack { id, modules: vec![module] });
     }
 
-    fn card_order(&self) -> Vec<usize> {
-        self.stacks.iter().flat_map(|stack| stack.modules.iter().copied())
-            .chain((0..CARD_MODULES.len()).filter(|index| self.location(*index).is_none())).collect()
-    }
-
-    fn edit(&mut self, module: usize, key: KeyCode) {
+    fn reorder_member(&mut self, module: usize, forward: bool) {
         if !self.supported || self.ownership[2] != Ownership::User { return; }
-        match key {
-            KeyCode::Char(' ') | KeyCode::Enter => {
-                if self.location(module).is_some() { self.remove(module); } else { self.new_stack(module); }
-            }
-            KeyCode::Char('n') => self.new_stack(module),
-            KeyCode::Left | KeyCode::Right => {
-                // Capture the destination ID before removing a possibly singleton source.
-                let next = match self.location(module) {
-                    Some((stack, _)) if key == KeyCode::Right => (stack + 1) % self.stacks.len(),
-                    Some((stack, _)) => (stack + self.stacks.len() - 1) % self.stacks.len(),
-                    None => 0,
-                };
-                if let Some(target) = self.stacks.get(next).map(|stack| stack.id.clone()) {
-                    if self.location(module).is_some_and(|(stack, _)| self.stacks[stack].id == target) { return; }
-                    self.remove(module);
-                    self.stacks.iter_mut().find(|stack| stack.id == target).unwrap().modules.push(module);
-                } else { self.new_stack(module); }
-            }
-            KeyCode::Char('+') | KeyCode::Char('-') => {
-                if let Some((stack, position)) = self.location(module) {
-                    let members = &mut self.stacks[stack].modules;
-                    let next = if key == KeyCode::Char('+') { (position + 1).min(members.len() - 1) }
-                        else { position.saturating_sub(1) };
-                    members.swap(position, next);
-                }
-            }
-            KeyCode::Char('[') | KeyCode::Char(']') => {
-                if let Some((stack, _)) = self.location(module) {
-                    let next = if key == KeyCode::Char(']') { (stack + 1).min(self.stacks.len() - 1) }
-                        else { stack.saturating_sub(1) };
-                    self.stacks.swap(stack, next);
-                }
-            }
-            KeyCode::Delete => { if let Some((stack, _)) = self.location(module) { self.stacks.remove(stack); } }
-            _ => (),
+        if let Some((stack, position)) = self.location(module) {
+            let members = &mut self.stacks[stack].modules;
+            let next = if forward { (position + 1).min(members.len() - 1) } else { position.saturating_sub(1) };
+            members.swap(position, next);
         }
     }
 
-    fn save(&mut self) -> io::Result<String> {
+    fn save_subset(&mut self, fields: &[&str]) -> io::Result<String> {
         let mut args = vec!["widgets-apply".into(), format!("revision={}", self.revision)];
         args.extend(WIDGETS.iter().enumerate().map(|(index, (id, _, _))| format!("{id}={}", self.enabled[index])));
         args.push(format!("cardStacks={}", self.stacks.iter().map(|stack|
@@ -248,8 +218,13 @@ impl Widgets {
         args.extend(BAR_SETTINGS.iter().enumerate().map(|(index, (id, _, choices, _))|
             format!("{id}={}", choices[self.bar[index]])));
         args.push(format!("barWidth={}", self.width));
+        args = args.into_iter().enumerate().filter_map(|(index, value)|
+            (index < 2 || value.split_once('=').is_some_and(|(name, _)| fields.contains(&name))).then_some(value)).collect();
         let text = widget_command(&args)?;
-        *self = Self::load().map_err(|error| io::Error::other(format!("Save completed; refresh failed: {error}")))?;
+        let refreshed = Self::load().map_err(|error| io::Error::other(format!("Save completed; refresh failed: {error}")))?;
+        self.revision = refreshed.revision;
+        self.ownership = refreshed.ownership;
+        self.supported = refreshed.supported;
         Ok(text)
     }
 }
@@ -264,6 +239,7 @@ fn picker(terminal: &mut ratatui::DefaultTerminal) -> io::Result<Option<PathBuf>
     let file = std::env::temp_dir().join(format!("icewine-picker-{}", std::process::id()));
     OpenOptions::new().write(true).create_new(true).mode(0o600).open(&file)?;
     let result = (|| {
+        crossterm::execute!(io::stdout(), event::DisableMouseCapture)?;
         ratatui::restore();
         let result = Command::new("yazi").arg("--chooser-file").arg(&file).status();
         *terminal = ratatui::init();
@@ -282,313 +258,512 @@ fn handheld_available(steam: usize, selected: &BTreeMap<&str, bool>) -> bool {
     steam == 1 && selected["desktop"] && selected["gamescope"]
 }
 
-fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize) -> io::Result<Option<bool>> {
+#[derive(Clone)]
+struct ViewRow { label: String, value: String, control: Control, enabled: bool }
+fn row(label: &str, value: String, control: Control, enabled: bool) -> ViewRow {
+    ViewRow { label: label.into(), value: if enabled { value } else { format!("{value} - Read Only") }, control, enabled }
+}
+fn tick(value: bool) -> String { if value { "[x]" } else { "[ ]" }.into() }
+fn cycle(value: &mut usize, count: usize, forward: bool) { *value = (*value + if forward { 1 } else { count - 1 }) % count; }
+fn theme_colours(id: &str) -> io::Result<[Color; 6]> {
+    let text = widget_command(&["theme-preview".into(), id.into()])?;
+    let fields: BTreeMap<_, _> = text.split_whitespace().filter_map(|field| field.split_once('=')).collect();
+    let mut colours = [Color::Reset; 6];
+    for (index, name) in ["primary", "foreground", "background", "muted", "secondary", "tertiary"].iter().enumerate() {
+        let value = fields.get(name).ok_or_else(|| io::Error::other("Missing preview colour"))?.trim_start_matches('#');
+        let rgb = u32::from_str_radix(value, 16).map_err(io::Error::other)?;
+        colours[index] = Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
+    }
+    Ok(colours)
+}
+fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize, screenshot: &mut usize) -> io::Result<Option<bool>> {
     let mut appearance = Appearance::load()?;
-    let (mut widgets, mut widget_message) = match Widgets::load() {
+    let (mut widgets, mut message) = match Widgets::load() {
         Ok(value) => (value, String::new()),
-        Err(error) => (Widgets { enabled: [true; 2], ownership: [Ownership::Policy; 8], supported: false, revision: String::new(), stacks: Vec::new(), bar: [0; 4], width: 80 }, error.to_string()),
+        Err(error) => (Widgets { enabled: [true; 2], ownership: [Ownership::Policy; 8], supported: false,
+            revision: String::new(), stacks: Vec::new(), bar: [0; 4], width: 80 }, error.to_string()),
     };
-    let mut message = String::new();
-    let mut page = 0;
-    let mut focuses = [0, 0, 0, 0];
-    let mut card_focus = None;
+    let mut taskbar = widgets.clone();
+    let mut page = 0usize;
+    let mut pane = false;
+    let mut subpage = 0; // 1: local theme preview, 2: local Taskbar draft.
+    let mut preview = appearance.theme;
+    let mut colours = theme_colours(&appearance.themes[preview]).unwrap_or([Color::Cyan, Color::White, Color::Black, Color::Gray, Color::Green, Color::Magenta]);
+    let mut focus = 0usize;
+    let mut overwrite = false;
+    let mut stack = 0usize;
+    let mut member = None;
+    let mut remembered = 0usize;
+    let mut placement = None;
+    let mut grid_start = 0usize;
+    let mut hot_category = 0usize;
+    let mut hot_scroll = 0usize;
+    let effective_screenshot = *screenshot;
+    let mut icons = widget_command(&["widget-icons".into()]).unwrap_or_default();
     let mut terminal = ratatui::init();
     let result = (|| {
-        let mut focus = 0;
-        let mut overwrite = false;
+        crossterm::execute!(io::stdout(), event::EnableMouseCapture)?;
         loop {
-            let rows: Vec<_> = ROWS.iter().filter(|(id, _, _)|
-                (readonly || *id != "login") && (*steam != 0 || !matches!(*id, "gamescope" | "handheld"))).collect();
-            let controls: Vec<_> = if page == 1 {
-                let mut controls = Vec::new();
-                for (index, control) in [Control::Theme, Control::Transparency, Control::Wallpaper, Control::Monitors, Control::Layout].into_iter().enumerate() {
-                    if !appearance.readonly[index] && !(control == Control::Theme && appearance.policy) { controls.push(control); }
+            let editable = |index: usize| widgets.supported && widgets.ownership[index] == Ownership::User;
+            let mut rows = Vec::new();
+            if subpage == 1 {
+                for (index, id) in appearance.themes.iter().enumerate() {
+                    rows.push(row(id, if index == preview { "Preview" } else if index == appearance.theme { "Current" } else { "" }.into(), Control::Preview(index), true));
                 }
-                controls.extend([Control::Apply, Control::Cancel]);
-                controls
-            } else if page == 2 {
-                WIDGETS.iter().enumerate().filter(|(index, _)| widgets.supported && widgets.ownership[*index] == Ownership::User)
-                    .map(|(index, _)| Control::Widget(index))
-                    .chain((0..BAR_SETTINGS.len()).filter(|index| widgets.supported && widgets.ownership[index + 3] == Ownership::User).map(Control::Bar))
-                    .chain((widgets.supported && widgets.ownership[7] == Ownership::User).then_some(Control::BarWidth))
-                    .chain([Control::Arrangement])
-                    .chain((widgets.supported && widgets.ownership.contains(&Ownership::User)).then_some(Control::Apply)).chain([Control::Cancel]).collect()
-            } else if page == 3 {
-                widgets.card_order().into_iter().map(Control::Card)
-                    .chain([Control::Back])
-                    .chain((widgets.supported && widgets.ownership.contains(&Ownership::User)).then_some(Control::Apply))
-                    .chain([Control::Cancel]).collect()
-            } else { rows.iter().filter(|(id, _, _)| !readonly
-                && (*id != "handheld" || handheld_available(*steam, selected)))
-                .map(|(id, _, _)| if *id == "steam" { Control::Steam } else { Control::Utility(*id) })
-                .chain([Control::Overwrite, Control::Apply, Control::Cancel]).collect() };
-            if let Some(card) = card_focus.take() {
-                focus = controls.iter().position(|control| *control == Control::Card(card)).unwrap_or(focus);
-            }
-            focus = focus.min(controls.len() - 1);
-            terminal.draw(|frame| {
-                let accent = Style::default().fg(Color::Cyan).bold();
-                let muted = Style::default().fg(Color::DarkGray);
-                let focused = Style::default().fg(Color::Black).bg(Color::Cyan).bold();
-                let panel = frame.area();
-                let block = Block::bordered().border_type(BorderType::Rounded)
-                    .border_style(muted).title(Line::from(match page {
-                        0 => " Icewine Installer (1/3) | Tab: Appearance ",
-                        1 => " Icewine Appearance (2/3) | Tab: Widgets ",
-                        2 => " Icewine Widgets (3/3) | Tab: Installer ",
-                        _ => " Icewine Widgets > Card arrangement | b/Tab: Back ",
-                    }).style(accent))
-                    .padding(Padding::horizontal(1));
-                if frame.area().width < 80 || frame.area().height < 24 {
-                    frame.render_widget(Paragraph::new("Icewine needs an 80 x 24 terminal.\nResize to continue; Esc: cancel.").style(accent), frame.area());
-                    return;
+                rows.extend([row("[ Use theme ]", "".into(), Control::Apply, !appearance.readonly[0] && !appearance.policy), row("[ Back ]", "".into(), Control::Back, true)]);
+            } else if subpage == 2 {
+                for (index, (_, label, _, labels)) in BAR_SETTINGS.iter().enumerate() {
+                    let value = if index == 0 && taskbar.bar[index] == 3 { "Always show (legacy)" } else { labels[taskbar.bar[index]] };
+                    rows.push(row(label, value.into(), Control::Bar(index), editable(index + 3)));
+                    if index == 2 { rows.push(row("Width", format!("{}%", taskbar.width), Control::BarWidth, editable(7))); }
                 }
-                let inner = block.inner(panel);
-                frame.render_widget(block, panel);
-                let [intro, utilities, reset, buttons, help] = Layout::vertical([
-                    Constraint::Length(4), Constraint::Min(10),
-                    Constraint::Length(3), Constraint::Length(2), Constraint::Length(2),
-                ]).areas(inner);
-                if page == 1 {
-                    frame.render_widget(Paragraph::new(vec![
-                        Line::from("Appearance updates immediately.").style(accent),
-                        Line::from("Apply/Cancel here control utility choices only.").style(muted),
-                        Line::from("HyprMon live/save changes remain after Cancel.").style(muted),
-                    ]), intro);
-                    let settings = vec![
-                        (Control::Theme, "Theme", format!("< {} >{}", appearance.themes[appearance.theme], if appearance.policy { " (Nix policy)" } else { "" })),
-                        (Control::Transparency, "Transparency", format!("< {} >", TRANSPARENCY[appearance.transparency])),
-                        (Control::Wallpaper, "Wallpaper", format!("[ {} ]", filename(&appearance.wallpaper))),
-                        (Control::Monitors, "Monitors", "[ Configure monitors… ]".to_owned()),
-                        (Control::Layout, "Desktop layout default", format!("< {} >", LAYOUTS[appearance.layout])),
-                    ];
-                    frame.render_widget(Table::new(settings.into_iter().map(|(control, label, value)|
-                        Row::new([Cell::from(label), Cell::from(value + if !controls.contains(&control) && !(control == Control::Theme && appearance.policy) { " (symlink/read-only)" } else { "" })]).bottom_margin(u16::from(control != Control::Layout)).style(if controls[focus] == control { focused }
-                            else if !controls.contains(&control) { muted } else { Style::default() })),
-                        [Constraint::Length(23), Constraint::Min(20)]).column_spacing(2), utilities);
-                    frame.render_widget(Paragraph::new(message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
-                } else if page >= 2 {
-                    frame.render_widget(Paragraph::new(vec![
-                        Line::from(if page == 3 { "First member: topbar icon; accents: primary/secondary/tertiary, repeat." }
-                            else { "Widget and bar preferences; open Card arrangement to edit stacks." }).style(accent),
-                        Line::from("Save commits widgets only; Cancel/Esc discards drafts.").style(muted),
-                        Line::from(if page == 3 { "Space: enable/disable  Left/right: move to stack  n: new stack" }
-                            else { "Space/Enter: change setting or open Card arrangement" }).style(muted),
-                        Line::from(if widgets.ownership.contains(&Ownership::Symlink) { "Symlinked preferences are read-only." }
-                            else if !widgets.supported { "Unavailable: restore shipped settings/entry via Installer." }
-                            else if page == 3 { "+/-: member order  [/]: stack order  Delete: remove stack" }
-                            else { "Card arrangement and this page share the same unsaved draft." }).style(muted),
-                    ]), intro);
-                    let owner = |index| match widgets.ownership[index] {
-                        Ownership::Symlink => " symlink/read-only", Ownership::Policy => " Nix policy", Ownership::User => "",
+                rows.extend([row("[ Save ]", "".into(), Control::Apply, (3..8).any(editable)), row("[ Back ]", "".into(), Control::Back, true)]);
+            } else if page == 0 {
+                for (id, label, detail) in ROWS.iter().filter(|(id, _, _)| *id != "login") {
+                    let enabled = !readonly && (*id != "gamescope" || *steam != 0) && (*id != "handheld" || handheld_available(*steam, selected));
+                    let value = match *id {
+                        "steam" => ["None", "Native", "Flatpak"][*steam].into(),
+                        "screenshot" => ["None", "Simple", "Advanced"][*screenshot].into(),
+                        "handheld" => if selected[id] && enabled { "Steamdeck" } else { "Off" }.into(),
+                        _ => tick(selected[id]),
                     };
-                    let mut entries: Vec<_> = WIDGETS.iter().enumerate().map(|(index, (_, label, _))|
-                        (Control::Widget(index), (*label).to_owned(), format!("[{}]{}",
-                            if !widgets.supported { "?" } else if widgets.enabled[index] { "x" } else { " " }, owner(index)))).collect();
-                    entries.extend(BAR_SETTINGS.iter().enumerate().map(|(index, (_, label, _, labels))|
-                        (Control::Bar(index), (*label).to_owned(), if widgets.supported {
-                            format!("< {} >{}", labels[widgets.bar[index]], owner(index + 3))
-                        } else { "Unavailable".to_owned() })));
-                    entries.push((Control::BarWidth, "Bar Width".to_owned(), if widgets.supported {
-                        format!("< {}% >{}", widgets.width, owner(7))
-                    } else { "Unavailable".to_owned() }));
-                    entries.push((Control::Arrangement, "Card arrangement".to_owned(), "[ Open > ]".to_owned()));
-                    if page == 3 {
-                        entries.clear();
-                        for (stack_index, stack) in widgets.stacks.iter().enumerate() {
-                            // Group headings are display-only; keyboard focus follows member order.
-                            entries.push((Control::Arrangement, format!("{}. {}", stack_index + 1, stack.id), owner(2).to_owned()));
-                            for (position, index) in stack.modules.iter().enumerate() {
-                                entries.push((Control::Card(*index), format!("  {}. {}", position + 1, CARD_MODULES[*index]),
-                                    format!("{}{}", if position == 0 { "topbar icon / " } else { "" },
-                                        ["primary", "secondary", "tertiary"][position % 3])));
+                    let detail = match *id {
+                        "screenshot" => ["", "Hyprshot", "Flameshot"][*screenshot],
+                        "gamescope" if *steam == 0 => "Requires Steam",
+                        "handheld" if !handheld_available(*steam, selected) => "Requires Steam native", _ => detail,
+                    };
+                    rows.push(ViewRow { label: format!("{label}\t{detail}"), value: if readonly { format!("{value} - Read Only") } else { value },
+                        control: if *id == "steam" { Control::Steam } else if *id == "screenshot" { Control::Screenshot } else { Control::Utility(id) }, enabled });
+                }
+                rows.extend([row("Overwrite existing dotfiles", tick(overwrite), Control::Overwrite, true),
+                    ViewRow { label: if appearance.readonly[3] { "Setup Monitors - Read Only" } else if executable("hyprmon") { "[ Setup Monitors... ]" } else { "Hyprmon Unavailable" }.into(),
+                        value: "".into(), control: Control::Monitors, enabled: !appearance.readonly[3] && executable("hyprmon") },
+                    row("[ Review and Apply ]", "".into(), Control::Apply, true)]);
+            } else if page == 1 {
+                rows = vec![row("Theme", appearance.themes[appearance.theme].clone(), Control::Theme, !appearance.readonly[0] && !appearance.policy),
+                    row("Transparency", TRANSPARENCY[appearance.transparency].into(), Control::Transparency, !appearance.readonly[1]),
+                    row("Wallpaper", filename(&appearance.wallpaper), Control::Wallpaper, !appearance.readonly[2]),
+                    row("Default layout", LAYOUTS[appearance.layout].into(), Control::Layout, !appearance.readonly[4]),
+                    row("Taskbar", "Configure…".into(), Control::Taskbar, true),
+                    row("Notifications", tick(widgets.enabled[0]), Control::Widget(0), editable(0))];
+            }
+            let mut controls: Vec<Control> = rows.iter().filter(|row| row.enabled).map(|row| row.control).collect();
+            if page == 2 && subpage == 0 {
+                controls = (0..=widgets.stacks.len()).map(Control::Stack).collect();
+                if editable(1) { controls.push(Control::Widget(1)); }
+                if editable(2) { controls.extend((0..8).map(Control::GridAction)); }
+                if editable(1) || editable(2) { controls.push(Control::Apply); }
+            }
+            if page == 3 && subpage == 0 { controls = vec![Control::Category]; }
+            if controls.is_empty() { controls.push(Control::Back); }
+            focus = focus.min(controls.len() - 1);
+            stack = stack.min(widgets.stacks.len());
+            if let Some(module) = member { if widgets.location(module).map(|v| v.0).unwrap_or(widgets.stacks.len()) != stack { member = None; } }
+            let current = controls[focus];
+            let mut hits: Vec<(Rect, Control)> = Vec::new();
+            let mut page_hits = Vec::new();
+            let mut grid_columns = 2usize;
+            let mut visible_grid_rows = 1usize;
+            terminal.draw(|frame| {
+                let area = frame.area();
+                if area.width < 80 || area.height < 24 {
+                    frame.render_widget(Paragraph::new("Icewine needs an 80 x 24 terminal.\nResize to continue; Esc: cancel."), area); return;
+                }
+                let accent = Style::default().fg(colours[0]).bold();
+                let normal = Style::default().fg(colours[1]).bg(colours[2]);
+                let muted = normal.fg(colours[3]);
+                let highlighted = normal.fg(colours[2]).bg(colours[0]).bold();
+                frame.render_widget(Block::default().style(normal), area);
+                let [sidebar, content] = Layout::horizontal([Constraint::Length(18), Constraint::Min(1)]).areas(area);
+                for (rect, active) in [(sidebar, !pane), (content, pane)] {
+                    frame.render_widget(Block::bordered().border_type(BorderType::Rounded).border_style(if active { accent } else { muted }), rect);
+                }
+                let left = Rect::new(sidebar.x + 2, sidebar.y + 1, sidebar.width - 4, sidebar.height - 2);
+                frame.render_widget(Paragraph::new("Icewine").style(accent), Rect::new(left.x, left.y, left.width, 1));
+                frame.render_widget(Paragraph::new("─".repeat(left.width as usize)).style(muted), Rect::new(left.x, left.y + 1, left.width, 1));
+                for (index, name) in ["Utilities", "Appearance", "Widgets", "Hotkeys"].iter().enumerate() {
+                    let rect = Rect::new(left.x, left.y + 3 + index as u16 * 2, left.width, 1);
+                    frame.render_widget(Paragraph::new(*name).style(if index == page { if !pane { highlighted } else { accent } } else { normal }), rect);
+                    page_hits.push((rect, index));
+                }
+                let inner = Rect::new(content.x + 2, content.y + 1, content.width - 4, content.height - 2);
+                let title = if subpage == 1 { "Appearance / Theme" } else if subpage == 2 { "Appearance / Taskbar" } else { ["Utilities", "Appearance", "Widgets", "Hotkeys"][page] };
+                frame.render_widget(Paragraph::new(title).style(accent), Rect::new(inner.x, inner.y, inner.width, 1));
+                frame.render_widget(Paragraph::new("─".repeat(inner.width as usize)).style(muted), Rect::new(inner.x, inner.y + 1, inner.width, 1));
+                let footer = Rect::new(inner.x, inner.bottom() - 1, inner.width, 1);
+                frame.render_widget(Paragraph::new(if subpage > 0 { "Tab: Switch pane   Esc: Back" } else { "Tab: Switch pane   Esc: Close" }).style(muted), footer);
+                frame.render_widget(Paragraph::new(message.as_str()).style(accent).wrap(Wrap { trim: false }), Rect::new(inner.x, footer.y - 2, inner.width, 2));
+                let body = Rect::new(inner.x, inner.y + 3, inner.width, inner.height - 6);
+                if page == 2 && subpage == 0 {
+                    let unassigned: Vec<_> = (0..CARD_MODULES.len()).filter(|module| widgets.location(*module).is_none()).collect();
+                    let grid_height = body.height.saturating_sub(9);
+                    visible_grid_rows = (grid_height / 5).max(1) as usize;
+                    grid_columns = if body.width >= 90 { 3 } else { 2 };
+                    let selected_row = stack / grid_columns;
+                    if stack < widgets.stacks.len() {
+                        if selected_row < grid_start { grid_start = selected_row; }
+                        if selected_row >= grid_start + visible_grid_rows { grid_start = selected_row + 1 - visible_grid_rows; }
+                    }
+                    let cell_width = body.width / grid_columns as u16;
+                    for index in grid_start * grid_columns..((grid_start + visible_grid_rows) * grid_columns).min(widgets.stacks.len()) {
+                        let value = &widgets.stacks[index];
+                        let rect = Rect::new(body.x + (index % grid_columns) as u16 * cell_width, body.y + 1 + (index / grid_columns - grid_start) as u16 * 5, cell_width, 5);
+                        let active = pane && stack == index;
+                        let title = icons.split_whitespace().find_map(|field| field.split_once('=').filter(|(id, _)| *id == CARD_MODULES[value.modules[0]]).map(|(_, icon)| icon)).unwrap_or("·");
+                        frame.render_widget(Block::bordered().title(format!(" {title} ")).border_type(if active { BorderType::Double } else { BorderType::Plain }).border_style(if active { accent } else { muted }), rect);
+                        hits.push((rect, Control::Stack(index)));
+                        let selected_pos = member.and_then(|m| value.modules.iter().position(|v| *v == m)).unwrap_or(0);
+                        let start = selected_pos.saturating_sub(2);
+                        for (offset, module) in value.modules.iter().enumerate().skip(start).take(3) {
+                            let selected = active && member == Some(*module) && placement.is_none();
+                            let label = format!("{}{}{}", if selected { "›" } else { " " }, if offset == 0 { "" } else { "  " }, CARD_LABELS[*module]);
+                            let r = Rect::new(rect.x + 1, rect.y + 1 + (offset - start) as u16, rect.width - 2, 1);
+                            frame.render_widget(Paragraph::new(label).style(if selected { highlighted } else { normal.fg([colours[0], colours[4], colours[5]][offset % 3]) }), r);
+                            hits.push((r, Control::Card(*module)));
+                        }
+                    }
+                    let unrect = Rect::new(body.x, body.y + 1 + visible_grid_rows as u16 * 5, body.width, 4);
+                    let active = pane && stack == widgets.stacks.len() && placement.is_none();
+                    frame.render_widget(Block::bordered().title(format!(" Unassigned ({}) ", unassigned.len())).border_type(if active { BorderType::Double } else { BorderType::Plain }).border_style(if active { accent } else { muted }), unrect);
+                    hits.push((unrect, Control::Stack(widgets.stacks.len())));
+                    let position = member.and_then(|m| unassigned.iter().position(|v| *v == m)).unwrap_or(0);
+                    for (offset, module) in unassigned.iter().enumerate().skip(position.saturating_sub(1)).take(2) {
+                        let r = Rect::new(unrect.x + 1, unrect.y + 1 + (offset - position.saturating_sub(1)) as u16, unrect.width - 2, 1);
+                        let selected = active && member == Some(*module);
+                        frame.render_widget(Paragraph::new(format!("{} {}", if selected { "›" } else { " " }, CARD_LABELS[*module])).style(if selected { highlighted } else { normal }), r);
+                        hits.push((r, Control::Card(*module)));
+                    }
+                    let switcher_rect = Rect::new(body.x, body.y, body.width, 1);
+                    frame.render_widget(Paragraph::new(format!("Window switcher {}{}", tick(widgets.enabled[1]), if editable(1) { "" } else { " - Read Only" })).style(if pane && current == Control::Widget(1) { highlighted } else if editable(1) { normal } else { muted }), switcher_rect);
+                    if editable(1) { hits.push((switcher_rect, Control::Widget(1))); }
+                    let mut x = body.x;
+                    let mut y = unrect.bottom();
+                    for control in controls.iter().filter(|c| !matches!(c, Control::Stack(_) | Control::Widget(_))) {
+                        let label: String = match control {
+                            Control::Widget(_) => format!("Window switcher {}", tick(widgets.enabled[1])),
+                            Control::GridAction(index) => ["New stack", "Remove stack", "Make primary", "Member -", "Member +", "Stack [", "Stack ]", "Unassign"][*index].into(),
+                            _ => "Save".into(),
+                        };
+                        let label = format!("[ {label} ]");
+                        let width = label.chars().count() as u16;
+                        if x + width > body.right() { x = body.x; y += 1; }
+                        let rect = Rect::new(x, y, width.min(body.width), 1);
+                        frame.render_widget(Paragraph::new(label).style(if pane && *control == current { highlighted } else { accent }), rect);
+                        hits.push((rect, *control)); x += width + 1;
+                    }
+                    // The unavailable import stays visible and has no hit target.
+                    if x + 25 > body.right() { x = body.x; y += 1; }
+                    frame.render_widget(Paragraph::new("[ Import (coming soon) ]").style(muted), Rect::new(x, y, 25.min(body.width), 1));
+                } else if page == 3 && subpage == 0 {
+                    let category = ["Common", "Applications", "Windows", "Workspaces", "Desktop / session"][hot_category];
+                    let rect = Rect::new(body.x, body.y, body.width, 1);
+                    frame.render_widget(Paragraph::new(format!("‹ {category} ›")).style(if pane { highlighted } else { accent }), rect);
+                    hits.push((rect, Control::Category));
+                    let text = hotkeys(hot_category, &widgets, effective_screenshot);
+                    frame.render_widget(Paragraph::new(text).style(normal).wrap(Wrap { trim: false }).scroll((hot_scroll as u16, 0)), Rect::new(body.x, body.y + 2, body.width, body.height.saturating_sub(2)));
+                } else {
+                    let mut top = body.y;
+                    if page == 0 && subpage == 0 {
+                        frame.render_widget(Paragraph::new("Selected utilities are installed and configured by Icewine.").style(muted).wrap(Wrap { trim: false }), Rect::new(body.x, top, body.width, 2));
+                        top += if body.width >= 57 { 2 } else { 3 };
+                    }
+                    let selected_row = rows.iter().position(|row| row.control == current).unwrap_or(0);
+                    let step = if page == 1 || subpage == 2 { 2 } else { 1 };
+                    let capacity = ((body.bottom() - top) / step).max(1) as usize;
+                    let start = if rows.len() > capacity { selected_row.saturating_sub(capacity - 1) } else { 0 };
+                    for (index, value) in rows.iter().enumerate().skip(start).take(capacity) {
+                        let gap = if page == 0 && subpage == 0 && index >= 6 && start < 6 { 1 } else { 0 };
+                        let y = top + ((index - start) * step as usize) as u16 + gap;
+                        if y >= body.bottom() { break; }
+                        let rect = Rect::new(body.x, y, body.width, 1);
+                        let style = if !value.enabled { muted } else if pane && value.control == current { highlighted } else { normal };
+                        let parts: Vec<_> = value.label.split('\t').collect();
+                        let text = if parts.len() == 2 {
+                            let value_width = if readonly { 24 } else { 12 };
+                            let detail_width = (body.width as usize).saturating_sub(17 + value_width);
+                            format!("{:<17}{:<detail_width$}{:^value_width$}", parts[0], parts[1].chars().take(detail_width).collect::<String>(), value.value)
+                        } else { format!("{:<20}{}", value.label, value.value) };
+                        frame.render_widget(Paragraph::new(text).style(style), rect);
+                        if value.enabled { hits.push((rect, value.control)); }
+                    }
+                }
+            })?;
+            if !event::poll(std::time::Duration::from_secs(2))? {
+                if page == 2 { icons = widget_command(&["widget-icons".into()]).unwrap_or(icons); }
+                continue;
+            }
+            let mut activate = false;
+            let mut key = match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if key.code == KeyCode::Char('c') && key.modifiers.contains(event::KeyModifiers::CONTROL) { return Ok(None); }
+                    if key.code == KeyCode::Char('q') { KeyCode::Esc } else { key.code }
+                }
+                Event::Mouse(mouse) => {
+                    if terminal.size()?.width < 80 || terminal.size()?.height < 24 { continue; }
+                    match mouse.kind {
+                        event::MouseEventKind::Down(event::MouseButton::Left) => {
+                            if let Some((_, index)) = page_hits.iter().find(|(r, _)| r.contains(Position::new(mouse.column, mouse.row))) {
+                                if subpage != 0 { subpage = 0; colours = theme_colours(&appearance.themes[appearance.theme]).unwrap_or(colours); }
+                                page = *index; pane = false; focus = 0; member = None; placement = None; continue;
+                            }
+                            if let Some((_, control)) = hits.iter().rev().find(|(r, _)| r.contains(Position::new(mouse.column, mouse.row))) {
+                                pane = true;
+                                match *control {
+                                    Control::Stack(index) => { stack = index; focus = index; if placement.is_none() { member = None; remembered = widgets.stacks.get(index).and_then(|s| s.modules.first()).copied().unwrap_or(remembered); } if placement.is_some() && index < widgets.stacks.len() { activate = true; } }
+                                    Control::Card(module) => {
+                                        if placement.is_some() { stack = widgets.location(module).map(|v| v.0).unwrap_or(widgets.stacks.len()); }
+                                        else { member = Some(module); remembered = module; stack = widgets.location(module).map(|v| v.0).unwrap_or(widgets.stacks.len()); }
+                                        focus = stack; activate = true;
+                                    }
+                                    _ => { focus = controls.iter().position(|c| c == control).unwrap_or(focus); activate = true; }
+                                }
+                                KeyCode::Enter
+                            } else { continue; }
+                        }
+                        event::MouseEventKind::ScrollDown => { pane = mouse.column >= 18; KeyCode::Down },
+                        event::MouseEventKind::ScrollUp => { pane = mouse.column >= 18; KeyCode::Up },
+                        _ => continue,
+                    }
+                }
+                _ => continue,
+            };
+            if terminal.size()?.width < 80 || terminal.size()?.height < 24 {
+                if key == KeyCode::Esc { return Ok(None); } continue;
+            }
+            if key == KeyCode::Tab || key == KeyCode::BackTab { pane = !pane; continue; }
+            if key == KeyCode::Esc {
+                if placement.take().is_some() { message.clear(); continue; }
+                if page == 2 && member.take().is_some() { continue; }
+                if subpage != 0 { subpage = 0; focus = 0; colours = theme_colours(&appearance.themes[appearance.theme]).unwrap_or(colours); continue; }
+                return Ok(None);
+            }
+            if !pane {
+                match key {
+                    KeyCode::Down | KeyCode::Up => { if subpage == 1 { colours = theme_colours(&appearance.themes[appearance.theme]).unwrap_or(colours); } cycle(&mut page, 4, key == KeyCode::Down); subpage = 0; focus = 0; member = None; placement = None; },
+                    KeyCode::Enter | KeyCode::Right | KeyCode::Char(' ') => pane = true, _ => (),
+                }
+                continue;
+            }
+            if page == 3 && subpage == 0 {
+                match key { KeyCode::Left | KeyCode::Right | KeyCode::Enter | KeyCode::Char(' ') => { cycle(&mut hot_category, 5, key != KeyCode::Left); hot_scroll = 0; },
+                    KeyCode::Down => hot_scroll = (hot_scroll + 1).min(50), KeyCode::Up => hot_scroll = hot_scroll.saturating_sub(1), _ => () }
+                continue;
+            }
+            if page == 2 && subpage == 0 {
+                if let Some(module) = member { remembered = module; }
+                if matches!(key, KeyCode::Char('n' | '+' | '-' | '[' | ']') | KeyCode::Delete) && editable(2) {
+                    let command = match key { KeyCode::Char('n') => 0, KeyCode::Delete => 1, KeyCode::Char('-') => 3, KeyCode::Char('+') => 4, KeyCode::Char('[') => 5, _ => 6 };
+                    focus = controls.iter().position(|c| *c == Control::GridAction(command)).unwrap_or(focus); key = KeyCode::Enter;
+                }
+                if key == KeyCode::Char('s') { focus = controls.iter().position(|c| *c == Control::Apply).unwrap_or(focus); key = KeyCode::Enter; }
+                let action = controls[focus];
+                if matches!(key, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down) {
+                    if matches!(action, Control::Stack(_)) {
+                        if matches!(key, KeyCode::Up | KeyCode::Down) && member.is_some() && placement.is_none() {
+                            let inventory = if stack < widgets.stacks.len() { widgets.stacks[stack].modules.clone() } else { (0..CARD_MODULES.len()).filter(|m| widgets.location(*m).is_none()).collect() };
+                            if let Some(position) = inventory.iter().position(|m| Some(*m) == member) {
+                                let next = if key == KeyCode::Down { (position + 1).min(inventory.len() - 1) } else { position.saturating_sub(1) };
+                                member = Some(inventory[next]);
+                            }
+                        } else {
+                            let count = widgets.stacks.len();
+                            let next = match key {
+                                KeyCode::Left if stack < count && stack % grid_columns > 0 => stack - 1,
+                                KeyCode::Right if stack < count && stack % grid_columns + 1 < grid_columns && stack + 1 < count => stack + 1,
+                                KeyCode::Up if stack == count => count.saturating_sub(1),
+                                KeyCode::Up if stack < grid_columns && placement.is_none() => { if let Some(index) = controls.iter().position(|c| *c == Control::Widget(1)) { focus = index; } stack },
+                                KeyCode::Up => stack.saturating_sub(grid_columns),
+                                KeyCode::Down if stack < count => (stack + grid_columns).min(count),
+                                KeyCode::Down if placement.is_none() => { focus = controls.iter().position(|c| matches!(c, Control::GridAction(_) | Control::Apply)).unwrap_or(focus); stack },
+                                _ => stack,
+                            };
+                            if !(placement.is_some() && next == count) {
+                                let changed_stack = stack != next;
+                                stack = next;
+                                if changed_stack && member.is_none() && placement.is_none() { remembered = widgets.stacks.get(stack).and_then(|s| s.modules.first()).copied().or_else(|| (0..CARD_MODULES.len()).find(|m| widgets.location(*m).is_none())).unwrap_or(remembered); }
+                                if focus <= count { focus = stack; }
+                                if member.is_some() { member = if stack < count { widgets.stacks[stack].modules.first().copied() } else { (0..CARD_MODULES.len()).find(|m| widgets.location(*m).is_none()) }; }
                             }
                         }
-                        entries.push((Control::Arrangement, "Disabled / unassigned".to_owned(), owner(2).to_owned()));
-                        entries.extend((0..CARD_MODULES.len()).filter(|index| widgets.location(*index).is_none())
-                            .map(|index| (Control::Card(index), format!("  {}", CARD_MODULES[index]),
-                                if widgets.supported { "Disabled".to_owned() } else { "Unavailable".to_owned() })));
-                        entries.push((Control::Back, "[ < Back to Widgets ]".to_owned(), "Draft retained".to_owned()));
+                    } else if action == Control::Widget(1) && key == KeyCode::Down { stack = 0; focus = 0; }
+                    else if key == KeyCode::Up { focus = stack; }
+                    else if key == KeyCode::Left { focus = focus.saturating_sub(1).max(widgets.stacks.len() + 1).min(controls.len() - 1); }
+                    else { focus = (focus + 1).min(controls.len() - 1); }
+                    continue;
+                }
+                if !matches!(key, KeyCode::Enter | KeyCode::Char(' ')) { continue; }
+                match action {
+                    Control::Stack(index) => {
+                        stack = index;
+                        if let Some(module) = placement {
+                            if editable(2) && index < widgets.stacks.len() {
+                                let destination = widgets.stacks[index].id.clone();
+                                widgets.remove(module);
+                                stack = widgets.stacks.iter().position(|s| s.id == destination).unwrap();
+                                widgets.stacks[stack].modules.push(module); placement = None; member = Some(module); remembered = module; focus = stack; message = "Unsaved Widgets changes".into();
+                            }
+                        } else if let Some(module) = member {
+                            if editable(2) {
+                                if widgets.location(module).is_some() { widgets.remove(module); stack = widgets.stacks.len(); focus = stack; member = Some(module); }
+                                else if !widgets.stacks.is_empty() { placement = Some(module); stack = 0; focus = 0; message = "Select a stack; Enter/Space adds, Escape cancels".into(); }
+                                else { message = "Use New stack to enable this entry".into(); }
+                            }
+                        } else {
+                            member = if index < widgets.stacks.len() { widgets.stacks[index].modules.first().copied() } else { (0..CARD_MODULES.len()).find(|m| widgets.location(*m).is_none()) };
+                            if let Some(module) = member { remembered = module; }
+                        }
                     }
-                    let selected = entries.iter().position(|(control, _, _)| *control == controls[focus]);
-                    let mut table_state = TableState::default().with_selected(selected);
-                    // Keep the focused row visible in the existing 80 x 24 minimum.
-                    *table_state.offset_mut() = selected.unwrap_or(0).saturating_sub(utilities.height.saturating_sub(1) as usize);
-                    frame.render_stateful_widget(Table::new(entries.into_iter().map(|(control, label, value)|
-                        Row::new([Cell::from(label), Cell::from(value)]).style(if controls[focus] == control { focused }
-                            else if match control { Control::Arrangement | Control::Back => false, Control::Widget(index) => !widgets.supported || widgets.ownership[index] != Ownership::User, Control::Bar(index) => !widgets.supported || widgets.ownership[index + 3] != Ownership::User, Control::BarWidth => !widgets.supported || widgets.ownership[7] != Ownership::User, _ => !widgets.supported || widgets.ownership[2] != Ownership::User } { muted }
-                            else { Style::default() })), [Constraint::Length(25), Constraint::Min(20)]).column_spacing(1), utilities, &mut table_state);
-                    frame.render_widget(Paragraph::new(widget_message.chars().map(|c| if c.is_control() && c != '\n' { '?' } else { c }).collect::<String>()).style(accent).wrap(Wrap { trim: false }), reset);
-                } else {
-                frame.render_widget(Paragraph::new(vec![
-                    Line::from("Optional utilities, configured for Icewine.").style(accent),
-                    Line::from("Selected utilities are installed and configured.").style(muted),
-                    Line::from(if readonly {
-                        "Utility selections are read-only (host policy or symlink)."
-                    } else {
-                        "Deselecting removes Icewine configuration; packages stay installed."
-                    }).style(muted),
-                ]), intro);
-                let rows = rows.iter().map(|(id, purpose, defaults)| {
-                    let available = *id != "handheld" || handheld_available(*steam, selected);
-                    let active = controls[focus] == (if *id == "steam" { Control::Steam } else { Control::Utility(id) });
-                    Row::new(vec![
-                        Cell::from(*purpose),
-                        Cell::from(*defaults).style(muted),
-                        Cell::from(Line::from(if *id == "steam" { format!("< {} >", STEAM[*steam]) }
-                            else { (if selected[id] { "[x]" } else { "[ ]" }).to_owned() }).right_aligned())
-                            .style(if active { focused } else if readonly || !available { muted } else { accent }),
-                    ]).style(if active { focused } else { Style::default() })
-                });
-                frame.render_widget(Table::new(rows, [
-                    Constraint::Length(18), Constraint::Min(20), Constraint::Length(11),
-                ]).column_spacing(2).header(Row::new([
-                    Cell::from("Utility"), Cell::from("Contains"),
-                    Cell::from(Line::from("Configure").right_aligned()),
-                ]).style(accent).bottom_margin(1)), utilities);
-                frame.render_widget(Paragraph::new(format!("[{}] Overwrite existing dotfiles",
-                    if overwrite { "x" } else { " " }))
-                    .style(if controls[focus] == Control::Overwrite { focused } else { Style::default() }), reset);
-                }
-                frame.render_widget(Paragraph::new(Line::from(vec![
-                    Span::styled(if page >= 2 { "[ Save ]" } else { "[ Apply ]" }, if controls[focus] == Control::Apply { focused } else if page >= 2 && (!widgets.supported || !widgets.ownership.contains(&Ownership::User)) { muted } else { accent }),
-                    Span::raw("   "),
-                    Span::styled("[ Cancel ]", if controls[focus] == Control::Cancel { focused } else { muted }),
-                ])), buttons);
-                frame.render_widget(Paragraph::new(vec![
-                    Line::from(if page == 3 { "b/Tab: Back   Up/down: move   Shift-Tab: previous control" }
-                        else { "Tab: page   Up/down: move   Shift-Tab: previous control" }),
-                    Line::from(if page == 0 { "Left/right: Steam   Space/Enter: act   Esc: cancel" }
-                        else if page == 1 { "Left/right: cycle   Space/Enter: act   Esc: cancel" }
-                        else { "Space/Enter: act   s: Save   Esc: cancel" }),
-                ]).style(muted), help);
-            })?;
-            let Event::Key(key) = event::read()? else { continue };
-            if key.kind != KeyEventKind::Press { continue; }
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => return Ok(None),
-                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(None),
-                _ if terminal.size()?.width < 80 || terminal.size()?.height < 24 => (),
-                KeyCode::Char('s') if page >= 2 && widgets.supported && widgets.ownership.contains(&Ownership::User) => {
-                    widget_message = match widgets.save() { Ok(text) => text, Err(error) => error.to_string() };
-                }
-                KeyCode::Left | KeyCode::Right | KeyCode::Char('n' | '+' | '-' | '[' | ']') | KeyCode::Delete
-                    if matches!(controls[focus], Control::Card(_)) => {
-                    if let Control::Card(index) = controls[focus] { widgets.edit(index, key.code); card_focus = Some(index); }
-                }
-                KeyCode::Left | KeyCode::Right if controls[focus] == Control::BarWidth => {
-                    widgets.width = if key.code == KeyCode::Right { (widgets.width + 1).min(100) }
-                        else { widgets.width.saturating_sub(1).max(50) };
-                }
-                KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Bar(_)) => {
-                    if let Control::Bar(index) = controls[focus] {
-                        let count = BAR_SETTINGS[index].2.len();
-                        widgets.bar[index] = (widgets.bar[index] + if key.code == KeyCode::Right { 1 } else { count - 1 }) % count;
+                    Control::Widget(1) => widgets.enabled[1] = !widgets.enabled[1],
+                    Control::GridAction(index) if editable(2) => {
+                        match index {
+                            0 => { widgets.new_stack(remembered); stack = widgets.location(remembered).unwrap().0; member = Some(remembered); },
+                            1 if stack < widgets.stacks.len() => { widgets.stacks.remove(stack); member = None; },
+                            2 => if let Some((s, pos)) = widgets.location(remembered) { let module = widgets.stacks[s].modules.remove(pos); widgets.stacks[s].modules.insert(0, module); },
+                            3 | 4 => widgets.reorder_member(remembered, index == 4),
+                            5 | 6 if stack < widgets.stacks.len() => { let next = if index == 5 { stack.saturating_sub(1) } else { (stack + 1).min(widgets.stacks.len() - 1) }; widgets.stacks.swap(stack, next); stack = next; },
+                            7 => { widgets.remove(remembered); stack = widgets.stacks.len(); member = Some(remembered); }, _ => (),
+                        }
+                        focus = stack.min(widgets.stacks.len()); message = "Unsaved Widgets changes".into();
                     }
+                    Control::Apply => message = match widgets.save_subset(&["windowSwitcher", "cardStacks"]) { Ok(text) => text, Err(error) => error.to_string() },
+                    _ => (),
                 }
-                KeyCode::Char('b') | KeyCode::Backspace if page == 3 => {
-                    focuses[page] = focus; page = 2; focus = focuses[page];
+                continue;
+            }
+            if matches!(key, KeyCode::Up | KeyCode::Down) {
+                cycle(&mut focus, controls.len(), key == KeyCode::Down);
+                if let Control::Preview(index) = controls[focus] { preview = index; colours = theme_colours(&appearance.themes[preview]).unwrap_or(colours); }
+                continue;
+            }
+            let current = controls[focus];
+            let forward = key != KeyCode::Left;
+            let change = matches!(key, KeyCode::Left | KeyCode::Right);
+            activate |= matches!(key, KeyCode::Enter | KeyCode::Char(' '));
+            if !change && !activate { continue; }
+            match current {
+                Control::Preview(index) => { preview = index; colours = theme_colours(&appearance.themes[index]).unwrap_or(colours); },
+                Control::Theme if activate => { subpage = 1; preview = appearance.theme; focus = preview; },
+                Control::Taskbar if activate => { taskbar = widgets.clone(); subpage = 2; focus = 0; },
+                Control::Back if activate => { subpage = 0; focus = 0; colours = theme_colours(&appearance.themes[appearance.theme]).unwrap_or(colours); },
+                Control::Transparency | Control::Layout => {
+                    let (choices, index, command) = if current == Control::Transparency { (TRANSPARENCY, appearance.transparency, "transparency") } else { (LAYOUTS, appearance.layout, "layout") };
+                    let next = (index + if forward { 1 } else { choices.len() - 1 }) % choices.len();
+                    message = appearance_command(&[command, choices[next]]).unwrap_or_else(|error| error.to_string());
+                    match Appearance::load() { Ok(value) => appearance = value, Err(error) => message.push_str(&format!(" Could not refresh appearance state: {error}")) }
                 }
-                KeyCode::Tab => { focuses[page] = focus; page = if page == 3 { 2 } else { (page + 1) % 3 }; focus = focuses[page]; }
-                KeyCode::Left | KeyCode::Right if matches!(controls[focus], Control::Theme | Control::Transparency | Control::Layout) => {
-                    let (values, current, command) = if controls[focus] == Control::Theme {
-                        (appearance.themes.iter().map(String::as_str).collect::<Vec<_>>(), appearance.theme, "theme")
-                    } else if controls[focus] == Control::Layout {
-                        (LAYOUTS.to_vec(), appearance.layout, "layout")
-                    } else { (TRANSPARENCY.to_vec(), appearance.transparency, "transparency") };
-                    let next = (current + if key.code == KeyCode::Right { 1 } else { values.len() - 1 }) % values.len();
-                    message = match appearance_command(&[command, values[next]]) {
-                        Ok(text) => text, Err(error) => error.to_string(),
+                Control::Wallpaper if activate => {
+                    message = match picker(&mut terminal) { Ok(Some(path)) => appearance_command(&["wallpaper", &path.to_string_lossy()]).unwrap_or_else(|e| e.to_string()), Ok(None) => "".into(), Err(error) => error.to_string() };
+                    crossterm::execute!(io::stdout(), event::EnableMouseCapture)?;
+                    if let Ok(value) = Appearance::load() { appearance = value; }
+                }
+                Control::Monitors if activate => {
+                    // Re-read permissions immediately before handing terminal ownership over.
+                    appearance = Appearance::load()?;
+                    if appearance.readonly[3] { message = "Monitors - Read Only".into(); continue; }
+                    crossterm::execute!(io::stdout(), event::DisableMouseCapture)?; ratatui::restore();
+                    let status = Command::new("hyprmon").status();
+                    terminal = ratatui::init(); crossterm::execute!(io::stdout(), event::EnableMouseCapture)?;
+                    message = match status { Ok(status) => format!("HyprMon exited {status}; live/save changes remain"), Err(error) => format!("Hyprmon Unavailable: {error}") };
+                }
+                Control::Bar(index) => { if index == 0 { taskbar.bar[0] = if taskbar.bar[0] == 3 { if forward { 0 } else { 2 } } else { (taskbar.bar[0] + if forward { 1 } else { 2 }) % 3 }; } else { cycle(&mut taskbar.bar[index], BAR_SETTINGS[index].2.len(), forward); } },
+                Control::BarWidth => taskbar.width = if forward { (taskbar.width + 1).min(100) } else { taskbar.width.saturating_sub(1).max(50) },
+                Control::Widget(0) => { widgets.enabled[0] = !widgets.enabled[0]; message = match widgets.save_subset(&["notificationToasts"]) { Ok(text) => text, Err(error) => { widgets.enabled[0] = !widgets.enabled[0]; error.to_string() } }; },
+                Control::Steam => { let previous = *steam; cycle(steam, 3, forward); if previous == 0 { selected.insert("gamescope", true); } if *steam == 0 { selected.insert("gamescope", false); } if !handheld_available(*steam, selected) { selected.insert("handheld", false); } },
+                Control::Screenshot => cycle(screenshot, 3, forward),
+                Control::Utility(id) => { selected.insert(id, !selected[id]); if !handheld_available(*steam, selected) { selected.insert("handheld", false); } },
+                Control::Overwrite => overwrite = !overwrite,
+                Control::Apply if activate && subpage == 1 => {
+                    message = appearance_command(&["theme", &appearance.themes[preview]]).unwrap_or_else(|error| error.to_string());
+                    match Appearance::load() { Ok(value) => appearance = value, Err(error) => message.push_str(&format!(" Could not refresh appearance state: {error}")) }
+                    subpage = 0; focus = 0;
+                }
+                Control::Apply if activate && subpage == 2 => {
+                    taskbar.revision = widgets.revision.clone();
+                    message = match taskbar.save_subset(&["barBehaviour", "barLocation", "barStyle", "barWidth", "oskAccess"]) {
+                        Ok(text) => { widgets.bar = taskbar.bar; widgets.width = taskbar.width; widgets.revision = taskbar.revision.clone(); subpage = 0; focus = 4; text }, Err(error) => error.to_string(),
                     };
-                    // Selection can commit before live delivery fails. Read the
-                    // effective backend values even when the action returned an error.
-                    match Appearance::load() {
-                        Ok(updated) => {
-                            appearance.themes = updated.themes;
-                            appearance.theme = updated.theme;
-                            appearance.policy = updated.policy;
-                            appearance.transparency = updated.transparency;
-                            appearance.layout = updated.layout;
-                            appearance.readonly = updated.readonly;
-                        }
-                        Err(error) => message.push_str(&format!("\nCould not refresh appearance state: {error}")),
-                    }
                 }
-                KeyCode::Left | KeyCode::Right if controls[focus] == Control::Steam => {
-                    let previous = *steam;
-                    *steam = (*steam + if key.code == KeyCode::Right { 1 } else { STEAM.len() - 1 }) % STEAM.len();
-                    if previous == 0 { selected.insert("gamescope", true); }
-                    if *steam == 0 { selected.insert("gamescope", false); }
-                    if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
-                }
-                KeyCode::Down | KeyCode::Right => {
-                    focus = (focus + 1) % controls.len();
-                }
-                KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
-                    focus = (focus + controls.len() - 1) % controls.len();
-                }
-                KeyCode::Char(' ') | KeyCode::Enter => match controls[focus] {
-                    Control::Widget(index) => widgets.enabled[index] ^= true,
-                    Control::BarWidth => widgets.width = (widgets.width + 1).min(100),
-                    Control::Bar(index) => widgets.bar[index] = (widgets.bar[index] + 1) % BAR_SETTINGS[index].2.len(),
-                    Control::Card(index) => { widgets.edit(index, key.code); card_focus = Some(index); }
-                    Control::Arrangement => { focuses[page] = focus; page = 3; focus = focuses[page]; }
-                    Control::Back => { focuses[page] = focus; page = 2; focus = focuses[page]; }
-                    Control::Utility(id) => {
-                        *selected.get_mut(id).unwrap() ^= true;
-                        if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
-                    }
-                    Control::Steam => {
-                        let previous = *steam;
-                        *steam = (*steam + 1) % STEAM.len();
-                        if previous == 0 { selected.insert("gamescope", true); }
-                        if *steam == 0 { selected.insert("gamescope", false); }
-                        if !handheld_available(*steam, selected) { selected.insert("handheld", false); }
-                    }
-                    Control::Theme | Control::Transparency | Control::Layout => (),
-                    Control::Wallpaper => {
-                        let result = (|| -> io::Result<String> {
-                            let Some(path) = picker(&mut terminal)? else { return Ok("Picker cancelled.".into()); };
-                            let path_text = path.to_str().ok_or_else(|| io::Error::other("Image path is not UTF-8"))?;
-                            let text = appearance_command(&["wallpaper", path_text])?;
-                            appearance.wallpaper = path;
-                            Ok(if text.is_empty() { "Wallpaper saved.".into() } else { text })
-                        })();
-                        message = match result { Ok(text) => text, Err(error) => error.to_string() };
-                    }
-                    Control::Monitors => {
-                        appearance = Appearance::load()?;
-                        if appearance.readonly[3] {
-                            message = "Monitor configuration is now symlinked/read-only.".into();
-                            continue;
-                        }
-                        ratatui::restore();
-                        let result = Command::new("hyprmon").status();
-                        terminal = ratatui::init();
-                        message = match result {
-                            Ok(status) if status.success() => "Returned from HyprMon; live/save actions have their own effect.".into(),
-                            Ok(status) => format!("HyprMon exited with {status}"),
-                            Err(error) if error.kind() == io::ErrorKind::NotFound =>
-                                "HyprMon unavailable: install Lua-compatible hyprmon on PATH.\nNixOS: enable services.icewine.monitors with a compatible package.".into(),
-                            Err(error) => format!("HyprMon unavailable: could not run hyprmon: {error}"),
-                        };
-                    }
-                    Control::Overwrite => overwrite = !overwrite,
-                    Control::Apply if page >= 2 => {
-                        widget_message = match widgets.save() { Ok(text) => text, Err(error) => error.to_string() };
-                    }
-                    Control::Apply => return Ok(Some(overwrite)),
-                    Control::Cancel => return Ok(None),
-                },
+                Control::Apply if activate && page == 0 => return Ok(Some(overwrite)),
                 _ => (),
             }
         }
     })();
+    let _ = crossterm::execute!(io::stdout(), event::DisableMouseCapture);
+    ratatui::restore();
+    result
+}
+fn hotkeys(category: usize, widgets: &Widgets, screenshot: usize) -> String {
+    let taskbar = match widgets.bar[0] { 2 => "toggle on press", 3 => "legacy always visible", _ => "hold to show; release hides" };
+    let switcher = "Super+W  Window switcher (when enabled)";
+    let capture = ["Super+Print  Screenshot (disabled)", "Super+Print  Hyprshot region", "Super+Print  Flameshot editor"][screenshot];
+    let common = format!("Super+`  Show/Toggle Taskbar ({taskbar})\nSuper+Space  Launcher\nSuper+Enter  Terminal\nSuper+E  File manager\n{switcher}\nSuper+Q  Close window\nSuper+Arrows  Focus window\nSuper+F  Fullscreen\nSuper+1–0  Workspace 1–10\nSuper+Shift+1–0  Move to workspace\n{capture}\nSuper+L  Lock screen");
+    let text = match category {
+        0 => common,
+        1 => format!("Super+Enter  Configured terminal\nSuper+Space  Launcher\nSuper+E  Configured file manager\nSuper+B  Browser (if configured)\n{switcher}\n{capture}"),
+        2 => format!("{switcher}\nSuper+Q  Close\nSuper+V  Toggle floating\nSuper+F  Fullscreen\nSuper+M  Toggle width\nSuper+P  Pseudo tile\nSuper+J  Join/split column (scrolling only)\nSuper+Arrows  Focus\nSuper+Shift+Arrows  Swap\nSuper+Ctrl+Arrows  Resize\nAlt+Tab  Cycle and raise\nSuper+mouse drag  Move/resize\n\nScrolling left/right uses columns. Monocle focus cycles; directional swap and resize have no effect."),
+        3 => "Super+1–0  Switch workspace 1–10\nSuper+Shift+1–0  Move window\nSuper+PageUp/PageDown  Relative workspace\nSuper+Shift+PageUp/PageDown  Move window\nSuper+Tab  Next populated workspace\nSuper+Shift+Tab  Move to next populated\nSuper+Home/End  First/last populated\nSuper+Shift+Home/End  Move window".into(),
+        _ => "Super+L  Lock\nSuper+Shift+L  End session\nSuper+Ctrl+R  Reload Hyprland\nSuper+Shift+W  Wake displays\nSuper+Shift+wheel  Zoom\nSuper+Shift+Z  Reset zoom\nSuper+Shift+B/N/A/J/P/D  Bluetooth/network/audio/battery/performance/layout\nMedia keys  Player and audio\nBrightness keys  Focused display brightness".into(),
+    };
+    format!("{text}\n\nShipped Icewine bindings. Host/user overrides can change them; optional tools and the active layout affect availability. Up/Down scrolls.")
+}
+
+fn executable(name: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).any(|path| {
+        path.join(name).metadata().is_ok_and(|info| info.is_file() && info.permissions().mode() & 0o111 != 0)
+    })
+}
+
+fn review_utilities(lines: Vec<String>) -> io::Result<bool> {
+    let mut terminal = ratatui::init();
+    let result = (|| {
+        crossterm::execute!(io::stdout(), event::EnableMouseCapture)?;
+        let mut scroll = 0u16;
+        let mut apply = false; // Review starts on Back.
+        loop {
+            let mut buttons = [Rect::default(); 2];
+            terminal.draw(|frame| {
+                if frame.area().width < 80 || frame.area().height < 24 {
+                    frame.render_widget(Paragraph::new("Icewine needs an 80 x 24 terminal.\nResize to continue; Esc: cancel."), frame.area()); return;
+                }
+                let block = Block::bordered().title(" Utilities / Review ").padding(Padding::uniform(1));
+                let inner = block.inner(frame.area());
+                frame.render_widget(block, frame.area());
+                let body = Rect::new(inner.x, inner.y, inner.width, inner.height - 3);
+                frame.render_widget(Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).scroll((scroll, 0)), body);
+                buttons = [Rect::new(inner.x, inner.bottom() - 2, 11, 1), Rect::new(inner.x + 14, inner.bottom() - 2, 10, 1)];
+                for (index, label) in ["[ Apply ]", "[ Back ]"].iter().enumerate() {
+                    frame.render_widget(Paragraph::new(*label).style(if apply == (index == 0) { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default().fg(Color::Cyan) }), buttons[index]);
+                }
+                frame.render_widget(Paragraph::new("Up/Down: scroll   Left/Right: action   I: apply   Esc: Back"), Rect::new(inner.x, inner.bottom() - 1, inner.width, 1));
+            })?;
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => return Ok(false),
+                    KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(false),
+                    _ if terminal.size()?.width < 80 || terminal.size()?.height < 24 => (),
+                    KeyCode::Down => scroll = scroll.saturating_add(1).min(lines.len().saturating_mul(3) as u16),
+                    KeyCode::Up => scroll = scroll.saturating_sub(1),
+                    KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => apply = !apply,
+                    KeyCode::Enter | KeyCode::Char(' ') => return Ok(apply),
+                    KeyCode::Char('i') => return Ok(true), _ => (),
+                },
+                Event::Mouse(mouse) if terminal.size()?.width >= 80 && terminal.size()?.height >= 24 => match mouse.kind {
+                    event::MouseEventKind::Down(event::MouseButton::Left) => {
+                        if buttons[0].contains(Position::new(mouse.column, mouse.row)) { return Ok(true); }
+                        if buttons[1].contains(Position::new(mouse.column, mouse.row)) { return Ok(false); }
+                    }
+                    event::MouseEventKind::ScrollDown => scroll = scroll.saturating_add(1).min(lines.len().saturating_mul(3) as u16),
+                    event::MouseEventKind::ScrollUp => scroll = scroll.saturating_sub(1), _ => (),
+                }, _ => (),
+            }
+        }
+    })();
+    let _ = crossterm::execute!(io::stdout(), event::DisableMouseCapture);
     ratatui::restore();
     result
 }
 
-// Shared confirmations stay in the existing TUI; subprocesses run after restore.
 fn confirm(title: &str, lines: Vec<String>) -> io::Result<bool> {
     let mut scroll = 0u16;
     let mut terminal = ratatui::init();
@@ -650,7 +825,7 @@ fn bootstrap(directory: &str, revision: &str) -> Result<ExitCode, Box<dyn std::e
         "Plan: sudo pacman -U the prepared base archive and its runtime dependencies.".into(),
         format!("Archive: {}", archives[0].display()),
         "Pacman will show its transaction and request approval. User configuration is untouched here.".into(),
-        "Then choose optional integrations in the installed manager; all begin unchecked on first use.".into(),
+        "Then review the utility selections in the installed manager before applying them.".into(),
         "Cancel retains build/cache files; packages and user configuration remain unchanged.".into(),
     ])? { return Ok(ExitCode::SUCCESS); }
     let status = Command::new("sudo").args(["pacman", "-U"]).arg(&archives[0]).status()?;
@@ -682,6 +857,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut steam = STEAM.iter().position(|value| fields.get("steam") == Some(value))
         .ok_or("Invalid Steam choice")?;
     fields.remove("steam");
+    let screenshot_value = fields.remove("screenshot");
+    let mut screenshot = SCREENSHOTS.iter().position(|value| screenshot_value == Some(*value)).ok_or("Invalid Screenshot choice")?;
     let mut selected = BTreeMap::new();
     for (id, value) in fields {
         selected.insert(id, match value {
@@ -689,28 +866,30 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         });
     }
     let readonly = selected.remove("readonly").ok_or("Missing read-only state")?;
-    if selected.len() + 1 != ROWS.len() || ROWS.iter().any(|(id, _, _)| *id != "steam" && !selected.contains_key(id))
+    if selected.len() + 2 != ROWS.len() || ROWS.iter().any(|(id, _, _)| !matches!(*id, "steam" | "screenshot") && !selected.contains_key(id))
         || (steam == 0 && (selected["gamescope"] || selected["handheld"]))
         || (selected["handheld"] && !handheld_available(steam, &selected)) {
         return Err("Invalid manager selections".into());
     }
-    if let Some(overwrite) = choose(readonly, &mut selected, &mut steam)? {
+    if let Some(overwrite) = choose(readonly, &mut selected, &mut steam, &mut screenshot)? {
         let choices = ROWS.iter().map(|(id, label, _)| format!("{label}: {}",
-            if *id == "steam" { STEAM[steam].to_owned() } else { selected[id].to_string() })).collect::<Vec<_>>();
+            if *id == "steam" { STEAM[steam].to_owned() } else if *id == "screenshot" { SCREENSHOTS[screenshot].to_owned() } else { selected[id].to_string() })).collect::<Vec<_>>();
         let mut plan = vec![if readonly { "Host packages/services remain unchanged; deploy selected user defaults.".into() }
             else { "Install selected packages; configure selected utilities; deselection keeps packages.".into() }];
         plan.push("Create missing shared Quickshell/wallpaper defaults and publish theme outputs.".into());
         plan.extend(choices);
+        if selected["texteditor"] { plan.push("Terminal Editor: isolated icewine-nvim data; Arch first launch downloads LazyVim plugins. Personal nvim and host EDITOR/VISUAL stay unchanged.".into()); }
         plan.push(if overwrite { "Overwrite selected defaults WITHOUT backups.".into() }
             else { "Preserve existing dotfiles; create missing defaults. btop selects the Icewine theme in regular configs.".into() });
         plan.push(if readonly { "Host services and device permissions remain host policy.".into() }
             else { "Host prerequisites: services/device permissions; Multilib for native Steam; private packages for Handheld.".into() });
         plan.push("Earlier package/file changes can remain after failure or interruption. Retry Apply after resolving the error.".into());
         plan.push("Cancel leaves utility choices unapplied; earlier Appearance changes remain.".into());
-        if !confirm(" Icewine: planned changes ", plan)? { return Ok(ExitCode::SUCCESS); }
+        if !review_utilities(plan)? { return Ok(ExitCode::SUCCESS); }
         let status = Command::new("icewine-manage-backend").arg("apply")
             .args(selected.iter().map(|(id, value)| format!("{id}={value}")))
             .arg(format!("steam={}", STEAM[steam]))
+            .arg(format!("screenshot={}", SCREENSHOTS[screenshot]))
             .arg(format!("overwrite={overwrite}")).status()?;
         return Ok(if status.success() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
     }

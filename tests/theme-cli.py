@@ -408,8 +408,12 @@ with tempfile.TemporaryDirectory() as temporary:
         path.symlink_to(declared)
         assert run(name).returncode == 0
         rejected = run(name, new)
-        assert rejected.returncode == 1 and "read-only symlink" in rejected.stderr
-        assert path.is_symlink() and declared.read_text() == old + "\n"
+        assert rejected.returncode == 0, rejected.stderr
+        assert path.is_symlink() and declared.read_text() == new + "\n"
+        declared.chmod(0o444)
+        denied = run(name, old)
+        assert denied.returncode == 1 and declared.read_text() == new + "\n"
+        declared.chmod(0o600)
         if name == "theme":
             assert run("transparency", "low").returncode == 0
         declared.unlink()
@@ -438,6 +442,28 @@ with tempfile.TemporaryDirectory() as temporary:
     assert race.is_symlink() and outside.read_text() == "preserve\n"
     race.unlink()
     assert not list(directory.glob(".icewine-*"))
+    race.write_text("before\n")
+    race.chmod(0o640)
+    with mock.patch.object(module.os, "replace", side_effect=PermissionError("commit denied")):
+        try: module.atomic_text(race, "after\n", setting=True)
+        except PermissionError: pass
+        else: raise AssertionError("setting commit failure ignored")
+    assert race.read_text() == "before\n" and race.stat().st_mode & 0o777 == 0o640
+    race.unlink()
+    original_target = directory / "original-target"
+    original_target.write_text("before\n")
+    race.symlink_to(original_target)
+    def retarget_during_write(fd):
+        race.unlink()
+        race.symlink_to(outside)
+    with mock.patch.object(module.os, "fsync", side_effect=retarget_during_write):
+        try: module.atomic_text(race, "after\n", setting=True)
+        except ValueError: pass
+        else: raise AssertionError("setting followed a changed link")
+    assert original_target.read_text() == "before\n" and outside.read_text() == "preserve\n"
+    race.unlink()
+    original_target.unlink()
+
     protected_config = root / "protected-config"
     protected_current = protected_config / "icewine/current"
     protected_current.parent.mkdir(parents=True)
@@ -622,13 +648,15 @@ with tempfile.TemporaryDirectory() as temporary:
     # Synthetic proc entries exercise scoped pidfd dispatch and exit handling.
     proc = root / "proc"
     proc.mkdir()
-    def process(pid, name, arguments, *, config_home=str(config), runtime_dir=str(runtime), kitty_config=""):
+    def process(pid, name, arguments, *, config_home=str(config), runtime_dir=str(runtime), kitty_config="", appname=None, editor_defaults=None):
         entry = proc / str(pid)
         entry.mkdir()
         (entry / "comm").write_text(name + "\n")
         (entry / "cmdline").write_bytes(b"\0".join(arg.encode() for arg in arguments) + b"\0")
-        (entry / "environ").write_bytes(
-            f"HOME={root}\0XDG_CONFIG_HOME={config_home}\0XDG_RUNTIME_DIR={runtime_dir}\0KITTY_CONFIG_DIRECTORY={kitty_config}\0".encode())
+        environment = f"HOME={root}\0XDG_CONFIG_HOME={config_home}\0XDG_RUNTIME_DIR={runtime_dir}\0KITTY_CONFIG_DIRECTORY={kitty_config}\0"
+        if appname is not None: environment += f"NVIM_APPNAME={appname}\0"
+        if editor_defaults is not None: environment += f"ICEWINE_NVIM_DEFAULTS={editor_defaults}\0"
+        (entry / "environ").write_bytes(environment.encode())
     process(123, "kitty", ["kitty"])
     process(124, "kitty", ["kitty"], runtime_dir="/other-session")
     process(125, "kitty", ["kitty", "--config", "/other/kitty.conf"])
@@ -645,6 +673,27 @@ with tempfile.TemporaryDirectory() as temporary:
     process(135, ".kitty-wrapped", ["kitty"], config_home=str(root / "other-config"))
     process(136, ".kitty-wrapped", ["kitty", "-obackground=red"])
     process(137, ".kitty-wrapped", ["kitty"], kitty_config="relative-kitty")
+    arch_init = "/usr/share/icewine/editor/init.lua"
+    process(138, "nvim", ["nvim", "-u", arch_init, "notes.md"], appname="icewine-nvim")
+    process(139, "nvim", ["nvim"], appname="icewine-nvim")
+    process(140, "nvim", ["nvim", "-u", "/personal/init.lua"], appname="icewine-nvim")
+    process(141, "nvim", ["nvim", "-u", arch_init], appname="nvim")
+    process(142, "nvim", ["nvim", "-u", arch_init], appname="icewine-nvim", runtime_dir="/other-session")
+    process(143, "nvim", ["nvim", "-u", arch_init], appname="icewine-nvim", config_home=str(root / "other-config"))
+    # Actual native Nix wrapper argv: unwrapped nvim + provider-disable --cmd,
+    # then the explicit shipped init. Also cover the wrapped executable identity.
+    nix_init = str(root / "store/source-init.lua")
+    nix_defaults = str(root / "store/source-defaults.lua")
+    providers = "lua vim.g.loaded_node_provider=0;vim.g.loaded_perl_provider=0;vim.g.loaded_ruby_provider=0;vim.g.loaded_python3_provider=0"
+    nix_argv = ["/nix/store/example-neovim-unwrapped/bin/nvim", "--cmd", providers, "-u", nix_init]
+    process(144, "nvim", nix_argv + ["notes.md"], appname="icewine-nvim", editor_defaults=nix_defaults)
+    process(145, ".nvim-wrapped", ["/nix/store/example-neovim/bin/.nvim-wrapped", *nix_argv[1:]], appname="icewine-nvim", editor_defaults=nix_defaults)
+    process(146, "nvim", nix_argv + ["-u", "/personal/init.lua"], appname="icewine-nvim", editor_defaults=nix_defaults)
+    process(147, "nvim", ["nvim", "--cmd", "lua print('custom startup')", "-u", nix_init], appname="icewine-nvim", editor_defaults=nix_defaults)
+    process(148, "nvim", nix_argv + ["--headless"], appname="icewine-nvim", editor_defaults=nix_defaults)
+    process(149, "nvim", nix_argv, appname="icewine-nvim", editor_defaults="/personal/defaults.lua")
+    process(150, ".nvim-wrapped", ["nvim", "notes.md"])
+    process(151, "other-program", nix_argv, appname="icewine-nvim", editor_defaults=nix_defaults)
     delivered = []
     fd_pids = {}
     def open_pid(pid):
@@ -658,7 +707,11 @@ with tempfile.TemporaryDirectory() as temporary:
          mock.patch.object(module.signal, "pidfd_send_signal", send, create=True):
         assert module.signal_reload("kitty", config, str(runtime)) is False
         assert module.signal_reload("nvim", config, str(runtime)) is False
-        assert sorted(delivered) == [(pid, signal.SIGUSR1) for pid in (123, 126, 128, 133)], delivered
+        assert sorted(delivered) == [(pid, signal.SIGUSR1) for pid in (123, 126, 128, 133, 138)], delivered
+        delivered.clear()
+        with mock.patch.dict(os.environ, ICEWINE_EDITOR_INIT=nix_init, ICEWINE_EDITOR_DEFAULTS=nix_defaults):
+            assert module.signal_reload("nvim", config, str(runtime)) is False
+        assert sorted(delivered) == [(pid, signal.SIGUSR1) for pid in (126, 144, 145)], delivered
         with mock.patch.object(module.signal, "pidfd_send_signal", mock.Mock(side_effect=ProcessLookupError)):
             assert module.signal_reload("kitty", config, str(runtime)) is False
         with mock.patch.object(module.signal, "pidfd_send_signal", mock.Mock(side_effect=PermissionError)):
@@ -667,6 +720,7 @@ with tempfile.TemporaryDirectory() as temporary:
          mock.patch.object(module.os, "getuid", return_value=os.getuid() + 1), \
          mock.patch.object(module.os, "pidfd_open", side_effect=AssertionError("other user"), create=True):
         assert module.signal_reload("kitty", config, str(runtime)) is False
+        assert module.signal_reload("nvim", config, str(runtime)) is False
 
 
 print("PASS: retained contrast, opacity, concurrent publication, reload failure and pidfd ownership coverage")

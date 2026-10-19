@@ -46,7 +46,7 @@ for direction, workspace in pairs({ up = "r+1", down = "r-1" }) do
 	assert(lastDispatch.workspace == workspace)
 end
 assert(binds["SUPER + SHIFT + P"] == "qs ipc call topbar performance")
-assert(binds["SUPER + Print"] == "flameshot gui")
+assert(binds["SUPER + Print"] == "icewine screenshot")
 -- Hyprland shadows Lua bindings after intervening input unless transparent.
 for _, key in ipairs({"SUPER + grave", "SUPER_L", "SUPER_R"}) do
 	assert(options[key].transparent, key .. ": clicks must not suppress the summon-key release")

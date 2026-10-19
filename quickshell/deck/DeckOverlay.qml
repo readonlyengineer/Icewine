@@ -160,7 +160,7 @@ Scope {
         shell.handoff(entry.action === "screenshot")
         if (entry.action === "screenshot") {
             Qt.callLater(() => Quickshell.execDetached([
-                "flameshot", "screen", "--edit"
+                "icewine", "screenshot", "screen"
             ]))
         } else if (entry.action === "close") {
             compositor.dispatch("hl.dsp.window.close()")

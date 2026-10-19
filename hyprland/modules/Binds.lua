@@ -115,8 +115,8 @@ end)
 hl.bind(mainMod .. " + F", windows.toggle_fullscreen)
 hl.bind(mainMod .. " + M", windows.toggle_width)
 
--- Native Flameshot capture and editor.
-hl.bind(mainMod .. " + Print", hl.dsp.exec_cmd("flameshot gui"))
+-- Selected native screenshot utility; None reports disabled without launching a tool.
+hl.bind(mainMod .. " + Print", hl.dsp.exec_cmd("icewine screenshot"))
 
 -- Resolve the active layout at use time, including native runtime changes.
 for key, direction in pairs({ left = "l", right = "r", up = "u", down = "d" }) do

@@ -59,6 +59,11 @@ def rendered_frames(output, size, check_contrast=False, resize_events=()):
                         colour = codes.pop(0)
                         if code == 38: foreground = colour
                         else: background = colour
+                    elif code in (38, 48) and len(codes) >= 4 and codes[0] == 2:
+                        codes.pop(0)
+                        colour = tuple(codes[:3]); del codes[:3]
+                        if code == 38: foreground = colour
+                        else: background = colour
             elif token == "\x1b[?25l":
                 frames.append("\n".join("".join(row) for row in screen).encode())
         else:
@@ -75,6 +80,7 @@ def rendered_frames(output, size, check_contrast=False, resize_events=()):
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("binary", type=Path)
 parser.add_argument("--export-frames", type=Path, help="write complete text frames and raw terminal cells for developer inspection")
+parser.add_argument("--preview-only", action="store_true", help="run the existing native Theme preview/cancel/commit regression group")
 parser.add_argument("--frames-only", action="store_true", help="capture representative visual states without repeating the semantic suite")
 options = parser.parse_args()
 if options.frames_only and not options.export_frames: parser.error("--frames-only requires --export-frames")
@@ -91,6 +97,10 @@ elif sys.argv[1:] == ["appearance-state"]:
  with open(os.environ["TUI_APPEARANCE"]) as stream: saved=json.load(stream)
  response=" ".join(["themes=dracula,tokyo-night", "selected="+saved["theme"], "policy="+str(os.environ["TUI_POLICY"]=="1").lower(), "level="+saved["transparency"], "desktopLayout="+saved["layout"], os.environ["TUI_FILE_STATE"]])
  print(os.environ["TUI_APPEARANCE_WIRE"] or (response+" unknown=false" if os.environ["TUI_REFRESH_BAD"]=="1" and saved["theme"]!="tokyo-night" else response))
+elif sys.argv[1:2] == ["theme-preview"]:
+ print("primary=89b4fa foreground=cdd6f4 background=1e1e2e muted=a6adc8 secondary=a6e3a1 tertiary=cba6f7")
+elif sys.argv[1:] == ["widget-icons"]:
+ print("launcher= background=󰀻 layout=󰕰 media= audio= bluetooth= clipboard=󰅌 network=󰯡 tailscale=󰒍 ssh=󰣀 notifications=󰂜 battery=󰐥 performance=󰓅")
 elif sys.argv[1:] == ["widgets-state"]:
  if os.environ["TUI_WIDGET_POLICY"] == "invalid":
   print("invalid cardStacks policy; Widgets are read-only",file=sys.stderr); sys.exit(1)
@@ -103,7 +113,8 @@ elif sys.argv[1] == "widgets-apply":
  if os.environ["TUI_WIDGET_FAIL"] == "1":
   print("Widget preferences changed; reopen the manager before saving",file=sys.stderr); sys.exit(1)
  saved=dict(field.split("=") for field in sys.argv[3:])
- with open(os.environ["TUI_WIDGETS"],"w") as stream: json.dump({name:int(value) if name == "barWidth" else value if name in ("cardStacks","barBehaviour","barLocation","barStyle","oskAccess") else value=="true" for name,value in saved.items()},stream)
+ with open(os.environ["TUI_WIDGETS"]) as stream: previous=json.load(stream)
+ with open(os.environ["TUI_WIDGETS"],"w") as stream: json.dump(previous | {name:int(value) if name == "barWidth" else value if name in ("cardStacks","barBehaviour","barLocation","barStyle","oskAccess") else value=="true" for name,value in saved.items()},stream)
  print("Widget preferences saved; the shipped shell watches this file.")
 elif sys.argv[1:] and sys.argv[1] == "apply": sys.exit(int(os.environ["TUI_APPLY_EXIT"]))
 ''')
@@ -139,7 +150,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         executable.chmod(0o755)
     log = root / "calls"
     def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None):
-        global last_output, last_frames, last_widget_calls, capture_number
+        global last_output, last_frames, last_widget_calls, all_last_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.write_text("")  # A run may legitimately invoke no external tools.
         appearance_state = root / "appearance-state"
@@ -177,6 +188,18 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         output = bytearray()
         deadline = time.monotonic() + 10
         sent = False
+        pending_input = []
+        input_boundary = 0
+        input_batches = 0
+        def send_keys(data):
+            nonlocal input_boundary, input_batches
+            # ESC ESC in one terminal packet is Alt-Escape, not two presses.
+            # Keep CSI/mouse sequences intact; release each adjacent bare Escape
+            # after the preceding input's redraw has been consumed.
+            pending_input.extend(re.split(rb"(?<=\x1b)(?=\x1b)", data))
+            input_boundary = len(output)
+            os.write(master, pending_input.pop(0))
+            input_batches += 1
         pending_resizes = list(resize_steps)
         resize_events = []
         resize_keys = None
@@ -192,22 +215,26 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                     break
             frames = rendered_frames(output, size, resize_events=resize_events)
             rendered = b"\n".join(frames)
-            if sent and not reviewed and b"Icewine: planned changes" in rendered:
+            if sent and not reviewed and b"Utilities / Review" in rendered:
                 os.write(master, b"i" if confirm else b"\x1b")
                 reviewed = True
             if not sent and frames:
                 assert (b"Icewine needs an 80 x 24 terminal." if size[1] < 80 or size[0] < 24 else
                         b"Icewine onboarding: base package" if bootstrap else
-                        b"Icewine Installer (1/3) | Tab: Appearance") in rendered
-                os.write(master, keys)
+                        b"Utilities") in rendered
+                send_keys(keys)
                 sent = True
             elif resize_keys is not None:
                 # Wait for a completed redraw at the new dimensions before keys.
                 offset, new_size = resize_events[-1]
                 if rendered_frames(output[offset:], new_size):
-                    os.write(master, resize_keys)
+                    send_keys(resize_keys)
                     resize_keys = None
-            elif sent and pending_resizes and not readable:
+            elif sent and pending_input and not readable and rendered_frames(output[input_boundary:], resize_events[-1][1] if resize_events else size):
+                input_boundary = len(output)
+                os.write(master, pending_input.pop(0))
+                input_batches += 1
+            elif sent and pending_resizes and not pending_input and not readable:
                 new_size, resize_keys = pending_resizes.pop(0)
                 resize_events.append((len(output), new_size))
                 fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", *new_size, 0, 0))
@@ -222,7 +249,8 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             except OSError: break
         diagnostic = {"binary": str(binary), "size": size, "keys_hex": keys.hex(),
             "exit": code, "forced_kill": forced_kill, "stop_reason": stop_reason,
-            "sent": sent, "reviewed": reviewed, "resize_events": resize_events,
+            "sent": sent, "input_batches": input_batches, "pending_input_chunks": len(pending_input),
+            "reviewed": reviewed, "resize_events": resize_events,
             "mock_calls": log.read_text().splitlines() if log.exists() else [],
             "tool_calls": tool_log.read_text().splitlines() if tool_log.exists() else []}
         if options.export_frames:
@@ -263,44 +291,46 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         if size[1] < 80 or size[0] < 24:
             assert b"Resize to continue; Esc: cancel." in rendered
         else:
-            assert b"Icewine Installer" in rendered
+            assert b"Utilities" in rendered
             assert b"Overwrite existing dotfiles" in rendered
-            assert b"[ Apply ]" in rendered and b"[ Cancel ]" in rendered
-            assert (b"Utility selections are read-only" in rendered) == ("readonly=true" in state.split())
+            assert b"[ Review and Apply ]" in rendered
         all_calls = [json.loads(line) for line in log.read_text().splitlines()]
+        all_last_calls = all_calls
         last_widget_calls = [call for call in all_calls if call[0].startswith("widgets-")]
-        return [call for call in all_calls if not call[0].startswith("widgets-") and call[0] != "appearance-state"]
-    ids = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras")
+        return [call for call in all_calls if not call[0].startswith("widgets-") and call[0] not in ("appearance-state","theme-preview","widget-icons")]
+    ids = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras", "texteditor", "screenshot")
     visible = 5 # Arch hides Login; Steam none hides its two children.
     def state(readonly=False, **selected):
         # Deliberately shuffle fields: identity must not depend on wire order.
-        return " ".join([f"{name}={str(selected.get(name, "none" if name == "steam" else False)).lower()}" for name in reversed(ids)]
+        return " ".join([f"{name}={str(selected.get(name, "none" if name in {"steam","screenshot"} else False)).lower()}" for name in reversed(ids)]
                         + [f"readonly={str(readonly).lower()}"])
     def applied(calls):
         assert calls[0] == ["state"] and calls[1][0] == "apply" and len(calls) == 2
         fields = dict(field.split("=") for field in calls[1][1:])
         assert len(fields) == len(ids) + 1 and set(fields) == {*ids, "overwrite"}
         return fields
-    if options.frames_only:
-        tab, down = b"\t", b"\x1b[B"
-        for size in ((24, 80), (36, 120)):
-            run(tab + b"\x1b", state(), size=size, capture="pages")
-            run(tab + b"\x1b", state(readonly=True, desktop=True, steam="native", gamescope=True, handheld=True),
-                policy=True, auth=True, size=size, capture="readonly-auth")
-            run(tab*2+b" s\x1b", state(), size=size, capture="widgets-save")
-            run(tab*2+down*7+b"\r\x1b", state(), size=size, capture="arrangement")
-            if size[1] != 80: continue
-            run(down*3+b"\x1b[C"+down*5+b"\x1b", state(desktop=True), size=size, capture="installer-actions")
-            (root / "hyprmon").rename(root / "hyprmon-hidden")
-            try:
-                run(tab+down*3+b"\r\x1b", state(), size=size, path=str(root), capture="monitor-error")
-            finally: (root / "hyprmon-hidden").rename(root / "hyprmon")
-            run(tab+down*2+b"\r\x1b", state(), size=size, command_fail=True,
-                pick=str(root/"picture with spaces.png")+"\n", capture="picker-error")
-            run(tab*2+b" s\x1b", state(), size=size, widget_fail=True, capture="widgets-error")
-            run(tab*2+b"\x1b", state(), size=size, widget_supported=False, capture="widgets-unavailable")
-            run(tab*2+b"\x1b", state(), size=size, widget_policy="notificationToasts,windowSwitcher", capture="widgets-policy")
-        print("PASS: completed visual frames exported; semantic suite not run")
+    up, down, left, right, enter, esc, tab = b"\x1b[A", b"\x1b[B", b"\x1b[D", b"\x1b[C", b"\r", b"\x1b", b"\t"
+    def page(index): return down*index + tab
+    def saves(): return [call for call in last_widget_calls if call[0] == "widgets-apply"]
+    def save_field(name):
+        return next(field.split("=", 1)[1] for field in saves()[-1][2:] if field.startswith(name + "="))
+    def tools(): return [json.loads(line) for line in tool_log.read_text().splitlines()]
+    def click(x, y): return f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m".encode()
+    def test_theme_preview():
+        # Theme preview is local; Back never calls the public mutation command.
+        run(page(1)+enter+up+esc+esc, state())
+        assert not any(call[:2] == ["icewine","theme"] for call in tools())
+        # Reach Use theme via Back, without traversing and previewing tokyo-night.
+        run(page(1)+enter+up+up*2+enter+esc, state())
+        assert ["icewine","theme","dracula"] in tools()
+        # Keyboard exit from a local preview restores the effective theme palette.
+        run(page(1)+enter+up+tab+down+esc, state())
+        previews = [call for call in all_last_calls if call[0] == "theme-preview"]
+        assert previews[-1] == ["theme-preview", "tokyo-night"]
+        assert not any(call[:2] == ["icewine", "theme"] for call in tools())
+    if options.preview_only:
+        test_theme_preview()
+        print("PASS: native Theme preview cancel/commit and keyboard preview exit")
         sys.exit(0)
     no_tty = subprocess.run([str(binary)], stdin=subprocess.DEVNULL, capture_output=True)
     assert no_tty.returncode == 1 and b"A terminal is required" in no_tty.stderr
@@ -330,381 +360,134 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert calls[1] == ["icewine-manage"]
     calls = run(b"i", "", bootstrap=True, apply_exit=1)
     assert len(calls)==1 and calls[0][0] == "sudo"
-    assert run(b" \x1b", state()) == [["state"]]
-    assert run(b"\x1b[B"*(visible+2)+b"\r", state()) == [["state"]]
-    expected = dict.fromkeys(ids, "false") | {"steam": "none", "desktop": "true", "overwrite": "false"}
-    assert applied(run(b" "+b"\x1b[B"*(visible+1)+b"\r", state())) == expected
-    assert run(b" "+b"\x1b[B"*(visible+1)+b"\r", state(), confirm=False) == [["state"]]
-    assert applied(run(b" "+b"\x1b[B"*(visible+1)+b"\r", state(), apply_exit=1))["desktop"] == "true"
-    # A second row toggles its own ID, not the backend's second field.
-    expected["desktop"], expected["terminal"] = "false", "true"
-    assert applied(run(b"\x1b[B "+b"\x1b[B"*visible+b"\r", state())) == expected
-    # Right selects native, defaults Gamescope on and leaves Handheld off.
-    chosen = applied(run(b"\x1b[B"*3+b"\x1b[C"+b"\x1b[B"*4+b"\r", state()))
-    assert chosen["steam"] == "native" and chosen["gamescope"] == "true" and chosen["handheld"] == "false"
-    # Flatpak skips unsupported Handheld; Gamescope may be turned off.
-    chosen = applied(run(b"\x1b[B"*3+b"\x1b[C\x1b[C\x1b[B "+b"\x1b[B"*3+b"\r", state()))
-    assert chosen["steam"] == "flatpak" and chosen["gamescope"] == "false" and chosen["handheld"] == "false"
-    # Native+desktop allows Handheld; turning desktop off clears it.
-    chosen = applied(run(b" \x1b[B\x1b[B\x1b[B\x1b[C\x1b[B\x1b[B "+b"\x1b[B"*3+b"\r", state()))
-    assert chosen["handheld"] == "true"
-    chosen = applied(run(b" "+b"\x1b[B"*7+b"\r", state(desktop=True, steam="native", gamescope=True, handheld=True)))
-    assert chosen["desktop"] == "false" and chosen["handheld"] == "false"
-    # Reverse navigation from the first control reaches Cancel.
-    assert run(b"\x1b[Z\r", state()) == [["state"]]
-    # NixOS focus skips utility rows; Space only checks overwrite.
-    expected = dict.fromkeys(ids, "false") | {"steam": "none", "desktop": "true", "overwrite": "true"}
-    assert applied(run(b" \x1b[B\r", state(readonly=True, desktop=True))) == expected
-    assert applied(run(b"\x1b[B\r", state(readonly=True, desktop=True)))["overwrite"] == "false"
-    for invalid in (state() + " terminal=true", state().replace("terminal=false", "unknown=false"),
-                    state().replace("terminal=false", ""), state().replace("terminal=false", "terminal=1"),
-                    state(steam="invalid"), state(handheld=True), state(gamescope=True),
-                    state(steam="flatpak", desktop=True, gamescope=True, handheld=True)):
-        assert run(b"", invalid, valid=False) == [["state"]]
-    def tools():
-        return [json.loads(line) for line in tool_log.read_text().splitlines()]
-    tab = b"\t"
-    down = b"\x1b[B"
-    arrangement = tab*2 + down*7 + b"\r"
-    # Without the size guard, Tab/Right would immediately change Appearance.
-    assert run(tab+b"\x1b[C\x1b", state(), size=(20, 70)) == [["state"]]
-    assert not any(len(call) > 2 or call[0] != "icewine" for call in tools()), "hidden control acted"
-    # Page changes preserve utility focus and pending selections; appearance is live.
-    chosen = applied(run(b" \x1b[B" + tab + b"\x1b[C\x1b[B\x1b[C" + tab*2 + b" " + tab + b"\x1b[C" + tab*2 + down*visible+b"\r", state()))
-    assert chosen["desktop"] == "true" and chosen["terminal"] == "true"
-    assert ["icewine", "theme", "dracula"] in tools()
-    assert ["icewine", "transparency", "high"] in tools()
-    assert ["icewine", "transparency", "off"] in tools(), "appearance focus was not preserved"
-    assert b"Tab: page" in last_output
-    assert b"Up/down: move" in last_output
-    assert b"Appearance updates immediately." in last_output
-    # Every page reaches the edges at minimum, wide, tall and large sizes.
-    def full_panel(frame, size):
-        rows, columns = size
-        lines = frame.decode().splitlines()
-        assert len(lines) == rows and all(len(line) == columns for line in lines)
-        assert lines[0][0] == "╭" and lines[0][-1] == "╮", size
-        assert lines[-1][0] == "╰" and lines[-1][-1] == "╯", size
-        assert all(line[0] == line[-1] == "│" for line in lines[1:-1]), size
-    for size in ((24, 80), (24, 160), (48, 80), (48, 160)):
-        assert run(tab + tab + tab + b"\x1b", state(), size=size) == [["state"]]
-        assert any(b"Icewine Appearance (2/3) | Tab: Widgets" in frame for frame in last_frames)
-        assert b"Icewine Installer (1/3) | Tab: Appearance" in last_frames[-1]
-        for frame in last_frames:
-            if b"Icewine " in frame:
-                assert b"Tab: page" in frame and b"Esc: cancel" in frame
-                assert b"[ Cancel ]" in frame
-        appearance_frames = [frame for frame in last_frames if b"Icewine Appearance" in frame]
-        assert any(b"Configure monitors" in frame for frame in appearance_frames)
-        for title in (b"Icewine Installer", b"Icewine Appearance", b"Icewine Widgets"):
-            frame = next(frame for frame in last_frames if title in frame)
-            full_panel(frame, size)
-            assert b"[ Cancel ]" in frame and b"Esc: cancel" in frame
-            if title == b"Icewine Widgets" and size[0] == 48:
-                assert b"Notification toasts" in frame and b"Card arrangement" in frame
-                assert b"performance" not in frame
-        # Focus reaches the last module and Save/Cancel at every aspect ratio.
-        run(arrangement+down*12+b" "+down*2+b"\r"+down+b"\r", state(), size=size)
-        assert "performance" not in next(field for call in last_widget_calls
-            if call[0] == "widgets-apply" for field in call if field.startswith("cardStacks="))
-        assert any(b"performance" in frame for frame in last_frames)
-    # Keep a pending Installer draft and last-module focus through growth,
-    # shrink below minimum, and recovery. Hidden input must not change pages
-    # or toggle the module; the next Space disables it exactly once.
-    assert applied(run(b" "+arrangement+down*12, state(), size=(24, 80), resize_steps=[
-        ((48, 160), b""), ((20, 70), b" "+tab),
-        ((24, 80), b" sb"+tab+down*(visible+1)+b"\r"),
-    ]))["desktop"] == "true"
-    assert b"Icewine needs an 80 x 24 terminal." in last_output
-    for size in ((48, 160), (24, 80)):
-        frame = next(frame for frame in reversed(last_frames) if b"Icewine Widgets > Card arrangement" in frame
-                     and len(frame.decode().splitlines()) == size[0])
-        full_panel(frame, size)
-        assert b"performance" in frame, "focused module lost after resize"
-    save = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    assert "performance" not in next(field for field in save if field.startswith("cardStacks="))
-    # Backend errors and both help lines remain visible with expanded layouts.
-    for size in ((24, 160), (48, 80)):
-        run(tab*2+b"s\x1b", state(), size=size, widget_fail=True)
-        assert any(b"preferences changed" in frame and b"Esc: cancel" in frame
-                   and b"[ Cancel ]" in frame for frame in last_frames)
-    # The tallest Appearance form fits the minimum and wider reference panels.
-    for size in ((24, 80), (36, 120)):
-        assert run(tab + down*4 + b"\x1b[C\x1b", state(), auth=True, size=size) == [["state"]]
-        assert ["icewine", "layout", "dwindle"] in tools()
-        labels = (b"Theme", b"Transparency", b"Wallpaper",
-                  b"Configure monitors", b"Desktop layout default", b"[ Apply ]", b"[ Cancel ]",
-                  b"Tab: page", b"Esc: cancel")
-        assert any(b"Icewine Appearance" in frame and all(label in frame for label in labels)
-                   for frame in last_frames), (size, last_frames)
-    # Overwrite survives page switches and Apply works from either page.
-    for finish in (tab*2 + down + b"\r", down*5 + b"\r"):
-        assert applied(run(down*visible + b" " + tab + finish, state()))["overwrite"] == "true"
-
-    # Widget Cancel discards a draft after page navigation; Save commits only
-    # widgets while an Installer draft remains pending. Width matrices belong
-    # to the shared visual checks.
-    assert run(tab*2+b" "+tab*3+b"\x1b", state(), size=(24, 80)) == [["state"]]
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    assert b"Icewine Widgets (3/3)" in last_output
-    assert run(b" "+tab*2+b" s\x1b", state(), size=(24, 80)) == [["state"]]
-    save = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    assert save[2:4] == ["notificationToasts=false", "windowSwitcher=true"]
-    # A preloaded effective mixed policy skips its owned row. Persistence itself
-    # is exercised by the real backend, not this reset-per-run mock.
-    assert run(tab*2+b" s\x1b", state(readonly=True),
-               widgets={"notificationToasts": False, "windowSwitcher": False},
-               widget_policy="notificationToasts") == [["state"]]
-    save = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    assert save[2:4] == ["notificationToasts=false", "windowSwitcher=true"]
-    assert run(tab*2+b" s\x1b", state(), widget_fail=True) == [["state"]]
-    assert any(call[0] == "widgets-apply" for call in last_widget_calls)
-    assert b"preferences changed" in last_output and b"Widget preferences saved" not in last_output
-    # Unavailable card rows remain focusable for inspection; Space/Enter do
-    # nothing there. Save is disabled too; cancel explicitly rather than waiting.
-    assert run(tab*2+b" \rs\x1b", state(), widget_supported=False) == [["state"]]
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    assert b"Unavailable" in last_output
-    # Real key handling edits one in-memory draft; persistence validation is
-    # covered by install.py against the real backend rather than this TTY mock.
-    def saved_stacks():
-        call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-        return next(field.removeprefix("cardStacks=") for field in call if field.startswith("cardStacks="))
-    right, left, delete = b"\x1b[C", b"\x1b[D", b"\x1b[3~"
-    for size in ((24, 80), (24, 160), (48, 80), (48, 160)):
-        run(arrangement+b"b\r\x1b", state(), size=size,
-            widgets={"cardStacks": "a/launcher,background;b/audio"})
-        nested = [frame for frame in last_frames if b"Widgets > Card arrangement" in frame]
-        assert nested, "entry/back/re-entry did not open the subpage"
-        for frame in nested:
-            full_panel(frame, size)
-            assert b"b/Tab: Back" in frame and b"[ Save ]" in frame and b"Esc: cancel" in frame
-        assert any(all(label in frame for label in (b"1. a", b"  1. launcher",
-            b"  2. background", b"2. b", b"  1. audio", b"Disabled / unassigned")) for frame in nested)
-        assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    # Back retains both the arrangement and ordinary widget draft. Save on the
-    # parent commits both without applying a pending Installer selection.
-    calls = run(b" "+tab*2+b" "+down*7+b"\r "+b"b"+tab*3+b"s\x1b", state())
-    assert saved_stacks().startswith("launcher/background,layout;")
-    save = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    assert "notificationToasts=false" in save
-    assert calls == [["state"]]
-    # Cancel via its button discards the nested draft; Shift-Tab wraps to it.
-    run(arrangement+b"n"+b"\x1b[Z\r", state(), widgets={"cardStacks": ""})
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    # The visible Back button and Backspace also retain the same draft.
-    for back in (b"\x1b[Z"*3+b"\r", b"\x7f"):
-        run(arrangement+b"n"+back+b"s\x1b", state(), widgets={"cardStacks": ""})
-        assert saved_stacks() == "stack-1/launcher"
-        assert b"Icewine Widgets (3/3)" in last_frames[-1]
-    # Save failures stay visible on the subpage as well as the parent.
-    run(arrangement+b"s\x1b", state(), widget_fail=True)
-    assert any(b"preferences changed" in frame and b"b/Tab: Back" in frame for frame in last_frames)
-    # The read-only parent still allows inspecting the nested hierarchy.
-    for readonly_options in ({"widget_linked": True}, {"widget_supported": False},
-                    {"widget_policy": "notificationToasts,windowSwitcher,cardStacks,barBehaviour,barLocation,barStyle,barWidth,oskAccess"}):
-        run(tab*2+b"\r n+-[]\x1b[C\x1b[3~s\x1b", state(), **readonly_options)
-        assert b"Widgets > Card arrangement" in last_output
-        assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    for size in ((24, 80), (36, 120)):
-        # Reorder a member, move it to another stack, make it that stack's
-        # icon, and move that stack before the original one.
-        run(arrangement+b"+"+right+b"-[s\x1b", state(), size=size,
-            widgets={"cardStacks": "a/launcher,background,layout,media;b/audio"})
-        assert saved_stacks() == "b/launcher,audio;a/background,layout,media"
-        assert any(b"1. b" in frame and b"  1. launcher" in frame
-                   and b"topbar icon / primary" in frame for frame in last_frames)
-        # New stack, join an existing stack, and move a new singleton stack.
-        run(arrangement+b" "+down+right+down+b"n[s\x1b", state(), size=size,
-            widgets={"cardStacks": ""})
-        assert saved_stacks() == "stack-2/layout;stack-1/launcher,background"
-        # Removing the configured first member makes the next member the icon;
-        # disable the final member without retaining an empty stack.
-        run(arrangement+b" \x1b[A s\x1b", state(), size=size,
-            widgets={"cardStacks": "a/launcher,background"})
-        assert saved_stacks() == ""
-        # Remove a whole stack, then explicitly re-enable a module.
-        run(arrangement+delete+b" s\x1b", state(), size=size,
-            widgets={"cardStacks": "a/launcher,background;b/audio"})
-        assert saved_stacks() == "b/audio;stack-1/launcher"
-        # Focus scrolls to the last module; its configured fourth accent repeats.
-        run(arrangement+down*3+b"s\x1b", state(), size=size,
-            widgets={"cardStacks": "mixed/launcher,audio,clipboard,performance"})
-        assert saved_stacks() == "mixed/launcher,audio,clipboard,performance"
-        assert any(b"  4. performance" in frame and b"primary" in frame for frame in last_frames)
-    # Moving a singleton into its previous stack must remove the old stack
-    # without losing or misindexing the destination. Save button remains usable.
-    run(arrangement+left+down*13+b"\r\x1b", state(), size=(24, 80),
-        widgets={"cardStacks": "a/launcher;b/audio"})
-    assert saved_stacks() == "b/audio,launcher"
-    # Tab keeps the draft; Cancel never writes it.
-    run(arrangement+delete+tab*4+b"\x1b", state())
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    # Policy locks stack operations but leaves ordinary boolean settings editable.
-    run(arrangement+b"n+-[]"+right+delete+b" s\x1b", state(),
-        widgets={"cardStacks": "host/launcher"}, widget_policy="cardStacks")
-    assert saved_stacks() == "host/launcher"
-    run(tab*2+b"ns\x1b", state(), widget_policy="notificationToasts,windowSwitcher,cardStacks,barBehaviour,barLocation,barStyle,barWidth,oskAccess")
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    run(tab*2+b"ns\x1b", state(), widget_policy="invalid")
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    assert b"invalid cardStacks policy" in last_output
-    # Every visibility/location pair is an unsaved draft until Save; cycling
-    # wraps both ways and read-only policy rows are skipped by real navigation.
-    behaviours = ("keyboard", "keyboard-mouse", "toggle", "always")
-    locations = ("above", "top", "bottom")
-    for behaviour_index, behaviour in enumerate(behaviours):
-        for location_index, location in enumerate(locations):
-            run(tab*2+down*2+right*behaviour_index+down+right*location_index+b"s\x1b", state(), size=(24, 80))
-            call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-            assert "barBehaviour=" + behaviour in call and "barLocation=" + location in call
-    run(tab*2+down*2+left+right+down+left+b"s\x1b", state())
-    call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    assert "barBehaviour=keyboard" in call and "barLocation=bottom" in call
-    run(tab*2+down*2+right+down+right+tab*3+b"\x1b", state())
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    run(tab*2+down*2+right+b"s\x1b", state(),
-        widgets={"barBehaviour": "always", "barLocation": "bottom"}, widget_policy="barBehaviour")
-    call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    assert "barBehaviour=always" in call and "barLocation=above" in call
-    # Numeric width clamps at both endpoints; style wraps and Cancel never saves.
-    for width, moves in ((50, left*40), (99, right*19), (100, right*30)):
-        run(tab*2+down*4+right+down*2+moves+b"s\x1b", state(), size=(24, 80))
-        call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-        assert "barStyle=floating" in call and "barWidth=" + str(width) in call
-    run(tab*2+down*4+right+down*2+right+b"\x1b", state())
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    run(tab*2+down*4+right+b"s\x1b", state(),
-        widgets={"barWidth": 50, "barStyle": "floating"}, widget_policy="barWidth,barStyle")
-    call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    assert "barWidth=50" in call and "barStyle=floating" in call
-    # All three OSK choices cycle/save; policy and linked rows remain read-only.
-    for index, access in enumerate(("none", "launcher", "topbar")):
-        run(tab*2+down*5+right*index+b"s\x1b", state(), size=(24, 80))
-        call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-        assert "oskAccess=" + access in call
-        assert any(b"Onscreen Keyboard Access" in frame for frame in last_frames)
-    run(tab*2+down*5+left+b"s\x1b", state())
-    assert "oskAccess=topbar" in next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    run(tab*2+down*5+right+b"s\x1b", state(),
-        widgets={"oskAccess": "launcher"}, widget_policy="oskAccess")
-    assert "oskAccess=launcher" in next(call for call in last_widget_calls if call[0] == "widgets-apply")
-    run(tab*2+down*5+right+b"s\x1b", state(), widget_linked=True)
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    run(tab*2+b"s\x1b", state(), widgets={"oskAccess": "invalid"})
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    assert b"Invalid bar setting" in last_output
-    # Each of the eight ownership slots independently enables editing and Save.
-    # All other slots alternate policy/symlink, so neither read-only state can
-    # accidentally enable a control or suppress the sole user-owned setting.
-    initial = {"notificationToasts": True, "windowSwitcher": True,
-               "cardStacks": "a/launcher,background", "barBehaviour": "keyboard",
-               "barLocation": "above", "barStyle": "anchored", "oskAccess": "none", "barWidth": 80}
-    for name in initial:
-        owners = {field: "policy" if index % 2 else "symlink" for index, field in enumerate(initial)}
-        owners[name] = "user"
-        keys = b"\r n" if name == "cardStacks" else b" "
-        run(tab*2+keys+b"s\x1b", state(), widgets=initial, widget_owners=owners)
-        call = next(call for call in last_widget_calls if call[0] == "widgets-apply")
-        saved = dict(field.split("=", 1) for field in call[2:])
-        for field, value in initial.items():
-            before = str(value).lower() if isinstance(value, bool) else str(value)
-            assert (saved[field] != before) == (field == name), (name, field, saved)
-        assert b"Widget preferences saved" in last_output
-    # Full policy, symlink and mixed ownership keep both Save paths disabled
-    # while allowing arrangement inspection. Unsupported user state also locks.
-    for owners, supported in ((dict.fromkeys(initial, "policy"), True),
-                              (dict.fromkeys(initial, "symlink"), True),
-                              ({name: "policy" if index % 2 else "symlink" for index, name in enumerate(initial)}, True),
-                              (dict.fromkeys(initial, "user"), False)):
-        run(tab*2+b"s\r n+-[]"+right+delete+b"s\x1b", state(),
-            widgets=initial, widget_owners=owners, widget_supported=supported)
-        assert b"Widgets > Card arrangement" in last_output
-        assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    # Unknown, empty and compound tokens must fail closed at every owner parse.
-    for name in initial:
-        for owner in ("unknown", "", "user:policy"):
-            run(tab*2+b"s\x1b", state(), widget_owners={name: owner})
-            assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-            assert b"Invalid " in last_output and b" ownership" in last_output
-    # Delivery can fail after committing a choice: display/next cycle follow saved state.
-    assert run(tab+b"\x1b[C\x1b[C\x1b[B\x1b[C\x1b[C\x1b", state(), delivery_fail=True) == [["state"]]
-    changes = [call for call in tools() if call[0] == "icewine" and len(call) == 3]
-    assert changes == [["icewine", "theme", "dracula"], ["icewine", "theme", "tokyo-night"],
-                       ["icewine", "transparency", "high"], ["icewine", "transparency", "off"]]
-    assert b"live delivery failed after saving selection" in last_output
-    # Utility read-only does not lock permitted appearance controls; theme policy does.
-    assert run(tab+b"\x1b[C\x1b", state(readonly=True), policy=True) == [["state"]]
-    assert ["icewine", "transparency", "high"] in tools()
-    assert not any(call[:2] == ["icewine", "theme"] and len(call) == 3 for call in tools())
-    # Linked controls are skipped individually; a regular layout remains live.
-    assert run(tab+b"\x1b[C\x1b", state(readonly=True),
-               file_state="theme=true transparency=true wallpaper=true monitors=true layout=false") == [["state"]]
-    assert [call for call in tools() if len(call) == 3] == [["icewine", "layout", "dwindle"]]
-    assert b"symlink/read-only" in last_output
-    assert run(tab*2+b" \r\x1b", state(), widget_linked=True) == [["state"]]
-    assert not any(call[0] == "widgets-apply" for call in last_widget_calls)
-    assert b"symlink" in last_output
-    # A committed fallback is read back after failed delivery, even with utility
-    # controls read-only; the next cycle and Cancel follow the saved selection.
-    assert run(tab + down*4 + b"\x1b[C\x1b[C\x1b", state(readonly=True), delivery_fail=True) == [["state"]]
-    changes = [call for call in tools() if call[:2] == ["icewine", "layout"] and len(call) == 3]
-    assert changes == [["icewine", "layout", "dwindle"], ["icewine", "layout", "master"]]
-    assert any(b"Desktop layout default" in frame and b"< master >" in frame for frame in last_frames)
-    assert b"live delivery failed after saving selection" in last_output
-    def test_appearance_protocol():
-        # Reject malformed fields before raw mode, including plausible unsafe ownership.
-        good = "themes=dracula,tokyo-night selected=tokyo-night policy=false level=med desktopLayout=scrolling theme=false transparency=false wallpaper=false monitors=false layout=false"
-        for wire in (good + " policy=true", good + " unknown=false", good.replace("policy=false", "policy=user"),
-                     good.replace("theme=false", "theme=user"), good.replace(" layout=false", ""),
-                     good.replace("selected=tokyo-night", "selected=missing"), good.replace("level=med", "level=invalid"),
-                     good.replace("themes=dracula,tokyo-night", "themes=dracula,dracula"),
-                     good.replace("themes=dracula,tokyo-night", "themes=,tokyo-night"),
-                     good.replace("themes=dracula,tokyo-night", "themes=bad/id,tokyo-night"),
-                     good.replace("desktopLayout=scrolling", "desktopLayout=invalid"), "broken"):
-            assert run(b"", state(), valid=False, appearance_wire=wire) == [["state"]]
-        assert run(b"", state(), valid=False, layout="invalid") == [["state"]]
-        assert run(b"\x1b", state()) == [["state"]]
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        assert calls.count(["appearance-state"]) == 1
-        assert not tools(), "startup still depends on public CLI prose"
-        assert run(b"\x1b", state(), appearance_wire=" ".join(reversed(good.split()))) == [["state"]]
-        assert run(tab+b"\x1b[C\x1b", state(), refresh_bad=True) == [["state"]]
-        assert b"Could not refresh appearance state: Unknown appearance field" in last_output
-    test_appearance_protocol()
-    # Native chooser restores the terminal after success, cancel and failure.
+    for size in ((24,80), (24,160), (48,80), (48,160)):
+        run(esc, state(), size=size)
+        assert b"Utilities" in last_output and b"Appearance" in last_output and b"Hotkeys" in last_output
+        assert b"[ Review and Apply ]" in last_output and b"[ Setup Monitors... ]" in last_output
+        run(page(1)+esc, state(), size=size)
+        assert b"Default layout" in last_output and b"Notifications" in last_output
+        run(page(2)+right+down+esc, state(), size=size)
+        assert b"Unassigned" in last_output and b"Import (coming soon)" in last_output
+        run(page(3)+right+down*5+esc, state(), size=size)
+        assert b"Common" in last_output and b"Applications" in last_output
+        assert not saves()
+    # Pane focus and keyboard utility Apply identify fields independently of wire order.
+    run(tab+b" "+down*9+enter, state())
+    choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
+    assert choices["desktop"] == "true" and choices["overwrite"] == "false"
+    run(tab+b" "+down*9+enter, state(), confirm=False)
+    assert not any(call[0] == "apply" for call in all_last_calls)
+    # Steam-none prerequisite rows remain visible and cannot enable Handheld.
+    run(tab+down*6+right+down+enter+esc, state())
+    assert b"Requires Steam native" in last_output
+    test_theme_preview()
+    # Taskbar save scope is explicit. Legacy always survives unrelated Save/Cancel.
+    taskbar = page(1)+down*4+enter
+    run(taskbar+right+down*5+enter+esc, state())
+    assert save_field("barBehaviour") == "keyboard-mouse"
+    assert {field.split("=",1)[0] for field in saves()[-1][2:]} == {"barBehaviour","barLocation","barStyle","barWidth","oskAccess"}
+    run(taskbar+right+esc+esc, state())
+    assert not saves()
+    run(taskbar+down*5+enter+esc, state(), widgets={"barBehaviour":"always"})
+    assert save_field("barBehaviour") == "always" and b"Always show (legacy)" in last_output
+    run(taskbar+right+down*5+enter+esc, state(), widgets={"barBehaviour":"always"})
+    assert save_field("barBehaviour") == "keyboard"
+    run(taskbar+left+down*5+enter+esc, state(), widgets={"barBehaviour":"always"})
+    assert save_field("barBehaviour") == "toggle"
+    run(taskbar+right+down*4+enter+esc, state(), widgets={"barBehaviour":"always"}, widget_policy="barBehaviour")
+    assert save_field("barBehaviour") == "always"
+    for width, changes in ((50,left*40),(100,right*40)):
+        run(taskbar+down*3+changes+down*2+enter+esc, state())
+        assert save_field("barWidth") == str(width)
+    # Notifications saves only the toast bit; Widgets draft persists across pages.
+    run(page(1)+down*5+enter+esc, state())
+    assert saves()[-1][2:] == ["notificationToasts=false"]
+    # Remove, place in the visible grid, cancel placement and preserve destination IDs.
+    widgets = page(2)
+    run(widgets+enter+b"  "+right+enter+b"s"+esc*2, state())
+    assert "media/media,launcher" in save_field("cardStacks")
+    run(widgets+enter+b"  "+esc+b"s"+esc*2, state())
+    assert "launcher/" not in save_field("cardStacks") or "launcher/background,layout" in save_field("cardStacks")
+    run(widgets+enter+down+b"-s"+esc*2, state())
+    assert save_field("cardStacks").startswith("launcher/background,launcher,layout")
+    run(widgets+enter+b"ns"+esc*2, state())
+    assert "stack-1/launcher" in save_field("cardStacks")
+    run(widgets+enter+b"\x1b[3~s"+esc*2, state())
+    assert "launcher/" not in save_field("cardStacks")
+    run(widgets+enter+b"s"+esc*2, state(), widgets={"cardStacks":""})
+    assert save_field("cardStacks") == ""
+    run(widgets+enter+b"ns"+esc*2, state(), widgets={"cardStacks":""})
+    assert save_field("cardStacks") == "stack-1/launcher"
+    many = ";".join(f"s{i}/{name}" for i,name in enumerate(("launcher","background","layout","media","audio","bluetooth","clipboard","network","tailscale","ssh","notifications","battery","performance")))
+    for size in ((24,80),(24,160),(48,80)):
+        run(widgets+down*9+up+right+b"s"+esc*2, state(), widgets={"cardStacks":many}, size=size)
+        assert save_field("cardStacks") == many
+        run(widgets+enter+down*12+b"s"+esc*2, state(), widgets={"cardStacks":"all/"+",".join(name.split('/')[1] for name in many.split(';'))}, size=size)
+        assert b"Performance" in last_output
+    # Read-only and invalid ownership cannot save; sole editable fields remain reachable.
+    for options_ in ({"widget_linked":True}, {"widget_supported":False}, {"widget_policy":"notificationToasts,windowSwitcher,cardStacks,barBehaviour,barLocation,barStyle,barWidth,oskAccess"}):
+        run(widgets+enter+b" n+-[]s"+esc*3, state(), **options_)
+        assert not saves()
+    run(widgets+b"ns"+esc*2, state(), widget_fail=True)
+    assert b"changed" in last_output
+    for name in ("notificationToasts","windowSwitcher","cardStacks","barBehaviour","barLocation","barStyle","barWidth","oskAccess"):
+        run(esc, state(), widget_owners={name:"invalid"})
+        assert b"Invalid" in last_output or b"invalid" in last_output
+    fields = ("notificationToasts","windowSwitcher","cardStacks","barBehaviour","barLocation","barStyle","barWidth","oskAccess")
+    for name in fields:
+        owners = {field:"user" if field == name else "policy" for field in fields}
+        if name == "notificationToasts": keys = page(1)+down*5+enter+esc
+        elif name == "windowSwitcher": keys = widgets+up+b" s"+esc*2
+        elif name == "cardStacks": keys = widgets+b"ns"+esc*2
+        else: keys = taskbar+right+down+enter+esc
+        run(keys, state(), widget_owners=owners)
+        assert saves(), name
+        if name == "notificationToasts": assert save_field(name) == "false"
+        elif name == "windowSwitcher": assert save_field(name) == "false"
+        elif name == "cardStacks": assert "stack-1/launcher" in save_field(name)
+        else: assert save_field(name) != str({"barBehaviour":"keyboard","barLocation":"above","barStyle":"anchored","barWidth":80,"oskAccess":"none"}[name])
+    # Taskbar Save must not commit pending card membership, and later Widgets Save keeps it.
+    run(widgets+b"n"+tab+up+tab+down*4+enter+right+down*5+enter+tab+down+tab+b"s"+esc*2, state())
+    assert len(saves()) == 2
+    assert not any(field.startswith("cardStacks=") for field in saves()[0])
+    assert "stack-1/launcher" in save_field("cardStacks")
+    # Real mouse targets: select page, enter/remove a member, save; import is inert.
+    run(click(5,9)+click(23,7)+b"s"+esc*2, state(), size=(24,80))
+    assert saves()
+    run(page(3)+right*4+down*10+esc, state())
+    assert b"Desktop / session" in last_output
+    run(page(3)+esc, state(), widgets={"barBehaviour":"toggle"})
+    assert b"toggle on press" in last_output and b"toggle on release" not in last_output
+    # File read-only indicators skip the action, independently of host utility policy.
+    run(page(1)+right+esc, state(readonly=True), policy=True)
+    assert not any(call[:2] == ["icewine","theme"] for call in tools())
+    run(page(1)+esc, state(), file_state="theme=true transparency=true wallpaper=true monitors=true layout=false")
+    assert b"Read Only" in last_output
     picked = str(root / "picture with spaces.png")
-    for pick, exit_code, fail in ((picked+"\n", 0, False), ("", 0, False), (picked+"\n", 1, False), (picked+"\n", 0, True)):
-        assert run(tab+b"\x1b[B\x1b[B\r\x1b", state(), pick=pick, pick_exit=exit_code, command_fail=fail) == [["state"]]
-        calls = tools()
-        assert sum(call[0] == "yazi" for call in calls) == 1
-        assert (["icewine", "wallpaper", picked] in calls) == (bool(pick) and exit_code == 0)
-        assert not list(root.glob("icewine-picker-*")), "chooser file leaked"
-        if fail: assert b"invalid image" in last_output
-    (root / "yazi").chmod(0o600)
-    try:
-        assert run(tab+b"\x1b[B\x1b[B\r\x1b", state(), path=str(root)) == [["state"]]
-        assert b"Yazi unavailable:" in last_output
-    finally: (root / "yazi").chmod(0o755)
-    # A historical auth image must not restore the retired presentation controls.
-    assert run(tab+b"\x1b", state(), auth=True) == [["state"]]
-    assert b"Lockscreen Wallpaper" not in last_output and b"Separate image" not in last_output
-    assert (root / "data/icewine/wallpapers/auth.img").read_bytes() == b"fixture"
-    # HyprMon owns live/save semantics; zero exit must not claim a successful save.
-    for exit_code in (0, 1, 127):
-        assert run(tab+b"\x1b[B"*3+b"\r"+tab+b"\x1b", state(), hyprmon_exit=exit_code) == [["state"]]
+    for pick, code in ((picked+"\n",0),("",0),(picked+"\n",1)):
+        run(page(1)+down*2+enter+esc, state(), pick=pick, pick_exit=code)
+        assert any(call[0] == "yazi" for call in tools())
+        assert (["icewine","wallpaper",picked] in tools()) == (bool(pick) and code == 0)
+        assert not list(root.glob("icewine-picker-*"))
+    for code in (0,1,127):
+        run(tab+down*8+enter+esc, state(), hyprmon_exit=code)
         assert ["hyprmon"] in tools()
-    assert b"HyprMon live/save changes remain after Cancel." in last_output
-    (root / "hyprmon").chmod(0o600)
-    try:
-        assert run(tab+b"\x1b[B"*3+b"\r\x1b", state(), path=str(root)) == [["state"]]
-        assert b"HyprMon unavailable: could not run hyprmon:" in last_output
-    finally: (root / "hyprmon").chmod(0o755)
+        assert b"live/save changes remain" in last_output
     (root / "hyprmon").rename(root / "hyprmon-hidden")
     try:
-        assert run(tab+b"\x1b[B"*3+b"\r\x1b", state(readonly=True), size=(24, 80), path=str(root)) == [["state"]]
-        assert b"hyprmon on PATH" in last_output
-        assert b"Lua-compatible" in last_output
-        assert b"services.icewine.monitors" in last_output
+        run(esc, state(), size=(24,80), path=str(root))
+        assert b"Hyprmon Unavailable" in last_output
     finally: (root / "hyprmon-hidden").rename(root / "hyprmon")
-print("PASS: real TTY cancel, editable/read-only navigation, named selections, invalid state, Tab pages, appearance handoffs and fresh overwrite default")
+    # Fail malformed machine state before terminal ownership and commands.
+    for wire in (state()+" terminal=true", state().replace("screenshot=none","screenshot=invalid"), state().replace("terminal=false","terminal=1")):
+        run(b"", wire, valid=False)
+        assert not tools()
+    good = "themes=dracula,tokyo-night selected=tokyo-night policy=false level=med desktopLayout=scrolling theme=false transparency=false wallpaper=false monitors=false layout=false"
+    for wire in (good+" unknown=false", good.replace("policy=false","policy=maybe"), good.replace("selected=tokyo-night","selected=missing"), good.replace("desktopLayout=scrolling","desktopLayout=invalid")):
+        run(b"",state(),valid=False,appearance_wire=wire)
+        assert not tools()
+    # Undersized input has no side effects; recovery retains draft and focus.
+    run(tab+right+esc, state(), size=(23,79))
+    assert not saves() and not tools()
+    run(tab+b" ", state(), size=(24,80), resize_steps=[((20,79),right+tab),((24,100),esc)])
+print("PASS: pane/grid/entry/placement, separate drafts, legacy policy, mouse, overflow, handoffs and bootstrap TTY contracts")

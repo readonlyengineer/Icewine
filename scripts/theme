@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 import secrets
+import stat
 import shutil
 import signal
 import subprocess
@@ -100,8 +101,42 @@ def writable(path, target=None):
         raise ValueError(f"read-only symlink: {path} (via {link})")
 
 
-def atomic_text(path, contents, mode=None, *, root=None, signature=None):
-    writable(path)
+def setting_target(path):
+    """Resolve an editable file, without treating a link as ownership policy."""
+    linked = symlinked(path) is not None
+    destination = path.resolve(strict=linked)
+    if destination.exists():
+        info = destination.stat()
+        if not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o222 or not os.access(destination, os.W_OK):
+            raise ValueError(f"read-only file: {path}")
+    else:
+        info = None
+    parent = destination.parent
+    while not parent.exists():
+        parent = parent.parent
+    if not parent.is_dir() or not parent.stat().st_mode & 0o222 or not os.access(parent, os.W_OK | os.X_OK):
+        raise ValueError(f"read-only directory: {path}")
+    return destination, info
+
+
+def setting_readonly(path):
+    try:
+        setting_target(path)
+        return False
+    except (OSError, ValueError, RuntimeError):
+        return True
+
+
+def atomic_text(path, contents, mode=None, *, root=None, signature=None, setting=False):
+    original = path
+    if setting:
+        path, initial = setting_target(original)
+        if signature is not None and hashlib.sha256(path.read_bytes() if initial else b"").hexdigest() != signature:
+            raise ValueError(f"setting changed before atomic write: {original}")
+        if initial is not None:
+            mode = stat.S_IMODE(initial.st_mode)
+    else:
+        writable(path)
     if root is not None and not still_current(path, root, signature):
         raise ValueError(f"default changed before atomic write: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,11 +149,30 @@ def atomic_text(path, contents, mode=None, *, root=None, signature=None):
             if mode is not None:
                 os.fchmod(stream.fileno(), mode)
             os.fsync(stream.fileno())
-        writable(path)
+        if setting:
+            current, info = setting_target(original)
+            identity = lambda value: (value.st_dev, value.st_ino, value.st_mtime_ns, value.st_size) if value else None
+            if current != path or identity(info) != identity(initial):
+                raise ValueError(f"setting changed during atomic write: {original}")
+        else:
+            writable(path)
         if root is not None and not still_current(path, root, signature):
             raise ValueError(f"default changed during atomic write: {path}")
         try:
-            os.replace(temporary, path)
+            # Pin the resolved directory so replacing a parent with a link cannot
+            # redirect this commit. Recheck its identity after opening it.
+            if setting:
+                parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    parent = os.fstat(parent_fd)
+                    current = path.parent.stat()
+                    if (parent.st_dev, parent.st_ino) != (current.st_dev, current.st_ino):
+                        raise ValueError(f"setting directory changed: {original}")
+                    os.replace(Path(temporary).name, path.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+                finally:
+                    os.close(parent_fd)
+            else:
+                os.replace(temporary, path)
         except OSError as error:
             if error.errno != errno.EBUSY or root is None or path.is_symlink():
                 raise
@@ -563,14 +617,16 @@ PROC = Path("/proc")
 
 
 def signal_reload(name, config, runtime):
-    """Request native reload only for this user's default-config processes."""
+    """Reload this user's default config or the exact shipped optional editor."""
     if not runtime or not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
         print(f"Pending: {name} native reload is unavailable on this session.", file=sys.stderr)
         return False
     skipped = exited = 0
     failed = False
-    # Nixpkgs wraps Kitty's executable while retaining kitty as argv[0].
-    process_names = (b"kitty", b".kitty-wrapped") if name == "kitty" else (name.encode(),)
+    # Native wrappers can retain a wrapped executable's comm/argv basename.
+    process_names = (name.encode(), b"." + name.encode() + b"-wrapped")
+    editor_init = Path(os.environ.get("ICEWINE_EDITOR_INIT", "/usr/share/icewine/editor/init.lua")).resolve()
+    editor_defaults = Path(os.environ.get("ICEWINE_EDITOR_DEFAULTS", "/usr/share/icewine/editor/defaults.lua")).resolve()
     try:
         processes = list(PROC.iterdir())
     except OSError as error:
@@ -580,7 +636,8 @@ def signal_reload(name, config, runtime):
         if not process.name.isdecimal():
             continue
         try:
-            if ((process / "comm").read_bytes().strip() not in process_names or
+            identity = (process / "comm").read_bytes().strip()
+            if (identity not in process_names or
                     process.stat().st_uid != os.getuid()):
                 continue
         except (OSError, ValueError):
@@ -599,19 +656,34 @@ def signal_reload(name, config, runtime):
                 if process.stat().st_uid != os.getuid():
                     continue
                 args = (process / "cmdline").read_bytes().split(b"\0")
-                if not args or Path(os.fsdecode(args[0])).name != name:
+                executable = Path(os.fsdecode(args[0])).name if args else ""
+                if executable not in (name, ".nvim-wrapped" if name == "nvim" else name):
                     skipped += 1
                     continue
                 options = [os.fsdecode(arg) for arg in args[1:] if arg]
-                blocked = ("--config", "--override", "-c", "-o") if name == "kitty" else ("-u", "--clean", "--headless", "--cmd", "--noplugin")
-                if any(option == flag or option.startswith(flag + "=") or
-                       (flag in ("-c", "-o", "-u") and option.startswith(flag) and option != flag)
-                       for option in options for flag in blocked):
-                    skipped += 1
-                    continue
                 env = dict(item.split(b"=", 1) for item in (process / "environ").read_bytes().split(b"\0")
                            if b"=" in item and item.split(b"=", 1)[0] in
-                           (b"HOME", b"XDG_CONFIG_HOME", b"XDG_RUNTIME_DIR", b"NVIM_APPNAME", b"KITTY_CONFIG_DIRECTORY"))
+                           (b"HOME", b"XDG_CONFIG_HOME", b"XDG_RUNTIME_DIR", b"NVIM_APPNAME", b"KITTY_CONFIG_DIRECTORY", b"ICEWINE_NVIM_DEFAULTS"))
+                editor_options = options
+                # Nix's native wrapper prepends provider-disable commands. Permit
+                # only those inert assignments, never arbitrary --cmd startup code.
+                if (name == "nvim" and len(options) >= 2 and options[0] == "--cmd"
+                        and re.fullmatch(r"lua (?:vim\.g\.loaded_(?:node|perl|ruby|python3)_provider=0;?)+", options[1])):
+                    editor_options = options[2:]
+                packaged_editor = (name == "nvim" and env.get(b"NVIM_APPNAME") == b"icewine-nvim"
+                    and len(editor_options) >= 2 and editor_options[0] == "-u"
+                    and Path(editor_options[1]).is_absolute()
+                    and Path(editor_options[1]).resolve() == editor_init
+                    and Path(os.fsdecode(env.get(b"ICEWINE_NVIM_DEFAULTS", b"/usr/share/icewine/editor/defaults.lua"))).resolve() == editor_defaults)
+                checked_options = editor_options[2:] if packaged_editor else options
+                blocked = ("--config", "--override", "-c", "-o") if name == "kitty" else ("-u", "--clean", "--headless", "--cmd", "--noplugin")
+                if (any(option == flag or option.startswith(flag + "=") or
+                        (flag in ("-c", "-o", "-u") and option.startswith(flag) and option != flag)
+                        for option in checked_options for flag in blocked)
+                        or (name == "nvim" and not packaged_editor and
+                            (identity != b"nvim" or executable != "nvim"))):
+                    skipped += 1
+                    continue
                 home = os.fsdecode(env.get(b"HOME", b""))
                 target_config = os.fsdecode(env.get(b"XDG_CONFIG_HOME", b"")) or (home + "/.config" if home else "")
                 kitty_config = os.fsdecode(env.get(b"KITTY_CONFIG_DIRECTORY", b""))
@@ -619,7 +691,7 @@ def signal_reload(name, config, runtime):
                         not target_config or Path(target_config).resolve() != config.resolve() or
                         (name == "kitty" and kitty_config and
                          (not Path(kitty_config).is_absolute() or Path(kitty_config).resolve() != (config / "kitty").resolve())) or
-                        (name == "nvim" and env.get(b"NVIM_APPNAME", b"nvim") != b"nvim")):
+                        (name == "nvim" and not packaged_editor and env.get(b"NVIM_APPNAME", b"nvim") != b"nvim")):
                     skipped += 1
                     continue
                 signal.pidfd_send_signal(fd, signal.SIGUSR1)
@@ -687,7 +759,7 @@ def dispatch(argv):
     config = xdg("XDG_CONFIG_HOME", ".config")
     state = xdg("XDG_STATE_HOME", ".local/state") / "icewine"
     if args and not (command == "theme" and args == ["status"]):
-        writable(state / command)
+        setting_target(state / command)
         if command in {"theme", "transparency"} and render_readonly(config):
             raise ValueError("read-only symlink: generated theme configuration")
     if command == "layout":
@@ -698,7 +770,7 @@ def dispatch(argv):
             value = args[0]
             if value not in layouts:
                 raise ValueError("invalid layout; choose scrolling, dwindle, master or monocle")
-            atomic_text(path, value + "\n")
+            atomic_text(path, value + "\n", setting=True)
             if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
                 try:
                     result = subprocess.run(["hyprctl", "reload"], check=True, timeout=10,
@@ -717,7 +789,7 @@ def dispatch(argv):
         if value not in {"on", "off"}:
             raise ValueError("invalid autofullscreen setting; choose on or off")
         if args:
-            atomic_text(path, value + "\n")
+            atomic_text(path, value + "\n", setting=True)
             if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
                 try:
                     result = subprocess.run(["hyprctl", "eval", 'require("icewine.modules.WindowPolicy").refresh_autofullscreen()'],
@@ -774,13 +846,13 @@ def dispatch(argv):
             except (OSError, subprocess.SubprocessError):
                 pass
             print("Pending: Quickshell is unavailable; saving selection for next login.", file=sys.stderr)
-        atomic_text(state / "theme", requested + "\n")
+        atomic_text(state / "theme", requested + "\n", setting=True)
         if os.environ.get("ICEWINE_THEME_FROM_SHELL") == "1":
             print("Saved selection: " + requested, flush=True)
     elif command == "transparency":
         if args[0] not in TRANSPARENCY:
             raise ValueError("invalid transparency; choose off, low, med or high")
-        atomic_text(state / "transparency", args[0] + "\n")
+        atomic_text(state / "transparency", args[0] + "\n", setting=True)
     theme_id, policy = effective(state, themes)
     level = transparency_level(state)
     files = render_theme(assets, themes[theme_id], level)

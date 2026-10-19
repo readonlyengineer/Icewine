@@ -29,6 +29,9 @@ let
     login.enable = true;
     shellExtras.enable = true;
   }; }]; }).config;
+  screenshotSimple = (desktopSystem.extendModules { modules = [{ services.icewine.screenshot = "simple"; }]; }).config;
+  screenshotNone = (desktopSystem.extendModules { modules = [{ services.icewine.screenshot = "none"; }]; }).config;
+  editorEnabled = (desktopSystem.extendModules { modules = [{ services.icewine.texteditor.enable = true; }]; }).config;
   monitorsOnly = (desktopSystem.extendModules { modules = [{ services.icewine.monitors = { enable = true; package = pkgs.hello; }; }]; }).config;
   nativeGaming = (desktopSystem.extendModules { modules = [{ services.icewine.steam = "native"; }]; }).config;
   flatpakOnly = (desktopSystem.extendModules { modules = [{ services.icewine = { steam = "flatpak"; gamescope.enable = false; }; }]; }).config;
@@ -71,6 +74,7 @@ let
   contains = needle: lib.hasInfix (builtins.unsafeDiscardStringContext needle);
   greeterCommand = greeter.services.greetd.settings.default_session.command;
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
+  optionalEditor = builtins.head (lib.filter (package: lib.getName package == "icewine-editor") editorEnabled.users.users.demo.packages);
   icewineCli = builtins.head (lib.filter
     (package: lib.getName package == "icewine") optIn.users.users.demo.packages);
   handheldCli = builtins.head (lib.filter
@@ -177,6 +181,12 @@ in {
     touch "$out"
   '';
   modules =
+    assert hasPackage "hyprshot" screenshotSimple.environment.systemPackages;
+    assert !(hasPackage "flameshot" screenshotSimple.environment.systemPackages);
+    assert !(hasPackage "flameshot" screenshotNone.environment.systemPackages);
+    assert hasPackage "flameshot" optIn.environment.systemPackages;
+    assert hasPackage "icewine-editor" editorEnabled.users.users.demo.packages;
+    assert !(hasPackage "icewine-editor" desktop.users.users.demo.packages);
     assert lib.all (name: !desktop.services.icewine.${name}.enable)
       [ "desktop" "terminal" "filemanager" "login" "shellExtras" ];
     assert desktop.services.icewine.steam == "none";
@@ -249,6 +259,14 @@ in {
       export XDG_RUNTIME_DIR=$TMPDIR/runtime XDG_CACHE_HOME=$TMPDIR/cache
       mkdir -m700 -p "$XDG_RUNTIME_DIR"
       mkdir -p "$HOME"
+      mkdir -p "$XDG_CONFIG_HOME/nvim" "$XDG_DATA_HOME/nvim/lazy/personal"
+      printf 'personal init\n' > "$XDG_CONFIG_HOME/nvim/init.lua"
+      printf 'personal plugin\n' > "$XDG_DATA_HOME/nvim/lazy/personal/sentinel"
+      EDITOR=personal-editor VISUAL=personal-visual ${optionalEditor}/bin/icewine-editor --headless -c 'luafile ${./editor.lua}' -c qa
+      grep -Fx 'personal init' "$XDG_CONFIG_HOME/nvim/init.lua"
+      grep -Fx 'personal plugin' "$XDG_DATA_HOME/nvim/lazy/personal/sentinel"
+      # Use a separate fixture for manager/default deployment below.
+      export XDG_CONFIG_HOME=$TMPDIR/manager-config XDG_DATA_HOME=$TMPDIR/manager-data
       # Compositor callers must resolve the helper without Quickshell's private PATH.
       for cli in ${icewineCli} ${handheldCli}; do
         if PATH=$cli/bin icewine-monitor-brightness ../eDP-1 2>"$TMPDIR/brightness-error"; then exit 1; fi
@@ -267,7 +285,7 @@ in {
       done
       [[ " ''${fields[*]} " = *" readonly=true "* ]]
       for selection in "''${selections[@]}"; do
-        [[ "$selection" = *=true || "$selection" = steam=flatpak || "$selection" = handheld=false ]]
+        [[ "$selection" = *=true || "$selection" = steam=flatpak || "$selection" = handheld=false || "$selection" = texteditor=false || "$selection" = screenshot=advanced ]]
       done
       test ! -e "$XDG_CONFIG_HOME"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false

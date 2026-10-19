@@ -19,6 +19,44 @@ manage = types.ModuleType("icewine_manage")
 manage.__file__ = str(source / "scripts/manage")
 importlib.machinery.SourceFileLoader(manage.__name__, manage.__file__).exec_module(manage)
 
+def test_utility_choices():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        state = root / "state/icewine"
+        env = dict(HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), XDG_STATE_HOME=str(state.parent),
+                   XDG_DATA_HOME=str(root / "data"), ICEWINE_THEME_ASSETS=str(source / "theme/assets"))
+        with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID":"arch"}):
+            os.environ.pop("ICEWINE_MANAGE_SELECTIONS", None)
+            readonly, fresh = manage.selections(state)
+            assert not readonly and not state.exists()
+            assert fresh == dict.fromkeys(manage.FEATURES, True) | {"handheld":False,"login":False,"steam":"flatpak","screenshot":"advanced"}
+            state.mkdir(parents=True)
+            old = {name:value for name,value in fresh.items() if name not in {"texteditor","screenshot"}}
+            (state / "manage.json").write_text(json.dumps(old))
+            _, migrated = manage.selections(state)
+            assert migrated == old | {"texteditor":False,"screenshot":"advanced"}
+            assert json.loads((state / "manage.json").read_text()) == old
+            for mode, region, screen in (("simple",["hyprshot","-m","region"],["hyprshot","-m","output"]),
+                                         ("advanced",["flameshot","gui"],["flameshot","screen","--edit"])):
+                (state / "manage.json").write_text(json.dumps(fresh | {"screenshot":mode}))
+                for arguments, expected in ((["screenshot"],region),(["screenshot","screen"],screen)):
+                    with patch.object(manage, "run") as command:
+                        manage.main(arguments)
+                        command.assert_called_once_with(expected)
+            (state / "manage.json").write_text(json.dumps(fresh | {"screenshot":"none"}))
+            with patch.object(manage, "run", side_effect=AssertionError("disabled screenshot launched")):
+                try: manage.main(["screenshot"])
+                except ValueError as error: assert "disabled" in str(error)
+                else: raise AssertionError("disabled screenshot accepted")
+            # Preview reads the real installed palette without creating user configuration.
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                manage.main(["theme-preview","catppuccin-latte"])
+            assert set(field.split("=",1)[0] for field in output.getvalue().split()) == {"primary","foreground","background","muted","secondary","tertiary"}
+            assert not (root / "config").exists()
+
+
+test_utility_choices()
+
 def test_appearance_state():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -118,15 +156,15 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     env = dict(HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_DATA_HOME=str(data),
                XDG_STATE_HOME=str(state.parent), ICEWINE_DEFAULT_FILES=str(defaults),
                ICEWINE_THEME_ASSETS=str(source / "theme/assets"), ICEWINE_THEME_POLICY="")
-    false = dict.fromkeys(manage.FEATURES, False) | {"steam": "none"}
+    false = dict.fromkeys(manage.FEATURES, False) | {"steam": "none", "screenshot": "none"}
     def apply(features=(), overwrite=False, readonly=False, steam="none"):
-        selected = {name: name in features for name in manage.FEATURES} | {"steam": steam}
+        selected = {name: name in features for name in manage.FEATURES} | {"steam": steam, "screenshot": "none"}
         extra = {"ICEWINE_MANAGE_SELECTIONS": json.dumps(selected)} if readonly else {}
         with patch.dict(os.environ, dict(env, **extra)), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}):
             manage.main(["apply", *[f"{name}={str(bit).lower()}" for name, bit in reversed(list(selected.items()))], f"overwrite={str(overwrite).lower()}"])
         return selected
     # Invalid named requests fail before any filesystem or package operation.
-    valid = [f"{name}={"none" if name == "steam" else "false"}" for name in manage.FEATURES] + ["overwrite=false"]
+    valid = [f"{name}={"none" if name in {"steam", "screenshot"} else "false"}" for name in manage.FEATURES] + ["overwrite=false"]
     with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), patch.object(manage, "apply", side_effect=AssertionError("invalid request applied")):
         for request in (valid + ["terminal=true"], valid + ["unknown=false"], valid + ["texteditor=true"],
                         valid[1:], valid[:-1], ["terminal=1", *valid[1:]]):
@@ -352,17 +390,24 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         else: raise AssertionError("accepted malformed widget preference")
         (widget_saved / "widgets.json").unlink()
         (widget_saved / "widgets.json").symlink_to(root / "other.json")
-        assert widget_status()["windowSwitcher"] == "true:symlink"
+        assert widget_status()["windowSwitcher"] == "true:readonly"
         try: save_widgets(widget_status()["revision"])
-        except ValueError as error: assert "read-only symlink" in str(error)
+        except (ValueError, OSError) as error: assert isinstance(error, (ValueError, OSError))
         else: raise AssertionError("replaced dangling widget link")
         assert (widget_saved / "widgets.json").is_symlink() and not (root / "other.json").exists()
         (root / "other.json").write_text('{"windowSwitcher":false}')
-        assert widget_status()["windowSwitcher"] == "false:symlink"
-        try: save_widgets(widget_status()["revision"])
+        assert widget_status()["windowSwitcher"] == "false:user"
+        save_widgets(widget_status()["revision"])
+        assert (widget_saved / "widgets.json").is_symlink()
+        assert json.loads((root / "other.json").read_text())["windowSwitcher"] is False
+        (root / "other.json").chmod(0o444)
+        assert widget_status()["windowSwitcher"] == "false:readonly"
+        before = (root / "other.json").read_bytes()
+        try: save_widgets(widget_status()["revision"], "true", "true")
         except ValueError: pass
-        else: raise AssertionError("replaced declarative widget preferences")
-        assert (root / "other.json").read_text() == '{"windowSwitcher":false}'
+        else: raise AssertionError("wrote a read-only link target")
+        assert (root / "other.json").read_bytes() == before
+        (root / "other.json").chmod(0o600)
         (widget_saved / "widgets.json").unlink()
         # Widget saves do not depend on host package support or utility state.
         with patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "nixos"}):
@@ -371,12 +416,10 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         outside_state = root / "outside-widget-state"
         widget_saved.rename(outside_state)
         widget_saved.symlink_to(outside_state)
-        before = (outside_state / "widgets.json").read_bytes()
-        assert widget_status()["windowSwitcher"] == "false:symlink"
-        try: save_widgets(widget_status()["revision"], "true", "true")
-        except ValueError: pass
-        else: raise AssertionError("saved widgets through linked state directory")
-        assert (outside_state / "widgets.json").read_bytes() == before
+        assert widget_status()["windowSwitcher"] == "false:user"
+        save_widgets(widget_status()["revision"], "true", "true")
+        assert json.loads((outside_state / "widgets.json").read_text())["windowSwitcher"] is True
+        assert widget_saved.is_symlink()
         widget_saved.unlink()
         outside_state.rename(widget_saved)
         # A linked theme locks only that appearance action; queries never write.
@@ -391,6 +434,17 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             try: manage.apply(false, False, False, false, widget_config, data, widget_saved)
             except ValueError as error: assert "Arch/CachyOS" in str(error)
             else: raise AssertionError("NixOS reached native package operations")
+    with patch.dict(os.environ, widget_env), patch.object(manage.subprocess, "run", side_effect=AssertionError("partial save ran host command")):
+        before_partial = json.loads((widget_saved / "widgets.json").read_text())
+        revision = widget_status()["revision"]
+        new_toasts = not before_partial["notificationToasts"]
+        manage.main(["widgets-apply", "revision=" + revision, "notificationToasts=" + str(new_toasts).lower()])
+        assert json.loads((widget_saved / "widgets.json").read_text()) == before_partial | {"notificationToasts": new_toasts}
+        try: manage.main(["widgets-apply", "revision=" + revision, "barWidth=91"])
+        except ValueError as error: assert "changed" in str(error)
+        else: raise AssertionError("partial save accepted stale revision")
+        manage.main(["widgets-apply", "revision=" + widget_status()["revision"], "barWidth=91"])
+        assert json.loads((widget_saved / "widgets.json").read_text()) == before_partial | {"notificationToasts": new_toasts, "barWidth": 91}
     if sys.argv[2:] == ["--widgets-only"]:
         print("PASS: focused widget state/Save, absent versus empty, failed-write preservation and policy")
         sys.exit(0)
@@ -467,7 +521,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), contextlib.redirect_stdout(io.StringIO()) as saved:
         manage.main(["state"])
         assert dict(field.split("=") for field in saved.getvalue().split()) == (
-            dict.fromkeys(manage.FEATURES, "false") | {"steam": "none", "readonly": "false", "terminal": "true"})
+            dict.fromkeys(manage.FEATURES, "false") | {"steam": "none", "screenshot": "none", "readonly": "false", "terminal": "true"})
     kitty = config / "kitty/kitty.conf"
     kitty.write_text("my edits\n")
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
@@ -623,10 +677,10 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     (defaults / "config/user-dirs.locale").write_text("default locale\n")
     locale.write_text("edited locale\n")
     original_replace = manage.theme.os.replace
-    def busy(source, destination):
+    def busy(source, destination, **kwargs):
         if destination == locale:
             raise OSError(errno.EBUSY, "bind mount")
-        return original_replace(source, destination)
+        return original_replace(source, destination, **kwargs)
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), patch.object(manage.theme.os, "replace", side_effect=busy):
         apply(("desktop",), overwrite=True)
     assert locale.read_text() == "default locale\n"
@@ -765,7 +819,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             (state / name).write_text(json.dumps(legacy))
         with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), contextlib.redirect_stdout(io.StringIO()) as saved:
             manage.main(["state"])
-            assert dict(field.split("=") for field in saved.getvalue().split()) == {"readonly": "false", **{name: str(value).lower() for name, value in migrated.items()}}
+            assert dict(field.split("=") for field in saved.getvalue().split()) == {"readonly": "false", **{name: str(value).lower() for name, value in (migrated | {"texteditor": bit}).items()}}
         assert json.loads((state / "manage.json").read_text()) == legacy
         with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
             apply(("desktop", "terminal", "filemanager", "gamescope", "shellExtras"), overwrite=True, steam="native")
@@ -797,7 +851,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     (state / "applied.json").write_text(json.dumps(false))
     with patch.dict(os.environ, dict(env, ICEWINE_MANAGE_SELECTIONS=json.dumps(false))):
         try:
-            manage.main(["apply", *[f"{name}={"none" if name == "steam" else str(name == 'desktop').lower()}" for name in manage.FEATURES], "overwrite=false"])
+            manage.main(["apply", *[f"{name}={"none" if name in {"steam", "screenshot"} else str(name == 'desktop').lower()}" for name in manage.FEATURES], "overwrite=false"])
         except ValueError as error:
             assert "read-only" in str(error)
         else:
@@ -859,7 +913,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (outside / ".bashrc").write_text("external shell config\n")
     home = root / "home link"
     home.symlink_to(outside)
-    declared = dict.fromkeys(manage.FEATURES, False) | {"steam": "none"}
+    declared = dict.fromkeys(manage.FEATURES, False) | {"steam": "none", "screenshot": "none"}
     declared["shellExtras"] = True
     defaults = root / "defaults"
     for name in ("config", "data", "home"):

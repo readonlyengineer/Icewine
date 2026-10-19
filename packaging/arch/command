@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -e
 case ${0##*/} in
+  icewine-editor)
+    selections=$(icewine-manage-backend state)
+    [[ " $selections " == *" texteditor=true "* ]] || { echo 'Terminal Editor is disabled in Utilities' >&2; exit 1; }
+    export NVIM_APPNAME=icewine-nvim
+    exec nvim -u /usr/share/icewine/editor/init.lua "$@" ;;
   icewine-shell)
     exec qs "$@" ;;
   icewine-manage-backend)

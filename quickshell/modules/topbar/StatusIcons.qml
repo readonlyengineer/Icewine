@@ -14,6 +14,22 @@ import qs.icewine.theme as Theme
 Rectangle {
     id: root
 
+    function iconFor(page) {
+        return page === "launcher" ? Theme.Palette.osGlyph
+                    : page === "audio" ? (root.muted ? "󰝟" : root.volume < 34 ? "" : root.volume < 67 ? "" : "")
+                    : page === "network" ? (root.wifiConnected ? "" : root.networkConnected ? "" : "󰯡")
+                    : page === "notifications" ? (root.notificationService.doNotDisturb ? "󰂛"
+                        : root.notificationService.count > 0 ? "󰂚" : "󰂜")
+                    : page === "battery" ? (root.battery?.isLaptopBattery
+                        ? StatusModel.batteryIcon(root.battery?.percentage ?? 0, root.batteryCharging) : "󰐥")
+                    : page === "media" ? (root.player?.isPlaying ? "" : "")
+                    : ({background: "󰀻", layout: "󰕰", bluetooth: "", clipboard: "󰅌",
+                        tailscale: "󰒍", ssh: "󰣀", performance: "󰓅"})[page] ?? ""
+    }
+    function iconSnapshot() {
+        return Cards.modules.map(page => page + "=" + root.iconFor(page)).join(" ")
+    }
+
     required property var notificationService
     property var player: null
     property int backgroundCount: 0
@@ -83,16 +99,7 @@ Rectangle {
             StatusButton {
                 required property var modelData
                 page: modelData.modules[0]
-                icon: page === "launcher" ? Theme.Palette.osGlyph
-                    : page === "audio" ? (root.muted ? "󰝟" : root.volume < 34 ? "" : root.volume < 67 ? "" : "")
-                    : page === "network" ? (root.wifiConnected ? "" : root.networkConnected ? "" : "󰯡")
-                    : page === "notifications" ? (root.notificationService.doNotDisturb ? "󰂛"
-                        : root.notificationService.count > 0 ? "󰂚" : "󰂜")
-                    : page === "battery" ? (root.battery?.isLaptopBattery
-                        ? StatusModel.batteryIcon(root.battery?.percentage ?? 0, root.batteryCharging) : "󰐥")
-                    : page === "media" ? (root.player?.isPlaying ? "" : "")
-                    : ({background: "󰀻", layout: "󰕰", bluetooth: "", clipboard: "󰅌",
-                        tailscale: "󰒍", ssh: "󰣀", performance: "󰓅"})[page] ?? ""
+                icon: root.iconFor(page)
                 colour: page === "network" ? (root.networkConnected ? Theme.Palette.success : Theme.Palette.muted)
                     : page === "notifications" ? root.notificationColour
                     : page === "battery" && root.battery?.isLaptopBattery && (root.battery?.percentage ?? 1) < 0.15

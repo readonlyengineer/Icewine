@@ -38,7 +38,7 @@ def select(args):
     if not source.is_file():
         raise ValueError("image path is not a readable regular file")
     directory = data / "icewine/wallpapers"
-    theme.writable(directory / "selection.img")
+    theme.setting_target(directory / "selection.img")
     theme.writable(directory / ".selection.lock")
     directory.mkdir(parents=True, exist_ok=True)
     fd = os.open(directory / ".selection.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -51,8 +51,8 @@ def select(args):
             shutil.copyfile(source, temporary)
             temporary.chmod(0o600)
             validate(temporary)
-            theme.writable(directory / "selection.img")
-            os.replace(temporary, directory / "selection.img")
+            theme.setting_target(directory / "selection.img")
+            theme.atomic_text(directory / "selection.img", temporary.read_bytes(), 0o600, setting=True)
         finally:
             temporary.unlink(missing_ok=True)
     try:

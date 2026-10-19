@@ -2197,6 +2197,10 @@ ShellRoot {
                 const row = icons.children.find(item => item.children.filter(child => child.page !== undefined).length > 0)
                 const buttons = row.children.filter(item => item.page !== undefined && item.visible)
                 input.compare(buttons.map(item => item.page).join(","), "launcher,media,audio,network,notifications,battery")
+                const snapshot = {}
+                for (const field of icons.iconSnapshot().split(" ")) { const parts = field.split("="); snapshot[parts[0]] = parts[1] }
+                input.compare(Object.keys(snapshot).length, 13)
+                for (const button of buttons) input.compare(snapshot[button.page], button.icon)
                 input.compare(icons.implicitWidth, row.implicitWidth + 9)
                 input.compare(icons.battery, null)
                 input.compare(buttons[5].label, "")
@@ -2215,6 +2219,9 @@ ShellRoot {
                     input.compare(icons.activated, button.page)
                 }
                 icons.sink.audio.muted = true
+                input.tryCompare(icons, "muted", true)
+                input.compare(icons.iconFor("audio"), "󰝟")
+                input.verify(icons.iconSnapshot().includes("audio=󰝟"))
                 const volume = icons.sink.audio.volume
                 const audio = buttons[2]
                 input.mouseWheel(audio, audio.width / 2, audio.height / 2, 0, 120)
@@ -2898,9 +2905,12 @@ SERVICE_FIXTURES = {
     "UPower": "property var displayDevice: null",
     "UPowerDeviceState": "enum State { Charging, PendingCharge }",
     "Pipewire": """
+        // Real Pipewire audio properties notify bindings; nested JS objects do not.
+        property QtObject firstAudio: QtObject { property bool muted: false; property real volume: 0.5 }
+        property QtObject secondAudio: QtObject { property bool muted: false; property real volume: 0.5 }
         property var nodes: ({values: Array.from({length: 2}, (_, id) => ({
             id: id, name: "Audio " + id, description: "Device " + id,
-            isSink: true, isStream: false, audio: {muted: false, volume: 0.5}}))})
+            isSink: true, isStream: false, audio: id === 0 ? firstAudio : secondAudio}))})
         property var defaultAudioSink: nodes.values[0]
         property var defaultAudioSource: null
         property var preferredDefaultAudioSink: null
