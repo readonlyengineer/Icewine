@@ -25,6 +25,23 @@ import "icewine/modules/KeyboardModel.js" as KeyboardModel
 ShellRoot {
     id: root
     property string phase: "startup"
+    property var players: []
+    QtObject {
+        id: firstPlayer
+        property bool isPlaying: false
+        property string trackTitle: "First track"
+        property string trackArtist: "First artist"
+        property string identity: "First player"
+    }
+    Component {
+        id: playerFactory
+        QtObject {
+            property bool isPlaying: true
+            property string trackTitle: "Second track"
+            property string trackArtist: "Second artist"
+            property string identity: "Second player"
+        }
+    }
     readonly property Item view: viewLoader.item
     readonly property var fixtureSession: session
     QtObject {
@@ -70,7 +87,7 @@ ShellRoot {
         Loader {
             id: viewLoader
             anchors.fill: parent
-            sourceComponent: Modules.LockScreenSurface { session: root.fixtureSession }
+            sourceComponent: Modules.LockScreenSurface { session: root.fixtureSession; players: root.players }
         }
         TestCase { id: keys; when: false }
     }
@@ -81,7 +98,7 @@ ShellRoot {
             id: secondView
             anchors.fill: parent
             active: win2.visible
-            sourceComponent: Modules.LockScreenSurface { session: root.fixtureSession }
+            sourceComponent: Modules.LockScreenSurface { session: root.fixtureSession; players: root.players }
         }
     }
     function find(item, predicate) {
@@ -91,6 +108,15 @@ ShellRoot {
             if (match) return match
         }
         return null
+    }
+    function capture(name) {
+        const directory = Quickshell.env("ICEWINE_LOCK_CAPTURES")
+        if (!directory) return
+        let saved = false
+        keys.verify(win.contentItem.grabToImage(result => {
+            saved = result.saveToFile(directory + "/" + name + ".png")
+        }), "native capture starts")
+        keys.tryVerify(() => saved, 2000, "native capture saved: " + name)
     }
     Timer {
         interval: 150; running: true
@@ -136,6 +162,63 @@ ShellRoot {
                     }
                 }
                 checkTheme()
+                root.phase = "playing selection and live metadata"
+                const media = find(view, item => item.objectName === "lockNowPlaying")
+                const title = find(view, item => item.objectName === "lockTrackTitle")
+                const artist = find(view, item => item.objectName === "lockTrackArtist")
+                const idleHeight = media.parent.height
+                keys.verify(!media.visible)
+                capture("no-playback-dark")
+                const secondPlayer = playerFactory.createObject(root)
+                root.players = [firstPlayer, secondPlayer]
+                keys.compare(view.player, secondPlayer, "playing beats earlier paused player")
+                keys.verify(media.visible)
+                keys.compare(title.text, "♫ Second track")
+                keys.compare(artist.text, "Second artist")
+                capture("playing-dark")
+                firstPlayer.isPlaying = true
+                keys.compare(view.player, firstPlayer, "first playing player wins")
+                firstPlayer.trackTitle = "<b>Live metadata & title</b>"
+                keys.compare(title.text, "♫ <b>Live metadata & title</b>")
+                keys.compare(title.textFormat, Text.PlainText, "metadata cannot become rich text")
+                firstPlayer.trackArtist = "Updated artist"
+                keys.compare(artist.text, "Updated artist")
+                firstPlayer.trackTitle = "First line\\nSecond line"
+                firstPlayer.trackArtist = "First artist line\\nSecond artist line"
+                keys.wait(20)
+                keys.compare(title.lineCount, 1, "multiline title stays compact")
+                keys.compare(artist.lineCount, 1, "multiline artist stays compact")
+                firstPlayer.isPlaying = false
+                keys.compare(view.player, secondPlayer, "pause selects remaining playback")
+                secondPlayer.isPlaying = false
+                keys.verify(!media.visible, "all paused/stopped players collapse media")
+                keys.tryCompare(media.parent, "height", idleHeight, 1000, "no reserved placeholder spacing")
+                keys.compare(title.text, "", "no stale title on pause")
+                secondPlayer.isPlaying = true
+                secondPlayer.trackTitle = ""
+                secondPlayer.trackArtist = ""
+                keys.compare(title.text, "♫ Unknown track")
+                keys.compare(artist.text, "Second player", "identity fallback")
+                secondPlayer.identity = ""
+                keys.verify(!artist.visible, "empty artist row collapses")
+                capture("missing-metadata-dark")
+                root.players = [firstPlayer]
+                secondPlayer.destroy()
+                keys.wait(20)
+                keys.compare(view.player, null, "departed playing object is not retained")
+                keys.verify(!media.visible)
+                root.players = []
+                keys.tryCompare(media.parent, "height", idleHeight)
+                firstPlayer.trackTitle = "A very long title ".repeat(30)
+                firstPlayer.trackArtist = "A very long artist ".repeat(30)
+                firstPlayer.isPlaying = true
+                root.players = [firstPlayer]
+                keys.compare(title.elide, Text.ElideRight)
+                keys.compare(artist.elide, Text.ElideRight)
+                keys.verify(field.activeFocus, "media changes retain password focus")
+                keys.mouseClick(title)
+                keys.verify(field.activeFocus && session.locked && session.submissions === 0,
+                    "display click cannot raise media, submit or steal focus")
                 const image = find(view, item => item.objectName === "lockWallpaper")
                 keys.tryCompare(wallpaperOwner, "selectionAvailable", false)
                 keys.tryCompare(image, "status", Image.Ready)
@@ -247,7 +330,7 @@ ShellRoot {
                 keys.verify(session.locked && session.failed && !field.text, "failed retry preserves lock and clears secret")
                 keys.verify(toggle.visible && toggle.enabled, "failed retry restores OSK control")
                 keys.compare(prompt.text, "Incorrect password")
-                for (const size of [[1920,1080], [1280,800], [800,600], [320,480]]) {
+                for (const size of [[1920,1080], [1280,800], [1280,720], [800,600], [640,360], [320,480]]) {
                     checkTheme()
                     root.phase = "shared keyboard " + size.join("x")
                     win.width = size[0]; win.height = size[1]
@@ -265,6 +348,14 @@ ShellRoot {
                     keys.verify(toggle.x === 12 && toggle.y >= 0
                         && toggle.y + toggle.height <= panel.y,
                         "bottom-left icon remains reachable above shared OSK")
+                    const mediaPos = media.mapToItem(view, 0, 0)
+                    keys.verify(media.visible && media.width <= Math.min(440, win.width - 32))
+                    keys.verify(mediaPos.x >= 0 && mediaPos.x + media.width <= win.width,
+                        "long metadata fits output width")
+                    keys.verify(mediaPos.y >= 0 && mediaPos.y + media.height <= panel.y + 0.01,
+                        "media remains above OSK")
+                    keys.verify(prompt.mapToItem(view, 0, 0).y + prompt.height <= panel.y + 0.01,
+                        "authentication status remains above OSK")
                     const mapped = field.mapToItem(view, 0, 0)
                     keys.verify(mapped.y >= 0 && mapped.y + field.height <= win.height - panel.height, "field above keyboard")
                     const letter = find(panel, item => item.objectName === "oskKey" + KeyboardModel.keys.find(key => key.text === "a").index)
@@ -374,10 +465,16 @@ ShellRoot {
                         win.width = size[0]; win.height = size[1]
                         keys.tryVerify(visibleSelection)
                     }
+                    if (size[0] === 1920) capture("osk-dark-long-metadata")
                     root.phase = "live theme with keyboard " + size.join("x")
                     Theme.Palette.snapshot = JSON.parse(Quickshell.env("ICEWINE_LIGHT_PALETTE"))
                     keys.wait(250)
                     checkTheme()
+                    keys.compare(title.color, Theme.Palette.foreground)
+                    keys.compare(artist.color, Theme.Palette.foreground)
+                    if (size[0] === 640) capture("short-osk-light-long-metadata")
+                    if (size[0] === 320) capture("small-osk-light-long-metadata")
+                    if (size[0] === 1280) capture("osk-light-long-metadata")
                     keys.wait(250)
                     keys.compare(field.text, before, "theme change retains input")
                     keys.compare(clock.color, Theme.Palette.foreground, "clock follows live light theme")
@@ -386,6 +483,9 @@ ShellRoot {
                     keys.tryCompare(keyboardOwner, "keyboardVisible", false)
                     keys.tryCompare(field, "activeFocus", true)
                 }
+                root.players = []
+                keys.verify(!media.visible)
+                capture("no-playback-light")
                 root.phase = "successful response"
                 field.forceActiveFocus()
                 session.password = "correct-fixture-response"
@@ -447,6 +547,9 @@ with tempfile.TemporaryDirectory() as directory:
     shutil.copyfile(source / "theme/assets/flower-branch.png", root / "data/selected/icewine/wallpapers/selection.img")
     (root / "runtime").mkdir(mode=0o700)
     (root / "shell.qml").write_text(qml)
+    captures = os.environ.get("ICEWINE_LOCK_CAPTURES")
+    if captures:
+        Path(captures).mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
                QT_DEBUG_PLUGINS="1",
                QT_IM_MODULE="qtvirtualkeyboard", QT_VIRTUALKEYBOARD_DESKTOP_DISABLE="1",
@@ -456,7 +559,9 @@ with tempfile.TemporaryDirectory() as directory:
     result = subprocess.run([os.environ.get("ICEWINE_TEST_QS", "qs"), "-p", str(root), "--no-color"], env=env,
                             capture_output=True, text=True, timeout=25)
     output = result.stdout + result.stderr
+    if captures:
+        (Path(captures) / "quickshell.log").write_text(output)
     assert result.returncode == 0 and "CLOCK_LOCK_PASSED" in output, output
     assert re.search(r'libqtvirtualkeyboardplugin\.so[^\n]*loaded library', output), output
     assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign|is not installed|not a type", output), output
-print("PASS: actual clock lock surface, failure/retry/busy/clearing, policy, focus, shared 84-key OSK, arm/cancel/repeat/modifiers/pin/transparency and small screens")
+print("PASS: actual clock lock surface, failure/retry/busy/clearing, policy, focus, shared 84-key OSK, arm/cancel/repeat/modifiers/pin/transparency and small screens; playing selection/metadata/removal/collapse and display focus")

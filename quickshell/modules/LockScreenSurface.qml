@@ -4,11 +4,15 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
 import Quickshell
+import Quickshell.Services.Mpris
 import qs.icewine.theme as Theme
 
 FocusScope {
     id: root
     required property var session
+    property var players: Mpris.players.values
+    // Match the topbar's first-playing policy, without its paused control fallback.
+    readonly property var player: players.find(candidate => candidate.isPlaying) ?? null
     readonly property bool animationsEnabled: Theme.Palette.animate
     readonly property real keyboardInset: session.keyboardHost === root && session.keyboardVisible
         ? session.keyboardHeight : 0
@@ -65,11 +69,19 @@ FocusScope {
         anchors.horizontalCenter: parent.horizontalCenter
         y: Math.max(8, (root.height - root.keyboardInset - height) / 2)
         width: Math.max(0, parent.width - 32)
-        spacing: 8
+        spacing: root.keyboardInset > 0 ? 4 : 8
         Text {
             id: clock
             objectName: "lockClock"
             anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width
+            // Budget the clock after the other rows so media cannot crowd the OSK.
+            height: Math.min(implicitHeight, Math.max(34, root.height - root.keyboardInset
+                - date.height - (nowPlaying.visible ? nowPlaying.height : 0)
+                - password.height - statusText.height - 4 * parent.spacing - 24))
+            horizontalAlignment: Text.AlignHCenter
+            fontSizeMode: Text.Fit
+            minimumPixelSize: 28
             text: Qt.formatTime(time.date, Qt.locale().timeFormat(Locale.ShortFormat))
             font.family: "JetBrainsMono Nerd Font"
             font.pixelSize: Math.min(112, root.width / 5, Math.max(28, (root.height-root.keyboardInset)/3))
@@ -81,6 +93,7 @@ FocusScope {
             Behavior on scale { NumberAnimation { duration: root.animationsEnabled ? 120 : 0 } }
         }
         Text {
+            id: date
             objectName: "lockDate"
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
@@ -89,6 +102,39 @@ FocusScope {
             font.pixelSize: 20
             color: Theme.Palette.foreground
             wrapMode: Text.WordWrap
+        }
+        Column {
+            id: nowPlaying
+            objectName: "lockNowPlaying"
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(parent.width, 440)
+            visible: root.player !== null
+            spacing: 2
+            Text {
+                objectName: "lockTrackTitle"
+                width: parent.width
+                text: root.player ? "♫ " + (root.player.trackTitle || qsTr("Unknown track")) : ""
+                textFormat: Text.PlainText
+                horizontalAlignment: Text.AlignHCenter
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: 16
+                color: Theme.Palette.foreground
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
+            Text {
+                objectName: "lockTrackArtist"
+                width: parent.width
+                text: root.player?.trackArtist || root.player?.identity || ""
+                textFormat: Text.PlainText
+                visible: text !== ""
+                horizontalAlignment: Text.AlignHCenter
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: 14
+                color: Theme.Palette.foreground
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
         }
         TextInput {
             id: password
@@ -130,6 +176,7 @@ FocusScope {
             }
         }
         Text {
+            id: statusText
             objectName: "lockStatus"
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
