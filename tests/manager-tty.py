@@ -95,6 +95,7 @@ def rendered_frames(output, size, check_contrast=False, resize_events=(), check_
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("binary", type=Path)
+parser.add_argument("--bindings", type=Path, default=Path(__file__).resolve().parents[1] / "hyprland/modules/Bindings.tsv", help="shared shipped binding definitions")
 parser.add_argument("--export-frames", type=Path, help="write complete text frames and raw terminal cells for developer inspection")
 parser.add_argument("--preview-only", action="store_true", help="run the existing native Theme preview/cancel/commit regression group")
 parser.add_argument("--frames-only", action="store_true", help="capture representative visual states without repeating the semantic suite")
@@ -108,6 +109,7 @@ if options.frames_only and options.background_only: parser.error("--background-o
 binary = options.binary.resolve()
 if options.export_frames: options.export_frames.mkdir(parents=True, exist_ok=True)
 capture_number = 0
+hotkey_rows = [line.split("\t") for line in options.bindings.read_text().splitlines()]
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     backend = root / "icewine-manage-backend"
@@ -150,10 +152,11 @@ elif sys.argv[1:2] == ["default-apps-apply"]:
 elif sys.argv[1:] == ["hotkeys-state"]:
  with open(os.environ["TUI_HOTKEYS"]) as stream: saved=json.load(stream)
  print("readonly="+os.environ["TUI_HOTKEY_READONLY"], "live=true", "revision="+"a"*64, *[name+"="+chord for name,chord in saved.items()])
+ for row in json.loads(os.environ["TUI_HOTKEY_ROWS"]): print("\\t".join(row[:5]+["true"]))
 elif sys.argv[1:2] == ["hotkeys-apply"]:
  if os.environ["TUI_HOTKEY_ERROR"]:
   print(os.environ["TUI_HOTKEY_ERROR"],file=sys.stderr); sys.exit(1)
- defaults={"launcher":"SUPER+SPACE","terminal":"SUPER+RETURN","filemanager":"SUPER+E","screenshot":"SUPER+PRINT","lock":"SUPER+L"}
+ defaults={row[0]:row[3] for row in json.loads(os.environ["TUI_HOTKEY_ROWS"])}
  with open(os.environ["TUI_HOTKEYS"]) as stream: saved=json.load(stream)
  name,chord=sys.argv[3:]
  saved[name]=defaults[name] if chord=="default" else chord.upper().replace("ENTER","RETURN").replace(" ","")
@@ -223,14 +226,14 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         widgets_state.write_text(json.dumps({"notificationToasts": True, "windowSwitcher": True,
             "cardStacks": "launcher/launcher,background,layout;media/media;audio/audio,bluetooth;network/network,tailscale,ssh;notifications/notifications,clipboard;battery/battery,performance", "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80, "oskAccess": "none"} | (widgets or {})))
         hotkey_state = root / "hotkeys-state"
-        hotkey_state.write_text(json.dumps({"launcher":"SUPER+SPACE", "terminal":"SUPER+RETURN", "filemanager":"SUPER+E", "screenshot":"SUPER+PRINT", "lock":"SUPER+L"} | (hotkeys or {})))
+        hotkey_state.write_text(json.dumps({row[0]: row[3] for row in hotkey_rows} | (hotkeys or {})))
         defaults_state = root / "default-apps-state"
         defaults_state.write_text(json.dumps(default_apps if default_apps is not None else ["LibreWolf","Kitty","Yazi","Neovim","LibreWolf","imv","VLC","VLC"]))
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
                    TUI_DEFAULT_APPS=str(defaults_state), TUI_DEFAULT_READONLY=",".join(map(str,default_readonly)), TUI_DEFAULT_ERROR=default_error, TUI_DEFAULT_EMPTY=str(int(default_empty)), TUI_DEFAULT_MANY=str(int(default_many)),
-                   TUI_HOTKEYS=str(hotkey_state), TUI_HOTKEY_READONLY=str(hotkey_readonly).lower(), TUI_HOTKEY_ERROR=hotkey_error,
+                   TUI_HOTKEY_ROWS=json.dumps(hotkey_rows), TUI_HOTKEYS=str(hotkey_state), TUI_HOTKEY_READONLY=str(hotkey_readonly).lower(), TUI_HOTKEY_ERROR=hotkey_error,
                    TUI_APPLY_EXIT=str(apply_exit), TUI_WIDGETS=str(widgets_state), TUI_WIDGET_SUPPORTED=str(widget_supported).lower(),
                    TUI_FILE_STATE=file_state, TUI_APPEARANCE_WIRE=appearance_wire, TUI_REFRESH_BAD=str(int(refresh_bad)), TUI_WIDGET_LINKED=str(int(widget_linked)),
                    TUI_WIDGET_OWNERS=json.dumps(widget_owners or {}), TUI_WIDGET_POLICY=widget_policy, TUI_WIDGET_FAIL=str(int(widget_fail)), TUI_TOOLS=str(tool_log), TUI_POLICY=str(int(policy)),
@@ -506,7 +509,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         for size in ((24,80), (30,100), (40,140), (48,80)):
             # Recover the actual native list from overlapping one-row scrolls.
             # This detects both clipping and overscroll, including wrapped rows.
-            run(page(3)+wheel_down*180+esc, visual, size=size, capture="hotkeys-traversal")
+            run(page(3)+wheel_down*360+esc, visual, size=size, capture="hotkeys-traversal")
             bodies = hotkey_bodies()
             content = list(bodies[0])
             assert content[0] == "Common" and content[1] == ""
@@ -520,17 +523,17 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert sum(line.startswith("Shipped Icewine bindings.") for line in content) == 1
             text = "\n".join(content)
             assert all(label in text for label in ("Gradia full screenshot", "Browser (if configured)",
-                "Join/split column", "(scrolling only)", "Relative workspace", "Widget cards",
+                "Join/split column", "(scrolling only)", "Relative workspace", "Bluetooth card",
                 "Focused display", "brightness", "Cards: Bluetooth")), (size, text)
             start, end = bodies[0], bodies[-1]
             # A single Up must move immediately even after excess Down inputs.
-            run(page(3)+wheel_down*180+wheel_up+esc, visual, size=size, capture="hotkeys-end-up")
+            run(page(3)+wheel_down*360+wheel_up+esc, visual, size=size, capture="hotkeys-end-up")
             assert hotkey_bodies()[-1] == bodies[-2]
-            run(page(3)+down*180+up*180+esc, visual, size=size, capture="hotkeys-return-start")
+            run(page(3)+down*360+up*360+esc, visual, size=size, capture="hotkeys-return-start")
             assert hotkey_bodies()[-1] == start
-            run(page(3)+wheel_down*180+esc, visual, size=size, capture="hotkeys-wheel-end")
+            run(page(3)+wheel_down*360+esc, visual, size=size, capture="hotkeys-wheel-end")
             assert hotkey_bodies()[-1] == end
-            run(page(3)+wheel_down*180+wheel_up*180+esc, visual, size=size, capture="hotkeys-wheel-start")
+            run(page(3)+wheel_down*360+wheel_up*360+esc, visual, size=size, capture="hotkeys-wheel-start")
             assert hotkey_bodies()[-1] == start
             # Left/right/activation do not change sections. Pane/page changes retain offset.
             run(page(3)+wheel_down*20+left+right+tab+up+down+tab+esc,
@@ -541,12 +544,12 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         run(down*4+click(30,5)+down+esc, visual, size=(24,80), capture="hotkeys-click")
         assert hotkey_bodies()[-1][0] == "Common" and "Show/Toggle Taskbar" in hotkey_bodies()[-1][2]
         # Reflow at the bottom must clamp to the new rendered height immediately.
-        run(page(3)+down*180, visual, size=(24,80), capture="hotkeys-resize",
-            resize_steps=[((40,140),down*180), ((20,79),down+tab), ((30,100),down*180+esc)])
+        run(page(3)+down*360, visual, size=(24,80), capture="hotkeys-resize",
+            resize_steps=[((40,140),down*360), ((20,79),down+tab), ((30,100),down*360+esc)])
         resized = hotkey_bodies()
         assert next(body for body in resized if len(body) == 40-7)[-1].endswith("scrolls."), resized
         resized_end = resized[-1]
-        run(page(3)+down*180+esc, visual, size=(30,100), capture="hotkeys-resize-expected")
+        run(page(3)+down*360+esc, visual, size=(30,100), capture="hotkeys-resize-expected")
         assert hotkey_bodies()[-1] == resized_end
         print("PASS: continuous Hotkeys headings, native row overlap, bounds, wrapping, wheel, focus and resize")
 
@@ -560,7 +563,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert edits()[-1][2:] == ["launcher", "Super+Alt+F8"]
             assert b"Launcher" in last_frames[-1] and b"Super+Alt+F8" in last_frames[-1]
             # The same action in Applications must show and edit the new effective chord.
-            run(page(3)+down*180+esc, state(), size=size, hotkeys={"launcher":"SUPER+ALT+F8"}, capture="hotkeys-effective-repeat")
+            run(page(3)+down*360+esc, state(), size=size, hotkeys={"launcher":"SUPER+ALT+F8"}, capture="hotkeys-effective-repeat")
             assert any(b"Applications" in frame and b"Launcher" in frame and b"Super+Alt+F8" in frame for frame in last_frames)
             assert all("Super+Alt+F8" in line for frame in last_frames for line in frame.decode().splitlines()
                        if line[24:].startswith("Launcher"))
@@ -576,16 +579,27 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert b"Super+Space" in last_frames[-1]
             run(launcher+enter+b"r"+esc, state(), size=size, hotkey_readonly=True, capture="hotkeys-readonly")
             assert not edits() and b"Hotkeys - Read Only" in last_output
-        # Screenshot near the Common viewport edge stays visible during edit/error/reflow.
-        run(page(3)+down*12+enter, state(screenshot=True), size=(24,80), capture="hotkeys-editor-resize",
+        # Locate action rows from native output, including expanded group members.
+        run(page(3)+b"\x1b[<65;40;10M"*360+esc, state(screenshot=True), size=(24,80), capture="hotkeys-group-positions")
+        bodies = hotkey_bodies()
+        content = list(bodies[0]) + [body[-1] for body in bodies[1:]]
+        def position(label): return next(index for index, line in enumerate(content) if line.startswith(label))
+        for label, name in (("Show/Toggle Taskbar", "taskbar"), ("Focus left", "focus_left"),
+                            ("Workspace 7 ", "workspace_7"), ("Move window (mouse", "drag_move"), ("Volume up", "volume_up")):
+            chord = "Ctrl+Alt+mouse:274" if name == "drag_move" else "Ctrl+Alt+F8"
+            run(page(3)+down*position(label)+enter+clear+chord.encode()+enter+esc,
+                state(screenshot=True), size=(24,80), capture="hotkeys-group-edit-"+name)
+            assert edits()[-1][2:] == [name, chord]
+        # Screenshot stays visible during edit/error/reflow.
+        run(page(3)+down*position("Gradia full screenshot")+enter, state(screenshot=True), size=(24,80), capture="hotkeys-editor-resize",
             resize_steps=[((40,140), clear+b"Super+Shift+Ctrl+Alt+F12"+enter+esc)])
         assert edits()[-1][2:] == ["screenshot", "Super+Shift+Ctrl+Alt+F12"]
         assert b"Gradia full screenshot" in last_frames[-1] and b"Super+Shift+Ctrl+Alt+F12" in last_frames[-1]
         # Edit the repeated Lock below wrapped Windows/Workspaces text, then reflow.
-        run(page(3)+b"\x1b[<65;40;10M"*180+esc, state(), size=(24,80), capture="hotkeys-lock-position")
+        run(page(3)+b"\x1b[<65;40;10M"*360+esc, state(), size=(24,80), capture="hotkeys-lock-position")
         bodies = hotkey_bodies()
         content = list(bodies[0]) + [body[-1] for body in bodies[1:]]
-        lock_row = max(index for index, line in enumerate(content) if line.startswith("Lock "))
+        lock_row = max(index for index, line in enumerate(content) if line.startswith("Lock screen "))
         run(page(3)+down*lock_row+enter, state(), size=(24,80), capture="hotkeys-lock-reflow",
             resize_steps=[((40,140), clear+b"Super+Alt+F9"+enter+esc)])
         assert edits()[-1][2:] == ["lock", "Super+Alt+F9"]
@@ -720,7 +734,8 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert all(name.encode() in last_frames[-1] for name in ("Launcher", "Media", "Audio", "Network", "Notifications", "Battery")), "Default Widgets grid must show all six stacks"
 
         run(page(3)+right+down*5+esc, state(), size=size)
-        assert b"Common" in last_output and b"Applications" in last_output
+        # Expanded Common fills short viewports; test_hotkeys traverses every heading.
+        assert b"Common" in last_output and b"Show/Toggle Taskbar" in last_output
         assert not saves()
     test_default_apps_page()
     test_spacing()
@@ -842,7 +857,8 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert saves()
     run(page(3)+down*180+esc, state())
     assert b"Desktop / session" in last_output
-    run(page(3)+esc, state(), widgets={"barBehaviour":"toggle"})
+    # Mode text is in the footer; return to Common for action/chord ordering.
+    run(page(3)+down*360+up*360+esc, state(), widgets={"barBehaviour":"toggle"})
     assert b"toggle on press" in last_output and b"toggle on release" not in last_output
     taskbar_line = next(line for line in last_frames[-1].decode().splitlines() if "Show/Toggle Taskbar" in line)
     assert taskbar_line.index("Show/Toggle Taskbar") < taskbar_line.index("Super+"), "Hotkeys must put the action before its chord"

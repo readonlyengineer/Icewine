@@ -196,20 +196,32 @@ def widgets(argv, config, state):
     print("Widget preferences saved; the shipped shell watches this file.")
 
 
-# This bounded editor only accepts ordinary Super chords, never commands or Lua.
-HOTKEYS = {"launcher": "SUPER+SPACE", "terminal": "SUPER+RETURN", "filemanager": "SUPER+E",
-           "screenshot": "SUPER+PRINT", "lock": "SUPER+L"}
+# The same shipped data drives Lua registration and the terminal editor.
+BINDINGS_FILE = Path(os.environ.get("ICEWINE_BINDINGS_FILE", str(Path(__file__).resolve().parents[1] / "hyprland/modules/Bindings.tsv")))
+HOTKEY_ROWS = [line.split("\t") for line in BINDINGS_FILE.read_text().splitlines()]
+HOTKEYS = {row[0]: row[3] for row in HOTKEY_ROWS}
+HOTKEY_DEFINITIONS = {row[0]: row for row in HOTKEY_ROWS}
 HOTKEY_MODS = {"SUPER": 64, "SHIFT": 1, "CTRL": 4, "ALT": 8}
+HOTKEY_KEYS = {chord.split("+")[-1] for chord in HOTKEYS.values()}
+HOTKEY_MODIFIER_KEYS = {"SUPER": ("SUPER_L", "SUPER_R"), "SHIFT": ("SHIFT_L", "SHIFT_R"),
+                        "CTRL": ("CONTROL_L", "CONTROL_R"), "ALT": ("ALT_L", "ALT_R")}
 
 
-def hotkey_chord(value):
+def hotkey_chord(value, name=None):
     parts = value.upper().replace(" ", "").split("+")
-    parts[-1] = {"ENTER": "RETURN"}.get(parts[-1], parts[-1])
+    parts[-1] = {"ENTER": "RETURN", "PAGEUP": "PRIOR", "PAGEDOWN": "NEXT", "`": "GRAVE"}.get(parts[-1], parts[-1])
     mods, key = parts[:-1], parts[-1]
-    if (not mods or "SUPER" not in mods or len(set(mods)) != len(mods)
-            or any(mod not in HOTKEY_MODS for mod in mods)
-            or not re.fullmatch(r"[A-Z0-9]|RETURN|SPACE|PRINT|F[1-9]|F1[0-2]", key)):
-        raise ValueError("Use Super, optional Shift/Ctrl/Alt, and A-Z, 0-9, Enter, Space, Print or F1-F12")
+    if (len(set(mods)) != len(mods) or any(mod not in HOTKEY_MODS for mod in mods)
+            or not (key in HOTKEY_KEYS or re.fullmatch(r"[A-Z0-9]|RETURN|SPACE|PRINT|F[1-9]|F1[0-2]|MOUSE:27[2-9]", key))):
+        raise ValueError("Use Shift/Ctrl/Alt/Super and a key, media key, wheel or mouse:272-279")
+    kind = HOTKEY_DEFINITIONS[name][4] if name else None
+    button = key.startswith("MOUSE:")
+    if kind == "mouse" and not button:
+        raise ValueError("Mouse drag needs a mouse:272-279 button")
+    if kind and kind != "mouse" and button:
+        raise ValueError("Use a key or wheel for this action")
+    if kind in ("hold", "switcher") and (not mods or key.startswith("MOUSE_")):
+        raise ValueError("Hold/release actions need a modifier and a keyboard key")
     return "+".join([mod for mod in HOTKEY_MODS if mod in mods] + [key])
 
 
@@ -217,7 +229,7 @@ def hotkey_values(raw):
     saved = {}
     for line in (raw.decode("utf-8").removesuffix("\n").split("\n") if raw else []):
         name, separator, chord = line.partition("=")
-        if not separator or name not in HOTKEYS or name in saved or hotkey_chord(chord) != chord:
+        if not separator or name not in HOTKEYS or name in saved or hotkey_chord(chord, name) != chord:
             raise ValueError("Invalid hotkey preferences")
         saved[name] = chord
     values = HOTKEYS | saved
@@ -238,39 +250,60 @@ def hotkey_bindings():
     if not isinstance(bindings, list) or any(not isinstance(bind, dict) or any(
             type(bind.get(name, default)) is not type(default) for name, default in {
                 "key": "", "description": "", "submap": "", "modmask": 0, "keycode": 0,
-                "release": False, "mouse": False, "longPress": False, "repeat": False,
+                "release": False, "mouse": False, "longPress": False, "repeat": False, "locked": False,
                 "non_consuming": False, "catch_all": False,
             }.items()) for bind in bindings):
         raise ValueError("Invalid Hyprland bindings")
     return bindings
 
 
-def hotkey_matches(bind, chord):
+def hotkey_same_chord(bind, chord):
     parts = chord.split("+")
     return (bind.get("key", "").upper() == parts[-1]
             and bind.get("modmask") == sum(HOTKEY_MODS[mod] for mod in parts[:-1])
-            and not bind.get("submap") and not bind.get("keycode")
-            and not any(bind.get(flag) for flag in ("release", "mouse", "longPress", "repeat", "non_consuming", "catch_all")))
+            and not bind.get("submap") and not bind.get("keycode"))
 
 
-def hotkey_current(bindings):
-    values = {}
+def hotkey_matches(bind, chord, name):
+    flags = HOTKEY_DEFINITIONS[name][5].split(",")
+    # Lua hl.bind leaves kb.mouse false; drag/resize dispatchers own releasePending.
+    return hotkey_same_chord(bind, chord) and not bind.get("mouse") and all(bool(bind.get(flag)) == (expected in flags) for flag, expected in (
+        ("release", "release"), ("longPress", "long_press"), ("repeat", "repeating"),
+        ("locked", "locked"), ("non_consuming", "non_consuming"), ("catch_all", "catch_all")))
+
+
+def hotkey_current(bindings, saved):
+    values, available = {}, {}
     for name in HOTKEYS:
         matches = [bind for bind in bindings if bind.get("description") == "icewine:" + name]
+        # Browser is intentionally omitted when DefaultApps.browser is empty.
+        if not matches and name == "browser":
+            values[name], available[name] = saved[name], False
+            continue
         if len(matches) != 1:
             raise ValueError("Managed hotkeys unavailable in this session")
         bind = matches[0]
         chord = hotkey_chord("+".join([mod for mod, mask in HOTKEY_MODS.items() if bind.get("modmask", 0) & mask]
-                                     + [bind.get("key", "")]))
-        if not hotkey_matches(bind, chord):
+                                     + [bind.get("key", "")]), name)
+        if not hotkey_matches(bind, chord, name):
             raise ValueError("Managed hotkey semantics changed; reopen after reload")
-        values[name] = chord
-    return values
+        values[name], available[name] = chord, True
+    expected = {key for chord in values.values() for mod in chord.split("+")[:-1] for key in HOTKEY_MODIFIER_KEYS[mod]}
+    helpers = [bind for bind in bindings if bind.get("description", "").startswith("icewine:taskbar-modifier-")]
+    if len(helpers) != len(expected) or {bind.get("key", "").upper() for bind in helpers} != expected or any(
+            bind.get("description") != "icewine:taskbar-modifier-" + bind.get("key", "").upper()
+            or bind.get("modmask") != 0 or bind.get("submap") or bind.get("keycode")
+            or not bind.get("non_consuming") or any(bind.get(flag) for flag in ("release", "repeat", "mouse", "catch_all", "longPress"))
+            for bind in helpers):
+        raise ValueError("Taskbar release bindings changed; reload Hyprland and reopen")
+    return values, available
 
 
 def hotkey_managed(bindings, values):
-    if hotkey_current(bindings) != values:
+    current, available = hotkey_current(bindings, values)
+    if any(current[name] != chord for name, chord in values.items() if available[name]):
         raise ValueError("Managed hotkeys differ from this session; reload Hyprland and reopen")
+    return available
 
 
 def hotkey_conflict(bindings, name, chord):
@@ -278,12 +311,10 @@ def hotkey_conflict(bindings, name, chord):
         if bind.get("description") == "icewine:" + name:
             continue
         # Ponytail: binds JSON omits ignore_mods and keycode-to-keysym mapping.
-        # Reserve noneditable symbols across modifiers/submaps; refuse opaque
-        # keycode/catchall binds. Widen only when the compositor exposes overlap.
+        # Reserve custom symbols across modifiers/submaps; refuse opaque
+        # keycode/catchall binds until the compositor exposes their overlap.
         managed = bind.get("description", "").removeprefix("icewine:") in HOTKEYS
-        # The shipped exact-modifier session chord shares L with Lock.
-        exact = managed or bind.get("description") == "icewine:session-end"
-        if ((exact and hotkey_matches(bind, chord)) or (not exact and
+        if ((managed and hotkey_same_chord(bind, chord)) or (not managed and
                 (bind.get("catch_all") or bind.get("keycode") or "code:" in bind.get("key", "").lower()
                  or bind.get("key", "").upper() == chord.split("+")[-1]))):
             raise ValueError("Hotkey conflicts with an existing binding")
@@ -297,14 +328,18 @@ def hotkeys(argv, state):
     readonly = theme.setting_readonly(path)
     if argv == ["hotkeys-state"]:
         live = False
+        available = {name: False for name in HOTKEYS}
         try:
-            current = hotkey_current(hotkey_bindings())
-            readonly = readonly or current != values
-            values, live = current, True
+            current, available = hotkey_current(hotkey_bindings(), values)
+            readonly = readonly or any(current[name] != chord for name, chord in values.items() if available[name])
+            values = {name: current[name] if available[name] else chord for name, chord in values.items()}
+            live = True
         except (OSError, ValueError, subprocess.SubprocessError):
             readonly = True
         print("readonly=" + str(readonly).lower(), "live=" + str(live).lower(), "revision=" + revision,
               *[name + "=" + chord for name, chord in values.items()])
+        for name, categories, label, default, kind, _ in HOTKEY_ROWS:
+            print("\t".join((name, categories, label, default, kind, str(available[name]).lower())))
         return
     if len(argv) != 4 or argv[0] != "hotkeys-apply" or argv[2] not in HOTKEYS:
         raise ValueError("Invalid hotkey request")
@@ -313,7 +348,7 @@ def hotkeys(argv, state):
     if argv[1] != revision:
         raise ValueError("Hotkeys changed; reopen before saving")
     name = argv[2]
-    chord = HOTKEYS[name] if argv[3] == "default" else hotkey_chord(argv[3])
+    chord = HOTKEYS[name] if argv[3] == "default" else hotkey_chord(argv[3], name)
     selected = values | {name: chord}
     if len(set(selected.values())) != len(selected):
         raise ValueError("Hotkey conflicts with another managed action")

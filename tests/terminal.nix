@@ -5,6 +5,6 @@ in pkgs.runCommand "icewine-manager-contract-checks" { nativeBuildInputs = [ pkg
   python3 ${./bootstrap.py} ${self}
   python3 ${./install.py} ${self}
   python3 ${./theme-cli.py} ${../scripts/theme} ${../scripts/icewine} ${self}/theme/assets
-  python3 ${./manager-tty.py} ${manager}/bin/icewine-manage
+  python3 ${./manager-tty.py} ${manager}/bin/icewine-manage --bindings ${../hyprland/modules/Bindings.tsv}
   touch "$out"
 ''

@@ -45,7 +45,8 @@ let
     cp ${../gtk}/defaults.css $out/gtk/defaults.css
     ${lib.concatMapStringsSep "\n" (name:
       "cp ${../hyprland}/modules/${name}.lua $out/hyprland/modules/"
-    ) [ "Baseline" "Layouts" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" "Binds" ]}
+    ) [ "Baseline" "Layouts" "LookAndFeel" "WindowPolicy" "DefaultApps" "Docking" "Bindings" "Binds" ]}
+    cp ${../hyprland}/modules/Bindings.tsv $out/hyprland/modules/
     cp ${../hyprland}/deck/Deck.lua $out/hyprland/modules/
   '';
   defaults = pkgs.runCommand "icewine-default-files" { } ''
@@ -137,6 +138,7 @@ let
     runtimeInputs = [ pkgs.python3 pkgs.xdg-utils wallpaperSelector quickshell ]
       ++ lib.optional cfg.screenshot pkgs.flatpak;
     text = ''
+      export ICEWINE_BINDINGS_FILE=${../hyprland/modules/Bindings.tsv}
       export ICEWINE_THEME_SCRIPT=${../scripts/theme}
       export ICEWINE_THEME_ASSETS=${../theme/assets}
       export ICEWINE_DEFAULT_FILES=${defaults}

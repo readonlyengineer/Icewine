@@ -948,3 +948,23 @@ for (const invalidate of [
     assert.equal(keyboardShell.keyboardRequest, null)
 }
 console.log("OSK held shortcut: both actions retain target, both release orders defer until modifier up, stale intent cancels")
+
+// Execute the actual passive modifier handler used by remapped opening chords.
+const openingModifier = topbar.match(/name: "topbarOpeningModifier"[\s\S]*?onReleased: \{([\s\S]*?)^        \}/m)[1]
+prepareKeyboard()
+keyboardShell.Config.Settings.barBehaviour = "keyboard"
+keyboardShell.ui = State.initial()
+keyboardShell.pressBar()
+keyboardShell.barModifiersHeld = 2
+vm.runInNewContext(openingModifier, {root: keyboardShell})
+assert.equal(keyboardShell.barModifiersHeld, 1)
+assert.equal(keyboardShell.ui.held, true, "Unrelated modifier release must not end the taskbar hold")
+keyboardShell.showKeyboard("launcher")
+assert.equal(keyboardShell.keyboardRequest.awaitingRelease, true)
+vm.runInNewContext(openingModifier, {root: keyboardShell})
+oskFlush()
+keyboardShell.finishKeyboardRequest()
+assert.equal(oskCalls.filter(value => value === "show").length, 1, "Remapped opening modifier drains before keyboard handoff")
+vm.runInNewContext(openingModifier, {root: keyboardShell})
+assert.equal(keyboardShell.barModifiersHeld, 0, "Late releases after reload cannot underflow")
+console.log("remapped modifiers: passive release preserves hold and drains keyboard handoff once")

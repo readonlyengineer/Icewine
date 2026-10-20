@@ -417,6 +417,7 @@ Scope {
                 root.dismissWidget()
         }
         function onConfigReloaded() {
+            root.barModifiersHeld = 0
             root.ui = State.reduce(root.ui, { type: "release" })
             root.compositor.supress_mouse_binds(root.mouseBindsSuppressed)
         }
@@ -437,6 +438,16 @@ Scope {
         onReleased: {
             root.barModifiersHeld = Math.max(0, root.barModifiersHeld - 1)
             root.releaseBar()
+        }
+    }
+
+    // Other opening chords defer keyboard handoff without ending a taskbar hold.
+    GlobalShortcut {
+        name: "topbarOpeningModifier"
+        onPressed: root.barModifiersHeld++
+        onReleased: {
+            root.barModifiersHeld = Math.max(0, root.barModifiersHeld - 1)
+            if (root.keyboardRequest?.awaitingRelease) root.releaseBar()
         }
     }
 

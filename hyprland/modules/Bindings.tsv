@@ -1,0 +1,81 @@
+taskbar	Common	Show/Toggle Taskbar	SUPER+GRAVE	hold	transparent,dont_inhibit,submap_universal
+launcher	Common|Applications	Launcher	SUPER+SPACE	press	-
+terminal	Common|Applications	Terminal	SUPER+RETURN	press	-
+filemanager	Common|Applications	File manager	SUPER+E	press	-
+switcher	Common|Applications|Windows	Window switcher	SUPER+W	switcher	transparent
+close	Common|Windows	Close window	SUPER+Q	press	-
+focus_left	Common|Windows	Focus left	SUPER+LEFT	press	-
+focus_right	Common|Windows	Focus right	SUPER+RIGHT	press	-
+focus_up	Common|Windows	Focus up	SUPER+UP	press	-
+focus_down	Common|Windows	Focus down	SUPER+DOWN	press	-
+fullscreen	Common|Windows	Fullscreen	SUPER+F	press	-
+workspace_1	Common|Workspaces	Workspace 1	SUPER+1	press	-
+workspace_2	Common|Workspaces	Workspace 2	SUPER+2	press	-
+workspace_3	Common|Workspaces	Workspace 3	SUPER+3	press	-
+workspace_4	Common|Workspaces	Workspace 4	SUPER+4	press	-
+workspace_5	Common|Workspaces	Workspace 5	SUPER+5	press	-
+workspace_6	Common|Workspaces	Workspace 6	SUPER+6	press	-
+workspace_7	Common|Workspaces	Workspace 7	SUPER+7	press	-
+workspace_8	Common|Workspaces	Workspace 8	SUPER+8	press	-
+workspace_9	Common|Workspaces	Workspace 9	SUPER+9	press	-
+workspace_10	Common|Workspaces	Workspace 10	SUPER+0	press	-
+move_workspace_1	Common|Workspaces	Move to workspace 1	SUPER+SHIFT+1	press	-
+move_workspace_2	Common|Workspaces	Move to workspace 2	SUPER+SHIFT+2	press	-
+move_workspace_3	Common|Workspaces	Move to workspace 3	SUPER+SHIFT+3	press	-
+move_workspace_4	Common|Workspaces	Move to workspace 4	SUPER+SHIFT+4	press	-
+move_workspace_5	Common|Workspaces	Move to workspace 5	SUPER+SHIFT+5	press	-
+move_workspace_6	Common|Workspaces	Move to workspace 6	SUPER+SHIFT+6	press	-
+move_workspace_7	Common|Workspaces	Move to workspace 7	SUPER+SHIFT+7	press	-
+move_workspace_8	Common|Workspaces	Move to workspace 8	SUPER+SHIFT+8	press	-
+move_workspace_9	Common|Workspaces	Move to workspace 9	SUPER+SHIFT+9	press	-
+move_workspace_10	Common|Workspaces	Move to workspace 10	SUPER+SHIFT+0	press	-
+screenshot	Common|Applications	Gradia full screenshot	SUPER+PRINT	press	-
+lock	Common|Desktop / session	Lock screen	SUPER+L	press	-
+browser	Applications	Browser (if configured)	SUPER+B	press	-
+floating	Windows	Toggle floating	SUPER+V	press	-
+width	Windows	Toggle width	SUPER+M	press	-
+join	Windows	Join/split column (scrolling only)	SUPER+J	press	-
+swap_left	Windows	Swap left	SUPER+SHIFT+LEFT	press	-
+swap_right	Windows	Swap right	SUPER+SHIFT+RIGHT	press	-
+swap_up	Windows	Swap up	SUPER+SHIFT+UP	press	-
+swap_down	Windows	Swap down	SUPER+SHIFT+DOWN	press	-
+resize_left	Windows	Resize left	SUPER+CTRL+LEFT	press	-
+resize_right	Windows	Resize right	SUPER+CTRL+RIGHT	press	-
+resize_up	Windows	Resize up	SUPER+CTRL+UP	press	-
+resize_down	Windows	Resize down	SUPER+CTRL+DOWN	press	-
+cycle	Windows	Cycle and raise	ALT+TAB	press	repeating
+drag_move	Windows	Move window (mouse drag)	SUPER+MOUSE:272	mouse	-
+drag_resize	Windows	Resize window (mouse drag)	SUPER+MOUSE:273	mouse	-
+previous_workspace	Workspaces	Relative workspace previous	SUPER+PRIOR	press	-
+next_workspace	Workspaces	Relative workspace next	SUPER+NEXT	press	-
+move_previous	Workspaces	Move window to previous workspace	SUPER+SHIFT+PRIOR	press	-
+move_next	Workspaces	Move window to next workspace	SUPER+SHIFT+NEXT	press	-
+populated	Workspaces	Next populated workspace	SUPER+TAB	press	-
+move_populated	Workspaces	Move to next populated	SUPER+SHIFT+TAB	press	-
+wheel_right	Workspaces	Focus right (wheel)	SUPER+MOUSE_DOWN	press	-
+wheel_left	Workspaces	Focus left (wheel)	SUPER+MOUSE_UP	press	-
+first_workspace	Workspaces	First populated workspace	SUPER+HOME	press	-
+last_workspace	Workspaces	Last populated workspace	SUPER+END	press	-
+move_first	Workspaces	Move to first populated	SUPER+SHIFT+HOME	press	-
+move_last	Workspaces	Move to last populated	SUPER+SHIFT+END	press	-
+power	Desktop / session	Power menu	SUPER+P	press	-
+session_end	Desktop / session	End session	SUPER+SHIFT+L	press	-
+reload	Desktop / session	Reload Hyprland	SUPER+CTRL+R	press	-
+wake	Desktop / session	Wake displays	SUPER+SHIFT+W	press	-
+zoom_in	Desktop / session	Zoom in	SUPER+SHIFT+MOUSE_DOWN	press	-
+zoom_out	Desktop / session	Zoom out	SUPER+SHIFT+MOUSE_UP	press	-
+zoom_reset	Desktop / session	Reset zoom	SUPER+SHIFT+Z	press	-
+bluetooth	Desktop / session	Bluetooth card	SUPER+SHIFT+B	press	-
+network	Desktop / session	Network card	SUPER+SHIFT+N	press	-
+audio	Desktop / session	Audio card	SUPER+SHIFT+A	press	-
+layout	Desktop / session	Layout card	SUPER+SHIFT+D	press	-
+volume_up	Desktop / session	Volume up	XF86AUDIORAISEVOLUME	press	locked,repeating
+volume_down	Desktop / session	Volume down	XF86AUDIOLOWERVOLUME	press	locked,repeating
+mute	Desktop / session	Mute audio	XF86AUDIOMUTE	press	locked
+mic_mute	Desktop / session	Mute microphone	XF86AUDIOMICMUTE	press	locked
+media_next	Desktop / session	Next track	XF86AUDIONEXT	press	locked
+media_pause	Desktop / session	Pause/play	XF86AUDIOPAUSE	press	locked
+media_play	Desktop / session	Play/pause	XF86AUDIOPLAY	press	locked
+media_previous	Desktop / session	Previous track	XF86AUDIOPREV	press	locked
+brightness_up	Desktop / session	Focused display brightness up	XF86MONBRIGHTNESSUP	press	locked,repeating
+brightness_down	Desktop / session	Focused display brightness down	XF86MONBRIGHTNESSDOWN	press	locked,repeating

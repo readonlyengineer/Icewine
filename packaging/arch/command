@@ -9,6 +9,7 @@ case ${0##*/} in
   icewine-shell)
     exec qs "$@" ;;
   icewine-manage-backend)
+    export ICEWINE_BINDINGS_FILE=/usr/share/icewine/hyprland/modules/Bindings.tsv
     export ICEWINE_THEME_ASSETS=/usr/share/icewine/theme
     export ICEWINE_DEFAULT_FILES=/usr/share/icewine/defaults
     exec python3 /usr/lib/icewine/manage "$@" ;;

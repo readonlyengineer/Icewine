@@ -5,6 +5,7 @@ local stub = setmetatable({}, {
 })
 package.loaded["icewine.modules.DefaultApps"] = dofile("hyprland/modules/DefaultApps.lua")
 package.loaded["icewine.modules.WindowPolicy"] = stub
+package.loaded["icewine.modules.Bindings"] = dofile("hyprland/modules/Bindings.lua")
 local binds, workspaces, active, target = {}, {}, { tiled_layout = "scrolling" }, nil
 local options, gestures, lastDispatch = {}, {}, nil
 hl = {

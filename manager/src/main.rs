@@ -127,18 +127,14 @@ impl Appearance {
     }
 }
 
-const HOTKEY_ACTIONS: &[(&str, &str, &str)] = &[
-    ("launcher", "Launcher", "SUPER+SPACE"), ("terminal", "Terminal", "SUPER+RETURN"),
-    ("filemanager", "File manager", "SUPER+E"), ("screenshot", "Screenshot", "SUPER+PRINT"),
-    ("lock", "Lock", "SUPER+L"),
-];
-
-struct HotkeySettings { values: Vec<String>, revision: String, readonly: bool, live: bool }
+struct HotkeyAction { id: String, categories: Vec<String>, label: String, kind: String, available: bool }
+struct HotkeySettings { actions: Vec<HotkeyAction>, values: Vec<String>, revision: String, readonly: bool, live: bool }
 impl HotkeySettings {
     fn load() -> io::Result<Self> {
         let text = widget_command(&["hotkeys-state".into()])?;
+        let mut lines = text.lines();
         let mut fields = BTreeMap::new();
-        for field in text.split_whitespace() {
+        for field in lines.next().unwrap_or("").split_whitespace() {
             let (name, value) = field.split_once('=').ok_or_else(|| io::Error::other("Invalid hotkey state"))?;
             if fields.insert(name, value).is_some() { return Err(io::Error::other("Duplicate hotkey field")); }
         }
@@ -148,19 +144,31 @@ impl HotkeySettings {
             _ => return Err(io::Error::other("Invalid hotkey session state")) };
         let revision = fields.remove("revision").filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit()))
             .ok_or_else(|| io::Error::other("Invalid hotkey revision"))?.to_owned();
+        let chord_valid = |value: &str| !value.is_empty() && value.len() <= 64
+            && value.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || b"+_:".contains(&c));
+        let mut actions: Vec<HotkeyAction> = Vec::new();
         let mut values = Vec::new();
-        for (id, _, _) in HOTKEY_ACTIONS {
-            let chord = fields.remove(id).filter(|value| value.len() <= 48 && value.starts_with("SUPER+")
-                && value.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'+'))
+        for line in lines {
+            let row: Vec<_> = line.split('\t').collect();
+            if row.len() != 6 || row[..5].iter().any(|v| v.is_empty() || v.len() > 160 || v.chars().any(char::is_control))
+                || !row[0].bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+                || actions.iter().any(|a| a.id == row[0]) || !chord_valid(row[3])
+                || !matches!(row[4], "press" | "hold" | "switcher" | "mouse") {
+                return Err(io::Error::other("Invalid hotkey definition"));
+            }
+            let available = match row[5] { "true" => true, "false" => false, _ => return Err(io::Error::other("Invalid hotkey availability")) };
+            let value = fields.remove(row[0]).filter(|value| chord_valid(value))
                 .ok_or_else(|| io::Error::other("Invalid hotkey chord"))?;
-            values.push(chord.to_owned());
+            values.push(value.to_owned());
+            actions.push(HotkeyAction { id: row[0].into(), categories: row[1].split('|').map(str::to_owned).collect(),
+                label: row[2].into(), kind: row[4].into(), available });
         }
-        if !fields.is_empty() { return Err(io::Error::other("Unknown hotkey field")); }
-        Ok(Self { values, revision, readonly, live })
+        if actions.is_empty() || !fields.is_empty() { return Err(io::Error::other("Invalid hotkey catalogue")); }
+        Ok(Self { actions, values, revision, readonly, live })
     }
 
     fn save(&self, action: usize, chord: &str) -> io::Result<String> {
-        widget_command(&["hotkeys-apply".into(), self.revision.clone(), HOTKEY_ACTIONS[action].0.into(), chord.into()])
+        widget_command(&["hotkeys-apply".into(), self.revision.clone(), self.actions[action].id.clone(), chord.into()])
     }
 }
 
@@ -420,7 +428,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
         Ok(value) => value,
         Err(error) => {
             message = error.to_string();
-            HotkeySettings { values: HOTKEY_ACTIONS.iter().map(|v| v.2.to_owned()).collect(), revision: String::new(), readonly: true, live: false }
+            HotkeySettings { actions: Vec::new(), values: Vec::new(), revision: String::new(), readonly: true, live: false }
         }
     };
     let mut default_settings: Option<Vec<DefaultApp>> = None;
@@ -704,7 +712,8 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     frame.render_widget(Paragraph::new(lines.into_iter().skip(hot_scroll).take(hot_height).collect::<Vec<_>>()).style(normal), body);
                     hits.push((body, Control::Hotkeys));
                     if let Some((action, draft)) = &hot_edit {
-                        let editor = format!("{}: {}_\nSuper + Shift/Ctrl/Alt + key\nEnter: Save   Esc: Cancel   Ctrl+U: Clear", HOTKEY_ACTIONS[*action].1, draft);
+                        let input = if hot_settings.actions[*action].kind == "mouse" { "Shift/Ctrl/Alt/Super + mouse:272-279" } else { "Shift/Ctrl/Alt/Super + key" };
+                        let editor = format!("{}: {}_\n{input}\nEnter: Save   Esc: Cancel   Ctrl+U: Clear", hot_settings.actions[*action].label, draft);
                         frame.render_widget(Paragraph::new(editor).style(accent), Rect::new(body.x, body.bottom() + 1, body.width, 3));
                     }
                 } else {
@@ -840,7 +849,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     KeyCode::Esc => { hot_edit = None; message.clear(); hot_follow = true; },
                     KeyCode::Backspace => { draft.pop(); },
                     KeyCode::Delete => draft.clear(),
-                    KeyCode::Char(character) if character.is_ascii() && !character.is_ascii_control() && draft.len() < 32 => draft.push(character),
+                    KeyCode::Char(character) if character.is_ascii() && !character.is_ascii_control() && draft.len() < 64 => draft.push(character),
                     KeyCode::Enter => {
                         match hot_settings.save(*action, draft) {
                             Ok(text) => {
@@ -1076,36 +1085,29 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
 }
 fn hotkeys(widgets: &Widgets, settings: &HotkeySettings, screenshot: bool, width: usize, heading: Style) -> (Vec<Line<'static>>, Vec<(usize, usize, usize)>) {
     let taskbar = match widgets.bar[0] { 2 => "toggle on press", 3 => "legacy always visible", _ => "hold to show; release hides" };
-    let switcher = "Super+W  Window switcher";
-    let capture = if screenshot { "Super+Print  Gradia full screenshot" } else { "Super+Print  Screenshot (disabled)" };
-    let taskbar_key = if widgets.bar[0] == 2 { "Super+` (toggle on press)" } else { "Super+`" };
-    let common = format!("{taskbar_key}  Show/Toggle Taskbar\nSuper+Space  Launcher\nSuper+Enter  Terminal\nSuper+E  File manager\n{switcher}\nSuper+Q  Close window\nSuper+Arrows  Focus window\nSuper+F  Fullscreen\nSuper+1–0  Workspace 1–10\nSuper+Shift+1–0  Move to workspace\n{capture}\nSuper+L  Lock screen");
-    let categories = [
-        ("Common", common),
-        ("Applications", format!("Super+Enter  Configured terminal\nSuper+Space  Launcher\nSuper+E  Configured file manager\nSuper+B  Browser (if configured)\n{switcher}\n{capture}")),
-        ("Windows", format!("{switcher}\nSuper+Q  Close\nSuper+V  Toggle floating\nSuper+F  Fullscreen\nSuper+M  Toggle width\nSuper+J  Join/split column (scrolling only)\nSuper+Arrows  Focus\nSuper+Shift+Arrows  Swap\nSuper+Ctrl+Arrows  Resize\nAlt+Tab  Cycle and raise\nSuper+mouse drag  Move/resize\n\nScrolling left/right uses columns. Monocle focus cycles; directional swap and resize have no effect.")),
-        ("Workspaces", "Super+1–0  Switch workspace 1–10\nSuper+Shift+1–0  Move window\nSuper+PageUp/PageDown  Relative workspace\nSuper+Shift+PageUp/PageDown  Move window\nSuper+Tab  Next populated workspace\nSuper+Shift+Tab  Move to next populated\nSuper+Home/End  First/last populated\nSuper+Shift+Home/End  Move window".into()),
-        ("Desktop / session", "Super+L  Lock\nSuper+P  Power menu\nSuper+Shift+L  End session\nSuper+Ctrl+R  Reload Hyprland\nSuper+Shift+W  Wake displays\nSuper+Shift+wheel  Zoom\nSuper+Shift+Z  Reset zoom\nSuper+Shift+B/N/A/D  Widget cards\nMedia keys  Player and audio\nBrightness keys  Focused display brightness\n\nCards: Bluetooth, network, audio and layout.".into()),
-    ];
     let mut lines = Vec::new();
     let mut actions = Vec::new();
-    for (title, text) in categories {
+    for title in ["Common", "Applications", "Windows", "Workspaces", "Desktop / session"] {
         if !lines.is_empty() { lines.push(Line::default()); }
         lines.push(Line::from(title).style(heading));
         lines.push(Line::default());
-        for line in text.lines() {
+        for (index, action) in settings.actions.iter().enumerate().filter(|(_, a)| a.categories.iter().any(|c| c == title)) {
             let start = lines.len();
-            let mut action = None;
-            let wrapped = match line.split_once("  ") {
-                Some((chord, label)) => {
-                    action = HOTKEY_ACTIONS.iter().position(|(_, _, value)| hotkey_label(value) == chord);
-                    let effective = action.map(|index| hotkey_label(&settings.values[index])).unwrap_or_else(|| chord.to_owned());
-                    columns(label, &effective, 23, width)
-                },
-                None => wrap_cells(line, width),
-            };
-            lines.extend(wrapped.into_iter().map(Line::from));
-            if let Some(action) = action { actions.push((start, lines.len(), action)); }
+            let label = if action.id == "screenshot" && !screenshot { "Screenshot (disabled)".to_owned() }
+                else if action.id == "switcher" && !widgets.enabled[1] { format!("{} (disabled)", action.label) }
+                else if settings.live && !action.available { format!("{} (unavailable)", action.label) }
+                else { action.label.clone() };
+            let value = if settings.live && !action.available { "—".to_owned() } else { hotkey_label(&settings.values[index]) };
+            lines.extend(columns(&label, &value, 23, width).into_iter().map(Line::from));
+            if settings.live { actions.push((start, lines.len(), index)); }
+        }
+        let note = match title {
+            "Windows" => "Scrolling left/right uses columns. Monocle focus cycles; directional swap and resize have no effect.",
+            "Desktop / session" => "Cards: Bluetooth, network, audio and layout.", _ => "",
+        };
+        if !note.is_empty() {
+            lines.push(Line::default());
+            lines.extend(wrap_cells(note, width).into_iter().map(Line::from));
         }
     }
     lines.push(Line::default());
