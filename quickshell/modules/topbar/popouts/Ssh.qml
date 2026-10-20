@@ -359,27 +359,11 @@ Flickable {
         Column {
             visible: root.form !== ""
             width: parent.width
-            SshButton {
-                id: back
-                text: "← Identities"; Accessible.name: "Back to SSH identities"
-                implicitWidth: contentItem.implicitWidth
-                background: Rectangle { color: "transparent"; radius: 3; border.width: back.activeFocus ? 2 : 0; border.color: Theme.Palette.primary }
-                font.pixelSize: 12
-                onClicked: root.cancel()
-            }
             Text {
                 width: parent.width; topPadding: 14
                 text: root.form === "import" ? "Import key" : "Generate key"
                 font { family: importButton.font.family; pixelSize: 15 }
                 color: Theme.Palette.primary
-            }
-            Text {
-                width: parent.width; topPadding: 12; bottomPadding: 14
-                text: root.form === "import" ? "Load a temporary key."
-                    : permanent.checked ? "Save a key file for later import. It survives reboot and is not loaded automatically."
-                    : "Load into the agent and discard the generated private key. Unload or reboot removes it."
-                textFormat: Text.PlainText; color: Theme.Palette.foregroundDark
-                font: importButton.font; wrapMode: Text.Wrap
             }
             KeyCheck {
                 id: fromFile
