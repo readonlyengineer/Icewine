@@ -34,20 +34,6 @@ hl.window_rule({
 	fullscreen = true,
 })
 
--- The capture surface overlays the current view instead of joining the layout.
-hl.window_rule({
-	name = "icewine-flameshot-capture",
-	match = { class = "^flameshot$", title = "^flameshot$" },
-	float = true,
-	pin = true,
-	fullscreen_state = "0 0",
-	move = { 0, 0 },
-	decorate = false,
-	no_anim = true,
-	no_blur = true,
-	no_shadow = true,
-})
-
 local function same_number(a, b)
 	return math.abs((a or 0) - (b or 0)) < epsilon
 end

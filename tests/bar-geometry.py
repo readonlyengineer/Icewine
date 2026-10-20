@@ -148,7 +148,11 @@ ShellRoot {
         Timer {
             interval: 100; running: true
             onTriggered: {
-                try { checks.test_geometry() }
+                try {
+                    if (!root.barVisible && (surface.opacity !== 0 || surface.y !== (root.bottomBar ? barHost.height : -surface.height)))
+                        throw new Error("Hidden startup surface did not settle")
+                    __TEST_CALL__
+                }
                 catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }
             }
         }
@@ -193,6 +197,36 @@ ShellRoot {
                     root.sessionLocked = false
                     send("reset")
                     settled(behaviour === "always")
+                }
+                root.instantBarHide = true
+            }
+            function capture_animations() {
+                root.instantBarHide = false
+                for (const location of ["above", "top", "bottom"])
+                for (const alreadyClosing of [true, false]) {
+                    Config.Settings.widgetSelections = {barBehaviour: "toggle", barLocation: location}
+                    root.ui = State.reduce(State.initial(), {type: "press", behaviour: "toggle"})
+                    tryCompare(surface, "opacity", 1)
+                    const shownY = root.bottomBar ? barHost.height - surface.height - root.barGap : root.barGap
+                    tryCompare(surface, "y", shownY)
+                    root.ui = State.reduce(root.ui, {type: "hide"})
+                    if (alreadyClosing) tryVerify(() => surface.opacity > 0 && surface.opacity < 1)
+                    const hiddenY = root.bottomBar ? barHost.height : -surface.height
+                    // Target remains hidden; changing duration alone cannot finish the old job.
+                    root.instantBarHide = true
+                    if (surface.opacity !== 0 || surface.y !== hiddenY)
+                        throw new Error("CAPTURE_BAR_NOT_FINISHED: " + location + ": " + surface.y + "/" + surface.opacity)
+                    root.instantBarHide = false
+                    wait(200)
+                    compare(surface.opacity, 0); compare(surface.y, hiddenY)
+                    root.ui = State.reduce(State.initial(), {type: "press", behaviour: "toggle"})
+                    tryVerify(() => surface.opacity > 0 && surface.opacity < 1)
+                    tryCompare(surface, "opacity", 1)
+                    tryCompare(surface, "y", shownY)
+                    root.ui = State.reduce(root.ui, {type: "hide"})
+                    tryVerify(() => surface.opacity > 0 && surface.opacity < 1)
+                    tryCompare(surface, "opacity", 0)
+                    tryCompare(surface, "y", hiddenY)
                 }
                 root.instantBarHide = true
             }
@@ -273,6 +307,7 @@ ShellRoot {
                 }
                 native_geometry()
                 transitions()
+                capture_animations()
                 // Media-leading stacks use the retained independent capsule and routing.
                 panel.width = 1280
                 Config.Settings.widgetSelections = {barWidth: 100}
@@ -358,7 +393,7 @@ ShellRoot {
     }
 }
 '''
-for key, value in {'PROPERTIES': properties, 'SURFACE': surface,
+for key, value in {'TEST_CALL': 'checks.capture_animations(); console.log(\"BAR_GEOMETRY_PASSED\"); Qt.quit()' if '--capture-only' in sys.argv else 'checks.test_geometry()', 'PROPERTIES': properties, 'SURFACE': surface,
                    'EDGE': block('                Item {\n                    id: edge'),
                    'BAR_LAYER': binding('WlrLayershell.layer', bar_window),
                    'BAR_FOCUS': binding('WlrLayershell.keyboardFocus', bar_window),
@@ -403,4 +438,7 @@ for theme in ('tokyo-night', 'gruvbox-light'):
         output = result.stdout + result.stderr
         if result.returncode or 'BAR_GEOMETRY_PASSED' not in output or re.search(r'(ReferenceError|TypeError|FAIL!|Cannot assign)', output):
             raise AssertionError(theme + '\n' + output)
-print('bar geometry: real surface, corners, live native layer/focus and edge/reservation/available-area requests, captured output bounds, animated transitions, foreign zones, overflow dragging, live settings, handheld/radial, dark/light at 1x/1.5x pass')
+if '--capture-only' in sys.argv:
+    print('capture: actual bar surface already-closing slide/fade finish immediately; normal transitions, dark/light at 1x/1.5x pass')
+else:
+    print('bar geometry: real surface, corners, live native layer/focus and edge/reservation/available-area requests, captured output bounds, animated transitions, foreign zones, overflow dragging, live settings, handheld/radial, dark/light at 1x/1.5x pass')

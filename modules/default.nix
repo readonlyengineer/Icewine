@@ -88,9 +88,9 @@ in {
     };
     texteditor.enable = lib.mkEnableOption "optional isolated Neovim + LazyVim utility (icewine-editor)";
     screenshot = lib.mkOption {
-      type = lib.types.enum [ "none" "simple" "advanced" ];
-      default = if cfg.desktop.enable then "advanced" else "none";
-      description = "Screenshot utility: None, Hyprshot (Simple), or Flameshot (Advanced).";
+      type = lib.types.bool;
+      default = cfg.desktop.enable;
+      description = "Enable Gradia screenshots from Flathub.";
     };
     applications = {
       steam = command "Steam command used inside Gamescope."
@@ -134,10 +134,11 @@ in {
     programs.steam.enable = lib.mkIf (cfg.steam == "native") true;
     nixpkgs.config.allowUnfreePackages = lib.optionals (cfg.steam == "native")
       [ "steam" "steam-unwrapped" ];
-    services.flatpak = lib.mkIf (cfg.steam == "flatpak") {
+    services.flatpak = lib.mkIf (cfg.steam == "flatpak" || cfg.screenshot) {
       enable = true;
       remotes = [ { name = "flathub"; location = "https://dl.flathub.org/repo/flathub.flatpakrepo"; } ];
-      packages = [ "com.valvesoftware.Steam" ];
+      packages = lib.optional (cfg.steam == "flatpak") "com.valvesoftware.Steam"
+        ++ lib.optional cfg.screenshot { appId = "be.alexandervanhee.gradia"; origin = "flathub"; };
     };
 
     programs.hyprland = lib.mkIf cfg.desktop.enable { enable = true; withUWSM = true; };
@@ -167,8 +168,6 @@ in {
       adwaita-icon-theme papirus-icon-theme brightnessctl xdg-utils gtk3 ]) ++ launchers
       ++ lib.optionals cfg.desktop.enable (with pkgs; [ hyprshutdown hyprpolkitagent hypridle xdg-terminal-exec wtype ])
       ++ lib.optional (cfg.steam != "none" && cfg.gamescope.enable) pkgs.gamescope
-      ++ lib.optional (cfg.screenshot == "simple") pkgs.hyprshot
-      ++ lib.optional (cfg.screenshot == "advanced") pkgs.flameshot
       ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
     users.users.${cfg.user}.packages = lib.optional cfg.terminal.enable pkgs.kitty
       ++ lib.optionals cfg.shellExtras.enable [ pkgs.starship pkgs.fastfetch ]

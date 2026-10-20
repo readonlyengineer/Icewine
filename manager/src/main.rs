@@ -5,15 +5,14 @@ use ratatui::{prelude::*, widgets::{Block, BorderType, Paragraph, Wrap}};
 const ROWS: &[(&str, &str, &str)] = &[
     ("desktop", "Desktop session", "Hyprland + Quickshell"), ("terminal", "Terminal", "Kitty"),
     ("filemanager", "File manager", "Yazi"), ("texteditor", "Terminal Editor", "Neovim + LazyVIM"),
-    ("shellExtras", "Shell extras", "Starship / Fastfetch"), ("screenshot", "Screenshot", ""),
+    ("shellExtras", "Shell extras", "Starship / Fastfetch"), ("screenshot", "Screenshots", "Gradia (Flatpak/Flathub)"),
     ("steam", "Steam", ""), ("gamescope", "Gamescope", "Nested Steam session"),
     ("handheld", "Handheld", "Handheld UI"), ("login", "Login styling", "Host configuration"),
 ];
 #[derive(Clone, Copy, PartialEq)]
 enum Control { Theme, Preview(usize), Taskbar, Transparency, Layout, Wallpaper, Monitors,
     Utility(&'static str), Widget(usize), Bar(usize), BarWidth, Back, Card(usize), Stack(usize),
-    GridAction(usize), GridTools, Hotkeys, Steam, Screenshot, Overwrite, Apply }
-const SCREENSHOTS: &[&str] = &["none", "simple", "advanced"];
+    GridAction(usize), GridTools, Hotkeys, Steam, Overwrite, Apply }
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
 
@@ -359,7 +358,7 @@ fn theme_colours(id: &str) -> io::Result<[Color; 6]> {
     }
     Ok(colours)
 }
-fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize, screenshot: &mut usize) -> io::Result<Option<bool>> {
+fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize) -> io::Result<Option<bool>> {
     let mut appearance = Appearance::load()?;
     let (mut widgets, mut message) = match Widgets::load() {
         Ok(value) => (value, String::new()),
@@ -392,7 +391,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     let mut grid_start = 0usize;
     let mut grid_tools = false;
     let mut hot_scroll = 0usize;
-    let effective_screenshot = *screenshot;
+    let effective_screenshot = selected["screenshot"];
     let mut icons = widget_command(&["widget-icons".into()]).unwrap_or_default();
     let mut terminal = ratatui::init();
     let result = (|| {
@@ -417,17 +416,15 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     let enabled = !readonly && (*id != "gamescope" || *steam != 0) && (*id != "handheld" || handheld_available(*steam, selected));
                     let value = match *id {
                         "steam" => ["None", "Native", "Flatpak"][*steam].into(),
-                        "screenshot" => ["None", "Simple", "Advanced"][*screenshot].into(),
                         "handheld" => if selected[id] && enabled { "Steamdeck" } else { "Off" }.into(),
                         _ => tick(selected[id]),
                     };
                     let detail = match *id {
-                        "screenshot" => ["", "Hyprshot", "Flameshot"][*screenshot],
                         "gamescope" if *steam == 0 => "Requires Steam",
                         "handheld" if !handheld_available(*steam, selected) => "Requires Steam native", _ => detail,
                     };
                     rows.push(ViewRow { label: format!("{label}\t{detail}"), value,
-                        control: if *id == "steam" { Control::Steam } else if *id == "screenshot" { Control::Screenshot } else { Control::Utility(id) }, enabled });
+                        control: if *id == "steam" { Control::Steam } else { Control::Utility(id) }, enabled });
                 }
                 rows.extend([row("Overwrite existing dotfiles", tick(overwrite), Control::Overwrite, true),
                     ViewRow { label: if appearance.readonly[3] { "Setup Monitors - Read Only" } else if executable("hyprmon") { "[ Setup Monitors... ]" } else { "Hyprmon Unavailable" }.into(),
@@ -622,7 +619,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         if page == 0 && subpage == 0 && matches!(index, 6 | 9) { offset += 1; }
                         let parts: Vec<_> = value.label.split('\t').collect();
                         let plain_value = value.value.strip_suffix(" - Read Only").unwrap_or(&value.value);
-                        let mut displayed = if matches!(value.control, Control::Steam | Control::Screenshot | Control::Utility("handheld") | Control::Transparency | Control::Layout | Control::Bar(_) | Control::BarWidth) {
+                        let mut displayed = if matches!(value.control, Control::Steam | Control::Utility("handheld") | Control::Transparency | Control::Layout | Control::Bar(_) | Control::BarWidth) {
                             format!("‹ {plain_value} ›")
                         } else if value.enabled && matches!(value.control, Control::Theme | Control::Wallpaper | Control::Taskbar) {
                             format!("{plain_value}  ›")
@@ -631,9 +628,12 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                             displayed.push_str(if Line::from(displayed.as_str()).width() + 12 > body.width as usize - 20 { "\n- Read Only" } else { " - Read Only" });
                         }
                         let text = if parts.len() == 2 {
-                            let detail_width = body.width as usize - 18 - 14;
-                            let details = wrap_cells(parts[1], detail_width);
                             let padding = 14usize.saturating_sub(Line::from(displayed.as_str()).width()) / 2;
+                            // Let Gradia's label use the existing gap before its aligned checkbox.
+                            let extra = if value.control == Control::Utility("screenshot") { padding } else { 0 };
+                            let detail_width = body.width as usize - 18 - 14 + extra;
+                            let details = wrap_cells(parts[1], detail_width);
+                            let padding = padding - extra;
                             details.iter().enumerate().map(|(line, detail)| {
                                 let label = if line == 0 { parts[0] } else { "" };
                                 format!("{label:<18}{detail}{}{}{}", " ".repeat(detail_width - Line::from(detail.as_str()).width()), " ".repeat(padding), if line == 0 { displayed.as_str() } else { "" })
@@ -913,7 +913,6 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 Control::BarWidth => taskbar.width = if forward { (taskbar.width + 1).min(100) } else { taskbar.width.saturating_sub(1).max(50) },
                 Control::Widget(0) => { widgets.enabled[0] = !widgets.enabled[0]; message = match widgets.save_subset(&["notificationToasts"]) { Ok(text) => text, Err(error) => { widgets.enabled[0] = !widgets.enabled[0]; error.to_string() } }; },
                 Control::Steam => { let previous = *steam; cycle(steam, 3, forward); if previous == 0 { selected.insert("gamescope", true); } if *steam == 0 { selected.insert("gamescope", false); } if !handheld_available(*steam, selected) { selected.insert("handheld", false); } },
-                Control::Screenshot => cycle(screenshot, 3, forward),
                 Control::Utility(id) => { selected.insert(id, !selected[id]); if !handheld_available(*steam, selected) { selected.insert("handheld", false); } },
                 Control::Overwrite => overwrite = !overwrite,
                 Control::Apply if activate && subpage == 1 => {
@@ -936,10 +935,10 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     ratatui::restore();
     result
 }
-fn hotkeys(widgets: &Widgets, settings: &HotkeySettings, screenshot: usize, width: usize, heading: Style) -> (Vec<Line<'static>>, Vec<(usize, usize, usize)>) {
+fn hotkeys(widgets: &Widgets, settings: &HotkeySettings, screenshot: bool, width: usize, heading: Style) -> (Vec<Line<'static>>, Vec<(usize, usize, usize)>) {
     let taskbar = match widgets.bar[0] { 2 => "toggle on press", 3 => "legacy always visible", _ => "hold to show; release hides" };
     let switcher = "Super+W  Window switcher";
-    let capture = ["Super+Print  Screenshot (disabled)", "Super+Print  Hyprshot region", "Super+Print  Flameshot editor"][screenshot];
+    let capture = if screenshot { "Super+Print  Gradia full screenshot" } else { "Super+Print  Screenshot (disabled)" };
     let taskbar_key = if widgets.bar[0] == 2 { "Super+` (toggle on press)" } else { "Super+`" };
     let common = format!("{taskbar_key}  Show/Toggle Taskbar\nSuper+Space  Launcher\nSuper+Enter  Terminal\nSuper+E  File manager\n{switcher}\nSuper+Q  Close window\nSuper+Arrows  Focus window\nSuper+F  Fullscreen\nSuper+1–0  Workspace 1–10\nSuper+Shift+1–0  Move to workspace\n{capture}\nSuper+L  Lock screen");
     let categories = [
@@ -1131,8 +1130,6 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut steam = STEAM.iter().position(|value| fields.get("steam") == Some(value))
         .ok_or("Invalid Steam choice")?;
     fields.remove("steam");
-    let screenshot_value = fields.remove("screenshot");
-    let mut screenshot = SCREENSHOTS.iter().position(|value| screenshot_value == Some(*value)).ok_or("Invalid Screenshot choice")?;
     let mut selected = BTreeMap::new();
     for (id, value) in fields {
         selected.insert(id, match value {
@@ -1140,14 +1137,14 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         });
     }
     let readonly = selected.remove("readonly").ok_or("Missing read-only state")?;
-    if selected.len() + 2 != ROWS.len() || ROWS.iter().any(|(id, _, _)| !matches!(*id, "steam" | "screenshot") && !selected.contains_key(id))
+    if selected.len() + 1 != ROWS.len() || ROWS.iter().any(|(id, _, _)| *id != "steam" && !selected.contains_key(id))
         || (steam == 0 && (selected["gamescope"] || selected["handheld"]))
         || (selected["handheld"] && !handheld_available(steam, &selected)) {
         return Err("Invalid manager selections".into());
     }
-    if let Some(overwrite) = choose(readonly, &mut selected, &mut steam, &mut screenshot)? {
+    if let Some(overwrite) = choose(readonly, &mut selected, &mut steam)? {
         let choices = ROWS.iter().map(|(id, label, _)| format!("{label}: {}",
-            if *id == "steam" { STEAM[steam].to_owned() } else if *id == "screenshot" { SCREENSHOTS[screenshot].to_owned() } else { selected[id].to_string() })).collect::<Vec<_>>();
+            if *id == "steam" { STEAM[steam].to_owned() } else { selected[id].to_string() })).collect::<Vec<_>>();
         let mut plan = vec![if readonly { "Host packages/services remain unchanged; deploy selected user defaults.".into() }
             else { "Install selected packages; configure selected utilities; deselection keeps packages.".into() }];
         plan.push("Create missing shared Quickshell/wallpaper defaults and publish theme outputs.".into());
@@ -1163,7 +1160,6 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         let status = Command::new("icewine-manage-backend").arg("apply")
             .args(selected.iter().map(|(id, value)| format!("{id}={value}")))
             .arg(format!("steam={}", STEAM[steam]))
-            .arg(format!("screenshot={}", SCREENSHOTS[screenshot]))
             .arg(format!("overwrite={overwrite}")).status()?;
         return Ok(if status.success() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
     }

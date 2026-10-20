@@ -435,14 +435,22 @@ ShellRoot {
         host.openLauncher()
         launcher.selector.forceActiveFocus()
         toggleKeys.keyClick(Qt.Key_Tab)
-        toggleKeys.wait(25)
+        const exchange = Array.from(stack.data).find(item => item.property === "progress")
+        if (!stack.exchanging || !exchange?.running) throw new Error("Expected a running first-card sweep")
+        // Native key delivery may advance frames; freeze only this fixture's real job.
+        exchange.pause()
+        stack.progress = 0.25
         backgroundWindow.watchedCard = cards[1]
         backgroundWindow.intermediateActivations = 0
         const before = cards.map(card => [card.x, card.y])
+        const sweep = [stack.frontCard, stack.outgoingCard, stack.incomingCard, stack.selectedCard]
         toggleKeys.keyClick(Qt.Key_Tab)
         if (stack.queuedCard !== 2 || stack.motionInitialFocus !== backgroundWindow.activeFocusItem
+                || !exchange.paused || stack.progress !== 0.25
+                || [stack.frontCard, stack.outgoingCard, stack.incomingCard, stack.selectedCard].some((value, i) => value !== sweep[i])
                 || cards.some((card, i) => card.x !== before[i][0] || card.y !== before[i][1]))
             throw new Error("Third-card request jumped the running sweep")
+        exchange.resume()
         toggleKeys.tryCompare(stack, "exchanging", false, 900)
         if (stack.frontCard !== 2 || !toggle.activeFocus || !host.layoutActive
                 || backgroundWindow.intermediateActivations)
@@ -548,7 +556,7 @@ ShellRoot {
         host.openLauncher()
         if (stack.exchanging || stack.frontCard !== 0 || !launcher.initialFocus.activeFocus)
             throw new Error("Explicit open failed during exchange")
-        for (const duringMotion of [false, true]) {
+        for (const duringMotion of [true, false]) {
             stack.selectCard(1)
             if (!duringMotion) toggleKeys.tryCompare(stack, "exchanging", false, 900)
             if (duringMotion) stack.motionInitialFocus.forceActiveFocus()
@@ -958,7 +966,7 @@ ShellRoot {
         networkKeys.tryCompare(page, "exchanging", false, 900)
     }
     function checkSsh(page, first, second) {
-        const third = root.findAccessible(networkPages, "SSH card")
+        const third = root.findAccessible(networkPages, "SSH Keyring card")
         if (!third || page.cards.length !== 3) throw new Error("SSH is not the third network card")
         networkWindow.height = 550
         first.forceActiveFocus()
@@ -2777,6 +2785,74 @@ ShellRoot {
 """
 
 # Compare real stack pixels against an independent native single-caster reference.
+CAPTURE_QML = """import QtQuick
+import QtQuick.Window
+import QtTest
+import Quickshell
+import "icewine/modules/topbar" as Bar
+ShellRoot {
+    Window {
+        id: window
+        visible: true; width: 400; height: 300; color: "white"
+        Bar.Widget {
+            id: widget
+            width: 320; height: 240; shown: false
+            Bar.CardStack {
+                width: 320; height: 240
+                shadowHost: widget.cardShadowHost
+                cards: [front, rear]
+                Bar.Card { id: front; color: "red" }
+                Bar.Card { id: rear; index: 1; color: "red" }
+            }
+        }
+        TestCase { id: keys; when: false }
+        Timer {
+            interval: 100; running: true
+            onTriggered: {
+                try {
+                    for (const alreadyClosing of [true, false]) {
+                        widget.animateClose = true
+                        widget.shown = true
+                        keys.tryVerify(() => widget.reveal > 0 && widget.reveal < 1)
+                        keys.tryCompare(widget, "reveal", 1)
+                        if (!widget.visible || !widget.cardShadowHost.visible)
+                            throw new Error("Normal open lost widget/shadow")
+                        widget.shown = false
+                        if (alreadyClosing) keys.tryVerify(() => widget.reveal > 0 && widget.reveal < 1)
+                        // Same boundary used by capture and lock; shown is already false.
+                        widget.animateClose = false
+                        if (widget.reveal !== 0 || widget.visible || widget.cardShadowHost.visible)
+                            throw new Error("CAPTURE_WIDGET_NOT_FINISHED: " + widget.reveal)
+                        widget.animateClose = true // Capture flag resets next turn.
+                        keys.wait(200)
+                        if (widget.reveal !== 0 || widget.visible || widget.cardShadowHost.visible)
+                            throw new Error("Finished widget/shadow reappeared")
+                        const image = keys.grabImage(window.contentItem)
+                        if (image.pixel(160, 100).r !== 1 || image.pixel(160, 100).g !== 1)
+                            throw new Error("Hidden card still rendered")
+                    }
+                    widget.shown = true
+                    keys.tryVerify(() => widget.reveal > 0 && widget.reveal < 1)
+                    widget.animateClose = false
+                    keys.tryCompare(widget, "reveal", 1) // Close policy does not cancel opening.
+                    widget.shown = false
+                    if (widget.reveal !== 0 || widget.visible || widget.cardShadowHost.visible)
+                        throw new Error("Instant shown transition failed")
+                    widget.animateClose = true
+                    widget.shown = true
+                    keys.tryCompare(widget, "reveal", 1)
+                    widget.shown = false
+                    keys.tryVerify(() => widget.reveal > 0 && widget.reveal < 1)
+                    keys.tryCompare(widget, "reveal", 0) // Ordinary close still animates.
+                    console.log("CAPTURE_WIDGET_PASSED")
+                    Qt.quit()
+                } catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }
+            }
+        }
+    }
+}
+"""
+
 SHADOW_QML = """import QtQuick
 import QtQuick.Window
 import QtQuick.Effects
@@ -3141,6 +3217,16 @@ print(json.dumps(dict(available=True, error="", entries=[dict(public="ssh-ed2551
         assert not (root / "state/icewine").exists(), "First-use fixture must lack the preference directory"
     else:
         (root / "state/icewine").mkdir(parents=True)
+    if "--capture-only" in sys.argv or len(sys.argv) == 2:
+        (root / "shell.qml").write_text(CAPTURE_QML)
+        result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                                capture_output=True, text=True, timeout=15)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0 and "CAPTURE_WIDGET_PASSED" in output, output
+        assert not re.search(r"ReferenceError|TypeError|FAIL!|[Bb]inding loop|Unable to assign", output), output
+        print("capture: actual Widget/CardStack already-closing reveal/shadow finish immediately; opening and normal close remain animated")
+        if "--capture-only" in sys.argv: sys.exit(0)
+        (root / "shell.qml").write_text(QML)
     if "--ssh-only" in sys.argv:
         (root / "shell.qml").write_text(QML.replace("property bool sshOnly: false", "property bool sshOnly: true"))
         result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,

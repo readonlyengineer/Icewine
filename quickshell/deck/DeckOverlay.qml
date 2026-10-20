@@ -157,10 +157,11 @@ Scope {
             keyboard?.toggle()
             return
         }
-        shell.handoff(entry.action === "screenshot")
+        if (entry.action === "screenshot") shell.instantHandoff(true)
+        else shell.handoff()
         if (entry.action === "screenshot") {
             Qt.callLater(() => Quickshell.execDetached([
-                "icewine", "screenshot", "screen"
+                "icewine", "screenshot"
             ]))
         } else if (entry.action === "close") {
             compositor.dispatch("hl.dsp.window.close()")

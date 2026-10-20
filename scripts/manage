@@ -44,11 +44,12 @@ def validate(value, *, saved=False):
     previous = set(FEATURES) - {"texteditor", "screenshot"}
     if saved and isinstance(value, dict) and set(value) == previous:
         value = value | {"texteditor": original.get("texteditor", False),
-                         "screenshot": "advanced" if value["desktop"] else "none"}
+                         "screenshot": value["desktop"]}
+    if saved and isinstance(value, dict) and value.get("screenshot") in ("none", "simple", "advanced"):
+        value = value | {"screenshot": value["screenshot"] != "none"}
     if (not isinstance(value, dict) or set(value) != set(FEATURES)
             or value["steam"] not in ("none", "native", "flatpak")
-            or value["screenshot"] not in ("none", "simple", "advanced")
-            or any(type(bit) is not bool for name, bit in value.items() if name not in {"steam", "screenshot"})):
+            or any(type(bit) is not bool for name, bit in value.items() if name != "steam")):
         raise ValueError("invalid manager selections")
     if value["steam"] == "none" and (value["gamescope"] or value["handheld"]):
         raise ValueError("Gamescope and Handheld require Steam")
@@ -64,7 +65,7 @@ def selections(state):
     if platform.freedesktop_os_release().get("ID") not in {"arch", "cachyos"}:
         raise ValueError("Icewine manager supports Arch/CachyOS or the NixOS module")
     path = state / "manage.json"
-    saved = validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, True) | {"steam": "flatpak", "handheld": False, "login": False, "screenshot": "advanced"}
+    saved = validate(json.loads(path.read_text()), saved=True) if path.exists() else dict.fromkeys(FEATURES, True) | {"steam": "flatpak", "handheld": False, "login": False}
     return theme.setting_readonly(path), saved | {"login": False}
 
 
@@ -409,17 +410,15 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
     applied_path = state / "applied.json"
     if applied_path.is_symlink():
         raise ValueError("refusing symlinked applied-selection record")
-    applied = validate(json.loads(applied_path.read_text()), saved=True) if applied_path.exists() else previous if (state / "manage.json").exists() else dict.fromkeys(FEATURES, False) | {"steam": "none", "screenshot": "none"}
+    applied = validate(json.loads(applied_path.read_text()), saved=True) if applied_path.exists() else previous if (state / "manage.json").exists() else dict.fromkeys(FEATURES, False) | {"steam": "none"}
     if not readonly and selected["login"]:
         raise ValueError("Login configuration belongs to the host; login styling is NixOS-only")
     if not readonly:
-        packages = [package for feature in FEATURES if selected[feature] and feature not in {"steam", "screenshot"} for package in PACKAGES[feature]]
+        packages = [package for feature in FEATURES if selected[feature] and feature != "steam" for package in PACKAGES[feature]]
         if selected["steam"] == "native":
             packages.append("steam")
-        if selected["steam"] == "flatpak":
+        if selected["steam"] == "flatpak" or selected["screenshot"]:
             packages.append("flatpak")
-        if selected["screenshot"] != "none":
-            packages.append("hyprshot" if selected["screenshot"] == "simple" else "flameshot")
         local = []
         package_dir = os.environ.get("ICEWINE_PACKAGE_DIR")
         for package in ("icewine-session", "icewine-handheld", "icewine-keyboard", "icewine-controller-idle"):
@@ -438,9 +437,10 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
             run(["sudo", "pacman", "-S", "--needed", *packages])
         if local:
             run(["sudo", "pacman", "-U", *local])
-        if selected["steam"] == "flatpak":
+        if selected["steam"] == "flatpak" or selected["screenshot"]:
             run(["flatpak", "remote-add", "--user", "--if-not-exists", "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"])
-            run(["flatpak", "install", "--user", "--noninteractive", "flathub", "com.valvesoftware.Steam"])
+            apps = (["com.valvesoftware.Steam"] if selected["steam"] == "flatpak" else []) + (["be.alexandervanhee.gradia"] if selected["screenshot"] else [])
+            run(["flatpak", "install", "--user", "--noninteractive", "flathub", *apps])
     shell_running = False
     changed = any(applied[name] != selected[name] for name in ("steam", "gamescope", "handheld")) or selected["handheld"] or (state / "handheld-rules.sha256").exists()
     try:
@@ -566,12 +566,13 @@ def main(argv):
         return
     if argv in (["screenshot"], ["screenshot", "screen"]):
         _, selected = selections(state)
-        mode = selected["screenshot"]
-        if mode == "none":
+        if not selected["screenshot"]:
             raise ValueError("Screenshot is disabled in Utilities")
-        command = (["hyprshot", "-m", "output" if len(argv) == 2 else "region"] if mode == "simple"
-                   else ["flameshot", "screen", "--edit"] if len(argv) == 2 else ["flameshot", "gui"])
-        run(command)
+        try:
+            run(["qs", "ipc", "call", "topbar", "capture"])
+            run(["flatpak", "run", "be.alexandervanhee.gradia", "--screenshot=FULL"])
+        except (OSError, subprocess.SubprocessError) as error:
+            raise ValueError("Gradia capture failed; check Icewine shell, Flatpak installation and screenshot portal: " + str(error)) from error
         return
     if argv == ["appearance-state"]:
         themes = theme.installed(Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine")))
@@ -609,9 +610,9 @@ def main(argv):
         fields = {}
         for field in argv[1:]:
             name, separator, value = field.partition("=")
-            if not separator or name in fields or value not in ({"none", "native", "flatpak"} if name == "steam" else {"none", "simple", "advanced"} if name == "screenshot" else {"true", "false"}):
+            if not separator or name in fields or value not in ({"none", "native", "flatpak"} if name == "steam" else {"true", "false"}):
                 raise ValueError("invalid manager request")
-            fields[name] = value if name in {"steam", "screenshot"} else value == "true"
+            fields[name] = value if name == "steam" else value == "true"
         if "overwrite" not in fields:
             raise ValueError("missing overwrite choice")
         overwrite = fields.pop("overwrite")

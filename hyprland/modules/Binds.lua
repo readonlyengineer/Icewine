@@ -155,7 +155,7 @@ end)
 hl.bind(mainMod .. " + F", windows.toggle_fullscreen)
 hl.bind(mainMod .. " + M", windows.toggle_width)
 
--- Selected native screenshot utility; None reports disabled without launching a tool.
+-- Gradia FULL capture via the shared enabled-state and instant shell handoff.
 hl.bind(hotkeys.screenshot, hl.dsp.exec_cmd("icewine screenshot"), { description = "icewine:screenshot" })
 
 -- Resolve the active layout at use time, including native runtime changes.

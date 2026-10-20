@@ -29,8 +29,8 @@ let
     login.enable = true;
     shellExtras.enable = true;
   }; }]; }).config;
-  screenshotSimple = (desktopSystem.extendModules { modules = [{ services.icewine.screenshot = "simple"; }]; }).config;
-  screenshotNone = (desktopSystem.extendModules { modules = [{ services.icewine.screenshot = "none"; }]; }).config;
+  screenshotOnly = (desktopSystem.extendModules { modules = [{ services.icewine = { desktop.enable = true; steam = "none"; }; }]; }).config;
+  screenshotNone = (desktopSystem.extendModules { modules = [{ services.icewine = { desktop.enable = true; screenshot = false; }; }]; }).config;
   editorEnabled = (desktopSystem.extendModules { modules = [{ services.icewine.texteditor.enable = true; }]; }).config;
   monitorsOnly = (desktopSystem.extendModules { modules = [{ services.icewine.monitors = { enable = true; package = pkgs.hello; }; }]; }).config;
   nativeGaming = (desktopSystem.extendModules { modules = [{ services.icewine.steam = "native"; }]; }).config;
@@ -182,10 +182,20 @@ in {
     touch "$out"
   '';
   modules =
-    assert hasPackage "hyprshot" screenshotSimple.environment.systemPackages;
-    assert !(hasPackage "flameshot" screenshotSimple.environment.systemPackages);
-    assert !(hasPackage "flameshot" screenshotNone.environment.systemPackages);
-    assert hasPackage "flameshot" optIn.environment.systemPackages;
+    assert screenshotOnly.services.icewine.screenshot;
+    assert screenshotOnly.services.flatpak.enable;
+    assert map (package: package.appId) screenshotOnly.services.flatpak.packages == [ "be.alexandervanhee.gradia" ];
+    assert (builtins.head screenshotOnly.services.flatpak.packages).origin == "flathub";
+    assert lib.any (remote: remote.name == "flathub") screenshotOnly.services.flatpak.remotes;
+    assert !screenshotOnly.services.flatpak.uninstallUnmanaged;
+    assert screenshotOnly.systemd.user.paths ? icewine-refresh-flatpak-icons;
+    assert !screenshotNone.services.flatpak.enable;
+    assert !(screenshotNone.systemd.user.paths ? icewine-refresh-flatpak-icons);
+    assert lib.all (config: lib.all (name: !(hasPackage name config.environment.systemPackages))
+      [ "gradia" "hyprshot" "flameshot" ]) [ screenshotOnly screenshotNone optIn handheld ];
+    assert handheld.services.icewine.screenshot && handheld.services.flatpak.enable;
+    assert map (package: package.appId) handheld.services.flatpak.packages == [ "be.alexandervanhee.gradia" ];
+    assert handheld.services.icewine.steam == "native";
     assert hasPackage "icewine-editor" editorEnabled.users.users.demo.packages;
     assert !(hasPackage "icewine-editor" desktop.users.users.demo.packages);
     assert lib.all (name: !desktop.services.icewine.${name}.enable)
@@ -217,7 +227,7 @@ in {
     assert optIn.programs.hyprland.enable && optIn.programs.hyprland.withUWSM;
     assert !optIn.programs.steam.enable;
     assert optIn.services.flatpak.enable;
-    assert map (package: package.appId) optIn.services.flatpak.packages == [ "com.valvesoftware.Steam" ];
+    assert map (package: package.appId) optIn.services.flatpak.packages == [ "com.valvesoftware.Steam" "be.alexandervanhee.gradia" ];
     assert !optIn.services.flatpak.uninstallUnmanaged;
     assert optIn.services.icewine.applications.steam == [ "flatpak" "run" "com.valvesoftware.Steam" ];
     assert hasPackage "kitty" optIn.users.users.demo.packages;
@@ -286,7 +296,7 @@ in {
       done
       [[ " ''${fields[*]} " = *" readonly=true "* ]]
       for selection in "''${selections[@]}"; do
-        [[ "$selection" = *=true || "$selection" = steam=flatpak || "$selection" = handheld=false || "$selection" = texteditor=false || "$selection" = screenshot=advanced ]]
+        [[ "$selection" = *=true || "$selection" = steam=flatpak || "$selection" = handheld=false || "$selection" = texteditor=false ]]
       done
       test ! -e "$XDG_CONFIG_HOME"
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false

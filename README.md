@@ -395,22 +395,18 @@ host-dependent paths or unavailable public metadata may require explicit import.
 
 ### Screenshots
 
-Utilities offers None, Simple (Hyprshot), or Advanced (Flameshot). Advanced is
-the fresh Arch default; NixOS selects it for the desktop by default and can set
-`services.icewine.screenshot = "none"` / `"simple"` / `"advanced"` declaratively.
-Super+Print uses the selected utility for region capture; the handheld action
-uses output capture. None launches no capture tool. Deselection keeps installed
-packages and each tool's personal configuration.
+Enable Screenshots in Utilities to install Gradia from Flathub. Super+Print,
+`icewine screenshot` and the handheld Screenshot action open Gradia with a full
+capture of all monitors. Icewine hides its shell chrome immediately first.
+Launch Gradia normally from the application launcher to edit an existing image;
+editing, saving, copying and cancellation use Gradia's own controls.
 
-In Flameshot, select the area to crop, then use arrows, shapes, freehand, text and
-undo. Use an opaque filled rectangle to cover sensitive content; blur/pixelation
-is not secure redaction. Choose **Save** or **Copy**, or press Esc to cancel without
-exporting. Save defaults to Pictures (then the last Flameshot save directory),
-with a date/time PNG name and a numbered suffix on collisions; the save dialog
-asks before replacing a chosen existing file. No unannotated original is saved.
-Flameshot's own settings can change save/copy behavior, including save-after-copy.
-Icewine leaves those settings intact. Cancelling the save dialog discards the
-unsaved edit, so choose the destination before closing it.
+On NixOS, `services.icewine.screenshot` is now a boolean (desktop default: true).
+Replace old `"none"` with `false`, and `"simple"` / `"advanced"` with `true`.
+Saved portable selections migrate automatically. Disabling Screenshots prevents
+capture shortcuts from launching; installed applications and their settings stay.
+Gradia uses the desktop screenshot portal; permission prompts depend on the host.
+Flatpak/Flathub is enabled independently of the Steam choice, including native Steam.
 
 The Clipboard card is behind Notifications (Tab switches cards). Click an entry to
 load it; its accent outline follows the current clipboard. The ↑ action loads

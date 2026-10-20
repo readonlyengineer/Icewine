@@ -134,7 +134,8 @@ let
   manager = pkgs.callPackage ../manager/package.nix { };
   managerBackend = pkgs.writeShellApplication {
     name = "icewine-manage-backend";
-    runtimeInputs = [ pkgs.python3 pkgs.xdg-utils wallpaperSelector ];
+    runtimeInputs = [ pkgs.python3 pkgs.xdg-utils wallpaperSelector quickshell ]
+      ++ lib.optional cfg.screenshot pkgs.flatpak;
     text = ''
       export ICEWINE_THEME_SCRIPT=${../scripts/theme}
       export ICEWINE_THEME_ASSETS=${../theme/assets}
@@ -232,7 +233,7 @@ in {
     };
     wantedBy = [ "graphical-session.target" ];
   };
-  systemd.user.paths.icewine-refresh-flatpak-icons = lib.mkIf (cfg.desktop.enable && (cfg.steam == "flatpak")) {
+  systemd.user.paths.icewine-refresh-flatpak-icons = lib.mkIf (cfg.desktop.enable && config.services.flatpak.enable) {
     description = "Refresh Icewine when Flatpak's icon cache changes";
     partOf = [ "graphical-session.target" ];
     after = [ "graphical-session.target" ];
@@ -243,7 +244,7 @@ in {
     ];
     wantedBy = [ "graphical-session.target" ];
   };
-  systemd.user.services.icewine-refresh-flatpak-icons = lib.mkIf (cfg.desktop.enable && (cfg.steam == "flatpak")) {
+  systemd.user.services.icewine-refresh-flatpak-icons = lib.mkIf (cfg.desktop.enable && config.services.flatpak.enable) {
     description = "Refresh Icewine's Flatpak icon cache";
     after = [ "icewine.service" ];
     unitConfig.ConditionUser = cfg.user;

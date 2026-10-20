@@ -29,25 +29,42 @@ def test_utility_choices():
             os.environ.pop("ICEWINE_MANAGE_SELECTIONS", None)
             readonly, fresh = manage.selections(state)
             assert not readonly and not state.exists()
-            assert fresh == dict.fromkeys(manage.FEATURES, True) | {"handheld":False,"login":False,"steam":"flatpak","screenshot":"advanced"}
+            assert fresh == dict.fromkeys(manage.FEATURES, True) | {"handheld":False,"login":False,"steam":"flatpak"}
             state.mkdir(parents=True)
             old = {name:value for name,value in fresh.items() if name not in {"texteditor","screenshot"}}
             (state / "manage.json").write_text(json.dumps(old))
             _, migrated = manage.selections(state)
-            assert migrated == old | {"texteditor":False,"screenshot":"advanced"}
+            assert migrated == old | {"texteditor":False,"screenshot":True}
             assert json.loads((state / "manage.json").read_text()) == old
-            for mode, region, screen in (("simple",["hyprshot","-m","region"],["hyprshot","-m","output"]),
-                                         ("advanced",["flameshot","gui"],["flameshot","screen","--edit"])):
-                (state / "manage.json").write_text(json.dumps(fresh | {"screenshot":mode}))
-                for arguments, expected in ((["screenshot"],region),(["screenshot","screen"],screen)):
+            for old_mode, enabled in (("none", False), ("simple", True), ("advanced", True), (False, False), (True, True)):
+                saved = fresh | {"screenshot":old_mode}
+                (state / "manage.json").write_text(json.dumps(saved))
+                assert manage.selections(state)[1] == fresh | {"screenshot":enabled}
+                assert json.loads((state / "manage.json").read_text()) == saved
+                for arguments in (["screenshot"], ["screenshot", "screen"]):
                     with patch.object(manage, "run") as command:
-                        manage.main(arguments)
-                        command.assert_called_once_with(expected)
-            (state / "manage.json").write_text(json.dumps(fresh | {"screenshot":"none"}))
-            with patch.object(manage, "run", side_effect=AssertionError("disabled screenshot launched")):
-                try: manage.main(["screenshot"])
-                except ValueError as error: assert "disabled" in str(error)
-                else: raise AssertionError("disabled screenshot accepted")
+                        if enabled:
+                            manage.main(arguments)
+                            assert [call.args[0] for call in command.call_args_list] == [
+                                ["qs", "ipc", "call", "topbar", "capture"],
+                                ["flatpak", "run", "be.alexandervanhee.gradia", "--screenshot=FULL"]]
+                        else:
+                            try: manage.main(arguments)
+                            except ValueError as error: assert "disabled" in str(error)
+                            else: raise AssertionError("disabled screenshot accepted")
+                            command.assert_not_called()
+            (state / "manage.json").write_text(json.dumps(fresh))
+            for failure in (FileNotFoundError("flatpak"), subprocess.CalledProcessError(1, ["flatpak", "run"])):
+                for fail_at in (0, 1):
+                    with patch.object(manage, "run", side_effect=[None]*fail_at+[failure]) as command:
+                        try: manage.main(["screenshot"])
+                        except ValueError as error: assert "Gradia capture failed" in str(error) and "portal" in str(error)
+                        else: raise AssertionError("capture failure swallowed")
+                        assert command.call_count == fail_at + 1
+            for value in ("advanced", "none", 1, None):
+                try: manage.validate(fresh | {"screenshot":value})
+                except ValueError: pass
+                else: raise AssertionError("live policy accepted a non-boolean screenshot")
             # Preview reads the real installed palette without creating user configuration.
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 manage.main(["theme-preview","catppuccin-latte"])
@@ -156,15 +173,15 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     env = dict(HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_DATA_HOME=str(data),
                XDG_STATE_HOME=str(state.parent), ICEWINE_DEFAULT_FILES=str(defaults),
                ICEWINE_THEME_ASSETS=str(source / "theme/assets"), ICEWINE_THEME_POLICY="")
-    false = dict.fromkeys(manage.FEATURES, False) | {"steam": "none", "screenshot": "none"}
+    false = dict.fromkeys(manage.FEATURES, False) | {"steam": "none"}
     def apply(features=(), overwrite=False, readonly=False, steam="none"):
-        selected = {name: name in features for name in manage.FEATURES} | {"steam": steam, "screenshot": "none"}
+        selected = {name: name in features for name in manage.FEATURES} | {"steam": steam}
         extra = {"ICEWINE_MANAGE_SELECTIONS": json.dumps(selected)} if readonly else {}
         with patch.dict(os.environ, dict(env, **extra)), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}):
             manage.main(["apply", *[f"{name}={str(bit).lower()}" for name, bit in reversed(list(selected.items()))], f"overwrite={str(overwrite).lower()}"])
         return selected
     # Invalid named requests fail before any filesystem or package operation.
-    valid = [f"{name}={"none" if name in {"steam", "screenshot"} else "false"}" for name in manage.FEATURES] + ["overwrite=false"]
+    valid = [f"{name}={"none" if name == "steam" else "false"}" for name in manage.FEATURES] + ["overwrite=false"]
     with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), patch.object(manage, "apply", side_effect=AssertionError("invalid request applied")):
         for request in (valid + ["terminal=true"], valid + ["unknown=false"], valid + ["texteditor=true"],
                         valid[1:], valid[:-1], ["terminal=1", *valid[1:]]):
@@ -521,7 +538,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), contextlib.redirect_stdout(io.StringIO()) as saved:
         manage.main(["state"])
         assert dict(field.split("=") for field in saved.getvalue().split()) == (
-            dict.fromkeys(manage.FEATURES, "false") | {"steam": "none", "screenshot": "none", "readonly": "false", "terminal": "true"})
+            dict.fromkeys(manage.FEATURES, "false") | {"steam": "none", "readonly": "false", "terminal": "true"})
     kitty = config / "kitty/kitty.conf"
     kitty.write_text("my edits\n")
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
@@ -552,16 +569,34 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     with patch.dict(os.environ, ICEWINE_GTK_ENABLE="false"), patch.object(manage.theme, "install_gtk_theme", side_effect=AssertionError("disabled GTK installed")):
         apply(("desktop",), readonly=True)
     for client, gamescope in [("none", False), ("native", False), ("native", True), ("flatpak", True)]:
-        with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
-            apply(("gamescope",) if gamescope else (), steam=client)
-        calls = [call.args[0] for call in commands.call_args_list]
-        packages = [package for call in calls if call[:4] == ["sudo", "pacman", "-S", "--needed"] for package in call[4:]]
-        assert ("steam" in packages) == (client == "native")
-        assert any(call[:2] == ["flatpak", "install"] for call in calls) == (client == "flatpak")
-        assert ("gamescope" in packages) == gamescope
-        assert "bazaar" not in packages
-        assert (data / "applications/steam-gamescope.desktop").exists() == gamescope
-        assert not any("-R" in call or "uninstall" in call for call in calls)
+        for screenshot in (False, True):
+            features = (("gamescope",) if gamescope else ()) + (("screenshot",) if screenshot else ())
+            with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+                selected = apply(features, steam=client)
+            calls = [call.args[0] for call in commands.call_args_list]
+            packages = [package for call in calls if call[:4] == ["sudo", "pacman", "-S", "--needed"] for package in call[4:]]
+            apps = (["com.valvesoftware.Steam"] if client == "flatpak" else []) + (["be.alexandervanhee.gradia"] if screenshot else [])
+            assert ("steam" in packages) == (client == "native")
+            assert ("flatpak" in packages) == bool(apps)
+            installs = [call for call in calls if call[:2] == ["flatpak", "install"]]
+            assert installs == ([["flatpak", "install", "--user", "--noninteractive", "flathub", *apps]] if apps else [])
+            assert any(call[:2] == ["flatpak", "remote-add"] for call in calls) == bool(apps)
+            assert ("gamescope" in packages) == gamescope
+            assert not any(package in packages for package in ("hyprshot", "flameshot", "gradia", "bazaar"))
+            assert (data / "applications/steam-gamescope.desktop").exists() == gamescope
+            assert not any("-R" in call or "uninstall" in call for call in calls)
+            assert json.loads((state / "manage.json").read_text()) == selected
+    # A failed Gradia installation must not persist a successful selection.
+    before = (state / "manage.json").read_bytes()
+    def fail_install(argv, **kwargs):
+        if argv[:2] == ["flatpak", "install"]:
+            raise subprocess.CalledProcessError(1, argv)
+        return subprocess.CompletedProcess(argv, 0)
+    with patch.object(manage.subprocess, "run", side_effect=fail_install):
+        try: apply(("screenshot",))
+        except subprocess.CalledProcessError: pass
+        else: raise AssertionError("failed Gradia install reported success")
+    assert (state / "manage.json").read_bytes() == before
     # Handheld transitions stop the live shell, idle/OSK/routing before policy
     # removal. Failure cannot persist a successful new selection.
     handheld = false | {"desktop": True, "steam": "native", "gamescope": True, "handheld": True}
@@ -863,7 +898,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     (state / "applied.json").write_text(json.dumps(false))
     with patch.dict(os.environ, dict(env, ICEWINE_MANAGE_SELECTIONS=json.dumps(false))):
         try:
-            manage.main(["apply", *[f"{name}={"none" if name in {"steam", "screenshot"} else str(name == 'desktop').lower()}" for name in manage.FEATURES], "overwrite=false"])
+            manage.main(["apply", *[f"{name}={"none" if name == "steam" else str(name == 'desktop').lower()}" for name in manage.FEATURES], "overwrite=false"])
         except ValueError as error:
             assert "read-only" in str(error)
         else:
@@ -925,7 +960,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (outside / ".bashrc").write_text("external shell config\n")
     home = root / "home link"
     home.symlink_to(outside)
-    declared = dict.fromkeys(manage.FEATURES, False) | {"steam": "none", "screenshot": "none"}
+    declared = dict.fromkeys(manage.FEATURES, False) | {"steam": "none"}
     declared["shellExtras"] = True
     defaults = root / "defaults"
     for name in ("config", "data", "home"):

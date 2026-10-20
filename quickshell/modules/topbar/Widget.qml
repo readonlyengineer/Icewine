@@ -24,6 +24,10 @@ FocusScope {
     opacity: reveal
     transform: Translate { y: -12 * (1 - root.reveal) }
     Component.onCompleted: reveal = shown ? 1 : 0
+    onAnimateCloseChanged: if (!shown && !animateClose) {
+        revealAnimation.stop()
+        reveal = 0
+    }
     onShownChanged: {
         revealAnimation.stop()
         if (!shown && !animateClose) reveal = 0

@@ -523,16 +523,32 @@ input("ui_accept", false)
 assert.equal(deck.draining, false)
 deck.keyboard = null
 
+// Capture-only handoff suppresses held/latched/hovered/always bars without animation.
+for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"]) {
+    shell.ui = Object.assign(State.initial(), {held: true, latched: true, page: "audio", engaged: true})
+    shell.hoveredScreen = "external"
+    shell.instantHandoff(true)
+    assert.equal(shell.instantBarHide, true)
+    assert.equal(shell.hoveredScreen, "")
+    assert.equal(shell.ui.page, "")
+    assert.equal(State.barVisible(shell.ui, false, true, behaviour), false)
+    assert.equal(State.reduce(shell.ui, {type: "release"}).suppressed, true)
+    flush()
+    assert.equal(shell.instantBarHide, false)
+}
+assert.match(fs.readFileSync(path.join(__dirname, "../modules/Topbar.qml"), "utf8"),
+    /function capture\(\): void \{ root\.instantHandoff\(true\) \}/)
 const captures = []
 deck.Quickshell.execDetached = command => captures.push(Array.from(command))
 deck.activate({action: "screenshot"}, 0)
 assert.equal(captures.length, 0, "Dismiss the shell before capture")
+assert.equal(shell.instantBarHide, true, "Controller capture must bypass close animations")
 assert.equal(State.barVisible(shell.ui, false, false, "always"), false,
     "The real controller screenshot caller must explicitly suppress Always Show")
 flush()
 assert.deepEqual(captures, [
-    ["icewine", "screenshot", "screen"]
-], "Dispatch the selected output-capture utility after dismissing the shell")
+    ["icewine", "screenshot"]
+], "Dispatch Gradia FULL capture after dismissing the shell")
 
 const controllerActions = []
 deck.compositor = {dispatch: command => controllerActions.push(command),
@@ -721,7 +737,7 @@ for (const behaviour of Cards.barBehaviours) for (const location of Cards.barLoc
         const value = source => vm.runInNewContext(source, env)
         const reservation = value(expression(topbar, "readonly property int reservation"))
         assert.equal(reservation, visible && location !== "above" ? 38 : 0)
-        const y = value(expression(surfaceSource, "y"))
+        const y = value(expression(surfaceSource, "readonly property real targetY"))
         if (visible) assert.equal(y, location === "bottom" ? height - 38 : 0)
         else assert.ok(y <= -38 || y >= height, "Hidden visual leaves the usable screen")
         env.height = value(expression(popoutSource, "height"))

@@ -337,7 +337,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     visible = 5 # Arch hides Login; Steam none hides its two children.
     def state(readonly=False, **selected):
         # Deliberately shuffle fields: identity must not depend on wire order.
-        return " ".join([f"{name}={str(selected.get(name, "none" if name in {"steam","screenshot"} else False)).lower()}" for name in reversed(ids)]
+        return " ".join([f"{name}={str(selected.get(name, "none" if name == "steam" else False)).lower()}" for name in reversed(ids)]
                         + [f"readonly={str(readonly).lower()}"])
     def applied(calls):
         assert calls[0] == ["state"] and calls[1][0] == "apply" and len(calls) == 2
@@ -365,7 +365,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert not any(call[:2] == ["icewine", "theme"] for call in tools())
     def test_spacing():
         visual = state(desktop=True, terminal=True, filemanager=True, texteditor=True,
-                       shellExtras=True, steam="flatpak", gamescope=True, screenshot="advanced")
+                       shellExtras=True, steam="flatpak", gamescope=True, screenshot=True)
         def frame_for(title):
             return next(frame.decode().splitlines() for frame in reversed(last_frames)
                         if title in frame.decode().splitlines()[1])
@@ -388,6 +388,11 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                 if name == "utilities":
                     selected_rows = [i for i, line in enumerate(frame) if any(label in line for label in ("Desktop session", "Steam", "Overwrite existing"))]
                     assert len(selected_rows) >= 3
+                if name == "utilities":
+                    screenshot = next(line for line in frame if "Screenshots" in line)
+                    assert "Gradia (Flatpak/Flathub)" in screenshot and "[x]" in screenshot, (size, screenshot)
+                    checkbox = next(line for line in frame if "Terminal Editor" in line)
+                    assert screenshot.index("[x]") == checkbox.index("[x]"), (size, frame)
                 if name == "widgets" and size == (24,80):
                     assert all(label in "\n".join(frame) for label in ("Launcher", "Media", "Audio", "Network", "Notifications", "Battery", "Unassigned"))
             run(page(3)+esc, visual, size=size, capture="hotkeys-start")
@@ -443,7 +448,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 
     def test_hotkeys():
         headings = ["Common", "Applications", "Windows", "Workspaces", "Desktop / session"]
-        visual = state(screenshot="advanced")
+        visual = state(screenshot=True)
         wheel_down = b"\x1b[<65;40;10M"
         wheel_up = b"\x1b[<64;40;10M"
         for size in ((24,80), (30,100), (40,140), (48,80)):
@@ -462,7 +467,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert sum(line.startswith("Taskbar:") for line in content) == 1
             assert sum(line.startswith("Shipped Icewine bindings.") for line in content) == 1
             text = "\n".join(content)
-            assert all(label in text for label in ("Flameshot editor", "Browser (if configured)",
+            assert all(label in text for label in ("Gradia full screenshot", "Browser (if configured)",
                 "Join/split column", "(scrolling only)", "Relative workspace", "Widget cards",
                 "Focused display", "brightness", "Cards: Bluetooth")), (size, text)
             start, end = bodies[0], bodies[-1]
@@ -520,10 +525,10 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             run(launcher+enter+b"r"+esc, state(), size=size, hotkey_readonly=True, capture="hotkeys-readonly")
             assert not edits() and b"Hotkeys - Read Only" in last_output
         # Screenshot near the Common viewport edge stays visible during edit/error/reflow.
-        run(page(3)+down*12+enter, state(screenshot="advanced"), size=(24,80), capture="hotkeys-editor-resize",
+        run(page(3)+down*12+enter, state(screenshot=True), size=(24,80), capture="hotkeys-editor-resize",
             resize_steps=[((40,140), clear+b"Super+Shift+Ctrl+Alt+F12"+enter+esc)])
         assert edits()[-1][2:] == ["screenshot", "Super+Shift+Ctrl+Alt+F12"]
-        assert b"Flameshot editor" in last_frames[-1] and b"Super+Shift+Ctrl+Alt+F12" in last_frames[-1]
+        assert b"Gradia full screenshot" in last_frames[-1] and b"Super+Shift+Ctrl+Alt+F12" in last_frames[-1]
         # Edit the repeated Lock below wrapped Windows/Workspaces text, then reflow.
         run(page(3)+b"\x1b[<65;40;10M"*180+esc, state(), size=(24,80), capture="hotkeys-lock-position")
         bodies = hotkey_bodies()
@@ -607,6 +612,16 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
     assert choices["desktop"] == "true" and choices["overwrite"] == "false"
     run(tab+b" "+down*9+enter, state(), confirm=False)
+    assert not any(call[0] == "apply" for call in all_last_calls)
+    # Screenshots is an ordinary checkbox; Review/Apply sends a boolean.
+    for enabled in (False, True):
+        run(tab+down*5+b" "+down*4+enter, state(screenshot=enabled))
+        choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
+        assert choices["screenshot"] == str(not enabled).lower()
+        assert b"Screenshots:" in last_output
+    run(tab+down*5+b" "+esc, state())
+    assert not any(call[0] == "apply" for call in all_last_calls)
+    run(tab+right+esc, state(readonly=True, screenshot=True))
     assert not any(call[0] == "apply" for call in all_last_calls)
     # Steam-none prerequisite rows remain visible and cannot enable Handheld.
     run(tab+down*6+right+down+enter+esc, state())
@@ -713,7 +728,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert b"Hyprmon Unavailable" in last_output
     finally: (root / "hyprmon-hidden").rename(root / "hyprmon")
     # Fail malformed machine state before terminal ownership and commands.
-    for wire in (state()+" terminal=true", state().replace("screenshot=none","screenshot=invalid"), state().replace("terminal=false","terminal=1")):
+    for wire in (state()+" terminal=true", state().replace("screenshot=false","screenshot=invalid"), state().replace("terminal=false","terminal=1")):
         run(b"", wire, valid=False)
         assert not tools()
     good = "themes=dracula,tokyo-night selected=tokyo-night policy=false level=med desktopLayout=scrolling theme=false transparency=false wallpaper=false monitors=false layout=false"

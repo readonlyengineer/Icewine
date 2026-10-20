@@ -360,9 +360,9 @@ Scope {
         dismiss(suppress)
     }
 
-    function instantHandoff() {
+    function instantHandoff(suppress = false) {
         instantBarHide = true
-        handoff()
+        handoff(suppress)
         Qt.callLater(() => instantBarHide = false)
     }
 
@@ -508,10 +508,11 @@ Scope {
                 Rectangle {
                     id: surface
                     x: (parent.width - width) / 2
-                    y: root.bottomBar ? (root.barVisible ? parent.height - height - root.barGap : parent.height) : (root.barVisible ? root.barGap : -height)
+                    readonly property real targetY: root.bottomBar ? (root.barVisible ? parent.height - height - root.barGap : parent.height) : (root.barVisible ? root.barGap : -height)
                     width: root.fullBar ? parent.width : parent.width * Config.Settings.barWidth / 100
                     height: root.barHeight
-                    opacity: root.barVisible ? 1 : 0
+                    readonly property real targetOpacity: root.barVisible ? 1 : 0
+                    readonly property bool instantHide: root.instantBarHide
                     enabled: root.barVisible
                     color: Theme.Palette.backgroundDark
                     layer.enabled: visible
@@ -600,8 +601,25 @@ Scope {
                         id: barHover
                         enabled: root.barVisible
                     }
-                    Behavior on y { NumberAnimation { duration: root.instantBarHide ? 0 : 160; easing.type: Easing.OutCubic } }
-                    Behavior on opacity { NumberAnimation { duration: root.instantBarHide ? 0 : 140 } }
+                    onTargetYChanged: { barSlide.to = targetY; barSlide.restart() }
+                    onTargetOpacityChanged: { barFade.to = targetOpacity; barFade.restart() }
+                    Component.onCompleted: {
+                        barSlide.complete(); barFade.complete()
+                        y = targetY; opacity = targetOpacity
+                    }
+                    // Behavior-owned jobs cannot be completed when a capture interrupts closing.
+                    NumberAnimation on y {
+                        id: barSlide
+                        running: false
+                        duration: root.instantBarHide ? 0 : 160
+                        easing.type: Easing.OutCubic
+                    }
+                    NumberAnimation on opacity {
+                        id: barFade
+                        running: false
+                        duration: root.instantBarHide ? 0 : 140
+                    }
+                    onInstantHideChanged: if (instantHide) { barSlide.complete(); barFade.complete() }
                 }
 
             }
@@ -818,6 +836,7 @@ Scope {
         function press(): void { root.pressBar() }
         function release(): void { root.releaseBar() }
         function hide(): void { root.dismiss() }
+        function capture(): void { root.instantHandoff(true) }
         function audio(): void { root.openWidget("audio", true, root.focusedScreenName()) }
         function layout(): void { if (root.layoutsEnabled) root.openWidget("layout", true, root.focusedScreenName()) }
         function network(): void { root.openWidget("network", true, root.focusedScreenName()) }
