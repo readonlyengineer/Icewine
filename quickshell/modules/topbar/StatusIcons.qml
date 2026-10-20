@@ -94,6 +94,16 @@ Rectangle {
         anchors.centerIn: parent
         spacing: 2
 
+        StatusButton {
+            visible: Config.Settings.oskAccess === "topbar"
+            page: "keyboard"
+            icon: "󰌌"
+            colour: Theme.Palette.primary
+            Accessible.name: "Onscreen Keyboard"
+            Accessible.role: Accessible.Button
+            Accessible.onPressAction: root.keyboardRequested()
+            onActivated: root.keyboardRequested()
+        }
         Repeater {
             model: root.cardStacks
             StatusButton {
@@ -118,16 +128,6 @@ Rectangle {
                     if (opening) root.popoutActivated(opening)
                 }
             }
-        }
-        StatusButton {
-            visible: Config.Settings.oskAccess === "topbar"
-            page: "keyboard"
-            icon: "󰌌"
-            colour: Theme.Palette.primary
-            Accessible.name: "Onscreen Keyboard"
-            Accessible.role: Accessible.Button
-            Accessible.onPressAction: root.keyboardRequested()
-            onActivated: root.keyboardRequested()
         }
     }
 

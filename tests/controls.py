@@ -2115,7 +2115,7 @@ ShellRoot {
                         input.tryCompare(stack, "exchanging", false, 900)
                         input.compare(stack.frontCard, index)
                         const row = icons.children.find(item => item.children.some(child => child.page !== undefined))
-                        input.compare(row.children.filter(item => item.page !== undefined)[0].page, "notifications")
+                        input.compare(row.children.filter(item => item.page !== undefined && item.visible)[0].page, "notifications")
                         input.compare(new Set(stack.cards.map(card => card.y)).size, 4)
                     }
                 }
@@ -2240,6 +2240,17 @@ ShellRoot {
                 input.mouseWheel(audio, audio.width / 2, audio.height / 2, 0, 120)
                 input.tryCompare(icons.sink.audio, "muted", false)
                 input.verify(icons.sink.audio.volume > volume)
+                Config.Settings.widgetSelections = {oskAccess: "topbar"}
+                input.wait(30)
+                const populated = row.children.filter(item => item.page !== undefined && item.visible)
+                input.compare(populated.map(item => item.page).join(","), "keyboard,launcher,media,audio,network,notifications,battery")
+                for (let i = 1; i < populated.length; ++i)
+                    input.compare(populated[i].x, populated[i - 1].x + populated[i - 1].width + row.spacing)
+                input.verify(populated[0].mapToItem(icons, 0, 0).x >= 0)
+                input.verify(populated[populated.length - 1].mapToItem(icons, populated[populated.length - 1].width, 0).x <= icons.width)
+                Config.Settings.widgetSelections = {oskAccess: "none"}
+                input.wait(30)
+                input.compare(row.implicitWidth, buttons.reduce((width, button) => width + button.width, 0) + (buttons.length - 1) * row.spacing)
                 icons.cardStacks = []
                 input.verify(!icons.visible)
                 Config.Settings.widgetSelections = {oskAccess: "topbar"}
