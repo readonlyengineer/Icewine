@@ -99,6 +99,7 @@ parser.add_argument("--export-frames", type=Path, help="write complete text fram
 parser.add_argument("--preview-only", action="store_true", help="run the existing native Theme preview/cancel/commit regression group")
 parser.add_argument("--frames-only", action="store_true", help="capture representative visual states without repeating the semantic suite")
 parser.add_argument("--background-only", action="store_true", help="check terminal-default cells across pages, previews, errors and resize")
+parser.add_argument("--hotkeys-only", action="store_true", help="check continuous Hotkeys scrolling, wrapping, mouse, focus and resize")
 parser.add_argument("--spacing-only", action="store_true", help="check page geometry, wrapping and action placement with synthetic data")
 options = parser.parse_args()
 if options.frames_only and not options.export_frames: parser.error("--frames-only requires --export-frames")
@@ -374,13 +375,13 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                     assert len(selected_rows) >= 3
                 if name == "widgets" and size == (24,80):
                     assert all(label in "\n".join(frame) for label in ("Launcher", "Media", "Audio", "Network", "Notifications", "Battery", "Unassigned"))
-            for category in range(5):
-                run(page(3)+right*category+esc, visual, size=size, capture=f"hotkeys-{category}")
-                frame = frame_for("Hotkeys")
-                assert "←/→ Category" in frame[size[0]-4], (category, size, frame)
-                for line in frame[7:size[0]-5]:
-                    if "Super+" in line:
-                        assert line.index("Super+") == 49, (category, size, line)
+            run(page(3)+esc, visual, size=size, capture="hotkeys-start")
+            frame = frame_for("Hotkeys")
+            assert "Common" in frame[4] and "Show/Toggle Taskbar" in frame[6], (size, frame)
+            assert "←/→ Category" not in "\n".join(frame)
+            for line in frame[6:size[0]-3]:
+                if "Super+" in line:
+                    assert line.index("Super+") == 49, (size, line)
         run(page(2)+up+esc, visual, size=(24,80), capture="widgets-tools")
         frame = frame_for("Widgets")
         assert "Window switcher" in "\n".join(frame) and "[ New stack ]" in "\n".join(frame)
@@ -412,6 +413,74 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert not any(call[0] == "apply" for call in all_last_calls)
         run(esc, "", bootstrap=True, size=(24,80), capture="bootstrap")
         print("PASS: spacing, wrapping, read-only values, status/action separation and native captures")
+    def hotkey_bodies():
+        bodies = []
+        for raw in last_frames:
+            frame = raw.decode().splitlines()
+            if len(frame) < 24 or "Hotkeys" not in frame[1][22:]: continue
+            assert "Tab: Switch pane   Esc: Close" in frame[-2], frame
+            assert "←/→ Category" not in "\n".join(frame), frame
+            assert all(line[20:22] == "  " and line[-1] == "│" for line in frame[3:-1]), frame
+            body = [line[24:-2].rstrip() for line in frame[4:-3]]
+            if not bodies or body != bodies[-1]: bodies.append(body)
+        assert bodies, "No Hotkeys draw captured"
+        return bodies
+
+    def test_hotkeys():
+        headings = ["Common", "Applications", "Windows", "Workspaces", "Desktop / session"]
+        visual = state(screenshot="advanced")
+        wheel_down = b"\x1b[<65;40;10M"
+        wheel_up = b"\x1b[<64;40;10M"
+        for size in ((24,80), (30,100), (40,140), (48,80)):
+            # Recover the actual native list from overlapping one-row scrolls.
+            # This detects both clipping and overscroll, including wrapped rows.
+            run(page(3)+down*180+esc, visual, size=size, capture="hotkeys-traversal")
+            bodies = hotkey_bodies()
+            content = list(bodies[0])
+            assert content[0] == "Common" and content[1] == ""
+            assert content[2].startswith("Show/Toggle Taskbar")
+            for previous, current in zip(bodies, bodies[1:]):
+                assert previous[1:] == current[:-1], (size, previous, current)
+                content.append(current[-1])
+            assert [line for line in content if line in headings] == headings, (size, content)
+            assert content[-1].endswith("scrolls."), (size, content[-5:])
+            assert sum(line.startswith("Taskbar:") for line in content) == 1
+            assert sum(line.startswith("Shipped Icewine bindings.") for line in content) == 1
+            text = "\n".join(content)
+            assert all(label in text for label in ("Flameshot editor", "Browser (if configured)",
+                "Join/split column", "(scrolling only)", "Relative workspace", "Widget cards",
+                "Focused display", "brightness", "Cards: Bluetooth")), (size, text)
+            start, end = bodies[0], bodies[-1]
+            # A single Up must move immediately even after excess Down inputs.
+            run(page(3)+down*180+up+esc, visual, size=size, capture="hotkeys-end-up")
+            assert hotkey_bodies()[-1] == bodies[-2]
+            run(page(3)+down*180+up*180+esc, visual, size=size, capture="hotkeys-return-start")
+            assert hotkey_bodies()[-1] == start
+            run(page(3)+wheel_down*180+esc, visual, size=size, capture="hotkeys-wheel-end")
+            assert hotkey_bodies()[-1] == end
+            run(page(3)+wheel_down*180+wheel_up*180+esc, visual, size=size, capture="hotkeys-wheel-start")
+            assert hotkey_bodies()[-1] == start
+            # Left/right/activation do not change sections. Pane/page changes retain offset.
+            run(page(3)+down*20+left+right+enter+b" "+tab+up+down+tab+esc,
+                visual, size=size, capture="hotkeys-focus")
+            assert hotkey_bodies()[-1] == bodies[20]
+            assert not saves() and not tools()
+        # Clicking the list focuses it; its headings are not separate controls.
+        run(down*3+click(30,5)+down+esc, visual, size=(24,80), capture="hotkeys-click")
+        assert hotkey_bodies()[-1][0] == "" and "Show/Toggle Taskbar" in hotkey_bodies()[-1][1]
+        # Reflow at the bottom must clamp to the new rendered height immediately.
+        run(page(3)+down*180, visual, size=(24,80), capture="hotkeys-resize",
+            resize_steps=[((40,140),down*180), ((20,79),down+tab), ((30,100),down*180+esc)])
+        resized = hotkey_bodies()
+        assert next(body for body in resized if len(body) == 40-7)[-1].endswith("scrolls."), resized
+        resized_end = resized[-1]
+        run(page(3)+down*180+esc, visual, size=(30,100), capture="hotkeys-resize-expected")
+        assert hotkey_bodies()[-1] == resized_end
+        print("PASS: continuous Hotkeys headings, native row overlap, bounds, wrapping, wheel, focus and resize")
+
+    if options.hotkeys_only:
+        test_hotkeys()
+        sys.exit(0)
     if options.background_only:
         test_spacing()
         test_theme_preview()
@@ -473,6 +542,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert b"Common" in last_output and b"Applications" in last_output
         assert not saves()
     test_spacing()
+    test_hotkeys()
     # Pane focus and keyboard utility Apply identify fields independently of wire order.
     run(tab+b" "+down*9+enter, state())
     choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
@@ -556,7 +626,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     # Real mouse targets: select page, enter/remove a member, save; import is inert.
     run(click(5,9)+click(26,5)+b"s"+esc*2, state(), size=(24,80))
     assert saves()
-    run(page(3)+right*4+down*10+esc, state())
+    run(page(3)+down*180+esc, state())
     assert b"Desktop / session" in last_output
     run(page(3)+esc, state(), widgets={"barBehaviour":"toggle"})
     assert b"toggle on press" in last_output and b"toggle on release" not in last_output

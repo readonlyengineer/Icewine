@@ -12,7 +12,7 @@ const ROWS: &[(&str, &str, &str)] = &[
 #[derive(Clone, Copy, PartialEq)]
 enum Control { Theme, Preview(usize), Taskbar, Transparency, Layout, Wallpaper, Monitors,
     Utility(&'static str), Widget(usize), Bar(usize), BarWidth, Back, Card(usize), Stack(usize),
-    GridAction(usize), GridTools, Category, Steam, Screenshot, Overwrite, Apply }
+    GridAction(usize), GridTools, Hotkeys, Steam, Screenshot, Overwrite, Apply }
 const SCREENSHOTS: &[&str] = &["none", "simple", "advanced"];
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
@@ -336,7 +336,6 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     let mut placement = None;
     let mut grid_start = 0usize;
     let mut grid_tools = false;
-    let mut hot_category = 0usize;
     let mut hot_scroll = 0usize;
     let effective_screenshot = *screenshot;
     let mut icons = widget_command(&["widget-icons".into()]).unwrap_or_default();
@@ -395,7 +394,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 if editable(1) || editable(2) { controls.push(Control::Apply); }
                 controls.push(Control::GridTools);
             }
-            if page == 3 && subpage == 0 { controls = vec![Control::Category]; }
+            if page == 3 && subpage == 0 { controls = vec![Control::Hotkeys]; }
             if controls.is_empty() { controls.push(Control::Back); }
             focus = focus.min(controls.len() - 1);
             stack = stack.min(widgets.stacks.len());
@@ -406,6 +405,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             let mut page_hits = Vec::new();
             let mut grid_columns = 2usize;
             let mut visible_grid_rows = 1usize;
+            let mut hot_max_scroll = 0usize;
             terminal.draw(|frame| {
                 let area = frame.area();
                 if area.width < 80 || area.height < 24 {
@@ -518,13 +518,11 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         x += width + 1;
                     }
                 } else if page == 3 && subpage == 0 {
-                    let category = ["Common", "Applications", "Windows", "Workspaces", "Desktop / session"][hot_category];
-                    let rect = Rect::new(body.x, body.y, body.width, 1);
-                    frame.render_widget(Paragraph::new(format!("‹ {category} ›")).style(if pane { highlighted } else { accent }), rect);
-                    hits.push((rect, Control::Category));
-                    let text = hotkeys(hot_category, &widgets, effective_screenshot, body.width as usize);
-                    frame.render_widget(Paragraph::new(text).style(normal).wrap(Wrap { trim: false }).scroll((hot_scroll as u16, 0)), Rect::new(body.x, body.y + 3, body.width, body.height.saturating_sub(5)));
-                    frame.render_widget(Paragraph::new("←/→ Category").style(muted), Rect::new(body.x, body.bottom() - 1, body.width, 1));
+                    let lines = hotkeys(&widgets, effective_screenshot, body.width as usize, accent);
+                    hot_max_scroll = lines.len().saturating_sub(body.height as usize);
+                    hot_scroll = hot_scroll.min(hot_max_scroll);
+                    frame.render_widget(Paragraph::new(lines.into_iter().skip(hot_scroll).take(body.height as usize).collect::<Vec<_>>()).style(normal), body);
+                    hits.push((body, Control::Hotkeys));
                 } else {
                     let mut top = body.y;
                     if page == 0 && subpage == 0 {
@@ -653,8 +651,8 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 continue;
             }
             if page == 3 && subpage == 0 {
-                match key { KeyCode::Left | KeyCode::Right | KeyCode::Enter | KeyCode::Char(' ') => { cycle(&mut hot_category, 5, key != KeyCode::Left); hot_scroll = 0; },
-                    KeyCode::Down => hot_scroll = (hot_scroll + 1).min(50), KeyCode::Up => hot_scroll = hot_scroll.saturating_sub(1), _ => () }
+                match key {
+                    KeyCode::Down => hot_scroll = (hot_scroll + 1).min(hot_max_scroll), KeyCode::Up => hot_scroll = hot_scroll.saturating_sub(1), _ => () }
                 continue;
             }
             if page == 2 && subpage == 0 {
@@ -801,23 +799,36 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     ratatui::restore();
     result
 }
-fn hotkeys(category: usize, widgets: &Widgets, screenshot: usize, width: usize) -> String {
+fn hotkeys(widgets: &Widgets, screenshot: usize, width: usize, heading: Style) -> Vec<Line<'static>> {
     let taskbar = match widgets.bar[0] { 2 => "toggle on press", 3 => "legacy always visible", _ => "hold to show; release hides" };
     let switcher = "Super+W  Window switcher";
     let capture = ["Super+Print  Screenshot (disabled)", "Super+Print  Hyprshot region", "Super+Print  Flameshot editor"][screenshot];
     let taskbar_key = if widgets.bar[0] == 2 { "Super+` (toggle on press)" } else { "Super+`" };
     let common = format!("{taskbar_key}  Show/Toggle Taskbar\nSuper+Space  Launcher\nSuper+Enter  Terminal\nSuper+E  File manager\n{switcher}\nSuper+Q  Close window\nSuper+Arrows  Focus window\nSuper+F  Fullscreen\nSuper+1–0  Workspace 1–10\nSuper+Shift+1–0  Move to workspace\n{capture}\nSuper+L  Lock screen");
-    let text = match category {
-        0 => common,
-        1 => format!("Super+Enter  Configured terminal\nSuper+Space  Launcher\nSuper+E  Configured file manager\nSuper+B  Browser (if configured)\n{switcher}\n{capture}"),
-        2 => format!("{switcher}\nSuper+Q  Close\nSuper+V  Toggle floating\nSuper+F  Fullscreen\nSuper+M  Toggle width\nSuper+P  Pseudo tile\nSuper+J  Join/split column (scrolling only)\nSuper+Arrows  Focus\nSuper+Shift+Arrows  Swap\nSuper+Ctrl+Arrows  Resize\nAlt+Tab  Cycle and raise\nSuper+mouse drag  Move/resize\n\nScrolling left/right uses columns. Monocle focus cycles; directional swap and resize have no effect."),
-        3 => "Super+1–0  Switch workspace 1–10\nSuper+Shift+1–0  Move window\nSuper+PageUp/PageDown  Relative workspace\nSuper+Shift+PageUp/PageDown  Move window\nSuper+Tab  Next populated workspace\nSuper+Shift+Tab  Move to next populated\nSuper+Home/End  First/last populated\nSuper+Shift+Home/End  Move window".into(),
-        _ => "Super+L  Lock\nSuper+Shift+L  End session\nSuper+Ctrl+R  Reload Hyprland\nSuper+Shift+W  Wake displays\nSuper+Shift+wheel  Zoom\nSuper+Shift+Z  Reset zoom\nSuper+Shift+B/N/A/J/P/D  Widget cards\nMedia keys  Player and audio\nBrightness keys  Focused display brightness\n\nCards: Bluetooth, network, audio, battery, performance and layout.".into(),
-    };
-    let text = text.lines().map(|line| match line.split_once("  ") {
-        Some((chord, label)) => columns(label, chord, 23, width).join("\n"), None => wrap_cells(line, width).join("\n"),
-    }).collect::<Vec<_>>().join("\n");
-    format!("{text}\n\nTaskbar: {taskbar}. Window switcher requires its preference enabled.\nShipped Icewine bindings. Host/user overrides can change them; optional tools and the active layout affect availability. Up/Down scrolls.")
+    let categories = [
+        ("Common", common),
+        ("Applications", format!("Super+Enter  Configured terminal\nSuper+Space  Launcher\nSuper+E  Configured file manager\nSuper+B  Browser (if configured)\n{switcher}\n{capture}")),
+        ("Windows", format!("{switcher}\nSuper+Q  Close\nSuper+V  Toggle floating\nSuper+F  Fullscreen\nSuper+M  Toggle width\nSuper+P  Pseudo tile\nSuper+J  Join/split column (scrolling only)\nSuper+Arrows  Focus\nSuper+Shift+Arrows  Swap\nSuper+Ctrl+Arrows  Resize\nAlt+Tab  Cycle and raise\nSuper+mouse drag  Move/resize\n\nScrolling left/right uses columns. Monocle focus cycles; directional swap and resize have no effect.")),
+        ("Workspaces", "Super+1–0  Switch workspace 1–10\nSuper+Shift+1–0  Move window\nSuper+PageUp/PageDown  Relative workspace\nSuper+Shift+PageUp/PageDown  Move window\nSuper+Tab  Next populated workspace\nSuper+Shift+Tab  Move to next populated\nSuper+Home/End  First/last populated\nSuper+Shift+Home/End  Move window".into()),
+        ("Desktop / session", "Super+L  Lock\nSuper+Shift+L  End session\nSuper+Ctrl+R  Reload Hyprland\nSuper+Shift+W  Wake displays\nSuper+Shift+wheel  Zoom\nSuper+Shift+Z  Reset zoom\nSuper+Shift+B/N/A/J/P/D  Widget cards\nMedia keys  Player and audio\nBrightness keys  Focused display brightness\n\nCards: Bluetooth, network, audio, battery, performance and layout.".into()),
+    ];
+    let mut lines = Vec::new();
+    for (title, text) in categories {
+        if !lines.is_empty() { lines.push(Line::default()); }
+        lines.push(Line::from(title).style(heading));
+        lines.push(Line::default());
+        for line in text.lines() {
+            let wrapped = match line.split_once("  ") {
+                Some((chord, label)) => columns(label, chord, 23, width),
+                None => wrap_cells(line, width),
+            };
+            lines.extend(wrapped.into_iter().map(Line::from));
+        }
+    }
+    lines.push(Line::default());
+    let help = format!("Taskbar: {taskbar}. Window switcher requires its preference enabled.\nShipped Icewine bindings. Host/user overrides can change them; optional tools and the active layout affect availability. Up/Down or mouse wheel scrolls.");
+    lines.extend(wrap_cells(&help, width).into_iter().map(Line::from));
+    lines
 }
 
 fn executable(name: &str) -> bool {
