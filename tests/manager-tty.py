@@ -101,6 +101,7 @@ parser.add_argument("--frames-only", action="store_true", help="capture represen
 parser.add_argument("--background-only", action="store_true", help="check terminal-default cells across pages, previews, errors and resize")
 parser.add_argument("--hotkeys-only", action="store_true", help="check continuous Hotkeys scrolling, editing, wrapping, mouse, focus and resize")
 parser.add_argument("--spacing-only", action="store_true", help="check page geometry, wrapping and action placement with synthetic data")
+parser.add_argument("--defaults-only", action="store_true", help="check Default Apps layout, chooser and persistence requests")
 options = parser.parse_args()
 if options.frames_only and not options.export_frames: parser.error("--frames-only requires --export-frames")
 if options.frames_only and options.background_only: parser.error("--background-only requires background assertions; omit --frames-only")
@@ -119,6 +120,33 @@ elif sys.argv[1:] == ["appearance-state"]:
  print(os.environ["TUI_APPEARANCE_WIRE"] or (response+" unknown=false" if os.environ["TUI_REFRESH_BAD"]=="1" and saved["theme"]!="tokyo-night" else response))
 elif sys.argv[1:2] == ["theme-preview"]:
  print("primary=bd93f9 foreground=f8f8f2 background=282a36 muted=6272a4 secondary=50fa7b tertiary=ff79c6" if sys.argv[2] == "dracula" else "primary=89b4fa foreground=cdd6f4 background=1e1e2e muted=a6adc8 secondary=a6e3a1 tertiary=cba6f7")
+elif sys.argv[1:] == ["default-apps-state"]:
+ with open(os.environ["TUI_DEFAULT_APPS"]) as stream: saved=json.load(stream)
+ mixed=[isinstance(value,list) and len(set(value))>1 for value in saved]
+ values=[(value[0] if value else "") if isinstance(value,list) else value for value in saved]
+ labels=["Mixed" if mixed[index] else value or "Not set" for index,value in enumerate(values)]
+ choices=[[('LibreWolf','LibreWolf'),('Firefox','Firefox')],[('Kitty','Kitty'),('Foot','Foot')],[('Yazi','Yazi')],[('Neovim','Neovim'),('LibreWolf','LibreWolf')],[('LibreWolf','LibreWolf'),('Firefox','Firefox')],[('imv','imv'),('Gradia','Gradia')],[('VLC','VLC')],[('VLC','VLC')]]
+ if os.environ["TUI_DEFAULT_MANY"] == "1": choices[0] += [("App"+str(i),"App"+str(i)) for i in range(20)]
+ for index, apps in enumerate(choices):
+  if os.environ["TUI_DEFAULT_EMPTY"] == "1" and index==0: apps=[]
+  if index==4:
+   apps=[('@browser','Default (browser)'),*apps]
+   if values[0] and values[4]==values[0]: labels[4]='Default (browser)'
+  apps=[*apps,('@unset','Not set')]
+  current='' if mixed[index] else '@browser' if index==4 and values[0] and values[4]==values[0] else values[index] or '@unset'
+  encode=lambda value:value.encode().hex()
+  print(index,str(str(index) in os.environ["TUI_DEFAULT_READONLY"].split(',')).lower(),'a'*64,encode(labels[index]),encode(current),','.join(encode(identifier)+':'+encode(name) for identifier,name in apps),sep='\t')
+elif sys.argv[1:2] == ["default-apps-apply"]:
+ if os.environ["TUI_DEFAULT_ERROR"]:
+  print(os.environ["TUI_DEFAULT_ERROR"],file=sys.stderr); sys.exit(1)
+ with open(os.environ["TUI_DEFAULT_APPS"]) as stream: saved=json.load(stream)
+ index,choice=int(sys.argv[3]),sys.argv[4]
+ if choice=='@browser':
+  if not saved[0]: print('Choose a browser first.',file=sys.stderr); sys.exit(1)
+  choice=saved[0]
+ saved[index]='' if choice=='@unset' else choice
+ with open(os.environ["TUI_DEFAULT_APPS"],'w') as stream: json.dump(saved,stream)
+ print('Default application saved')
 elif sys.argv[1:] == ["hotkeys-state"]:
  with open(os.environ["TUI_HOTKEYS"]) as stream: saved=json.load(stream)
  print("readonly="+os.environ["TUI_HOTKEY_READONLY"], "live=true", "revision="+"a"*64, *[name+"="+chord for name,chord in saved.items()])
@@ -181,7 +209,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None, hotkeys=None, hotkey_readonly=False, hotkey_error=""):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None, hotkeys=None, hotkey_readonly=False, hotkey_error="", default_apps=None, default_readonly=(), default_error="", default_empty=False, default_many=False):
         global last_output, last_frames, last_widget_calls, all_last_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.write_text("")  # A run may legitimately invoke no external tools.
@@ -196,9 +224,12 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             "cardStacks": "launcher/launcher,background,layout;media/media;audio/audio,bluetooth;network/network,tailscale,ssh;notifications/notifications,clipboard;battery/battery,performance", "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80, "oskAccess": "none"} | (widgets or {})))
         hotkey_state = root / "hotkeys-state"
         hotkey_state.write_text(json.dumps({"launcher":"SUPER+SPACE", "terminal":"SUPER+RETURN", "filemanager":"SUPER+E", "screenshot":"SUPER+PRINT", "lock":"SUPER+L"} | (hotkeys or {})))
+        defaults_state = root / "default-apps-state"
+        defaults_state.write_text(json.dumps(default_apps if default_apps is not None else ["LibreWolf","Kitty","Yazi","Neovim","LibreWolf","imv","VLC","VLC"]))
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), TERM="xterm", PATH=path if path is not None else str(root)+":"+os.environ["PATH"], TUI_LOG=str(log), TUI_STATE=state,
+                   TUI_DEFAULT_APPS=str(defaults_state), TUI_DEFAULT_READONLY=",".join(map(str,default_readonly)), TUI_DEFAULT_ERROR=default_error, TUI_DEFAULT_EMPTY=str(int(default_empty)), TUI_DEFAULT_MANY=str(int(default_many)),
                    TUI_HOTKEYS=str(hotkey_state), TUI_HOTKEY_READONLY=str(hotkey_readonly).lower(), TUI_HOTKEY_ERROR=hotkey_error,
                    TUI_APPLY_EXIT=str(apply_exit), TUI_WIDGETS=str(widgets_state), TUI_WIDGET_SUPPORTED=str(widget_supported).lower(),
                    TUI_FILE_STATE=file_state, TUI_APPEARANCE_WIRE=appearance_wire, TUI_REFRESH_BAD=str(int(refresh_bad)), TUI_WIDGET_LINKED=str(int(widget_linked)),
@@ -231,7 +262,14 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             # ESC ESC in one terminal packet is Alt-Escape, not two presses.
             # Keep CSI/mouse sequences intact; release each adjacent bare Escape
             # after the preceding input's redraw has been consumed.
-            pending_input.extend(re.split(rb"(?<=\x1b)(?=\x1b)", data))
+            # Large synthetic input floods need drained redraws between 1 KiB bursts.
+            for chunk in re.split(rb"(?<=\x1b)(?=\x1b)", data):
+                while len(chunk) > 1024:
+                    boundary = chunk.rfind(b"\x1b", 1, 1024)
+                    boundary = boundary if boundary > 0 else 1024
+                    pending_input.append(chunk[:boundary])
+                    chunk = chunk[boundary:]
+                pending_input.append(chunk)
             input_boundary = len(output)
             os.write(master, pending_input.pop(0))
             input_batches += 1
@@ -248,6 +286,8 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                 except OSError as error:
                     stop_reason = f"read-error:{error.errno}"
                     break
+            # Ponytail: fixed test sequences bound full-history replay;
+            # use incremental replay if those sequences grow.
             frames = rendered_frames(output, size, resize_events=resize_events)
             rendered = b"\n".join(frames)
             if sent and not reviewed and b"Utilities / Review" in rendered:
@@ -332,7 +372,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         all_calls = [json.loads(line) for line in log.read_text().splitlines()]
         all_last_calls = all_calls
         last_widget_calls = [call for call in all_calls if call[0].startswith("widgets-")]
-        return [call for call in all_calls if not call[0].startswith(("widgets-", "hotkeys-")) and call[0] not in ("appearance-state","theme-preview","widget-icons")]
+        return [call for call in all_calls if not call[0].startswith(("widgets-", "hotkeys-", "default-apps-")) and call[0] not in ("appearance-state","theme-preview","widget-icons")]
     ids = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras", "texteditor", "screenshot", "media")
     def state(readonly=False, **selected):
         # Deliberately shuffle fields: identity must not depend on wire order.
@@ -344,7 +384,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert len(fields) == len(ids) + 1 and set(fields) == {*ids, "overwrite"}
         return fields
     up, down, left, right, enter, esc, tab = b"\x1b[A", b"\x1b[B", b"\x1b[D", b"\x1b[C", b"\r", b"\x1b", b"\t"
-    def page(index): return down*index + tab
+    def page(index): return down*(index + int(index >= 2)) + tab
     def saves(): return [call for call in last_widget_calls if call[0] == "widgets-apply"]
     def save_field(name):
         return next(field.split("=", 1)[1] for field in saves()[-1][2:] if field.startswith(name + "="))
@@ -498,7 +538,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert hotkey_bodies()[-1] == bodies[20]
             assert not saves() and not tools()
         # Clicking the list focuses it; its headings are not separate controls.
-        run(down*3+click(30,5)+down+esc, visual, size=(24,80), capture="hotkeys-click")
+        run(down*4+click(30,5)+down+esc, visual, size=(24,80), capture="hotkeys-click")
         assert hotkey_bodies()[-1][0] == "Common" and "Show/Toggle Taskbar" in hotkey_bodies()[-1][2]
         # Reflow at the bottom must clamp to the new rendered height immediately.
         run(page(3)+down*180, visual, size=(24,80), capture="hotkeys-resize",
@@ -551,6 +591,72 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert edits()[-1][2:] == ["lock", "Super+Alt+F9"]
         assert b"Lock" in last_frames[-1] and b"Super+Alt+F9" in last_frames[-1]
         print("PASS: Hotkeys editor save/cancel/reset, effective appearances, errors, ownership and selected-row resize")
+
+    def test_default_apps_page():
+        opening = down*2 + tab
+        def changes(): return [call for call in all_last_calls if call[0] == "default-apps-apply"]
+        def frame_for(title):
+            return next(frame.decode().splitlines() for frame in reversed(last_frames) if frame.decode().splitlines()[1][24:].startswith(title))
+        for size in ((24,80), (30,100), (36,120)):
+            run(opening+esc, state(), size=size, capture="default-apps")
+            frame = frame_for("Default Apps")
+            for index,label in enumerate(("Browser","Terminal","File manager","Text files","PDFs","Images","Videos","Audio")):
+                assert frame[4+index*2][24:].startswith(label), (size,frame)
+            assert frame[4][44:].startswith('LibreWolf') and frame[12][44:].startswith('Default (browser)')
+            assert 'Tab: Switch pane   Esc: Close' in frame[-2]
+            assert not changes()
+            for index,label in enumerate(("Browser","Terminal","File manager","Text files","PDFs","Images","Videos","Audio")):
+                run(opening+down*index+enter+esc*2, state(), size=size, capture="default-chooser-"+str(index))
+                chooser = frame_for("Default Apps / "+label)
+                assert '[ Use ]   [ Back ]' in chooser[-4] and 'Esc: Back' in chooser[-2]
+                assert any('Current' in line for line in chooser[4:-4])
+                assert not changes()
+            run(opening+esc, state(), size=size, default_apps=['LibreWolf','Kitty','Yazi','Neovim','',['imv','Gradia'],'VLC','VLC'], capture="default-pdf-unset-mixed")
+            mixed = frame_for('Default Apps')
+            assert mixed[12][44:].startswith('Not set') and mixed[14][44:].startswith('Mixed')
+            run(opening+down*5+enter+esc*2, state(), size=size, default_apps=['LibreWolf','Kitty','Yazi','Neovim','',['imv','Gradia'],'VLC','VLC'], capture="default-mixed-chooser")
+            chooser = frame_for('Default Apps / Images')
+            assert not any('Current' in line for line in chooser[4:-4])
+            assert 'imv' in chooser[4] and not changes()
+            run(opening+down*5+enter+enter+esc, state(), size=size, default_apps=['LibreWolf','Kitty','Yazi','Neovim','',['imv','Gradia'],'VLC','VLC'], capture="default-mixed-use")
+            assert changes()[-1][2:] == ['5','imv']
+
+            run(opening+enter+down*40+esc*2, state(), size=size, default_many=True, capture="default-chooser-scroll")
+            scrolled = frame_for('Default Apps / Browser')
+            assert 'Not set' in '\n'.join(scrolled[4:-4]) and '[ Use ]   [ Back ]' in scrolled[-4]
+            assert not changes()
+            run(opening+enter+down+esc*2, state(), size=size, capture="default-cancel")
+            assert not changes()
+            run(opening+enter+down+enter+esc, state(), size=size, capture="default-save")
+            assert changes()[-1][2:] == ['0','Firefox']
+            assert frame_for('Default Apps')[4][44:].startswith('Firefox')
+            # Independent PDF value remains the old concrete app after Browser changes.
+            assert frame_for('Default Apps')[12][44:].startswith('LibreWolf')
+            run(opening+down*4+enter+enter+esc, state(), size=size, capture="default-pdf-browser")
+            assert changes()[-1][2:] == ['4','@browser']
+            run(opening+enter+down+enter+esc, state(), size=size, default_error='injected write failure', capture="default-save-error")
+            assert 'Couldn’t save default application.' in frame_for('Default Apps')[-4]
+            assert frame_for('Default Apps')[4][44:].startswith('LibreWolf')
+            run(opening+down*4+enter+up*3+enter+esc, state(), size=size,
+                default_apps=['','Kitty','Yazi','Neovim','','imv','VLC','VLC'], default_empty=True, capture="default-no-browser-pdf")
+            assert changes()[-1][2:] == ['4','@browser']
+            assert 'Choose a browser first.' in frame_for('Default Apps')[-4]
+            run(opening+enter+esc*2, state(), size=size, default_apps=['']*8, default_empty=True, capture="default-empty")
+            assert 'No installed applications found.' in '\n'.join(frame_for('Default Apps / Browser'))
+            run(opening+enter+esc*2, state(), size=size, default_readonly=(0,2,3,4,5,6,7), capture="default-readonly")
+            assert 'Default Apps / Terminal' in last_output.decode()
+            assert 'Read Only' in '\n'.join(frame_for('Default Apps'))
+        run(click(5,9)+click(26,5)+click(26,7)+esc, state(), capture="default-mouse")
+        assert changes()[-1][2:] == ['0','Firefox']
+        run(opening+enter+click(36,21)+esc, state(), size=(24,80), capture="default-back-click")
+        assert not changes()
+        run(opening+tab+tab+enter+esc*2, state(), capture="default-pane-focus")
+        assert not changes()
+        print('PASS: Default Apps geometry, eight choosers, explicit use/cancel, PDF, missing/readonly/error states and mouse/focus')
+
+    if options.defaults_only:
+        test_default_apps_page()
+        sys.exit(0)
 
     if options.hotkeys_only:
         test_hotkeys()
@@ -616,6 +722,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         run(page(3)+right+down*5+esc, state(), size=size)
         assert b"Common" in last_output and b"Applications" in last_output
         assert not saves()
+    test_default_apps_page()
     test_spacing()
     test_hotkeys()
     test_hotkey_editor()
@@ -726,12 +833,12 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         elif name == "cardStacks": assert "stack-1/launcher" in save_field(name)
         else: assert save_field(name) != str({"barBehaviour":"keyboard","barLocation":"above","barStyle":"anchored","barWidth":80,"oskAccess":"none"}[name])
     # Taskbar Save must not commit pending card membership, and later Widgets Save keeps it.
-    run(widgets+b"n"+tab+up+tab+down*4+enter+right+down*5+enter+tab+down+tab+b"s"+esc*2, state())
+    run(widgets+b"n"+tab+up*2+tab+down*4+enter+right+down*5+enter+tab+down*2+tab+b"s"+esc*2, state(), capture="widgets-taskbar-save-scope")
     assert len(saves()) == 2
     assert not any(field.startswith("cardStacks=") for field in saves()[0])
     assert "stack-1/launcher" in save_field("cardStacks")
     # Real mouse targets: select page, enter/remove a member, save; import is inert.
-    run(click(5,9)+click(26,5)+b"s"+esc*2, state(), size=(24,80))
+    run(click(5,11)+click(26,5)+b"s"+esc*2, state(), size=(24,80))
     assert saves()
     run(page(3)+down*180+esc, state())
     assert b"Desktop / session" in last_output

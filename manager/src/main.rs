@@ -13,7 +13,7 @@ const ROWS: &[(&str, &str, &str)] = &[
 #[derive(Clone, Copy, PartialEq)]
 enum Control { Theme, Preview(usize), Taskbar, Transparency, Layout, Wallpaper, Monitors,
     Utility(&'static str), Widget(usize), Bar(usize), BarWidth, Back, Card(usize), Stack(usize),
-    GridAction(usize), GridTools, Hotkeys, Steam, Overwrite, Apply }
+    GridAction(usize), GridTools, Hotkeys, DefaultRole(usize), DefaultChoice(usize), Steam, Overwrite, Apply }
 
 const STEAM: &[&str] = &["none", "native", "flatpak"];
 
@@ -29,6 +29,56 @@ fn appearance_command(args: &[&str]) -> io::Result<String> {
         return Err(io::Error::other(text));
     }
     Ok(text)
+}
+
+const DEFAULT_ROLES: &[&str] = &["Browser", "Terminal", "File manager", "Text files", "PDFs", "Images", "Videos", "Audio"];
+struct DefaultApp { readonly: bool, revision: String, label: String, current: String, choices: Vec<(String, String)> }
+fn default_text(hex: &str) -> io::Result<String> {
+    if hex.len() % 2 != 0 || !hex.bytes().all(|c| c.is_ascii_hexdigit()) { return Err(io::Error::other("Invalid default application text")); }
+    let bytes = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(io::Error::other)).collect::<io::Result<Vec<_>>>()?;
+    let value = String::from_utf8(bytes).map_err(io::Error::other)?;
+    if value.chars().any(char::is_control) { return Err(io::Error::other("Invalid default application text")); }
+    Ok(value)
+}
+impl DefaultApp {
+    fn load() -> io::Result<Vec<Self>> {
+        let text = widget_command(&["default-apps-state".into()])?;
+        let mut result = Vec::new();
+        for (index, line) in text.lines().enumerate() {
+            let fields: Vec<_> = line.split('\t').collect();
+            if fields.len() != 6 || fields[0] != index.to_string() || index >= DEFAULT_ROLES.len()
+                || fields[2].len() != 64 || !fields[2].bytes().all(|c| c.is_ascii_hexdigit()) {
+                return Err(io::Error::other("Invalid default application state"));
+            }
+            let readonly = match fields[1] { "true" => true, "false" => false, _ => return Err(io::Error::other("Invalid default application ownership")) };
+            let mut choices = Vec::new();
+            for pair in fields[5].split(',') {
+                let (id, label) = pair.split_once(':').ok_or_else(|| io::Error::other("Invalid application choice"))?;
+                let (id, label) = (default_text(id)?, default_text(label)?);
+                if id.is_empty() || label.is_empty() || choices.iter().any(|(previous, _)| previous == &id) {
+                    return Err(io::Error::other("Invalid application choice"));
+                }
+                choices.push((id, label));
+            }
+            if choices.last().map(|pair| pair.0.as_str()) != Some("@unset") { return Err(io::Error::other("Missing unset application choice")); }
+            result.push(Self { readonly, revision: fields[2].into(), label: default_text(fields[3])?, current: default_text(fields[4])?, choices });
+        }
+        if result.len() != DEFAULT_ROLES.len() { return Err(io::Error::other("Missing default application roles")); }
+        Ok(result)
+    }
+    fn save(&self, role: usize, choice: usize) -> io::Result<String> {
+        widget_command(&["default-apps-apply".into(), self.revision.clone(), role.to_string(), self.choices[choice].0.clone()])
+    }
+}
+// The accepted reference clips a row rather than moving the following rows.
+fn default_clip(text: &str, width: usize) -> String {
+    if Line::from(text).width() <= width { return text.into(); }
+    let mut value = String::new();
+    for character in text.chars() {
+        if Line::from(format!("{value}{character}…")).width() > width { break; }
+        value.push(character);
+    }
+    value + "…"
 }
 
 struct Appearance {
@@ -373,6 +423,10 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             HotkeySettings { values: HOTKEY_ACTIONS.iter().map(|v| v.2.to_owned()).collect(), revision: String::new(), readonly: true, live: false }
         }
     };
+    let mut default_settings: Option<Vec<DefaultApp>> = None;
+    let mut default_chooser: Option<usize> = None;
+    let mut default_row = 0usize;
+    let mut default_start = 0usize;
     let mut hot_cursor = 0usize;
     let mut hot_edit: Option<(usize, String)> = None;
     let mut hot_follow = false;
@@ -398,6 +452,12 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     let result = (|| {
         crossterm::execute!(io::stdout(), event::EnableMouseCapture)?;
         loop {
+            if page == 2 && default_settings.is_none() {
+                match DefaultApp::load() {
+                    Ok(value) => default_settings = Some(value),
+                    Err(error) => { message = error.to_string(); default_settings = Some(Vec::new()); },
+                }
+            }
             let editable = |index: usize| widgets.supported && widgets.ownership[index] == Ownership::User;
             let mut rows = Vec::new();
             if subpage == 1 {
@@ -440,20 +500,27 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     row("Notifications", tick(widgets.enabled[0]), Control::Widget(0), editable(0))];
             }
             let mut controls: Vec<Control> = rows.iter().filter(|row| row.enabled).map(|row| row.control).collect();
-            if page == 2 && subpage == 0 {
+            if page == 3 && subpage == 0 {
                 controls = (0..=widgets.stacks.len()).map(Control::Stack).collect();
                 if editable(1) { controls.push(Control::Widget(1)); }
                 if editable(2) { controls.extend((0..8).map(Control::GridAction)); }
                 if editable(1) || editable(2) { controls.push(Control::Apply); }
                 controls.push(Control::GridTools);
             }
-            if page == 3 && subpage == 0 { controls = vec![Control::Hotkeys]; }
+            if page == 2 {
+                controls = if let Some(role) = default_chooser {
+                    default_settings.as_ref().and_then(|values| values.get(role)).map(|value| (0..value.choices.len()).map(Control::DefaultChoice).collect()).unwrap_or_default()
+                } else {
+                    default_settings.as_ref().map(|values| values.iter().enumerate().filter(|(_, value)| !value.readonly).map(|(index, _)| Control::DefaultRole(index)).collect()).unwrap_or_default()
+                };
+            }
+            if page == 4 && subpage == 0 { controls = vec![Control::Hotkeys]; }
             if controls.is_empty() { controls.push(Control::Back); }
             focus = focus.min(controls.len() - 1);
             stack = stack.min(widgets.stacks.len());
             if let Some(module) = member { if widgets.location(module).map(|v| v.0).unwrap_or(widgets.stacks.len()) != stack { member = None; } }
             let current = controls[focus];
-            if page == 2 && matches!(current, Control::Widget(_) | Control::GridAction(0 | 1 | 3..=7)) { grid_tools = true; }
+            if page == 3 && matches!(current, Control::Widget(_) | Control::GridAction(0 | 1 | 3..=7)) { grid_tools = true; }
             let mut hits: Vec<(Rect, Control)> = Vec::new();
             let mut page_hits = Vec::new();
             let mut grid_columns = 2usize;
@@ -479,25 +546,61 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 let left = Rect::new(sidebar.x + 2, sidebar.y + 1, sidebar.width - 4, sidebar.height - 2);
                 frame.render_widget(Paragraph::new("Icewine").style(accent), Rect::new(left.x, left.y, left.width, 1));
                 frame.render_widget(Paragraph::new(format!("├{}┤", "─".repeat(sidebar.width.saturating_sub(2) as usize))).style(if pane { muted } else { accent }), Rect::new(sidebar.x, sidebar.y + 2, sidebar.width, 1));
-                for (index, name) in ["Utilities", "Appearance", "Widgets", "Hotkeys"].iter().enumerate() {
+                for (index, name) in ["Utilities", "Appearance", "Default Apps", "Widgets", "Hotkeys"].iter().enumerate() {
                     let rect = Rect::new(left.x, left.y + 3 + index as u16 * 2, left.width, 1);
                     frame.render_widget(Paragraph::new(*name).style(if index == page { if !pane { highlighted } else { accent } } else { normal }), rect);
                     page_hits.push((rect, index));
                 }
                 let inner = Rect::new(content.x + 2, content.y + 1, content.width - 4, content.height - 2);
-                let title = if subpage == 1 { "Appearance / Theme" } else if subpage == 2 { "Appearance / Taskbar" } else if page == 3 && hot_settings.readonly { "Hotkeys - Read Only" } else if page == 0 && readonly { "Utilities - Read Only" } else { ["Utilities", "Appearance", "Widgets", "Hotkeys"][page] };
+                let title = if subpage == 1 { "Appearance / Theme" } else if subpage == 2 { "Appearance / Taskbar" } else if page == 4 && hot_settings.readonly { "Hotkeys - Read Only" } else if page == 0 && readonly { "Utilities - Read Only" } else { ["Utilities", "Appearance", "Default Apps", "Widgets", "Hotkeys"][page] };
+                let default_title = default_chooser.map(|role| format!("Default Apps / {}", DEFAULT_ROLES[role]));
+                let title = if page == 2 { default_title.as_deref().unwrap_or("Default Apps") } else { title };
                 frame.render_widget(Paragraph::new(title).style(accent), Rect::new(inner.x, inner.y, inner.width, 1));
                 frame.render_widget(Paragraph::new(format!("├{}┤", "─".repeat(content.width.saturating_sub(2) as usize))).style(if pane { accent } else { muted }), Rect::new(content.x, content.y + 2, content.width, 1));
                 let footer = Rect::new(inner.x, inner.bottom() - 1, inner.width, 1);
-                if (page != 2 || subpage != 0) && subpage != 1 {
-                    frame.render_widget(Paragraph::new(if subpage > 0 { "Tab: Switch pane   Esc: Back" } else if page == 3 && !hot_settings.live { "Saved chords - no managed session. Esc: Close" } else if page == 3 { "↑/↓: Move  Enter: Edit  r: Reset  Esc: Close" } else { "Tab: Switch pane   Esc: Close" }).style(muted), footer);
+                if (page != 3 || subpage != 0) && subpage != 1 {
+                    frame.render_widget(Paragraph::new(if subpage > 0 || (page == 2 && default_chooser.is_some()) { "Tab: Switch pane   Esc: Back" } else if page == 4 && !hot_settings.live { "Saved chords - no managed session. Esc: Close" } else if page == 4 { "↑/↓: Move  Enter: Edit  r: Reset  Esc: Close" } else { "Tab: Switch pane   Esc: Close" }).style(muted), footer);
                 }
-                let status_bottom = if page == 2 && subpage == 0 { footer.y + 1 } else if subpage > 0 { footer.y - 3 } else { footer.y - 1 };
+                let status_bottom = if page == 3 && subpage == 0 { footer.y + 1 } else if subpage > 0 { footer.y - 3 } else { footer.y - 1 };
                 let content_bottom = (if message.is_empty() { status_bottom } else { status_bottom - 3 })
-                    .saturating_sub(if page == 3 && hot_edit.is_some() { 4 } else { 0 });
-                let body_y = content.y + if subpage == 0 && matches!(page, 0 | 2) { 3 } else { 4 };
+                    .saturating_sub(if page == 4 && hot_edit.is_some() { 4 } else { 0 });
+                let body_y = content.y + if subpage == 0 && matches!(page, 0 | 3) { 3 } else { 4 };
                 let body = Rect::new(inner.x, body_y, inner.width, content_bottom.saturating_sub(body_y));
-                if page == 2 && subpage == 0 {
+                if page == 2 {
+                    if let Some(values) = &default_settings {
+                        if let Some(role) = default_chooser {
+                            if let Some(value) = values.get(role) {
+                                let empty = value.choices.iter().all(|pair| pair.0.starts_with('@'));
+                                let top = content.y + if empty { 6 } else { 4 };
+                                if empty { frame.render_widget(Paragraph::new("No installed applications found.").style(muted), Rect::new(inner.x, content.y + 4, inner.width, 1)); }
+                                let available = ((area.height - 9) / 2) as usize;
+                                if focus < default_start { default_start = focus; }
+                                if focus >= default_start + available { default_start = focus - available + 1; }
+                                let start = default_start;
+                                for (index, (id, label)) in value.choices.iter().enumerate().skip(start).take(available) {
+                                    let marker = if id == &value.current { "Current" } else { "" };
+                                    let text = format!("{}{}{marker}", default_clip(label, 25), " ".repeat(25usize.saturating_sub(Line::from(label.as_str()).width())));
+                                    let rect = Rect::new(inner.x, top + (index - start) as u16 * 2, inner.width, 1);
+                                    frame.render_widget(Paragraph::new(default_clip(&text, inner.width as usize)).style(if pane && index == focus { highlighted } else { normal }), rect);
+                                    hits.push((rect, Control::DefaultChoice(index)));
+                                }
+                                for (x, label, control) in [(inner.x, "[ Use ]", Control::DefaultChoice(focus)), (inner.x + 10, "[ Back ]", Control::Back)] {
+                                    let rect = Rect::new(x, area.height - 4, label.len() as u16, 1);
+                                    frame.render_widget(Paragraph::new(label).style(accent), rect);
+                                    hits.push((rect, control));
+                                }
+                            }
+                        } else {
+                            for (index, value) in values.iter().enumerate() {
+                                let suffix = if value.readonly { " - Read Only" } else { "  ›" };
+                                let text = format!("{:<20}{}{suffix}", DEFAULT_ROLES[index], value.label);
+                                let rect = Rect::new(inner.x, content.y + 4 + index as u16 * 2, inner.width, 1);
+                                frame.render_widget(Paragraph::new(default_clip(&text, inner.width as usize)).style(if value.readonly { muted } else if pane && current == Control::DefaultRole(index) { highlighted } else { normal }), rect);
+                                if !value.readonly { hits.push((rect, Control::DefaultRole(index))); }
+                            }
+                        }
+                    }
+                } else if page == 3 && subpage == 0 {
                     let unassigned: Vec<_> = (0..CARD_MODULES.len()).filter(|module| widgets.location(*module).is_none()).collect();
                     let mut actions = Vec::new();
                     for control in controls.iter().filter(|c| !matches!(c, Control::Stack(_) | Control::Widget(_))
@@ -574,7 +677,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         if let Some(control) = control { hits.push((rect, control)); }
                         x += width + 1;
                     }
-                } else if page == 3 && subpage == 0 {
+                } else if page == 4 && subpage == 0 {
                     let (mut lines, actions) = hotkeys(&widgets, &hot_settings, effective_screenshot, body.width as usize, accent);
                     hot_actions = actions;
                     if let Some(index) = hot_anchor {
@@ -676,11 +779,11 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     }
                 }
                 if !message.is_empty() {
-                    frame.render_widget(Paragraph::new(message.as_str()).style(accent).wrap(Wrap { trim: false }), Rect::new(inner.x, status_bottom - 2, inner.width, 2));
+                    frame.render_widget(Paragraph::new(message.as_str()).style(accent).wrap(Wrap { trim: false }), Rect::new(inner.x, if page == 2 { area.height - 4 } else { status_bottom - 2 }, inner.width, 2));
                 }
             })?;
             if !event::poll(std::time::Duration::from_secs(2))? {
-                if page == 2 { icons = widget_command(&["widget-icons".into()]).unwrap_or(icons); }
+                if page == 3 { icons = widget_command(&["widget-icons".into()]).unwrap_or(icons); }
                 continue;
             }
             let mut activate = false;
@@ -698,11 +801,12 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         event::MouseEventKind::Down(event::MouseButton::Left) => {
                             if let Some((_, index)) = page_hits.iter().find(|(r, _)| r.contains(Position::new(mouse.column, mouse.row))) {
                                 if subpage != 0 { subpage = 0; colours = theme_colours(&appearance.themes[appearance.theme]).unwrap_or(colours); }
-                                page = *index; pane = false; focus = 0; member = None; placement = None; continue;
+                                page = *index; default_chooser = None; default_settings = None; message.clear(); pane = false; focus = 0; member = None; placement = None; continue;
                             }
                             if let Some((hit, control)) = hits.iter().rev().find(|(r, _)| r.contains(Position::new(mouse.column, mouse.row))) {
                                 pane = true;
                                 match *control {
+                                    Control::Back if page == 2 => { default_chooser = None; focus = default_row; message.clear(); continue; },
                                     Control::Stack(index) => { stack = index; focus = index; if placement.is_none() { member = None; remembered = widgets.stacks.get(index).and_then(|s| s.modules.first()).copied().unwrap_or(remembered); } if placement.is_some() && index < widgets.stacks.len() { activate = true; } }
                                     Control::Hotkeys => { hot_cursor = hot_scroll + mouse.row.saturating_sub(hit.y) as usize; hot_follow = true; }
                                     Control::Card(module) => {
@@ -715,7 +819,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                                 KeyCode::Enter
                             } else { continue; }
                         }
-                        event::MouseEventKind::ScrollDown | event::MouseEventKind::ScrollUp if page == 3 && mouse.column >= 22 && hot_edit.is_none() => {
+                        event::MouseEventKind::ScrollDown | event::MouseEventKind::ScrollUp if page == 4 && mouse.column >= 22 && hot_edit.is_none() => {
                             pane = true;
                             hot_scroll = if mouse.kind == event::MouseEventKind::ScrollDown { (hot_scroll + 1).min(hot_max_scroll) } else { hot_scroll.saturating_sub(1) };
                             hot_cursor = hot_cursor.clamp(hot_scroll, hot_scroll + hot_height.saturating_sub(1));
@@ -757,19 +861,52 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             }
             if key == KeyCode::Tab || key == KeyCode::BackTab { pane = !pane; continue; }
             if key == KeyCode::Esc {
+                if page == 2 && default_chooser.take().is_some() { focus = default_row; message.clear(); continue; }
                 if placement.take().is_some() { message.clear(); continue; }
-                if page == 2 && member.take().is_some() { continue; }
+                if page == 3 && member.take().is_some() { continue; }
                 if subpage != 0 { subpage = 0; focus = 0; colours = theme_colours(&appearance.themes[appearance.theme]).unwrap_or(colours); continue; }
                 return Ok(None);
             }
             if !pane {
                 match key {
-                    KeyCode::Down | KeyCode::Up => { if subpage == 1 { colours = theme_colours(&appearance.themes[appearance.theme]).unwrap_or(colours); } cycle(&mut page, 4, key == KeyCode::Down); subpage = 0; focus = 0; member = None; placement = None; },
+                    KeyCode::Down | KeyCode::Up => { if subpage == 1 { colours = theme_colours(&appearance.themes[appearance.theme]).unwrap_or(colours); } cycle(&mut page, 5, key == KeyCode::Down); default_chooser = None; default_settings = None; message.clear(); subpage = 0; focus = 0; member = None; placement = None; },
                     KeyCode::Enter | KeyCode::Right | KeyCode::Char(' ') => pane = true, _ => (),
                 }
                 continue;
             }
-            if page == 3 && subpage == 0 {
+            if page == 2 {
+                if matches!(key, KeyCode::Up | KeyCode::Down) {
+                    if default_chooser.is_some() { focus = if key == KeyCode::Down { (focus + 1).min(controls.len() - 1) } else { focus.saturating_sub(1) }; }
+                    else { cycle(&mut focus, controls.len(), key == KeyCode::Down); }
+                    continue;
+                }
+                if activate || matches!(key, KeyCode::Enter | KeyCode::Char(' ')) || (default_chooser.is_none() && key == KeyCode::Right) {
+                    if let Some(role) = default_chooser {
+                        if let Some(value) = default_settings.as_ref().and_then(|values| values.get(role)) {
+                            message = match value.save(role, focus) {
+                                Ok(_) => String::new(),
+                                Err(error) if error.to_string().contains("Choose a browser first.") => "Choose a browser first.".into(),
+                                Err(error) if error.to_string().contains("recovery needs attention") => format!("Couldn’t save default application.\n{}", error.to_string().trim()),
+                                Err(_) => "Couldn’t save default application.".into(),
+                            };
+                        }
+                        default_chooser = None; focus = default_row;
+                        match DefaultApp::load() { Ok(value) => default_settings = Some(value), Err(error) => { default_settings = Some(Vec::new()); message = error.to_string(); } }
+                    } else if let Control::DefaultRole(role) = controls[focus] {
+                        match DefaultApp::load() {
+                            Ok(values) if !values[role].readonly => {
+                                default_row = focus; default_chooser = Some(role); default_start = 0;
+                                focus = values[role].choices.iter().position(|pair| pair.0 == values[role].current).unwrap_or(0);
+                                default_settings = Some(values); message.clear();
+                            },
+                            Ok(values) => { default_settings = Some(values); message = "Default application is Read Only".into(); },
+                            Err(error) => message = error.to_string(),
+                        }
+                    }
+                }
+                continue;
+            }
+            if page == 4 && subpage == 0 {
                 match key {
                     KeyCode::Down => { hot_cursor = (hot_cursor + 1).min(hot_line_count.saturating_sub(1)); hot_follow = true; },
                     KeyCode::Up => { hot_cursor = hot_cursor.saturating_sub(1); hot_follow = true; },
@@ -794,7 +931,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 }
                 continue;
             }
-            if page == 2 && subpage == 0 {
+            if page == 3 && subpage == 0 {
                 if let Some(module) = member { remembered = module; }
                 if matches!(key, KeyCode::Char('n' | '+' | '-' | '[' | ']') | KeyCode::Delete) && editable(2) {
                     let command = match key { KeyCode::Char('n') => 0, KeyCode::Delete => 1, KeyCode::Char('-') => 3, KeyCode::Char('+') => 4, KeyCode::Char('[') => 5, _ => 6 };

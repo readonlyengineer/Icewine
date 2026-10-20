@@ -9,6 +9,7 @@ from pathlib import Path
 import platform
 import pwd
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -488,8 +489,9 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         if selected["filemanager"] and not readonly:
             if any(theme.symlinked(config / name) for name in ("mimeapps.list", "mimeapps.list.new")):
                 print(f"read-only symlink: preserved {config / 'mimeapps.list'}", file=sys.stderr)
-            else:
-                # Set the generic XDG file, independent of the onboarding desktop.
+            elif not any(default_ini(default_read(path)).get("Default Applications", "inode/directory", fallback="").strip("; ")
+                         for path in default_paths(config, data)[0]):
+                # Initialise only when no explicit XDG directory default exists.
                 run(["xdg-mime", "default", "icewine-yazi.desktop", "inode/directory"],
                     env=dict(os.environ, XDG_CURRENT_DESKTOP="X-Generic", DE="generic", XDG_UTILS_INSTALL_MODE="user"))
         if selected["desktop"] and os.environ.get("ICEWINE_GTK_ENABLE", "true") != "false":
@@ -535,9 +537,363 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         print("Experimental Arch/CachyOS: installed-session and device qualification remain pending.")
 
 
+# Default Apps edits standard user preferences only; utility Apply is independent.
+DEFAULT_ROLES = ("Browser", "Terminal", "File manager", "Text files", "PDFs", "Images", "Videos", "Audio")
+DEFAULT_MIMES = (
+    ("x-scheme-handler/http", "x-scheme-handler/https", "text/html"), (),
+    ("inode/directory",), ("text/plain",), ("application/pdf",),
+    ("image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"),
+    ("video/mp4", "video/webm", "video/x-matroska"),
+    ("audio/mpeg", "audio/ogg", "audio/flac", "audio/x-wav"),
+)
+
+
+def default_ini(raw):
+    if b"\0" in raw:
+        raise ValueError("Invalid desktop preference file")
+    import configparser
+    parser = configparser.ConfigParser(interpolation=None, delimiters=("=",), comment_prefixes=("#",), strict=True, default_section="\0")
+    parser.optionxform = str
+    try:
+        parser.read_string(raw.decode("utf-8"))
+        if any("\n" in value for section in parser.sections() for value in parser[section].values()):
+            raise ValueError("Multiline desktop preference values are unsupported")
+    except (UnicodeError, configparser.Error) as error:
+        raise ValueError("Invalid desktop preference file; repair it before saving") from error
+    return parser
+
+
+def default_read(path):
+    return path.read_bytes() if path.exists() else b""
+
+
+def default_paths(config, data):
+    desktops = [name.lower() for name in os.environ.get("XDG_CURRENT_DESKTOP", "").split(":")
+                if re.fullmatch(r"[A-Za-z0-9_-]+", name)]
+    config_dirs = [Path(p) for p in (os.environ.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":") if p.startswith("/")]
+    data_dirs = [Path(p) for p in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":") if p.startswith("/")]
+    names = [name + "-mimeapps.list" for name in desktops] + ["mimeapps.list"]
+    users = [directory / name for directory in (config, data / "applications") for name in names]
+    paths = [directory / name for directory in (config, *config_dirs, data / "applications", *(p / "applications" for p in data_dirs)) for name in names]
+    terminal_names = [name + "-xdg-terminals.list" for name in desktops] + ["xdg-terminals.list"]
+    terminal_users = [config / name for name in terminal_names]
+    terminals = [directory / name for directory in (config, *config_dirs, *(p / "xdg-terminal-exec" for p in data_dirs)) for name in terminal_names]
+    return list(dict.fromkeys(paths)), list(dict.fromkeys(users)), list(dict.fromkeys(terminals)), list(dict.fromkeys(terminal_users)), [data, *data_dirs]
+
+
+def default_inventory(roots):
+    applications, seen, aliases = {}, set(), {}
+    for root in roots:
+        for line in default_read(root / "mime/aliases").decode("utf-8").splitlines():
+            parts = line.split()
+            if len(parts) == 2:
+                aliases.setdefault(parts[0], parts[1])
+        directory = root / "applications"
+        for path in sorted(directory.rglob("*.desktop")) if directory.is_dir() else ():
+            identifier = path.relative_to(directory).as_posix().replace("/", "-")
+            if identifier in seen:
+                continue
+            seen.add(identifier)  # Hidden/invalid higher-priority entries still mask lower ones.
+            if not re.fullmatch(r"[\w.+-]+\.desktop", identifier):
+                continue
+            try:
+                raw = path.read_bytes()
+                parser = default_ini(raw)
+                entry = dict(parser["Desktop Entry"])
+            except (OSError, ValueError, KeyError):
+                continue
+            if (entry.get("Type") != "Application" or entry.get("Hidden") == "true"
+                    or not entry.get("Name") or not (entry.get("Exec") or entry.get("DBusActivatable") == "true")
+                    or (entry.get("TryExec") and not shutil.which(entry["TryExec"]))):
+                continue
+            name = re.sub(r"\\([sntr\\])", lambda m: {"s": " ", "n": "\n", "t": "\t", "r": "\r", "\\": "\\"}[m[1]], entry["Name"])
+            name = "".join(c if c.isprintable() else " " for c in name)
+            applications[identifier] = {"name": name, "mimes": set(entry.get("MimeType", "").split(";")),
+                                        "directory": directory, "terminal": "TerminalEmulator" in entry.get("Categories", "").split(";"),
+                                        "raw": raw, "actions": {name[len("Desktop Action "):] for name in parser.sections() if name.startswith("Desktop Action ") and name[len("Desktop Action "):] in entry.get("Actions", "").split(";") and parser.get(name, "Exec", fallback="")}}
+    return applications, aliases
+
+
+def default_owned(path):
+    return theme.symlinked(path) is None and not theme.setting_readonly(path)
+
+
+def default_edit(raw, section, updates):
+    # Preserve all non-target lines, including comments and other MIME associations.
+    default_ini(raw)
+    lines, output, current, remaining = raw.decode("utf-8").splitlines(keepends=True), [], "", dict(updates)
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            if current == section:
+                output.extend(f"{key}={value}\n" for key, value in remaining.items() if value is not None)
+                remaining.clear()
+            current = stripped[1:-1]
+        key, separator, _ = stripped.partition("=")
+        if current == section and separator and key.strip() in updates:
+            value = remaining.pop(key.strip(), None)
+            if value is not None:
+                output.append(f"{key.strip()}={value}\n")
+        else:
+            output.append(line)
+    if any(value is not None for value in remaining.values()):
+        if output and not output[-1].endswith("\n"):
+            output[-1] += "\n"
+        if current != section and any(value is not None for value in remaining.values()):
+            output.append(f"[{section}]\n")
+        output.extend(f"{key}={value}\n" for key, value in remaining.items() if value is not None)
+    return "".join(output).encode()
+
+
+def default_snapshot(path):
+    import stat
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError(f"Default preference is Read Only: {path}")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as stream:
+        actual = os.fstat(stream.fileno())
+        if (info.st_dev, info.st_ino) != (actual.st_dev, actual.st_ino):
+            raise ValueError(f"Default preference changed: {path}")
+        return (info.st_dev, info.st_ino, info.st_mtime_ns, stat.S_IMODE(info.st_mode), stream.read())
+
+
+def default_commit(edits, recovering=False, before_commit=None, after_commit=None):
+    # Ponytail: bounded per-role files, not a cross-process atomic transaction.
+    # Stage before renaming; revision/identity guards protect unrelated writers.
+    staged, written = [], []
+    try:
+        for path, before, contents in edits:
+            if not default_owned(path):
+                raise ValueError(f"Default preference is Read Only: {path}")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            theme.writable(path)
+            parent = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            temporary = ".icewine-default-" + os.urandom(12).hex()
+            item = (path, before, contents, parent, temporary, None)
+            staged.append(item)
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(contents)
+                os.fchmod(stream.fileno(), before[3] if before else 0o600)
+                stream.flush()
+                os.fsync(stream.fileno())
+                info = os.fstat(stream.fileno())
+                expected = (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_mode & 0o7777, contents)
+                staged[-1] = (path, before, contents, parent, temporary, expected)
+        if before_commit is not None:
+            before_commit()
+        for path, before, contents, parent, temporary, expected in staged:
+            theme.writable(path)
+            directory = path.parent.stat()
+            pinned = os.fstat(parent)
+            if ((directory.st_dev, directory.st_ino) != (pinned.st_dev, pinned.st_ino)
+                    or default_snapshot(path) != before or not default_owned(path)):
+                raise ValueError(f"Default preference changed before saving: {path}")
+            os.replace(temporary, path.name, src_dir_fd=parent, dst_dir_fd=parent)
+            written.append((path, before, expected))
+            os.fsync(parent)
+        if after_commit is not None:
+            after_commit()
+    except (OSError, ValueError) as error:
+        if recovering:
+            raise
+        failures = []
+        for path, before, after in reversed(written):
+            try:
+                if not default_owned(path) or default_snapshot(path) != after:
+                    raise ValueError("changed by another writer")
+                if before is None:
+                    parent = next(item[3] for item in staged if item[0] == path)
+                    os.unlink(path.name, dir_fd=parent)
+                else:
+                    # Restore through the same guarded path, without overwriting newer edits.
+                    default_commit([(path, after, before[4])], recovering=True)
+            except (OSError, ValueError) as recovery:
+                failures.append(f"{path}: {recovery}")
+        if failures:
+            raise ValueError("Couldn’t save default application; recovery needs attention: " + "; ".join(failures)) from error
+        raise ValueError("Couldn’t save default application. Previous settings retained.") from error
+    finally:
+        for _, _, _, parent, temporary, _ in staged:
+            try:
+                os.unlink(temporary, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+            os.close(parent)
+
+
+def default_terminal_id():
+    tool = shutil.which("xdg-terminal-exec")
+    if not tool:
+        return ""
+    # Some versions remove a disabled cache; isolate it even for a read-only query.
+    with tempfile.TemporaryDirectory(prefix="icewine-terminal-query-") as cache:
+        try:
+            response = subprocess.run([tool, "--print-id"], capture_output=True, text=True, timeout=5,
+                                      env=dict(os.environ, XTE_CACHE_ENABLED="0", XDG_CACHE_HOME=cache))
+            return response.stdout.strip() if response.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+
+def default_apps_state(config, data):
+    paths, users, terminals, terminal_users, roots = default_paths(config, data)
+    apps, aliases = default_inventory(roots)
+    raw = {path: default_read(path) for path in dict.fromkeys([*paths, *terminals])}
+    documents = [(path, default_ini(raw[path])) for path in paths]
+    canonical = lambda mime: aliases.get(mime, mime)
+    def supported(identifier, mime):
+        for path, document in documents:
+            if path.name != "mimeapps.list":
+                continue  # Desktop-specific files cannot add/remove associations.
+            for section, answer in (("Added Associations", True), ("Removed Associations", False)):
+                if identifier in document.get(section, mime, fallback="").split(";"):
+                    return answer
+            if path.parent == apps[identifier]["directory"]:
+                break  # Lower directories cannot change the winning desktop entry.
+        return canonical(mime) in {canonical(value) for value in apps[identifier]["mimes"]}
+    def configured(mime):
+        for _, document in documents:
+            ids = [value for value in document.get("Default Applications", mime, fallback="").split(";") if value]
+            if ids:
+                identifier = ids[0]
+                return identifier, identifier in apps and supported(identifier, mime)
+        return "", False
+    values = [[configured(mime) for mime in group] for group in DEFAULT_MIMES]
+    browser = values[0][0][0] if len(set(values[0])) == 1 and values[0][0][1] else ""
+    digest = hashlib.sha256()
+    for path, contents in raw.items():
+        digest.update(str(path).encode() + b"\0" + contents + b"\0")
+        info = path.lstat() if path.exists() or path.is_symlink() else None
+        digest.update(str((info.st_dev, info.st_ino, info.st_mode, info.st_mtime_ns, info.st_size) if info else None).encode())
+    for identifier, app in sorted(apps.items()):
+        digest.update(identifier.encode() + b"\0" + str(app["directory"]).encode() + b"\0" + app["raw"])
+    digest.update(json.dumps(aliases, sort_keys=True).encode())
+    terminal_tool = shutil.which("xdg-terminal-exec")
+    digest.update(str(terminal_tool).encode())
+    revision = digest.hexdigest()
+    result = []
+    for index, group in enumerate(DEFAULT_MIMES):
+        mixed = index != 1 and len(set(values[index])) != 1
+        choices = [(identifier, app["name"]) for identifier, app in apps.items()
+                   if (app["terminal"] if index == 1 else all(supported(identifier, mime) for mime in group))]
+        counts = {}
+        for _, name in choices:
+            counts[name] = counts.get(name, 0) + 1
+        choices = [(identifier, name + (" (" + identifier + ")" if counts[name] > 1 else "")) for identifier, name in choices]
+        choices.sort(key=lambda pair: (pair[1].casefold(), pair[0]))
+        current, label = "", "Not set"
+        if index == 1:
+            ids = [line.strip() for path in terminals for line in raw[path].decode("utf-8").splitlines()
+                   if line.strip() and not line.strip().startswith(("#", "+", "-", "/"))]
+            current = ids[0] if ids else ""
+            if not current and terminal_tool:
+                current = default_terminal_id()
+            base, _, action = current.partition(":")
+            valid = base in apps and apps[base]["terminal"] and (not action or action in apps[base]["actions"])
+            label = (apps[base]["name"] + (" / " + action if action else "")) if valid else "Missing: " + current if current else "Not set"
+            if current and action and valid:
+                choices.insert(0, (current, label))
+            readonly = not terminal_tool or any(not default_owned(path) for path in terminal_users)
+        else:
+            entries = values[index]
+            if mixed:
+                label = "Mixed"
+            else:
+                current, valid = entries[0]
+                label = apps[current]["name"] if valid else "Missing: " + current if current else "Not set"
+            readonly = not default_owned(config / "mimeapps.list") or any(
+                not default_owned(path) and any(document.get("Default Applications", mime, fallback="") for mime in group)
+                for path, document in documents if path in users)
+        if index == 4:
+            choices.insert(0, ("@browser", "Default (browser)"))
+            if browser and current == browser and values[4][0][1]:
+                current, label = "@browser", "Default (browser)"
+        choices.append(("@unset", "Not set"))
+        result.append({"label": label, "current": "" if mixed else current or "@unset", "readonly": readonly,
+                       "choices": choices, "revision": revision, "browser": browser})
+    return result
+
+
+def default_apps(argv, config, data, state):
+    if argv == ["default-apps-state"]:
+        for index, role in enumerate(default_apps_state(config, data)):
+            encode = lambda value: value.encode("utf-8").hex()
+            print(index, str(role["readonly"]).lower(), role["revision"], encode(role["label"]), encode(role["current"]),
+                  ",".join(encode(identifier) + ":" + encode(name) for identifier, name in role["choices"]), sep="\t")
+        return
+    if len(argv) != 4 or argv[0] != "default-apps-apply" or argv[2] not in {str(i) for i in range(8)}:
+        raise ValueError("Invalid Default Apps request")
+    if os.getuid() == 0:
+        raise ValueError("run icewine as your desktop user")
+    state = state.resolve()
+    lock_path = state / "defaults.lock"
+    theme.writable(lock_path)
+    state.mkdir(parents=True, exist_ok=True)
+    with os.fdopen(os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600), "r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        index, choice = int(argv[2]), argv[3]
+        role = default_apps_state(config, data)[index]
+        if role["revision"] != argv[1]:
+            raise ValueError("Default applications changed; reopen the chooser before saving")
+        if role["readonly"]:
+            raise ValueError("Default application is Read Only")
+        if choice not in dict(role["choices"]):
+            raise ValueError("Application is no longer available for this role")
+        if choice == "@browser":
+            choice = role["browser"]
+            if not choice:
+                raise ValueError("Choose a browser first.")
+        needs_association = choice not in dict(role["choices"]) and choice != "@unset"
+        _, users, _, terminal_users, _ = default_paths(config, data)
+        terminal_fallbacks = list(dict.fromkeys(line.strip() for path in terminal_users for line in default_read(path).decode("utf-8").splitlines()
+                                                if line.strip() and not line.strip().startswith(("#", "+", "-", "/")) and line.strip() != choice))
+        paths = terminal_users if index == 1 else users
+        edits = []
+        for path in paths:
+            raw = default_read(path)
+            if index == 1:
+                contents = "".join(line for line in raw.decode("utf-8").splitlines(keepends=True)
+                                   if not line.strip() or line.strip().startswith(("#", "+", "-", "/"))).encode()
+                if path == config / "xdg-terminals.list" and choice != "@unset":
+                    contents = ("\n".join([choice, *terminal_fallbacks]) + "\n").encode() + contents
+            else:
+                updates = {mime: choice + ";" if path == config / "mimeapps.list" and choice != "@unset" else None for mime in DEFAULT_MIMES[index]}
+                contents = default_edit(raw, "Default Applications", updates)
+                if path == config / "mimeapps.list" and needs_association:
+                    document = default_ini(contents)
+                    for mime in DEFAULT_MIMES[index]:
+                        associated = [value for value in document.get("Added Associations", mime, fallback="").split(";") if value]
+                        if choice not in associated:
+                            associated.append(choice)
+                        contents = default_edit(contents, "Added Associations", {mime: ";".join(associated) + ";"})
+                        removed = [value for value in document.get("Removed Associations", mime, fallback="").split(";") if value and value != choice]
+                        contents = default_edit(contents, "Removed Associations", {mime: ";".join(removed) + ";" if removed else None})
+            if contents != raw:
+                before = default_snapshot(path)
+                if (before[4] if before else b"") != raw:
+                    raise ValueError("Default applications changed before saving")
+                edits.append((path, before, contents))
+        def current():
+            if default_apps_state(config, data)[index]["revision"] != role["revision"]:
+                raise ValueError("Default applications changed before saving")
+        def selected_terminal():
+            if index == 1 and choice != "@unset" and default_terminal_id() != choice:
+                raise ValueError("Terminal helper could not select this application")
+        default_commit(edits, before_commit=current, after_commit=selected_terminal)
+        print("Default application saved")
+
+
 def main(argv):
     config, data = theme.xdg("XDG_CONFIG_HOME", ".config"), theme.xdg("XDG_DATA_HOME", ".local/share")
     state = theme.xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    if argv and argv[0] in {"default-apps-state", "default-apps-apply"}:
+        default_apps(argv, config, data, state)
+        return
     if argv == ["hotkeys-state"]:
         hotkeys(argv, state)
         return
