@@ -383,21 +383,32 @@ ShellRoot {
         toggleKeys.tryCompare(stack, "exchanging", false, 900)
         const layout = stack.cards[1]
         let toggle = root.findAccessible(layout, "Autofullscreen")
-        if (!host.layoutActive || !toggle.activeFocus || layoutCompositor.calls.length)
-            throw new Error("Layout entry lost focus or applied a layout")
+        const master = root.findAccessible(layout, "Master layout")
+        if (!host.layoutActive || !master.activeFocus || layoutCompositor.calls.length)
+            throw new Error("Layout entry did not focus the active layout")
+        for (const name of ["scrolling", "dwindle", "master", "monocle", "unknown"]) {
+            layoutCompositor.layoutStatus = {effective: name, autofullscreen: false}
+            host.focusInitial()
+            const target = name === "unknown" ? toggle : root.findAccessible(layout,
+                name.charAt(0).toUpperCase() + name.slice(1) + " layout")
+            if (!target.activeFocus || layoutCompositor.calls.length)
+                throw new Error("Layout entry focus changed workspace state: " + name)
+        }
+        layoutCompositor.layoutStatus = {effective: "master", autofullscreen: false}
         backgroundWindow.height = 150
         toggleKeys.wait(30)
         host.focusInitial()
+        toggleKeys.wait(30)
         const scroll = descendants(layout, item => item instanceof Flickable)[0]
-        const focusY = toggle.mapToItem(scroll, 0, 0).y
+        const focusY = master.mapToItem(scroll, 0, 0).y
         if (!scroll.clip || scroll.contentHeight <= scroll.height || focusY < 0
-                || focusY + toggle.height > scroll.height)
+                || focusY + master.height > scroll.height)
             throw new Error("Constrained layout did not reveal focused controls: " + focusY + "/" + scroll.height)
         backgroundWindow.height = 488
         toggleKeys.wait(30)
         layoutCompositor.layoutWorkspaceId = 9
+        toggle.forceActiveFocus()
         toggleKeys.keyClick(Qt.Key_Return)
-        const master = root.findAccessible(layout, "Master layout")
         toggleKeys.mouseClick(master)
         if (JSON.stringify(layoutCompositor.calls) !== JSON.stringify([[9, true], [9, "master"]]))
             throw new Error("Layout controls did not target the current workspace")
@@ -452,13 +463,13 @@ ShellRoot {
             throw new Error("Third-card request jumped the running sweep")
         exchange.resume()
         toggleKeys.tryCompare(stack, "exchanging", false, 900)
-        if (stack.frontCard !== 2 || !toggle.activeFocus || !host.layoutActive
+        if (stack.frontCard !== 2 || !root.findAccessible(cards[2], "Master layout").activeFocus || !host.layoutActive
                 || backgroundWindow.intermediateActivations)
             throw new Error("Queued third-card request failed selected focus/activity")
         backgroundWindow.watchedCard = null
         // Layout uses the bounded shared focus chain, never arrow stack selection.
         toggleKeys.keyClick(Qt.Key_Right)
-        if (stack.selectedCard !== 2 || stack.exchanging || toggle.activeFocus)
+        if (stack.selectedCard !== 2 || stack.exchanging || root.findAccessible(cards[2], "Master layout").activeFocus)
             throw new Error("Layout arrow did not move focus within its card")
         cards[2].selector.forceActiveFocus()
         toggleKeys.keyClick(Qt.Key_Tab)

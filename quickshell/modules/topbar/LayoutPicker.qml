@@ -9,7 +9,8 @@ ColumnLayout {
     id: root
     property color accent: Theme.Palette.primary
     required property var compositor
-    readonly property var initialFocus: autofullscreen
+    readonly property var initialFocus: layoutChoices.children.find(item =>
+        item.modelData === (root.compositor.layoutStatus?.effective ?? "")) ?? autofullscreen
     readonly property bool available: compositor.layoutAvailable && !compositor.layoutPending
     implicitHeight: 202
     spacing: 8
@@ -23,6 +24,7 @@ ColumnLayout {
         font.bold: true
     }
     RowLayout {
+        id: layoutChoices
         Layout.fillWidth: true
         Layout.leftMargin: 12
         Layout.rightMargin: 12
