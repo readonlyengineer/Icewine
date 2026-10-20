@@ -33,6 +33,29 @@ theme.__file__ = str(script)
 importlib.machinery.SourceFileLoader(theme.__name__, str(script)).exec_module(theme)
 
 
+# Focused GTK coverage can run without repeating unrelated terminal checks.
+for theme_id, palette_file in theme.installed(assets).items():
+    appearance = json.loads(palette_file.read_text())["appearance"]
+    for level in theme.TRANSPARENCY:
+        files = theme.render_theme(assets, palette_file, level)
+        assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}\n" in files["gtk-settings.ini"]
+        assert f"gtk-theme-name=Icewine-{theme_id}\n" in files["gtk-settings.ini"]
+        assert files["gtk4-settings.ini"] == "[Settings]\ngtk-theme-name=Adwaita\n"
+    with tempfile.TemporaryDirectory() as temporary, \
+         patch.dict(os.environ, DBUS_SESSION_BUS_ADDRESS="developer-test"), \
+         patch.object(theme.subprocess, "run") as publish_setting:
+        assert theme.sync_gtk_settings(theme_id, appearance, Path(temporary))
+        assert publish_setting.call_args_list == [
+            mock.call(["gsettings", "set", "org.gnome.desktop.interface", key, value],
+                      check=True, timeout=10)
+            for key, value in (("gtk-theme", "Icewine-" + theme_id),
+                               ("color-scheme", "prefer-" + appearance))
+        ]
+print("PASS: GTK3 dark/light preference, GTK4 settings and supported color-scheme publication")
+if "--gtk-only" in sys.argv[4:]:
+    sys.exit(0)
+
+
 # Public append-only slot contract, independent of the renderer's declaration.
 EXPECTED_TERMINAL_ROLES = tuple("""
     backgroundDark red green yellow blue magenta cyan foregroundDark

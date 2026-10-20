@@ -313,7 +313,9 @@ def render_theme(assets, palette_file, level="high"):
             "error": "error", "info": "info",
         }.items()},
     }, sort_keys=True) + "\n"
-    files["gtk4-settings.ini"] = files["gtk-settings.ini"]
+    # libadwaita follows the published color-scheme, not GTK3's dark preference.
+    files["gtk4-settings.ini"] = files["gtk-settings.ini"].replace(
+        "gtk-application-prefer-dark-theme=" + values["gtkPreferDark"] + "\n", "")
     files["gtk4.css"] = files["gtk.css"] + files["gtk4.css"]
     files["gtk-settings.ini"] = files["gtk-settings.ini"].replace(
         "gtk-theme-name=Adwaita", "gtk-theme-name=Icewine-" + palette_file.stem
