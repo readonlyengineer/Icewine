@@ -729,6 +729,51 @@ const expression = (source, property) => source.match(new RegExp(`^ *${property}
 const surfaceSource = topbar.split("id: surface")[1].split("// Consume")[0]
 const popoutSource = topbar.split("id: statusPopout")[1]
 const edgeSource = topbar.split("id: edge\n")[1].split("HoverHandler")[0]
+const layerShell = controller("../modules/Topbar.qml", {...shell,
+    ui: State.initial(), interactionActive: false, previousWindow: "", radial: null,
+    Config: {Settings: {...shell.Config.Settings}}, Qt: {callLater() {}}})
+Object.defineProperty(layerShell, "widgetEngaged", {get: () => layerShell.ui.engaged})
+const barWindowSource = topbar.split("property PanelWindow barWindow: PanelWindow")[1]
+const layerFor = screen => {
+    const env = {root: {ui: layerShell.ui, barVisible: !layerShell.sessionLocked
+        && State.barVisible(layerShell.ui, false, false, layerShell.Config.Settings.barBehaviour)},
+        screen: {name: screen}, Config: layerShell.Config, panel: {}, statusPopout: {}, WlrLayer: {Overlay: 1, Top: 0}}
+    env.panel.widgetHere = vm.runInNewContext(expression(topbar, "readonly property bool widgetHere"), env)
+    env.statusPopout.shown = vm.runInNewContext(expression(popoutSource, "shown"), env)
+    return vm.runInNewContext(expression(barWindowSource, "WlrLayershell.layer"), env)
+}
+for (const behaviour of Cards.barBehaviours) for (const location of Cards.barLocations) {
+    layerShell.Config.Settings.barBehaviour = behaviour
+    layerShell.Config.Settings.barLocation = location
+    layerShell.ui = State.initial()
+    const idleLayer = location === "above" ? 1 : 0
+    assert.equal(layerFor("external"), idleLayer)
+    layerShell.pressBar()
+    assert.equal(layerFor("external"), idleLayer, "Showing only the bar retains ordinary fullscreen policy")
+    for (const engaged of [false, true]) {
+        layerShell.openWidget("audio", engaged, "external")
+        assert.equal(layerFor("external"), 1, "Opening a preview or engaged card promotes its bar")
+        assert.equal(layerFor("deck"), idleLayer, "The other output keeps its layer")
+        layerShell.releaseBar()
+        assert.equal(layerFor("external"), 1, "Held shortcut release leaves the open card's bar promoted")
+        layerShell.openWidget("network", engaged, "deck")
+        assert.equal(layerFor("external"), idleLayer, "Changing output restores the old bar")
+        assert.equal(layerFor("deck"), 1)
+        layerShell.sessionLocked = true
+        assert.equal(layerFor("deck"), idleLayer, "Lock hides chrome even before dismissal")
+        layerShell.sessionLocked = false
+        vm.runInNewContext(topbar.match(/function onScreensChanged\(\) \{([\s\S]*?)^        \}/m)[1],
+            {root: layerShell, Quickshell: {screens: [{name: "external"}]}})
+        assert.equal(layerFor("deck"), idleLayer, "Removing the owning output clears the interaction")
+    }
+    layerShell.openWidget("switcher", true, "external")
+    assert.equal(layerFor("external"), idleLayer, "Switcher does not promote an independently visible bar")
+    layerShell.openWidget("launcher", true, "external")
+    layerShell.instantHandoff(true)
+    assert.equal(layerFor("external"), idleLayer, "Instant capture suppression removes promotion synchronously")
+    assert.equal(layerShell.ui.suppressed, true)
+}
+console.log("widget bar layers: owning output, previews/engagement, release, switch, dismiss/removal, lock and instant capture pass")
 for (const behaviour of Cards.barBehaviours) for (const location of Cards.barLocations) {
     for (const height of [80, 600, 1440]) for (const visible of [false, true]) {
         const env = {root: {bottomBar: location === "bottom", barVisible: visible, barHeight: 38, barGap: 0, barExtent: 38, sessionLocked: false},

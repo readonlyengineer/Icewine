@@ -116,6 +116,7 @@ ShellRoot {
             id: panel
             width: 1280; height: 800
             property var screen: ({name: "fixture"})
+            readonly property bool widgetHere: __WIDGET_HERE__
             readonly property int reservation: __RESERVATION__
             readonly property string hoverPage: __HOVER_PAGE__
             Item {
@@ -135,6 +136,7 @@ ShellRoot {
                     - overlayRequest.margins.top - overlayRequest.margins.bottom - aboveInset
             Rectangle {
                 id: statusPopout
+                readonly property bool shown: __POPOUT_SHOWN__
                 property int backgroundCount: 0
                 property bool backgroundAttention: false
                 implicitHeight: 620
@@ -230,6 +232,49 @@ ShellRoot {
                 }
                 root.instantBarHide = true
             }
+            function widget_layers() {
+                for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"])
+                for (const location of ["above", "top", "bottom"]) {
+                    Config.Settings.widgetSelections = {barBehaviour: behaviour, barLocation: location}
+                    root.ui = State.initial()
+                    function layer(expected) {
+                        compare(barRequest.layer, location === "above" ? WlrLayer.Overlay : expected)
+                        compare(barRequest.keyboardFocus, WlrKeyboardFocus.None)
+                        compare(barRequest.exclusiveZone, root.barVisible && location !== "above" ? root.barExtent : 0)
+                        compare(barRequest.anchors.bottom, location === "bottom")
+                    }
+                    layer(WlrLayer.Top)
+                    root.ui = State.reduce(root.ui, {type: "press", behaviour: behaviour})
+                    for (const engaged of [false, true]) {
+                        root.ui = State.reduce(root.ui, {type: "open", page: "audio", engaged: engaged, screen: "fixture"})
+                        layer(WlrLayer.Overlay)
+                        root.ui = State.reduce(root.ui, {type: "release"})
+                        layer(WlrLayer.Overlay)
+                        wait(1)
+                        const barTop = barHost.y + surface.y
+                        const popupTop = input.y + statusPopout.y
+                        verify(location === "bottom" ? popupTop + statusPopout.height <= barTop - 4
+                            : popupTop >= barTop + surface.height + 4)
+                        root.ui = State.reduce(root.ui, {type: "open", page: "network", engaged: engaged, screen: "other"})
+                        layer(WlrLayer.Top)
+                        root.ui = State.reduce(root.ui, {type: "open", page: "launcher", engaged: engaged, screen: "fixture"})
+                        layer(WlrLayer.Overlay)
+                        root.sessionLocked = true
+                        layer(WlrLayer.Top)
+                        root.sessionLocked = false
+                        root.ui = State.reduce(root.ui, {type: "dismiss"})
+                        layer(WlrLayer.Top)
+                    }
+                    root.ui = State.reduce(root.ui, {type: "open", page: "switcher", engaged: true, screen: "fixture"})
+                    layer(WlrLayer.Top)
+                    root.ui = State.reduce(root.ui, {type: "open", page: "audio", engaged: true, screen: "fixture"})
+                    layer(WlrLayer.Overlay)
+                    root.ui = State.reduce(root.ui, {type: "hide"})
+                    layer(WlrLayer.Top)
+                    compare(surface.opacity, 0)
+                    compare(Config.Settings.barLocation, location)
+                }
+            }
             function native_geometry() {
                 // Captured failure: 2880x1800 at 1.5x => logical 1920x1200;
                 // the old 1238-high overlay placed the bottom surface at y=1200.
@@ -307,6 +352,7 @@ ShellRoot {
                 }
                 native_geometry()
                 transitions()
+                widget_layers()
                 capture_animations()
                 // Media-leading stacks use the retained independent capsule and routing.
                 panel.width = 1280
@@ -409,6 +455,8 @@ for key, value in {'TEST_CALL': 'checks.capture_animations(); console.log(\"BAR_
                    'BAR_VISIBLE': re.search(r'readonly property bool barVisible: ([\s\S]*?)\n    readonly', native)[1],
                    'CONTENT_INSET': binding('anchors.topMargin', native[native.index('                id: input'):]),
                    'RESERVATION': binding('readonly property int reservation'),
+                   'WIDGET_HERE': binding('readonly property bool widgetHere'),
+                   'POPOUT_SHOWN': binding('shown', popout),
                    'HOVER_PAGE': binding('readonly property string hoverPage'),
                    'POPOUT_X': binding('x', popout), 'POPOUT_Y': binding('y', popout),
                    'POPOUT_HEIGHT': binding('height', popout)}.items():
