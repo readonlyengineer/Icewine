@@ -161,9 +161,11 @@ Selections survive login and theme changes. An explicit `services.icewine.theme`
 setting overrides the CLI theme choice; leave it unset to choose themes yourself.
 
 Shell Extras Apply selects the generated Icewine theme in a regular btop config,
-preserving other preferences unless Overwrite is selected. Symlinked configs are
-preserved; set `color_theme = "icewine"` in their source yourself. Theme changes
-update colours only. Install btop through your host package configuration and
+defaulting to the terminal background while preserving an explicit
+`theme_background` preference. Other preferences are preserved unless Overwrite
+is selected. Symlinked configs are preserved; set `color_theme = "icewine"` and
+`theme_background = false` in their source yourself. Theme changes update
+colours only. Install btop through your host package configuration and
 reopen it after Apply or changing themes.
 
 ### Manage integrations and dotfiles

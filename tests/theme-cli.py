@@ -725,7 +725,8 @@ with tempfile.TemporaryDirectory() as temporary:
 
 print("PASS: retained contrast, opacity, concurrent publication, reload failure and pidfd ownership coverage")
 
-# Optional native smoke check; btop remains outside mandatory test dependencies.
+# Optional native palette smoke check with theme background explicitly enabled;
+# btop remains outside mandatory test dependencies.
 # Run: python3 tests/theme-cli.py scripts/theme scripts/icewine theme/assets /path/to/btop
 if len(sys.argv) > 4:
     with tempfile.TemporaryDirectory() as temporary:
@@ -742,11 +743,11 @@ if len(sys.argv) > 4:
         for theme_id, background in [("dracula", b"48;2;40;42;54m"),
                                      ("gruvbox-light", b"48;2;242;229;188m")]:
             theme.publish(config, theme.render_theme(assets, assets / "themes" / (theme_id + ".json")))
-            (config / "btop/btop.conf").write_text('color_theme = "Default"\nupdate_ms = 500\n')
+            (config / "btop/btop.conf").write_text('color_theme = "Default"\nupdate_ms = 500\ntheme_background = true\n')
             with patch.dict(os.environ, dict(env, ICEWINE_DEFAULT_FILES=str(defaults), ICEWINE_THEME_SKIP="")):
                 theme.install_defaults(defaults, config, root / "data", root / "state/icewine", False, "btop")
                 theme.install_links(config, root / "state/icewine", False, "btop")
-            assert (config / "btop/btop.conf").read_text() == 'color_theme = "icewine"\nupdate_ms = 500\n'
+            assert (config / "btop/btop.conf").read_text() == 'color_theme = "icewine"\nupdate_ms = 500\ntheme_background = true\n'
             assert selected.is_symlink() and selected.resolve() == (config / "icewine/current/btop.theme").resolve()
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 35, 120, 0, 0))

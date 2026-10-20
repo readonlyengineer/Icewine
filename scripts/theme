@@ -529,6 +529,8 @@ def install_defaults(defaults, config, data, state, replace, app):
                                              r'\g<1>"icewine"', contents)
                     if not count:
                         selected = contents + ("\n" if contents and not contents.endswith("\n") else "") + 'color_theme = "icewine"\n'
+                    if not re.search(r'(?m)^[ \t]*theme_background[ \t]*=', selected):
+                        selected += ("\n" if selected and not selected.endswith("\n") else "") + "theme_background = false\n"
                     if selected != contents:
                         atomic_text(path, selected, path.stat().st_mode & 0o7777, root=root, signature=signature)
                     # Selecting a theme does not make personal preferences ours to retire.

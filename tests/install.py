@@ -737,29 +737,40 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     btop = config / "btop/btop.conf"
     btop_link = config / "btop/themes/icewine.theme"
     assert btop.read_bytes() == btop_default.read_bytes()
+    assert btop.read_text() == 'color_theme = "icewine"\ntheme_background = false\n'
     assert btop_link.is_symlink() and btop_link.resolve() == (config / "icewine/current/btop.theme").resolve()
     preferences = btop.read_text() + "update_ms = 500\nvim_keys = true\n"
     btop.write_text(preferences)
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
         # An existing default/custom selection must change on explicit Apply only.
-        for existing, expected in (
-            ('# color_theme = "Default"\ncolor_theme = "Default"\n',
-             '# color_theme = "Default"\ncolor_theme = "icewine"\nupdate_ms = 500\nvim_keys = true'),
-            ('color_theme="custom"\ncolor_theme = "Default"\n',
-             'color_theme="icewine"\ncolor_theme = "icewine"\nupdate_ms = 500\nvim_keys = true'),
-            ('', 'update_ms = 500\nvim_keys = true\ncolor_theme = "icewine"\n'),
-        ):
-            personal = existing + "update_ms = 500\nvim_keys = true"  # No final newline.
-            btop.write_text(personal)
-            btop.chmod(0o600)
-            apply(("shellExtras",), readonly=True)
-            selected = btop.read_text()
-            assert selected == expected
-            assert btop.stat().st_mode & 0o777 == 0o600
-            apply(("shellExtras",), readonly=True)
-            assert btop.read_text() == selected  # Repeated Apply is stable.
-            apply((), readonly=True)
-            assert btop.read_text() == selected  # Personal config is never retired.
+        for background in ("", "# theme_background = true\n", "theme_background = true\n",
+                           "theme_background=false\n", " \ttheme_background \t= True\n"):
+            for existing, expected in (
+                ('# color_theme = "Default"\ncolor_theme = "Default"\n',
+                 '# color_theme = "Default"\ncolor_theme = "icewine"\n'),
+                ('color_theme="custom"\ncolor_theme = "Default"\n',
+                 'color_theme="icewine"\ncolor_theme = "icewine"\n'),
+                ('', ''),
+            ):
+                preferences_tail = "update_ms = 500\nvim_keys = true"  # No final newline.
+                personal = existing + background + preferences_tail
+                expected += background + preferences_tail
+                if not existing:
+                    expected += '\ncolor_theme = "icewine"\n'
+                if background in ("", "# theme_background = true\n"):
+                    expected += ("" if expected.endswith("\n") else "\n") + "theme_background = false\n"
+                btop.write_text(personal)
+                btop.chmod(0o600)
+                apply((), readonly=True)
+                assert btop.read_text() == personal  # Unselected extras never edit it.
+                apply(("shellExtras",), readonly=True)
+                selected = btop.read_text()
+                assert selected == expected
+                assert btop.stat().st_mode & 0o777 == 0o600
+                apply(("shellExtras",), readonly=True)
+                assert btop.read_text() == selected  # Repeated Apply is stable.
+                apply((), readonly=True)
+                assert btop.read_text() == selected  # Personal config is never retired.
         personal_config = root / "personal-btop.conf"
         personal_config.write_text('color_theme = "Default"\nupdate_ms = 500\n')
         btop.unlink()
@@ -770,6 +781,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         btop.write_text(preferences)
         apply(("shellExtras",), readonly=True)
         assert btop.read_text() == preferences
+        btop.write_text(preferences.replace("theme_background = false", "theme_background = true"))
         apply(("shellExtras",), overwrite=True, readonly=True)
         assert btop.read_bytes() == btop_default.read_bytes()
         btop.write_text(preferences)
