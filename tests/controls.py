@@ -323,7 +323,7 @@ ShellRoot {
                 Popouts.ActionButton {
                     id: companionButton
                     text: "Companion"
-                    x: 0; y: 60; width: 24; height: 70
+                    x: 0; y: parent.height - 70; width: 24; height: 70
                     enabled: companionCard.active
                     onClicked: ++cardWindow.companionCalls
                 }
@@ -332,7 +332,7 @@ ShellRoot {
     }
     Window {
         id: backgroundWindow
-        width: 434; height: 488
+        width: 416; height: 488
         property int activations: 0
         property int handoffs: 0
         property var trayItems: []
@@ -422,12 +422,12 @@ ShellRoot {
             stack.selectCard(front)
             toggleKeys.tryCompare(stack, "exchanging", false, 900)
             const near = cards[(front + 1) % 3], far = cards[(front + 2) % 3]
-            if (cards[front].x !== 26 || cards[front].y !== 56
-                    || near.x !== 17 || near.y !== 32 || far.x !== 8 || far.y !== 8
+            if (cards[front].x !== 8 || cards[front].y !== 8
+                    || near.x !== 8 || near.y !== 32 || far.x !== 8 || far.y !== 56
                     || !(far.z < near.z && near.z < cards[front].z))
                 throw new Error("Three-card rear exposure/order is incorrect")
             // Whole exposed strips promote without invoking controls.
-            toggleKeys.mouseClick(far, 40, 8)
+            toggleKeys.mouseClick(far, 40, far.height - 8)
             toggleKeys.tryCompare(stack, "exchanging", false, 900)
             if (stack.selectedCard !== (front + 2) % 3 || layoutCompositor.calls.length)
                 throw new Error("Rear strip did not promote inertly")
@@ -527,11 +527,11 @@ ShellRoot {
         const second = {id: "second", title: "Second", icon: "", status: 0, hasMenu: true, menu: null}
         backgroundWindow.trayItems = [first, second]
         toggleKeys.wait(30)
-        if (stack.cards.length !== 2 || host.implicitWidth !== 434 || host.implicitHeight !== 488)
+        if (stack.cards.length !== 2 || host.implicitWidth !== 416 || host.implicitHeight !== 488)
             throw new Error("First tray arrival failed optional-card creation")
         const rear = stack.cards[1]
         const apps = descendants(rear, item => item.selectedItem !== undefined)[0]
-        toggleKeys.mouseClick(rear, 8, 80)
+        toggleKeys.mouseClick(rear, 40, rear.height - 8)
         toggleKeys.tryCompare(stack, "exchanging", false, 900)
         if (stack.selectedCard !== 1 || backgroundWindow.activations || backgroundWindow.handoffs
                 || !apps.initialFocus.activeFocus)
@@ -607,11 +607,11 @@ ShellRoot {
         if (!launcherCard.initialFocus.activeFocus) throw new Error("Launcher focus entry failed")
         launcherStack.cards = [launcherCard, companionCard]
         toggleKeys.wait(20)
-        if (launcherCard.width !== 366 || launcherCard.height !== 360
-                || launcherCard.x !== 26 || launcherCard.y !== 56 || companionCard.active)
+        if (launcherCard.width !== 384 || launcherCard.height !== 360
+                || launcherCard.x !== 8 || launcherCard.y !== 8 || companionCard.active)
             throw new Error("Launcher did not compose through shared stack geometry")
-        // The exposed rear body lies over a real control, but promotes only.
-        toggleKeys.mouseClick(companionCard, 8, 80)
+        // The exposed bottom strip lies over a real control, but promotes only.
+        toggleKeys.mouseClick(companionCard, 8, companionCard.height - 8)
         toggleKeys.tryCompare(launcherStack, "exchanging", false, 900)
         if (launcherStack.selectedCard !== 1 || cardWindow.companionCalls !== 0)
             throw new Error("Rear body click failed selection-only routing")
@@ -671,8 +671,8 @@ ShellRoot {
         if (graphPage.contentY <= 0) throw new Error("Constrained graphs did not scroll")
         focusPopout.focusInitial()
         if (stack.selectedCard !== 1) throw new Error("Focus restoration reset Power selection")
-        // Whole rear surface consumes selection without firing the Lock beneath it.
-        toggleKeys.mouseClick(power, 8, 80)
+        // Exposed rear strip consumes selection without firing content.
+        toggleKeys.mouseClick(power, 40, power.height - 8)
         toggleKeys.wait(240)
         if (!power.active || root.sessionAction !== actions || !body.brightness.active)
             throw new Error("Rear Power surface activated content or lost brightness activity")
@@ -693,8 +693,8 @@ ShellRoot {
         toggleKeys.wait(180)
         if (!power.active) throw new Error("Ordinary Power reopen retained rear selection")
         const touch = toggleKeys.touchEvent(focusWindow)
-        touch.press(0, perf, 8, 12).commit()
-        touch.release(0, perf, 8, 12).commit()
+        touch.press(0, perf, 40, perf.height - 8).commit()
+        touch.release(0, perf, 40, perf.height - 8).commit()
         toggleKeys.wait(240)
         if (!perf.active || root.sessionAction !== actions)
             throw new Error("Touch promotion failed or fired a session action")
@@ -749,7 +749,7 @@ ShellRoot {
         if (bt.pairingDevice !== device || Fixtures.Bluetooth.calls.join() !== "pair")
             throw new Error("Pairing did not start")
         // Rear promotion consumes the click, preserving discovery and pair intent.
-        toggleKeys.mouseClick(audio, 8, 20)
+        toggleKeys.mouseClick(audio, 40, audio.height - 8)
         toggleKeys.wait(240)
         const sink = Fixtures.Pipewire.defaultAudioSink
         const muted = sink.audio.muted
@@ -943,9 +943,9 @@ ShellRoot {
         const rear = other.parent
         const body = descendants(front, item => item instanceof Flickable)[0]
         const rearDepth = page.rearOffset(rear.index, front.index)
-        if (front.x - rear.x !== 18 * (1 - rearDepth) || front.y - rear.y !== 48 * (1 - rearDepth) || front.z <= rear.z
+        if (front.x !== rear.x || rear.y - front.y !== 48 * (1 - rearDepth) || front.z <= rear.z
                 || front.color.toString() !== rear.color.toString() || front.opacity !== 1 || rear.opacity !== 1)
-            throw new Error("Cards lost their opaque lower/right stack")
+            throw new Error("Cards lost their opaque vertical stack")
         for (const card of [front, rear]) {
             if (card.x < 0 || card.y < 0 || card.x + card.width > page.width
                     || card.y + card.height > page.height || !card.clip)
@@ -1165,10 +1165,10 @@ ShellRoot {
         if (page.selectedCard !== 0 || page.exchanging)
             throw new Error("Hover/focus selected the alternate card")
         // Real click and early reversal, with both bodies inert and focus stationary.
-        networkKeys.mouseClick(second, 40, 20)
+        networkKeys.mouseClick(second.parent, 40, second.parent.height - 8)
         networkKeys.wait(30)
         const outgoing = first.parent
-        if (!page.exchanging || outgoing.x >= 26 || outgoing.z !== 2
+        if (!page.exchanging || outgoing.x >= 8 || outgoing.z !== 2
                 || wifi.enabled || tailscale.enabled || first.activeFocus || second.activeFocus)
             throw new Error("Early sweep did not move the front or remove body/title focus")
         const stationary = networkWindow.activeFocusItem
@@ -1184,7 +1184,7 @@ ShellRoot {
                 throw new Error("Host focus re-entry left the visible stationary motion target")
         }
         checkHostFocus()
-        networkKeys.mouseClick(second, 40, 20)
+        networkKeys.mouseClick(second.parent, 40, second.parent.height - 8)
         if (second.activeFocus) throw new Error("Repeated selection focused a moving title")
         const x = outgoing.x, y = outgoing.y
         page.selectCard(0)
@@ -1218,10 +1218,10 @@ ShellRoot {
         page.selectCard(1)
         settleCards(page)
         checkNetworkCards(second, first, page)
-        // The exposed rear title also accepts real touch; Enter on the stationary target reverses.
+        // The exposed rear strip also accepts real touch; Enter on the stationary target reverses.
         const touch = networkKeys.touchEvent(networkWindow)
-        touch.press(0, first, 40, 20).commit()
-        touch.release(0, first, 40, 20).commit()
+        touch.press(0, first.parent, 40, first.parent.height - 8).commit()
+        touch.release(0, first.parent, 40, first.parent.height - 8).commit()
         networkKeys.wait(20)
         networkKeys.keyPress(Qt.Key_Enter)
         if (page.selectedCard !== 0) throw new Error("Motion reversal acted on key press")
@@ -2125,8 +2125,53 @@ ShellRoot {
                         const row = icons.children.find(item => item.children.some(child => child.page !== undefined))
                         input.compare(row.children.filter(item => item.page !== undefined && item.visible)[0].page, "notifications")
                         input.compare(new Set(stack.cards.map(card => card.y)).size, 4)
+                        input.compare(host.implicitWidth, Math.max(...stack.cards.map(card => card.implicitWidth)) + 16)
+                        input.compare(new Set(stack.cards.map(card => card.x)).size, 1)
+                        input.compare(stack.cards[index].y, 8)
+                        for (const card of stack.cards) {
+                            input.compare(card.x, 8)
+                            input.verify(card.y >= 8 && card.y + card.height <= stack.height - 8)
+                            input.compare(card.x + card.width, stack.width - 8)
+                        }
+                        const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
+                        if (directory) input.grabImage(host).save(directory + "/vertical-" + (palette === light ? "light" : "dark") + "-four-" + index + ".png")
                     }
+                    const before = stack.cards.map(card => [card.x, card.y])
+                    stack.selectCard(0)
+                    const animation = Array.from(stack.data).find(item => item.property === "progress")
+                    animation.pause()
+                    for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
+                        stack.progress = progress
+                        input.wait(20)
+                        for (const [i, card] of Array.from(stack.cards).entries()) {
+                            input.verify(card.y >= 8 && card.y + card.height <= stack.height - 8)
+                            if (progress === 0) input.compare([card.x, card.y].join(), before[i].join())
+                            if (card.index !== stack.outgoingCard) input.compare(card.x, 8)
+                        }
+                        if (progress === 0.5) input.verify(stack.cards[stack.outgoingCard].x + stack.cards[stack.outgoingCard].width < 0)
+                        const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
+                        if (directory) input.grabImage(host).save(directory + "/vertical-" + (palette === light ? "light" : "dark") + "-motion-" + progress + ".png")
+                    }
+                    const endpoint = stack.cards.map(card => [card.x, card.y].join()).join(";")
+                    stack.finishExchange()
+                    input.compare(stack.cards.map(card => [card.x, card.y].join()).join(";"), endpoint)
                 }
+                for (const palette of [light, dark]) for (const count of [1, 2]) {
+                    Theme.Palette.file.setText(palette.text())
+                    input.verify(Theme.Palette.refresh())
+                    host.cardStacks = [{id: "preview", modules: mixed[0].modules.slice(0, count)}]
+                    input.wait(220)
+                    input.compare(stack.cards.length, count)
+                    input.compare(host.implicitWidth, Math.max(...stack.cards.map(card => card.implicitWidth)) + (count === 1 ? 0 : 16))
+                    input.compare(stack.cards[0].x, count === 1 ? 0 : 8)
+                    input.compare(stack.cards[0].y, count === 1 ? 0 : 8)
+                    const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
+                    if (directory) input.grabImage(host).save(directory + "/vertical-" + (palette === light ? "light" : "dark") + "-count-" + count + ".png")
+                }
+                host.cardStacks = mixed
+                input.wait(40)
+                stack.selectCard(3)
+                input.tryCompare(stack, "exchanging", false, 900)
                 host.focusInitial()
                 input.keyClick(Qt.Key_Tab)
                 input.tryCompare(stack, "exchanging", false, 900)
@@ -2135,8 +2180,8 @@ ShellRoot {
                 input.tryCompare(stack, "exchanging", false, 900)
                 input.compare(stack.frontCard, 3)
                 const touch = input.touchEvent(window)
-                touch.press(0, stack.cards[0], 8, 6).commit()
-                touch.release(0, stack.cards[0], 8, 6).commit()
+                touch.press(0, stack.cards[0], 40, stack.cards[0].height - 4).commit()
+                touch.release(0, stack.cards[0], 40, stack.cards[0].height - 4).commit()
                 input.tryCompare(stack, "exchanging", false, 900)
                 input.compare(stack.frontCard, 0)
                 stack.selectCard(3)
@@ -2933,9 +2978,9 @@ ShellRoot {
             checkProjections("2,2,4")
             const top = stack.cards.find(card => card.z === 2)
             const lower = stack.cards.find(card => card !== top)
-            comparePixel(top, 2, 160, top.y - 2, label + " onto card")
-            comparePixel(top, 4, 160, top.y + top.height + 2, label + " onto windows")
-            comparePixel(lower, 2, 160, lower.y - 2, label + " lower onto windows")
+            comparePixel(top, 2, 160, top.y + top.height + 2, label + " onto card")
+            comparePixel(top, 4, 160, top.y - 2, label + " onto windows")
+            comparePixel(lower, 2, 160, lower.y + lower.height + 2, label + " lower onto windows")
             const image = keys.grabImage(window.contentItem)
             if (image.pixel(160, top.y + 20).r !== 1 || image.pixel(360, 120).r !== 1)
                 throw new Error("Shadow occlusion or constrained clip regressed")
@@ -2962,10 +3007,10 @@ ShellRoot {
                     stack.cards = [front, rear, third]
                     keys.wait(60)
                     window.checkProjections("1,1,2,2,3,4")
-                    window.comparePixel(rear, 1, 160, rear.y - 2, "middle onto bottom")
-                    window.comparePixel(front, 1, 160, front.y - 2, "top onto middle")
-                    window.comparePixel(front, 4, 160, front.y + front.height + 2, "triple top onto windows")
-                    window.comparePixel(third, 2, 160, third.y - 2, "bottom onto windows")
+                    window.comparePixel(rear, 1, 160, rear.y + rear.height + 2, "middle onto bottom")
+                    window.comparePixel(front, 1, 160, front.y + front.height + 2, "top onto middle")
+                    window.comparePixel(front, 4, 160, front.y - 2, "triple top onto windows")
+                    window.comparePixel(third, 2, 160, third.y + third.height + 2, "bottom onto windows")
                     const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
                     if (directory) keys.grabImage(window.contentItem).save(directory + "/shadow-triple.png")
                     stack.selectCard(1)

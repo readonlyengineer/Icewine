@@ -16,7 +16,7 @@ FocusScope {
     property Item initialFocus: exchanging ? motionFocus : cards[selectedCard]?.initialFocus ?? null
     readonly property Item motionInitialFocus: motionFocus
     signal selectionChanging()
-    implicitWidth: Math.max(0, ...cards.map(card => card.implicitWidth)) + (stacked ? 34 : 0)
+    implicitWidth: Math.max(0, ...cards.map(card => card.implicitWidth)) + (stacked ? 16 : 0)
     implicitHeight: Math.max(0, ...cards.map(card => card.implicitHeight)) + (stacked ? 64 : 0)
     clip: true
     onAvailableChanged: if (!available && exchanging) finishExchange()

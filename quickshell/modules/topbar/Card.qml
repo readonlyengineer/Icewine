@@ -25,7 +25,7 @@ Rectangle {
     readonly property real advance: stack ? stack.inOutCubic(stack.progress) : 0
     readonly property real sweep: !stack ? 0 : card.stack.progress < 0.5 ? card.stack.inOutCubic(card.stack.progress * 2)
         : 1 - Math.pow(1 - (card.stack.progress - 0.5) * 2, 3)
-    width: !stack ? implicitWidth : Math.max(0, card.stack.width - (card.stack.stacked ? 34 : 0))
+    width: !stack ? implicitWidth : Math.max(0, card.stack.width - (card.stack.stacked ? 16 : 0))
     height: !stack ? implicitHeight : Math.max(0, card.stack.height - (card.stack.stacked ? 64 : 0))
     readonly property real rearStart: stack ? stack.rearOffset(index, stack.outgoingCard) : 0
     readonly property real rearEnd: stack ? stack.rearOffset(index, stack.incomingCard) : 0
@@ -34,12 +34,12 @@ Rectangle {
         : index === stack.incomingCard ? rearStart + (1 - rearStart) * advance
         : rearStart + (rearEnd - rearStart) * advance
     x: !stack || !stack.stacked ? 0 : 8 + (stack.exchanging && outgoing
-        ? stack.progress < 0.5 ? 18 + (-width - 30) * sweep
-            : -width - 12 + (width + 12 + 18 * rearEnd) * sweep
-        : 18 * depth)
+        ? stack.progress < 0.5 ? (-width - 12) * sweep
+            : -width - 12 + (width + 12) * sweep
+        : 0)
     y: !stack || !stack.stacked ? 0 : 8 + (stack.exchanging && outgoing
-        ? stack.progress < 0.5 ? 48 - 24 * sweep : 24 + (48 * rearEnd - 24) * sweep
-        : 48 * depth)
+        ? stack.progress < 0.5 ? 24 * sweep : 24 + (48 * (1 - rearEnd) - 24) * sweep
+        : 48 * (1 - depth))
     // The outgoing card clears the clipped host before the incoming card takes front.
     z: !stack ? 0 : !stack.exchanging ? (index === stack.frontCard ? 2 : 1 + depth)
         : outgoing ? (stack.progress < 0.5 ? 2 : 1 + rearEnd)

@@ -24,15 +24,16 @@ Set `stack` to the enclosing `CardStack` and list the card in the stack's `cards
 in index order. `index` defaults to zero; set subsequent indices to one/two.
 The host supplies the stack's actual width and height. A single card fills it
 at (0, 0), with no geometry deduction. The existing two-card presentation uses
-34px horizontal and 64px vertical allowance, an 18px/48px front offset, and the
+16px horizontal and 64px vertical allowance: all cards share an 8px x inset,
+the front sits at y=8px and the rear at y=56px. Selection retains the
 existing 200ms reversible exchange. The stack clips the sweep and draws no
 frame or focus underline.
 
 The supported compositions are one, two or three cards. Three cards keep the
 same outer allowance and front offset; the next card in cyclic declared order
-rests at 9px/24px behind the front and the other at 0px/0px (all inside the
-existing 8px inset). Both rear strips are exposed. Each exchange still moves
-one front/rear pair for 200ms; the third card interpolates its rear position.
+rests 24px below the front and the other 48px below it (all share the
+existing 8px horizontal inset). Both rear strips are exposed. Each exchange
+still moves one front/rear pair for 200ms; the third card interpolates its rear position.
 Requesting the outgoing card reverses the sweep. Requesting the third card
 during motion queues the latest intent until the current sweep completes,
 then exchanges again, without jumping moving surfaces. Tab/motion-key cycles
@@ -134,7 +135,7 @@ exposes `backgroundCount`/`backgroundAttention`. It adds a Background Apps card
 only for nonempty tray contents. Layout joins when `layoutsEnabled`, reusing
 `LayoutPicker` and the supplied compositor in a constrained ScrollView. Declared
 order is Launcher → Background Apps (if any) → Layout (if enabled). The single
-card remains 400×424; two/three cards add the shared 34×64 allowance, constrained
+card remains 400×424; two/three cards add the shared 16×64 allowance, constrained
 by the panel. Layout's initial focus is Autofullscreen when available, otherwise
 its selector. Its ScrollView reveals focused controls
 when constrained; Tab switches cards from its controls. Selection alone
