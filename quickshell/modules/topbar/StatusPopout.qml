@@ -195,7 +195,7 @@ Widget {
                         accent: moduleLoader.accent
                         accessibleName: (moduleLoader.modelData === "network" ? "Networking"
                             : moduleLoader.modelData === "battery" ? "Power"
-                            : moduleLoader.modelData === "ssh" ? "SSH"
+                            : moduleLoader.modelData === "ssh" ? "SSH Keyring"
                             : moduleLoader.modelData === "background" ? "Background applications"
                             : moduleLoader.modelData[0].toUpperCase() + moduleLoader.modelData.slice(1)) + " card"
                         implicitWidth: moduleLoader.modelData === "background" ? 400 : 380
@@ -241,7 +241,7 @@ Widget {
                         } }
                         Component { id: ssh; Item {
                             implicitHeight: page.implicitHeight + 53
-                            Text { x: 16; y: 18; text: "SSH"; color: card.accent
+                            Text { x: 16; y: 18; text: "SSH Keyring"; color: card.accent
                                 font { family: "JetBrainsMono Nerd Font"; pixelSize: 15 } }
                             Popouts.Ssh { id: page; anchors.fill: parent; anchors.topMargin: 53; active: card.active }
                         } }
