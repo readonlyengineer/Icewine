@@ -38,8 +38,8 @@ Rectangle {
             : -width - 12 + (width + 12) * sweep
         : 0)
     y: !stack || !stack.stacked ? 0 : 8 + (stack.exchanging && outgoing
-        ? stack.progress < 0.5 ? 24 * sweep : 24 + (48 * (1 - rearEnd) - 24) * sweep
-        : 48 * (1 - depth))
+        ? stack.progress < 0.5 ? 48 - 24 * sweep : 24 + (48 * rearEnd - 24) * sweep
+        : 48 * depth)
     // The outgoing card clears the clipped host before the incoming card takes front.
     z: !stack ? 0 : !stack.exchanging ? (index === stack.frontCard ? 2 : 1 + depth)
         : outgoing ? (stack.progress < 0.5 ? 2 : 1 + rearEnd)
