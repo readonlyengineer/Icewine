@@ -412,7 +412,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     frame.render_widget(Paragraph::new("Icewine needs an 80 x 24 terminal.\nResize to continue; Esc: cancel."), area); return;
                 }
                 let accent = Style::default().fg(colours[0]).bold();
-                let normal = Style::default().fg(colours[1]).bg(colours[2]);
+                let normal = Style::default().fg(colours[1]).bg(Color::Reset);
                 let muted = normal.fg(colours[3]);
                 let highlighted = normal.fg(colours[2]).bg(colours[0]).bold();
                 frame.render_widget(Block::default().style(normal), area);

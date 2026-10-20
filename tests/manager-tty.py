@@ -16,11 +16,12 @@ import tempfile
 import termios
 import time
 
-def rendered_frames(output, size, check_contrast=False, resize_events=()):
+def rendered_frames(output, size, check_contrast=False, resize_events=(), check_background=False):
     # Ratatui emits positioned cell deltas, not complete text on page changes.
     # Replay its cursor/clear commands; retain completed draws for assertions.
     rows, columns = size
     screen = [[" "] * columns for _ in range(rows)]
+    styles = [[(None, None)] * columns for _ in range(rows)]
     x = y = 0
     foreground = background = None
     frames = []
@@ -36,6 +37,7 @@ def rendered_frames(output, size, check_contrast=False, resize_events=()):
         if isinstance(token, tuple):
             rows, columns = token
             screen = [[" "] * columns for _ in range(rows)]
+            styles = [[(None, None)] * columns for _ in range(rows)]
             x = y = 0
             continue
         if token.startswith("\x1b["):
@@ -45,6 +47,7 @@ def rendered_frames(output, size, check_contrast=False, resize_events=()):
                 y, x = position[0] - 1, (position[1] if len(position) > 1 else 1) - 1
             elif (command == "J" and args == "2") or token == "\x1b[?1049h":
                 screen = [[" "] * columns for _ in range(rows)]
+                styles = [[(foreground, background)] * columns for _ in range(rows)]
             elif command == "m":
                 codes = [int(value or 0) for value in args.split(";")]
                 while codes:
@@ -52,8 +55,10 @@ def rendered_frames(output, size, check_contrast=False, resize_events=()):
                     if code == 0: foreground = background = None
                     elif code == 39: foreground = None
                     elif code == 49: background = None
-                    # Fixed manager palette emits indexed SGR; extend only
-                    # when a real palette or transport needs another encoding.
+                    elif 30 <= code <= 37: foreground = code - 30
+                    elif 40 <= code <= 47: background = code - 40
+                    elif 90 <= code <= 97: foreground = code - 90 + 8
+                    elif 100 <= code <= 107: background = code - 100 + 8
                     elif code in (38, 48) and len(codes) >= 2 and codes[0] == 5:
                         codes.pop(0)
                         colour = codes.pop(0)
@@ -65,6 +70,15 @@ def rendered_frames(output, size, check_contrast=False, resize_events=()):
                         if code == 38: foreground = colour
                         else: background = colour
             elif token == "\x1b[?25l":
+                if check_background:
+                    # The fixture's theme background is only a highlight foreground.
+                    # Check retained cells too: deltas must erase old selections.
+                    highlights = {((30, 30, 46), (137, 180, 250)), ((40, 42, 54), (189, 147, 249)), (0, 6)}
+                    for row, cells in enumerate(styles):
+                        for column, (fg, bg) in enumerate(cells):
+                            assert bg is None or (fg, bg) in highlights, (
+                                f"Non-default ordinary background at ({row+1}, {column+1}): fg={fg}, bg={bg}")
+                    assert all(bg is None for fg, bg in styles[0] + styles[-1]), "Opaque canvas border"
                 frames.append("\n".join("".join(row) for row in screen).encode())
         else:
             for char in token:
@@ -73,7 +87,9 @@ def rendered_frames(output, size, check_contrast=False, resize_events=()):
                 elif char >= " ":
                     if check_contrast and char != " " and background is not None:
                         assert foreground != background, f"Invisible {char!r} at ({y+1}, {x+1}): fg=bg={background}"
-                    if 0 <= y < rows and 0 <= x < columns: screen[y][x] = char
+                    if 0 <= y < rows and 0 <= x < columns:
+                        screen[y][x] = char
+                        styles[y][x] = (foreground, background)
                     x += 1
     return frames
 
@@ -82,9 +98,11 @@ parser.add_argument("binary", type=Path)
 parser.add_argument("--export-frames", type=Path, help="write complete text frames and raw terminal cells for developer inspection")
 parser.add_argument("--preview-only", action="store_true", help="run the existing native Theme preview/cancel/commit regression group")
 parser.add_argument("--frames-only", action="store_true", help="capture representative visual states without repeating the semantic suite")
+parser.add_argument("--background-only", action="store_true", help="check terminal-default cells across pages, previews, errors and resize")
 parser.add_argument("--spacing-only", action="store_true", help="check page geometry, wrapping and action placement with synthetic data")
 options = parser.parse_args()
 if options.frames_only and not options.export_frames: parser.error("--frames-only requires --export-frames")
+if options.frames_only and options.background_only: parser.error("--background-only requires background assertions; omit --frames-only")
 binary = options.binary.resolve()
 if options.export_frames: options.export_frames.mkdir(parents=True, exist_ok=True)
 capture_number = 0
@@ -99,7 +117,7 @@ elif sys.argv[1:] == ["appearance-state"]:
  response=" ".join(["themes=dracula,tokyo-night", "selected="+saved["theme"], "policy="+str(os.environ["TUI_POLICY"]=="1").lower(), "level="+saved["transparency"], "desktopLayout="+saved["layout"], os.environ["TUI_FILE_STATE"]])
  print(os.environ["TUI_APPEARANCE_WIRE"] or (response+" unknown=false" if os.environ["TUI_REFRESH_BAD"]=="1" and saved["theme"]!="tokyo-night" else response))
 elif sys.argv[1:2] == ["theme-preview"]:
- print("primary=89b4fa foreground=cdd6f4 background=1e1e2e muted=a6adc8 secondary=a6e3a1 tertiary=cba6f7")
+ print("primary=bd93f9 foreground=f8f8f2 background=282a36 muted=6272a4 secondary=50fa7b tertiary=ff79c6" if sys.argv[2] == "dracula" else "primary=89b4fa foreground=cdd6f4 background=1e1e2e muted=a6adc8 secondary=a6e3a1 tertiary=cba6f7")
 elif sys.argv[1:] == ["widget-icons"]:
  print("launcher= background=󰀻 layout=󰕰 media= audio= bluetooth= clipboard=󰅌 network=󰯡 tailscale=󰒍 ssh=󰣀 notifications=󰂜 battery=󰐥 performance=󰓅")
 elif sys.argv[1:] == ["widgets-state"]:
@@ -261,7 +279,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             (directory / "terminal.ansi").write_bytes(output)
             (directory / "capture.json").write_text(json.dumps(diagnostic, indent=2)+"\n")
         # Preserve the child outcome before either contrast or ICANON assertions.
-        last_frames = rendered_frames(output, size, check_contrast=not options.frames_only, resize_events=resize_events)
+        last_frames = rendered_frames(output, size, check_contrast=not options.frames_only, resize_events=resize_events, check_background=not options.frames_only)
         rendered = b"\n".join(last_frames)
         if options.export_frames:
             diagnostic["frames"] = len(last_frames)
@@ -394,6 +412,13 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert not any(call[0] == "apply" for call in all_last_calls)
         run(esc, "", bootstrap=True, size=(24,80), capture="bootstrap")
         print("PASS: spacing, wrapping, read-only values, status/action separation and native captures")
+    if options.background_only:
+        test_spacing()
+        test_theme_preview()
+        run(tab+b" ", state(), size=(24,80), capture="background-resize",
+            resize_steps=[((20,79),right+tab),((30,100),esc)])
+        print("PASS: terminal-default ordinary cells and retained highlight contrast across pages, previews, errors and resize")
+        sys.exit(0)
     if options.spacing_only:
         test_spacing()
         sys.exit(0)
