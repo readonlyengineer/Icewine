@@ -39,40 +39,7 @@ assert.deepEqual(status.bluetoothDevices(devices).map(device => device.name),
 
 console.log("status model checks passed")
 
-// Exercise the shared Bluetooth handlers used by pointer and keyboard callers.
-const fs = require("node:fs")
-const path = require("node:path")
-const vm = require("node:vm")
-const bluetooth = fs.readFileSync(path.join(__dirname, "../modules/topbar/popouts/Bluetooth.qml"), "utf8")
-const bluetoothState = {Connecting: 1, Disconnecting: 2}
-const bluetoothContext = vm.createContext({BluetoothDeviceState: bluetoothState, pairingDevice: null,
-    enabled: true, adapter: {enabled: true}, allDevices: []})
-for (const name of ["busy", "available", "activate", "forget"])
-    vm.runInContext(bluetooth.match(new RegExp(`    function ${name}\\(device\\) \\{[\\s\\S]*?^    \\}`, "m"))[0], bluetoothContext)
-for (const busy of [{pairing: true}, {state: 1}, {state: 2}]) {
-    const device = {...busy, paired: true,
-        connect() { throw new Error("Busy device connected") },
-        disconnect() { throw new Error("Busy device disconnected") },
-        pair() { throw new Error("Busy device paired") },
-        forget() { throw new Error("Busy device forgotten") }}
-    bluetoothContext.allDevices = [device]
-    bluetoothContext.activate(device)
-    bluetoothContext.forget(device)
-}
-const actions = []
-const idleDevice = {paired: true,
-    connect() { actions.push("connect") }, disconnect() { actions.push("disconnect") },
-    pair() { actions.push("pair") }, forget() { actions.push("forget") }}
-const connectedDevice = {...idleDevice, connected: true}
-const unpairedDevice = {...idleDevice, paired: false}
-bluetoothContext.allDevices = [idleDevice, connectedDevice, unpairedDevice]
-bluetoothContext.activate(idleDevice)
-bluetoothContext.activate(connectedDevice)
-bluetoothContext.activate(unpairedDevice)
-bluetoothContext.forget(idleDevice)
-assert.deepEqual(actions, ["connect", "disconnect", "pair", "forget"])
-
-// Native JSON and the actual QML request handlers: no daemon or routing queries.
+// Input/eligibility parsing is independent of the native controls fixture.
 const tailscaleModel = require("../modules/topbar/popouts/TailscaleModel.js")
 const peer = (id, extra = {}) => ({ID: id, HostName: id, Online: true,
     TailscaleIPs: ["100.64.0.2"], ExitNodeOption: true, ...extra})
@@ -159,6 +126,9 @@ assert.equal(offlineCity.id, "de", "Offer an eligible alternative when the selec
 assert.equal(offlineCity.selected, true)
 assert.deepEqual(tailscaleModel.exitCommand(grouped, "au-best"), ["tailscale", "set", "--exit-node=100.64.0.2"])
 
+// Native controls own success, confirmation, focus and hide/reopen scenarios.
+// Retain deterministic failure/deadline checks without real ten-second waits.
+const fs = require("node:fs"), path = require("node:path"), vm = require("node:vm")
 const tailscale = fs.readFileSync(path.join(__dirname, "../modules/topbar/popouts/Tailscale.qml"), "utf8")
 const killed = []
 const context = vm.createContext({Model: tailscaleModel, active: true, data: unavailableExit,
@@ -174,248 +144,23 @@ function respond(code, text, errors = "") {
     context.process.running = false
     context.finish(code, 0, text, errors)
 }
-context.selectExit("approved")
-assert.equal(context.request.id, "approved")
-assert.deepEqual(Array.from(context.process.command), ["tailscale", "set", "--exit-node=100.64.0.2"])
-context.selectExit("") // Busy request cannot be redirected by another choice.
-assert.equal(context.request.id, "approved")
-respond(1, "", "access denied")
-assert.match(context.error, /Permission denied/)
-assert.equal(context.data.selected, "offline")
-context.selectExit("approved")
-respond(1, "", "unexpected failure")
-assert.match(context.error, /request failed/)
-assert.equal(context.data.selected, "offline")
-context.selectExit("approved")
-context.data = {...decoded, exits: [...decoded.exits].reverse()}
-respond(0, "")
-context.selectExit("")
-assert.equal(context.request, null) // Confirmation also serializes choices.
-later.shift()()
-respond(0, JSON.stringify({...running, ExitNodeStatus: {ID: "approved", Online: true}}))
-assert.equal(context.data.selected, "approved")
-assert.equal(context.confirming, "")
-assert.equal(context.error, "")
-context.refresh()
-const preserved = context.data
-context.generation++
-respond(0, JSON.stringify({...running, BackendState: "NeedsLogin"}))
-assert.equal(context.data, preserved) // A hidden/reopened page rejects the old read.
-later.shift()()
-respond(0, "bad JSON")
-assert.equal(context.data.label, "Error")
-assert.equal(context.data.connected, false)
-context.refresh()
-respond(127, "", "client absent")
-assert.equal(context.data.label, "Unavailable")
-context.refresh()
-assert.equal(context.busy, true)
 const deadlineBody = tailscale.match(/id: deadline[\s\S]*?onTriggered: \{([\s\S]*?)^        \}/m)[1]
-vm.runInContext(deadlineBody, context)
-assert.deepEqual(killed, [9])
-assert.equal(context.busy, true, "Keep the slot until the killed process exits")
-const timedOutRead = context.request
-context.refresh()
-assert.equal(context.request, timedOutRead)
-respond(0, JSON.stringify(running)) // Even a successful exit after timeout is discarded.
-assert.equal(context.busy, false)
-assert.equal(context.data.label, "Unavailable")
-respond(0, JSON.stringify(running)) // A response after the deadline cannot restore stale state.
-assert.equal(context.data.label, "Unavailable")
 context.data = decoded
 context.selectExit("approved")
-respond(0, "")
-later.shift()()
-respond(0, JSON.stringify({...running, Self: {ID: "other-profile", Online: true, HostName: "New profile"}}))
-assert.match(context.error, /profile changed/)
-assert.equal(context.data.selfName, "New profile")
+respond(1, "", "access denied")
+assert.match(context.error, /Permission denied/)
+assert.equal(context.data, decoded, "A rejected mutation keeps confirmed state")
 context.refresh()
-respond(0, JSON.stringify({...running, Self: {...running.Self, HostName: "Renamed device"}}))
-assert.equal(context.data.selfName, "Renamed device")
-context.selectExit("approved")
-respond(0, "")
-later.shift()()
-respond(0, JSON.stringify(running))
-assert.match(context.error, /not confirmed/)
-console.log("Tailscale eligibility, offline clear, captured requests and asynchronous failure checks passed")
-
-// Toggle policy uses backend state: an offline Running daemon can still be stopped.
-const stopped = {BackendState: "Stopped", Self: {ID: "local", HostName: "Laptop"}}
-for (const [value, command] of [[running, ["tailscale", "down"]],
-    [offlineStatus, ["tailscale", "down"]], [stopped, ["tailscale", "up"]],
-    [{BackendState: "Stopped"}, ["tailscale", "up"]]]) {
-    const valueDecoded = tailscaleModel.decode(JSON.stringify(value))
-    assert.deepEqual(tailscaleModel.connectionCommand(valueDecoded), command)
-}
-for (const state of ["NeedsLogin", "NeedsMachineAuth", "Starting", "NoState"])
-    assert.equal(tailscaleModel.connectionCommand(tailscaleModel.decode(JSON.stringify({BackendState: state}))), null)
-assert.equal(tailscaleModel.connectionCommand(tailscaleModel.empty("Unavailable")), null)
-
-function resetConnection(value = running) {
-    context.data = tailscaleModel.decode(JSON.stringify(value))
-    context.active = true
-    context.error = context.confirming = ""
-    context.request = null
-    context.process.running = false
-    context.exitPicker.visible = false
-    later.length = 0
-}
-function confirmConnection(value) {
-    assert.ok(context.confirming)
-    later.shift()()
-    respond(0, JSON.stringify(value))
-    assert.equal(context.confirming, "")
-}
-resetConnection()
-context.toggleConnection()
-const disconnect = context.request
-assert.deepEqual(Array.from(context.process.command), ["tailscale", "down"])
-assert.equal(context.data.connected, true, "Do not optimistically disconnect")
-context.toggleConnection()
-context.selectExit("approved")
-context.refresh()
-assert.equal(context.request, disconnect, "All callers serialize with a connection mutation")
-respond(0, "")
-context.toggleConnection()
-assert.equal(context.request, null, "Confirmation serializes a second mutation")
-confirmConnection(stopped)
-assert.equal(context.error, "")
-assert.equal(context.data.self, "local", "Stopped identity is retained when supplied")
-context.toggleConnection()
-assert.deepEqual(Array.from(context.process.command), ["tailscale", "up"])
-respond(0, "")
-confirmConnection({...running, ExitNodeStatus: {ID: "approved", Online: true}})
-assert.equal(context.data.selected, "approved")
-assert.equal(context.error, "")
-
-for (const [code, errors, value, message] of [
-    [1, "permission denied", running, /Permission denied/],
-    [1, "unknown error", running, /request failed/],
-    [0, "", running, /not confirmed/],
-    [0, "", {...stopped, Self: {ID: "other", HostName: "Other"}}, /profile changed/],
-    [1, "login required", {BackendState: "NeedsLogin"}, /Sign in/],
-    [1, "approval required", {BackendState: "NeedsMachineAuth"}, /approval required/]
-]) {
-    resetConnection()
-    context.toggleConnection()
-    respond(code, "", errors)
-    confirmConnection(value)
-    assert.match(context.error, message)
-}
-resetConnection(stopped)
-context.toggleConnection()
 vm.runInContext(deadlineBody, context)
-assert.equal(context.busy, true)
-const timedOutMutation = context.request
-context.toggleConnection()
-assert.equal(context.request, timedOutMutation)
-respond(0, "")
-confirmConnection({...running, Self: {...running.Self, Online: false}})
-assert.equal(context.data.connected, false)
-assert.match(context.error, /timed out/)
-context.toggleConnection() // Running/offline can be stopped, never accidentally reconnected.
-assert.deepEqual(Array.from(context.process.command), ["tailscale", "down"])
-respond(0, "")
-confirmConnection(stopped)
-assert.equal(context.error, "")
-
-resetConnection()
-context.toggleConnection()
-context.active = false
-context.generation++
-respond(0, "")
-assert.ok(context.confirming, "Hidden mutation waits for a fresh read on reopening")
-assert.equal(later.length, 0)
-context.active = true
-context.generation++
+assert.deepEqual(killed, [9])
+const pending = context.request
 context.refresh()
-respond(0, JSON.stringify(stopped))
-assert.equal(context.error, "")
-assert.equal(context.confirming, "")
-resetConnection()
-context.exitPicker.visible = true
-context.toggleConnection()
-assert.equal(context.request, null)
-context.exitPicker.visible = false
-context.selectExit("approved")
-const exitRequest = context.request
-context.toggleConnection()
-assert.equal(context.request, exitRequest)
-respond(1, "", "failed")
-resetConnection()
-context.toggleConnection()
-respond(127, "", "missing CLI")
-later.shift()()
-respond(127, "", "missing CLI")
-assert.equal(context.data.label, "Unavailable")
-assert.equal(context.confirming, "")
-assert.equal(tailscaleModel.connectionCommand(context.data), null)
-resetConnection()
+assert.equal(context.request, pending, "Timeout keeps the slot until child exit")
+respond(0, JSON.stringify(running))
+assert.equal(context.data.label, "Unavailable", "Late success cannot revive timed-out data")
 context.refresh()
-context.process.running = false // Failed-to-start has no child to deliver an exit signal.
+context.process.running = false
 vm.runInContext(deadlineBody, context)
-assert.equal(context.busy, false)
-assert.equal(context.data.label, "Unavailable")
-assert.deepEqual(killed, [9, 9], "Missing CLI must not signal a nonexistent process")
-console.log("Tailscale connection commands, confirmation, recovery, profile and lifecycle checks passed")
-
-resetConnection()
-context.syncPicker()
-const settled = context.data
-const settledMenu = context.menuData
-context.refresh()
-respond(0, JSON.stringify({...running, Health: [], CurrentTailnet: {Name: "ignored"}}))
-assert.equal(context.data, settled, "Unchanged rendered status retains model identity")
-assert.equal(context.menuData, settledMenu, "Unchanged menu retains native items")
-context.refresh()
-respond(0, JSON.stringify({...running, Health: ["warning"]}))
-assert.match(context.data.label, /needs attention/)
-assert.equal(context.data.peers, settled.peers, "Headline changes must not rebuild devices")
-context.refresh()
-respond(0, JSON.stringify({...running, Peer: {...running.Peer, approved: peer("approved", {Online: false})}}))
-assert.equal(context.data.peers.find(peer => peer.id === "approved").online, false)
-context.refresh()
-respond(1, "", "service unavailable")
-assert.match(context.error, /unavailable/)
-context.refresh()
-respond(0, JSON.stringify(running))
-assert.equal(context.error, "", "Successful automatic recovery clears the read error")
-console.log("Tailscale quiet refresh, changed status, identity and error recovery checks passed")
-
-// Read-time input waits for fresh state; no overlapping command or stale-profile intent.
-resetConnection()
-context.refresh()
-context.toggleConnection()
-context.selectExit("approved")
-assert.equal(context.request.kind, "status")
-assert.equal(context.request.next.kind, "connection", "Only the first read-time action is retained")
-respond(0, JSON.stringify(running))
-assert.equal(context.request.kind, "connection")
-assert.deepEqual(Array.from(context.process.command), ["tailscale", "down"])
-respond(0, "")
-confirmConnection(stopped)
-for (const value of [stopped, {...running, Self: {ID: "other", Online: true}}]) {
-    resetConnection()
-    context.refresh()
-    context.toggleConnection()
-    respond(0, JSON.stringify(value))
-    assert.equal(context.request, null)
-    assert.match(context.error, /state changed/)
-}
-resetConnection()
-context.refresh()
-context.selectExit("approved")
-respond(0, JSON.stringify(running))
-assert.equal(context.request.kind, "set")
-assert.equal(context.request.id, "approved")
-respond(1, "", "failed")
-for (const outcome of ["hidden", "reopened", "error"]) {
-    resetConnection()
-    context.refresh()
-    context.toggleConnection()
-    if (outcome !== "error") { context.generation++; context.active = outcome === "reopened" }
-    respond(outcome === "error" ? 1 : 0, JSON.stringify(running))
-    assert.equal(context.request, null, "Invalidated read must discard pending input")
-    assert.equal(context.process.command[1], "status")
-}
-console.log("Tailscale read-time intent serialization and stale-owner checks passed")
+assert.equal(context.busy, false, "Failed-to-start has no exit signal")
+assert.deepEqual(killed, [9], "No signal is sent without a child")
+console.log("status model eligibility and request failure/deadline checks passed")

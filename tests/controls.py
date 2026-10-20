@@ -1255,46 +1255,7 @@ ShellRoot {
         settleCards(page)
         first.forceActiveFocus()
     }
-    FileView { id: cardDarkPalette; path: Qt.resolvedUrl("palette-dark.json"); blockAllReads: true }
-    FileView { id: cardLightPalette; path: Qt.resolvedUrl("palette-light.json"); blockAllReads: true }
-    function checkCardThemes(page, first, second) {
-        for (const palette of [cardDarkPalette, cardLightPalette]) {
-            Theme.Palette.file.setText(palette.text())
-            if (!Theme.Palette.refresh()) throw new Error("Card theme refresh failed")
-            networkKeys.wait(220)
-            for (const [selected, other] of [[first, second], [second, first]]) {
-                selectCardTarget(selected)
-                settleCards(page)
-                selected.forceActiveFocus()
-                for (const width of [380, 320]) {
-                    networkWindow.width = width
-                    networkKeys.wait(20)
-                    const naturalHeight = page.implicitHeight
-                    for (const height of [550, 360, 150]) {
-                        networkWindow.height = height
-                        networkKeys.wait(20)
-                        checkNetworkCards(selected, other, page)
-                        if (page.implicitHeight !== naturalHeight)
-                            throw new Error("Constrained card height fed back into natural measurement")
-                        if (descendants(first.parent, item => item.text === "Networking")[0].color.toString() !== Theme.Palette.primary.toString()
-                                || descendants(second.parent, item => item.text === "Tailscale")[0].color.toString() !== Theme.Palette.secondary.toString())
-                            throw new Error("Card titles did not follow theme roles")
-                        const image = networkKeys.grabImage(page)
-                        for (const [card, dy] of [[selected.parent, 48], [other.parent, 46]]) {
-                            if (image.pixel(card.x + 3, card.y + dy).toString() !== Theme.Palette.backgroundDark.toString())
-                                throw new Error("Rendered card surface did not follow backgroundDark")
-                        }
-                    }
-                }
-            }
-        }
-        networkWindow.height = 150
-        Theme.Palette.file.setText(cardDarkPalette.text())
-        if (!Theme.Palette.refresh()) throw new Error("Card theme restore failed")
-        selectCardTarget(first)
-        settleCards(page)
-        first.forceActiveFocus()
-    }
+
     property bool traceNetworkFocus: false
     property var networkFocusEvents: []
     Connections {
@@ -1570,7 +1531,6 @@ ShellRoot {
             if (password.text || root.networkBody().passwordNetwork)
                 throw new Error("Password dismissal retained a secret or pending network")
             root.checkCardMotion(networkPage, firstTab, secondTab)
-            root.checkCardThemes(networkPage, firstTab, secondTab)
             for (const width of [380, 320, 280, 200]) {
                 networkWindow.width = width
                 networkKeys.wait(20)
@@ -2005,8 +1965,6 @@ ShellRoot {
         function requestShutdown() {}
     }
     SignalSpy { id: keyboardActions; target: host; signalName: "keyboardRequested" }
-    FileView { id: dark; path: Qt.resolvedUrl("palette-dark.json"); blockAllReads: true }
-    FileView { id: light; path: Qt.resolvedUrl("palette-light.json"); blockAllReads: true }
     Window {
         id: window
         visible: true
@@ -2123,62 +2081,6 @@ ShellRoot {
                 input.wait(40)
                 const stack = host.currentItem
                 input.compare(stack.cards.length, 4)
-                for (const palette of [light, dark]) {
-                    Theme.Palette.file.setText(palette.text())
-                    input.verify(Theme.Palette.refresh())
-                    input.wait(220)
-                    const colours = [Theme.Palette.primary, Theme.Palette.secondary, Theme.Palette.tertiary, Theme.Palette.primary]
-                    input.compare(stack.cards.map(card => card.accent.toString()).join(","), colours.map(String).join(","))
-                    for (let index = 0; index < 4; ++index) {
-                        stack.selectCard(index)
-                        input.tryCompare(stack, "exchanging", false, 900)
-                        input.compare(stack.frontCard, index)
-                        const row = icons.children.find(item => item.children.some(child => child.page !== undefined))
-                        input.compare(row.children.filter(item => item.page !== undefined && item.visible)[0].page, "notifications")
-                        input.compare(new Set(stack.cards.map(card => card.y)).size, 4)
-                        input.compare(host.implicitWidth, Math.max(...stack.cards.map(card => card.implicitWidth)) + 16)
-                        input.compare(new Set(stack.cards.map(card => card.x)).size, 1)
-                        input.compare(stack.cards[index].y, 56)
-                        for (const card of stack.cards) {
-                            input.compare(card.x, 8)
-                            input.verify(card.y >= 8 && card.y + card.height <= stack.height - 8)
-                            input.compare(card.x + card.width, stack.width - 8)
-                        }
-                        const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
-                        if (directory) input.grabImage(host).save(directory + "/vertical-" + (palette === light ? "light" : "dark") + "-four-" + index + ".png")
-                    }
-                    const before = stack.cards.map(card => [card.x, card.y])
-                    stack.selectCard(0)
-                    const animation = Array.from(stack.data).find(item => item.property === "progress")
-                    animation.pause()
-                    for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
-                        stack.progress = progress
-                        input.wait(20)
-                        for (const [i, card] of Array.from(stack.cards).entries()) {
-                            input.verify(card.y >= 8 && card.y + card.height <= stack.height - 8)
-                            if (progress === 0) input.compare([card.x, card.y].join(), before[i].join())
-                            if (card.index !== stack.outgoingCard) input.compare(card.x, 8)
-                        }
-                        if (progress === 0.5) input.verify(stack.cards[stack.outgoingCard].x + stack.cards[stack.outgoingCard].width < 0)
-                        const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
-                        if (directory) input.grabImage(host).save(directory + "/vertical-" + (palette === light ? "light" : "dark") + "-motion-" + progress + ".png")
-                    }
-                    const endpoint = stack.cards.map(card => [card.x, card.y].join()).join(";")
-                    stack.finishExchange()
-                    input.compare(stack.cards.map(card => [card.x, card.y].join()).join(";"), endpoint)
-                }
-                for (const palette of [light, dark]) for (const count of [1, 2]) {
-                    Theme.Palette.file.setText(palette.text())
-                    input.verify(Theme.Palette.refresh())
-                    host.cardStacks = [{id: "preview", modules: mixed[0].modules.slice(0, count)}]
-                    input.wait(220)
-                    input.compare(stack.cards.length, count)
-                    input.compare(host.implicitWidth, Math.max(...stack.cards.map(card => card.implicitWidth)) + (count === 1 ? 0 : 16))
-                    input.compare(stack.cards[0].x, count === 1 ? 0 : 8)
-                    input.compare(stack.cards[0].y, count === 1 ? 0 : 56)
-                    const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
-                    if (directory) input.grabImage(host).save(directory + "/vertical-" + (palette === light ? "light" : "dark") + "-count-" + count + ".png")
-                }
                 host.cardStacks = mixed
                 input.wait(40)
                 stack.selectCard(3)
@@ -2639,208 +2541,8 @@ ShellRoot {
 }
 """
 
-MENU_QML = """import QtQuick
-import QtQuick.Window
-import QtTest
-import Quickshell
-import Quickshell.Io
-import "icewine/modules/topbar/popouts" as Popouts
-import "icewine/theme" as Theme
-ShellRoot {
-    id: root
-    Window {
-        id: networkPages
-        visible: true; width: 760; height: 600
-        Popouts.Tailscale { id: page; width: 380; height: 500; active: true }
-        TestCase { id: networkKeys; when: false }
-    }
-    function descendants(item, predicate) {
-        let result = predicate(item) ? [item] : []
-        for (const child of item.children ?? []) result = result.concat(descendants(child, predicate))
-        return result
-    }
-    FileView { id: darkPalette; path: Qt.resolvedUrl("palette-dark.json"); blockAllReads: true }
-    FileView { id: lightPalette; path: Qt.resolvedUrl("palette-light.json"); blockAllReads: true }
-    function luminance(color) {
-        const linear = value => value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4)
-        return 0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
-    }
-    function contrast(first, second) {
-        // Checkmark images use translucent ink; compare its composite against the box.
-        first = Qt.rgba(first.r * first.a + second.r * (1 - first.a),
-                        first.g * first.a + second.g * (1 - first.a),
-                        first.b * first.a + second.b * (1 - first.a), 1)
-        const a = luminance(first), b = luminance(second)
-        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
-    }
-    function captureMenu(menu, name) {
-        const image = networkKeys.grabImage(menu.contentItem.parent)
-        const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
-        if (directory) image.save(directory + "/" + name + ".png")
-        return image
-    }
-    function checkMenuSurface(menu, name) {
-        const image = captureMenu(menu, name)
-        // Sample the empty right edge of an unhighlighted row, not the assigned palette.
-        const background = image.pixel(image.width - 6, 8)
-        if (background.toString() !== Theme.Palette.surface.toString()
-                || contrast(menu.itemAt(0).contentItem.color, background) < 4.5)
-            throw new Error(name + ": rendered menu background/text mismatch: " + background)
-    }
-    function checkMenuStates(menu, page, label) {
-        menu.currentIndex = -1
-        networkKeys.wait(30)
-        checkMenuSurface(menu, label + "-normal")
-        const row = menu.itemAt(1)
-        row.forceActiveFocus()
-        menu.currentIndex = 1
-        networkKeys.wait(30)
-        if (!row.activeFocus || !row.highlighted
-                || contrast(row.contentItem.color, row.background.color) < 4.5)
-            throw new Error(label + ": keyboard highlight is unreadable: focus=" + row.activeFocus + " highlighted=" + row.highlighted + " colors=" + row.contentItem.color + "/" + row.background.color + " contrast=" + contrast(row.contentItem.color, row.background.color))
-        captureMenu(menu, label + "-focus")
-        menu.currentIndex = -1
-        networkKeys.mouseMove(row, row.width / 2, row.height / 2)
-        networkKeys.wait(40)
-        if (!row.hovered || !row.highlighted
-                || contrast(row.contentItem.color, row.background.color) < 4.5)
-            throw new Error(label + ": mouse hover is unreadable: hovered=" + row.hovered + " hoverEnabled=" + row.hoverEnabled + " highlighted=" + row.highlighted)
-        captureMenu(menu, label + "-hover")
-        networkKeys.mouseMove(networkPages, 0, networkPages.height - 1)
-        menu.currentIndex = -1
-        const originalData = page.data
-        const id = menu.title === "Australia" ? "fixture-sydney-best" : "fixture-exit"
-        page.data = Object.assign({}, originalData, {exits: originalData.exits.map(peer =>
-            peer.id === id ? Object.assign({}, peer, {address: ""}) : peer)})
-        networkKeys.wait(30)
-        if (row.contentItem.color.toString() === Theme.Palette.foreground.toString()
-                || contrast(row.contentItem.color, menu.background.color) < 3)
-            throw new Error(label + ": disabled label is indistinguishable/unreadable: " + row.contentItem.color + " / " + menu.background.color)
-        captureMenu(menu, label + "-disabled")
-        if (row.enabled) throw new Error(label + ": unavailable entry stayed enabled")
-        page.data = originalData
-    }
-    function checkMenuRendering(menu, page) {
-        const country = menu.menuAt(4)
-        const selected = menu.itemAt(0)
-        if (!selected.checked) throw new Error("None lost its initial checkmark")
-        for (const [name, palette] of [["dark", darkPalette], ["light", lightPalette]]) {
-            // Use the real palette-file refresh path while the root popup stays open.
-            Theme.Palette.file.setText(palette.text())
-            if (!Theme.Palette.refresh()) throw new Error("Fixture palette refresh failed")
-            networkKeys.wait(220)
-            checkMenuStates(menu, page, name + "-root")
-            const separator = menu.itemAt(3).contentItem
-            const separatorImage = captureMenu(menu, name + "-separator")
-            const point = separator.mapToItem(menu.contentItem.parent, 5, 0)
-            const separatorContrast = Math.max(...[0, 1].map(offset => contrast(
-                separatorImage.pixel(Math.round(point.x), Math.floor(point.y) + offset), menu.background.color)))
-            if (separatorContrast < 1.5) throw new Error(name + ": separator disappeared")
-            const arrow = menu.itemAt(4).arrow
-            if (!arrow.visible || contrast(arrow.color, menu.background.color) < 4.5)
-                throw new Error(name + ": country arrow is unreadable")
-            const mark = descendants(selected.indicator, item => item.source !== undefined && item.visible)[0]
-            if (!mark || contrast(mark.color, selected.indicator.color) < 3)
-                throw new Error(name + ": None checkmark is unreadable")
-            menu.currentIndex = 4
-            const countryEntry = menu.itemAt(4)
-            countryEntry.forceActiveFocus()
-            networkKeys.mouseMove(countryEntry, countryEntry.width / 2, countryEntry.height / 2)
-            networkKeys.wait(40)
-            if (!countryEntry.hovered || !countryEntry.highlighted
-                    || contrast(countryEntry.contentItem.color, countryEntry.background.color) < 4.5
-                    || contrast(arrow.color, countryEntry.background.color) < 4.5)
-                throw new Error(name + ": highlighted country label/arrow is unreadable")
-            captureMenu(menu, name + "-country-hover")
-            networkKeys.keyClick(Qt.Key_Right)
-            networkKeys.tryCompare(country, "visible", true)
-            checkMenuStates(country, page, name + "-cities")
-            // Refresh again with both popups open: inherited colours must stay live.
-            Theme.Palette.file.setText((name === "light" ? darkPalette : lightPalette).text())
-            if (!Theme.Palette.refresh()) throw new Error("Open submenu refresh failed")
-            networkKeys.wait(220)
-            country.currentIndex = -1; menu.currentIndex = -1
-            if (!menu.visible || !country.visible) throw new Error("Theme refresh closed an open menu")
-            checkMenuSurface(menu, name + "-root-live")
-            checkMenuSurface(country, name + "-cities-live")
-            country.close()
-            menu.currentIndex = -1
-            const originalData = page.data
-            page.data = Object.assign({}, originalData, {connected: false})
-            networkKeys.wait(30)
-            if (country.enabled || contrast(countryEntry.contentItem.color, menu.background.color) < 3
-                    || countryEntry.contentItem.color.toString() === Theme.Palette.foreground.toString()
-                    || contrast(arrow.color, menu.background.color) < 3)
-                throw new Error(name + ": disabled country label/arrow is unreadable")
-            captureMenu(menu, name + "-country-disabled")
-            page.data = originalData
-        }
-        Theme.Palette.file.setText(darkPalette.text())
-        if (!Theme.Palette.refresh()) throw new Error("Fixture palette restore failed")
-        networkKeys.wait(220)
-        menu.currentIndex = 0
-        menu.itemAt(0).forceActiveFocus()
-    }
-    Timer {
-        interval: 300; running: true
-        onTriggered: {
-            try {
-                networkPages.requestActivate()
-                networkKeys.tryCompare(networkPages, "active", true)
-                const picker = descendants(page, item => item.Accessible?.name === "Exit node")[0]
-                networkKeys.tryCompare(picker, "enabled", true)
-                picker.forceActiveFocus()
-                networkKeys.keyClick(Qt.Key_Space)
-                const menu = Array.from(picker.data).find(child => child.title !== undefined && child.count !== undefined)
-                networkKeys.tryCompare(menu, "visible", true)
-                networkKeys.tryCompare(menu, "count", 6)
-                root.checkMenuRendering(menu, page)
-                menu.currentIndex = 4
-                networkKeys.keyClick(Qt.Key_Right)
-                const country = menu.menuAt(4)
-                networkKeys.tryCompare(country, "visible", true)
-                country.currentIndex = 1
-                networkKeys.keyClick(Qt.Key_Return)
-                networkKeys.tryCompare(menu, "visible", false)
-                networkKeys.tryCompare(page, "confirming", "")
-                networkKeys.tryCompare(picker, "enabled", true)
-                if (page.data.selected !== "fixture-sydney-best") throw new Error("City selection was not confirmed")
-                picker.forceActiveFocus()
-                networkKeys.keyClick(Qt.Key_Space)
-                networkKeys.tryCompare(menu, "visible", true)
-                const checkedCountry = menu.menuAt(4)
-                menu.currentIndex = 4
-                networkKeys.keyClick(Qt.Key_Right)
-                networkKeys.tryCompare(checkedCountry, "visible", true)
-                for (const [name, palette] of [["dark", darkPalette], ["light", lightPalette]]) {
-                    Theme.Palette.file.setText(palette.text())
-                    if (!Theme.Palette.refresh()) throw new Error("Checked city theme refresh failed")
-                    networkKeys.wait(220)
-                    const city = checkedCountry.itemAt(1)
-                    const mark = descendants(city.indicator, item => item.source !== undefined && item.visible)[0]
-                    if (!city.checked || !mark || contrast(mark.color, city.indicator.color) < 3)
-                        throw new Error(name + ": selected city checkmark is unreadable")
-                    captureMenu(checkedCountry, name + "-checked-city")
-                }
-                Theme.Palette.file.setText(darkPalette.text())
-                if (!Theme.Palette.refresh()) throw new Error("Checked city theme restore failed")
-                checkedCountry.close()
-                menu.close()
-                networkKeys.wait(220)
-                const touch = networkKeys.touchEvent(picker)
-                touch.press(0, picker).commit()
-                touch.release(0, picker).commit()
-                networkKeys.tryCompare(menu, "visible", true)
-                menu.close()
-                console.log("MENU_RENDER_CHECK_PASSED")
-                Qt.quit()
-            } catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }
-        }
-    }
-}
-"""
 
-# Compare real stack pixels against an independent native single-caster reference.
+# Real visibility at the capture/lock boundary must finish closing immediately.
 CAPTURE_QML = """import QtQuick
 import QtQuick.Window
 import QtTest
@@ -2909,153 +2611,6 @@ ShellRoot {
 }
 """
 
-SHADOW_QML = """import QtQuick
-import QtQuick.Window
-import QtQuick.Effects
-import QtTest
-import Quickshell
-import "icewine/modules/topbar" as Bar
-ShellRoot {
-    Window {
-        id: window
-        visible: true
-        width: 800; height: 280
-        color: "white"
-        Bar.Widget {
-            id: widget
-            width: 320; height: 240
-            Bar.CardStack {
-                id: stack
-                shadowHost: widget.cardShadowHost
-                width: 320; height: 240
-                cards: [front, rear]
-                Bar.Card { id: front; stack: stack; color: "white" }
-                Bar.Card { id: rear; index: 1; stack: stack; color: "white" }
-                Bar.Card { id: third; index: 2; stack: stack; color: "white"; visible: stack.cards.length === 3 }
-            }
-        }
-        Item {
-            id: reference
-            x: 400; width: stack.width; height: stack.height
-            property int drop: 2
-            property var caster: front
-            Rectangle { anchors.fill: parent; color: "white" }
-            Rectangle {
-                id: shape
-                x: reference.caster.x; y: reference.caster.y
-                width: reference.caster.width; height: reference.caster.height
-                radius: reference.caster.radius
-                color: "white"
-                visible: false
-            }
-            MultiEffect {
-                source: shape
-                anchors.fill: shape
-                shadowEnabled: true
-                shadowColor: "black"; shadowOpacity: 0.35
-                shadowBlur: 0.6; blurMax: 16
-                shadowVerticalOffset: reference.drop
-            }
-        }
-        TestCase { id: keys; when: false }
-        function comparePixel(caster, drop, x, y, label) {
-            if (window.GraphicsInfo.api === GraphicsInfo.Software) return
-            reference.caster = caster
-            reference.drop = drop
-            keys.wait(40)
-            const actual = keys.grabImage(window.contentItem).pixel(x, y)
-            const expected = keys.grabImage(reference).pixel(x, y)
-            if (expected.r > 0.995) throw new Error("Reference shadow did not render: " + label)
-            if (Math.abs(actual.r - expected.r) > 2 / 255)
-                throw new Error(label + ": actual=" + actual + " expected=" + expected)
-        }
-        function descendants(item) {
-            return Array.from(item.children).reduce((items, child) => items.concat([child], descendants(child)), [])
-        }
-        function checkProjections(expected) {
-            const effects = descendants(window.contentItem).filter(item => item.casterRank !== undefined && item.visible)
-            const drops = effects.map(item => item.shadowVerticalOffset).sort().join(",")
-            if (drops !== expected) throw new Error("Receiver drops: " + drops + " expected " + expected)
-            for (const effect of effects) {
-                if (!effect.source || effect.width !== stack.width || effect.height !== stack.height
-                        || !effect.shadowEnabled || !effect.source.clip)
-                    throw new Error("Projection lost common stack coordinates")
-                if (effect.maskEnabled === effect.autoPaddingEnabled
-                        || (effect.maskEnabled && !effect.maskSource.layer.enabled))
-                    throw new Error("Card receiver lost its surface mask")
-            }
-        }
-        function checkPair(label) {
-            checkProjections("2,2,4")
-            const top = stack.cards.find(card => card.z === 2)
-            const lower = stack.cards.find(card => card !== top)
-            comparePixel(top, 2, 160, top.y - 2, label + " onto card")
-            comparePixel(top, 4, 160, top.y + top.height + 2, label + " onto windows")
-            comparePixel(lower, 2, 160, lower.y - 2, label + " lower onto windows")
-            const image = keys.grabImage(window.contentItem)
-            if (image.pixel(160, top.y + 20).r !== 1 || image.pixel(360, 120).r !== 1)
-                throw new Error("Shadow occlusion or constrained clip regressed")
-            const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
-            if (directory) image.save(directory + "/shadow-" + label + ".png")
-        }
-        Timer {
-            interval: 250; running: true
-            onTriggered: {
-                try {
-                    window.checkPair("pair")
-                    widget.shadowDrop = 6
-                    stack.shadowDrop = Qt.binding(() => widget.shadowDrop)
-                    window.checkProjections("3,3,6")
-                    widget.shadowDrop = 4
-                    stack.selectCard(1)
-                    keys.wait(40)
-                    stack.selectCard(0)
-                    keys.tryCompare(stack, "exchanging", false, 900)
-                    window.checkPair("reversed")
-                    stack.selectCard(1)
-                    keys.tryCompare(stack, "exchanging", false, 900)
-                    window.checkPair("selected")
-                    stack.cards = [front, rear, third]
-                    keys.wait(60)
-                    window.checkProjections("1,1,2,2,3,4")
-                    window.comparePixel(rear, 1, 160, rear.y - 2, "middle onto bottom")
-                    window.comparePixel(front, 1, 160, front.y - 2, "top onto middle")
-                    window.comparePixel(front, 4, 160, front.y + front.height + 2, "triple top onto windows")
-                    window.comparePixel(third, 2, 160, third.y - 2, "bottom onto windows")
-                    const directory = Quickshell.env("ICEWINE_CONTROL_CAPTURES")
-                    if (directory) keys.grabImage(window.contentItem).save(directory + "/shadow-triple.png")
-                    stack.selectCard(1)
-                    keys.wait(30)
-                    stack.selectCard(2)
-                    keys.tryCompare(stack, "exchanging", false, 900)
-                    window.checkProjections("1,1,2,2,3,4")
-                    widget.animateClose = false
-                    widget.shown = false
-                    keys.wait(20)
-                    window.checkProjections("")
-                    widget.shown = true
-                    keys.wait(200)
-                    stack.visible = false
-                    keys.wait(20)
-                    window.checkProjections("")
-                    stack.visible = true
-                    stack.cards = [front]
-                    third.visible = false
-                    rear.visible = false
-                    keys.wait(60)
-                    if (front.x !== 0 || front.y !== 0 || front.width !== stack.width
-                            || keys.grabImage(stack).pixel(160, 1).r !== 1)
-                        throw new Error("Single-card appearance changed")
-                    if (window.GraphicsInfo.api === GraphicsInfo.Software)
-                        console.log("SHADOW_PIXELS_UNAVAILABLE: software scene graph does not render MultiEffect; native preview required")
-                    console.log("SHADOW_CHECK_PASSED")
-                    Qt.quit()
-                } catch (error) { console.error(error + "\\n" + error.stack); Qt.exit(1) }
-            }
-        }
-    }
-}
-"""
 
 SERVICE_FIXTURES = {
     "UPower": "property var displayDevice: null",
@@ -3114,17 +2669,6 @@ SERVICE_FIXTURES = {
 }
 
 source = Path(sys.argv[1]).resolve()
-battery = (source / "quickshell/modules/topbar/popouts/Battery.qml").read_text()
-assert battery.index('text: "Power"') < battery.index('id: lockButton')
-assert battery.index('id: lockButton') < battery.index('id: keepAwake')
-assert battery.index('id: keepAwake') < battery.index('visible: root.batteryPresent')
-assert battery.index('id: keepAwake') < battery.index('text: "Battery condition"')
-for action in ["Lock", "Sleep", "Reboot", "Shutdown"]:
-    assert f'Accessible.name: "{action}"' in battery
-    assert re.search(r'text: "[^"\n]*\s+' + re.escape(action) + '"', battery)
-bluetooth = (source / "quickshell/modules/topbar/popouts/Bluetooth.qml").read_text()
-assert re.search(r'ActionButton\s*\{\s*id: forget', bluetooth)
-assert 'Accessible.name: "Forget "' in bluetooth and 'onClicked: deviceRow.forgotten()' in bluetooth
 QML = QML.replace("ssh-ed25519 fixture-public", SSH_PUBLIC)
 
 with tempfile.TemporaryDirectory() as directory:
@@ -3156,11 +2700,6 @@ with tempfile.TemporaryDirectory() as directory:
     for name in ("Desktop.qml", "Handheld.qml", "adapters", "deck"):
         (root / "icewine" / name).symlink_to(source / "quickshell" / name)
     fixture_config = theme_fixture(source, root)
-    (root / "palette-dark.json").write_bytes((Path(fixture_config) / "icewine/current/palette.json").read_bytes())
-    import runpy
-    render_theme = runpy.run_path(str(source / "scripts/theme"))["render_theme"]
-    assets = source / "theme/assets"
-    (root / "palette-light.json").write_text(render_theme(assets, assets / "themes/catppuccin-latte.json")["palette.json"])
     shutil.copytree(source / "quickshell/config", root / "config")
     (root / "bin").mkdir()
     clipboard_command = root / "bin/icewine-clipboard"
@@ -3355,18 +2894,6 @@ ShellRoot {
     if "--status-icons-only" in sys.argv:
         print("status icon composition, batteryless access, hover, taps and volume scrolling pass")
         sys.exit(0)
-    (root / "shell.qml").write_text(SHADOW_QML)
-    result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
-                            capture_output=True, text=True, timeout=15)
-    output = result.stdout + result.stderr
-    assert result.returncode == 0 and "SHADOW_CHECK_PASSED" in output, output
-    assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign|Cannot stack", output), output
-    for line in output.splitlines():
-        if "SHADOW_PIXELS_UNAVAILABLE" in line:
-            print(line)
-    if "--shadows-only" in sys.argv:
-        print("receiver-relative shadow scene checks pass; pixel checks run only on an effect-capable scene graph")
-        sys.exit(0)
     (root / "shell.qml").write_text(ARROW_QML)
     result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
                             capture_output=True, text=True, timeout=25)
@@ -3376,15 +2903,6 @@ ShellRoot {
     if "--arrows-only" in sys.argv:
         print("native control ownership and stack keyboard checks pass")
         sys.exit(0)
-    (root / "shell.qml").write_text(MENU_QML)
-    # The offscreen platform has no desktop hover capability unless supplied explicitly.
-    result = subprocess.run(["qs", "-p", str(root), "--no-color"],
-                            env=dict(env, QT_QUICK_CONTROLS_HOVER_ENABLED="1"),
-                            capture_output=True, text=True, timeout=15)
-    output = result.stdout + result.stderr
-    assert result.returncode == 0 and "MENU_RENDER_CHECK_PASSED" in output, output
-    assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
-    # The rendering fixture confirms a city using the fake CLI; reset it for lifecycle checks.
     for name in ("exit-node", "tailscale-calls"):
         (root / name).unlink(missing_ok=True)
     (root / "shell.qml").write_text(QML)

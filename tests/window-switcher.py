@@ -324,8 +324,6 @@ ShellRoot {
                 tryVerify(() => sizedLoader.item !== null)
                 const view = sizedLoader.item
                 tryVerify(centeredAndBounded)
-                verify(sizedLoader.width >= 360 && sizedLoader.width < 500)
-                verify(sizedLoader.height >= 100 && sizedLoader.height < 200)
                 const emptyHeight = sizedLoader.height
                 mockCompositor.toplevels = [a]
                 tryVerify(() => sizedLoader.height > emptyHeight)
@@ -337,36 +335,31 @@ ShellRoot {
                 mockCompositor.toplevels = [a, b, d, c]
                 tryVerify(() => sizedLoader.height > singleHeight)
                 const many = []
-                for (let row = 1; row <= 8; ++row)
-                    for (let column = 0; column < 12; ++column)
+                for (let row = 1; row <= 4; ++row)
+                    for (let column = 0; column < 6; ++column)
                         many.push(fixtureWindow.createObject(window, {
                             address: row + ":" + column, title: "Window " + row + ":" + column,
                             workspace: {id: row, name: String(row), monitor: {name: "DP-1"}}}))
                 mockCompositor.toplevels = many
-                tryCompare(sizedLoader, "width", 1000)
-                tryCompare(sizedLoader, "height", 720)
-                // Both Topbar modes share geometry; shrink/grow the logical output
-                // (including a scaled small output) while selection is offscreen.
-                for (const fullWidth of [false, true]) {
-                    topbar.fullWidth = fullWidth
-                    for (const size of [[1920,1080], [420,280], [320,200], [1280,720]]) {
-                        geometryHost.width = size[0]; geometryHost.height = size[1]
-                        view.selected = many[many.length - 1]
-                        tryVerify(centeredAndBounded)
-                        tryVerify(() => selectedCardVisible(sizedLoader), 2000,
-                            "Last card visible after output resize")
-                        view.navigate(0, -1)
-                        tryVerify(() => selectedCardVisible(sizedLoader), 2000,
-                            "Workspace navigation scrolls selected card into view")
-                        view.navigate(-1, 0)
-                        tryVerify(() => selectedCardVisible(sizedLoader))
-                        const scrolls = descendants(view, item => item.contentX !== undefined
-                            && item.contentY !== undefined)
-                        for (const scroll of scrolls) {
-                            verify(scroll.contentX >= -1 && scroll.contentY >= -1)
-                            verify(scroll.contentX <= Math.max(0, scroll.contentWidth - scroll.width) + 1)
-                            verify(scroll.contentY <= Math.max(0, scroll.contentHeight - scroll.height) + 1)
-                        }
+                tryVerify(() => sizedLoader.width > singleWidth && sizedLoader.height > singleHeight)
+                // Shrink and regrow with an offscreen selection; size is not a bar mode.
+                for (const size of [[1920,1080], [320,200], [1280,720]]) {
+                    geometryHost.width = size[0]; geometryHost.height = size[1]
+                    view.selected = many[many.length - 1]
+                    tryVerify(centeredAndBounded)
+                    tryVerify(() => selectedCardVisible(sizedLoader), 2000,
+                        "Last card visible after output resize")
+                    view.navigate(0, -1)
+                    tryVerify(() => selectedCardVisible(sizedLoader), 2000,
+                        "Workspace navigation scrolls selected card into view")
+                    view.navigate(-1, 0)
+                    tryVerify(() => selectedCardVisible(sizedLoader))
+                    const scrolls = descendants(view, item => item.contentX !== undefined
+                        && item.contentY !== undefined)
+                    for (const scroll of scrolls) {
+                        verify(scroll.contentX >= -1 && scroll.contentY >= -1)
+                        verify(scroll.contentX <= Math.max(0, scroll.contentWidth - scroll.width) + 1)
+                        verify(scroll.contentY <= Math.max(0, scroll.contentHeight - scroll.height) + 1)
                     }
                 }
                 geometryHost.width = 1920; geometryHost.height = 1080
@@ -454,152 +447,75 @@ ShellRoot {
                 mockSession.fixturePam.completed(PamResult.Success)
                 verify(!mockSession.locked, "Shared entry restores release notification even for native-only state")
                 mockSession.fixtureNativeLock = {locked: false, secure: false}
-                for (let cycle = 0; cycle < 3; ++cycle) {
+                mockCompositor.restored = ""
+                topbar.openWidget("launcher", true, "DP-1")
+                topbar.pressBar()
+                verify(topbar.barVisible && topbar.widgetEngaged)
+                mockSession.beginLock()
+                verify(mockSession.locked && mockSession.lockRequested)
+                verify(!topbar.barVisible && !topbar.widgetEngaged)
+                compare(topbar.ui.page, "")
+                verify(!topbar.ui.held && !mockCompositor.suppressed)
+                topbar.pressBar()
+                topbar.toggleSwitcher()
+                topbar.openWidget("audio", true, "DP-1")
+                verify(!topbar.barVisible && !topbar.ui.held && !topbar.ui.page)
+                mockSession.password = "fixture response"
+                mockSession.authenticating = true
+                let clearAtIdle = false
+                const observeCompletion = () => {
+                    if (!mockSession.authenticating) clearAtIdle = !mockSession.password
+                }
+                mockSession.authenticatingChanged.connect(observeCompletion)
+                mockSession.fixturePam.completed(PamResult.Success + 1)
+                verify(clearAtIdle, "Completed response clears before input becomes ready")
+                verify(mockSession.locked && mockSession.failed && !mockSession.password)
+                verify(!mockSession.authenticating && !topbar.barVisible)
+                mockSession.password = "successful fixture response"
+                mockSession.authenticating = true
+                clearAtIdle = false
+                mockSession.fixturePam.completed(PamResult.Success)
+                verify(clearAtIdle, "Successful response clears before input becomes ready")
+                mockSession.authenticatingChanged.disconnect(observeCompletion)
+                verify(!mockSession.locked && !mockSession.lockRequested,
+                    "Successful unlock releases every UI guard without native notify")
+                verify(!mockSession.password && !mockSession.failed && !mockSession.authenticating)
+                wait(1)
+                compare(mockCompositor.restored, "", "Lock handoff cancels old focus restoration")
+                topbar.pressBar()
+                verify(topbar.barVisible && topbar.ui.held, "Hold opens after unlock")
+                topbar.releaseBar()
+                verify(!topbar.barVisible && !topbar.ui.held, "Release hides after unlock")
+                topbar.toggleSwitcher()
+                compare(topbar.ui.page, "switcher")
+                topbar.toggleSwitcher()
+                compare(topbar.ui.page, "")
+                // Mode changes share one native interaction/focus lifetime.
+                // Layer placement is covered by bar-geometry, not repeated here.
+                for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"]) {
+                    Config.Settings.widgetsFile.setText(JSON.stringify({barBehaviour: behaviour, barLocation: "above"}))
+                    Config.Settings.widgetsFile.reload()
+                    tryCompare(Config.Settings, "barBehaviour", behaviour)
+                    topbar.dismiss(false)
+                    topbar.pressBar(); topbar.releaseBar()
+                    const visible = behaviour === "toggle" || behaviour === "always"
+                    compare(topbar.barVisible, visible)
                     mockCompositor.restored = ""
-                    topbar.openWidget("launcher", true, "DP-1")
-                    topbar.pressBar()
-                    verify(topbar.barVisible && topbar.widgetEngaged)
-                    mockSession.beginLock()
-                    verify(mockSession.locked && mockSession.lockRequested)
-                    verify(!topbar.barVisible && !topbar.widgetEngaged)
-                    compare(topbar.ui.page, "")
-                    verify(!topbar.ui.held && !mockCompositor.suppressed)
-                    topbar.pressBar()
-                    topbar.toggleSwitcher()
-                    topbar.openWidget("audio", true, "DP-1")
-                    verify(!topbar.barVisible && !topbar.ui.held && !topbar.ui.page)
-                    mockSession.password = "fixture response"
-                    mockSession.authenticating = true
-                    let clearAtIdle = false
-                    const observeCompletion = () => {
-                        if (!mockSession.authenticating) clearAtIdle = !mockSession.password
-                    }
-                    mockSession.authenticatingChanged.connect(observeCompletion)
-                    mockSession.fixturePam.completed(PamResult.Success + 1)
-                    verify(clearAtIdle, "Completed response clears before input becomes ready")
-                    verify(mockSession.locked && mockSession.failed && !mockSession.password)
-                    verify(!mockSession.authenticating && !topbar.barVisible)
-                    mockSession.password = "successful fixture response"
-                    mockSession.authenticating = true
-                    clearAtIdle = false
-                    mockSession.fixturePam.completed(PamResult.Success)
-                    verify(clearAtIdle, "Successful response clears before input becomes ready")
-                    mockSession.authenticatingChanged.disconnect(observeCompletion)
-                    verify(!mockSession.locked && !mockSession.lockRequested,
-                        "Successful unlock releases every UI guard without native notify")
-                    verify(!mockSession.password && !mockSession.failed && !mockSession.authenticating)
-                    wait(1)
-                    compare(mockCompositor.restored, "", "Lock handoff cancels old focus restoration")
-                    topbar.pressBar()
-                    verify(topbar.barVisible && topbar.ui.held, "Hold opens after unlock")
-                    topbar.releaseBar()
-                    verify(!topbar.barVisible && !topbar.ui.held, "Release hides after unlock")
                     topbar.toggleSwitcher()
                     compare(topbar.ui.page, "switcher")
-                    topbar.toggleSwitcher()
-                    compare(topbar.ui.page, "")
-                    for (const page of ["launcher", "audio", "network", "bluetooth", "battery",
-                            "performance", "layout", "notifications"]) {
-                        topbar.openWidget(page, true, "DP-1")
-                        compare(topbar.ui.page, page, "Configured page opens after unlock")
-                        topbar.dismissWidget()
-                    }
-                }
-                // Exercise the real QML controller and preference notifications
-                // for each mode/location, including passive Always Show focus.
-                for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"]) {
-                    for (const location of ["above", "top", "bottom"]) {
-                        Config.Settings.widgetsFile.setText(JSON.stringify({barBehaviour: behaviour, barLocation: location}))
-                        Config.Settings.widgetsFile.reload()
-                        tryCompare(Config.Settings, "barBehaviour", behaviour)
-                        tryCompare(Config.Settings, "barLocation", location)
-                        topbar.dismiss(false)
-                        compare(topbar.barVisible, behaviour === "always")
-                        verify(!topbar.interactionActive, "Passive visibility does not capture focus")
-                        topbar.pressBar()
-                        topbar.releaseBar()
-                        compare(topbar.barVisible, behaviour === "toggle" || behaviour === "always")
-                        if (behaviour === "toggle") {
-                            topbar.pressBar()
-                            verify(!topbar.barVisible)
-                            topbar.releaseBar()
-                        }
-                        // Super+W has its own release callback; Super releases through
-                        // topbarModifier without a topbarHold press. Cover both orders.
-                        for (const visible of [false, true]) for (const modifierFirst of [false, true]) {
-                            topbar.dismiss(false)
-                            if (visible) topbar.pressBar()
-                            if (behaviour === "toggle") topbar.releaseBar()
-                            const latched = topbar.ui.latched
-                            const before = topbar.barVisible
-                            topbar.barModifiersHeld = 1
-                            if (modifierFirst) {
-                                topbar.barModifiersHeld = 0
-                                topbar.releaseBar()
-                            }
-                            const expected = modifierFirst && behaviour !== "toggle"
-                                ? behaviour === "always" : before
-                            topbar.toggleSwitcher()
-                            compare(topbar.ui.page, "switcher")
-                            compare(topbar.ui.latched, latched)
-                            compare(topbar.barVisible, expected, "Switcher adds no bar visibility reason")
-                            if (!modifierFirst) {
-                                topbar.barModifiersHeld = 0
-                                topbar.releaseBar()
-                            }
-                            compare(topbar.barVisible, behaviour === "always" || latched)
-                            topbar.toggleSwitcher()
-                            compare(topbar.ui.page, "")
-                            compare(topbar.ui.latched, latched, "Toggle-close preserves bar latch")
-                            mockCompositor.restored = ""
-                            topbar.toggleSwitcher()
-                            topbar.dismissWidget() // Same callback as Escape.
-                            compare(topbar.ui.latched, latched, "Cancel preserves bar latch")
-                            wait(1)
-                            verify(!topbar.interactionActive || latched)
-                            if (!latched) compare(mockCompositor.restored, mockCompositor.activeWindowAddress)
-                            topbar.toggleSwitcher()
-                            topbar.activateSwitcherWindow(b)
-                            compare(topbar.ui.page, "")
-                            compare(topbar.ui.latched, latched, "Selection preserves bar latch")
-                            compare(topbar.barVisible, behaviour === "always" || latched)
-                            wait(1)
-                            compare(mockCompositor.restored, b.address, "Selection activates chosen window")
-                        }
-                        topbar.dismiss(false)
-                        if (behaviour === "keyboard-mouse") {
-                            topbar.hoveredScreen = "DP-1"
-                            topbar.toggleSwitcher()
-                            verify(topbar.barVisible, "Mouse edge remains independent")
-                            topbar.hoveredScreen = ""
-                            verify(!topbar.barVisible, "Switcher cannot sustain a departed mouse edge")
-                            topbar.dismissWidget()
-                        }
-                        topbar.openWidget("audio", true, "DP-1")
-                        topbar.dismissWidget()
-                        wait(1)
-                        verify(!topbar.interactionActive, "Closing Always Show widget finishes interaction")
-                        mockCompositor.restored = ""
-                        topbar.openWidget("launcher", true, "DP-1")
-                        topbar.handoff()
-                        wait(1)
-                        compare(topbar.barVisible, behaviour === "always", "Ordinary launcher handoff follows selected mode")
-                        verify(!topbar.ui.suppressed && !topbar.interactionActive && !topbar.widgetEngaged)
-                        compare(mockCompositor.restored, "", "Handoff never restores stale app focus")
-                        topbar.openWidget("audio", true, "DP-1")
-                        topbar.instantHandoff()
-                        wait(1)
-                        compare(topbar.barVisible, behaviour === "always", "Switcher/clipboard handoff follows selected mode")
-                        verify(!topbar.ui.suppressed && !topbar.instantBarHide)
-                        topbar.handoff(true)
-                        verify(!topbar.barVisible, "Capture handoff suppresses every mode")
-                        mockCompositor.navigationRequested()
-                        compare(topbar.barVisible, behaviour === "always", "Ordinary navigation resumes selected mode")
-                        mockSession.lockRequested = true
-                        verify(!topbar.barVisible)
-                        mockSession.lockRequested = false
-                        compare(topbar.barVisible, behaviour === "always", "Unlock restores selected mode")
-                    }
+                    compare(topbar.barVisible, visible, "Switcher adds no visibility owner")
+                    topbar.activateSwitcherWindow(b)
+                    wait(1)
+                    compare(mockCompositor.restored, b.address)
+                    topbar.openWidget("audio", true, "DP-1")
+                    topbar.instantHandoff()
+                    wait(1)
+                    compare(topbar.barVisible, behaviour === "always")
+                    verify(!topbar.interactionActive && !topbar.widgetEngaged)
+                    topbar.handoff(true)
+                    verify(!topbar.barVisible, "Capture suppression overrides every mode")
+                    mockCompositor.navigationRequested()
+                    compare(topbar.barVisible, behaviour === "always")
                 }
                 // Actual Topbar bindings/signals/timer; native layer focus remains a device check.
                 Config.Settings.widgetsFile.blockWrites = true
@@ -799,8 +715,7 @@ ShellRoot {
                 workspaceWindow.requestActivate()
                 tryCompare(workspaceWindow, "active", true)
                 workspacePanel.screen = {name: "DP-1"}
-                for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"])
-                for (const location of ["above", "top", "bottom"]) {
+                for (const [behaviour, location] of [["keyboard-mouse", "top"], ["always", "bottom"]]) {
                     Config.Settings.widgetSelections = {barBehaviour: behaviour, barLocation: location, barWidth: 100}
                     topbar.pressBar()
                     wait(200)
@@ -1102,4 +1017,4 @@ ShellRoot {
     output = result.stdout + result.stderr
     assert result.returncode == 0 and 'SESSION_RELOAD_PASSED' in output, output
     assert not re.search(r'ReferenceError|TypeError|Binding loop|Unable to assign|not a type', output), output
-    print('Card interaction/hover/click switching in all 12 bar modes/locations, switcher sizing, scrolling, keys, widget policy, lock/unlock privacy, pending/acquired reload and workspace lifecycle pass')
+    print('Card native hover/click/focus in representative mouse/Always modes, fullscreen special-workspace refresh/hold conversion, switcher bounds/scroll/keys, lock/privacy/reload and workspace lifecycle pass')

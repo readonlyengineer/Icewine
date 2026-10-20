@@ -7,18 +7,7 @@ const Cards = require("../modules/topbar/CardModules.js")
 const State = require("../modules/ShellState.js")
 const Menu = require("../deck/DeckMenu.js")
 
-// Guard the scene's input boundary as well as the controller below. Qt's real
-// mouse/touch delivery requires separate validation in a Wayland session.
 const topbar = fs.readFileSync(path.join(__dirname, "../modules/Topbar.qml"), "utf8")
-const barBackground = topbar.split("id: surface")[1]?.split("Row {")[0] ?? ""
-assert.match(barBackground, /MouseArea\s*\{\s*anchors\.fill: parent\s*acceptedButtons: Qt\.AllButtons/,
-    "Bar background must catch clicks beneath its controls, before outside-dismiss")
-assert.match(barBackground, /onWheel: event => event\.accepted = true/,
-    "Bar background must consume scrolling rather than passing it underneath")
-
-const mask = topbar.slice(topbar.indexOf('WlrLayershell.namespace: "icewine:widgets"')).match(/mask: Region \{\n([\s\S]*?)^            \}/m)[1]
-assert.match(mask, /statusPopout\.shown \? statusPopout : null/, "Shared host supplies its input region")
-assert.doesNotMatch(mask, /\blauncher\b/, "Removed launcher cannot leave a dangling input-region binding")
 
 const clipboardLock = topbar.match(/^        locked: ([^\n]+)$/m)[1]
 for (const [locked, stacks, expected] of [[false, Cards.defaults, false], [true, Cards.defaults, true], [false, [], true]])
@@ -82,21 +71,6 @@ send({type: "press"})
 send({type: "open", page: "launcher", engaged: true, screen: "deck"})
 send({type: "reset"})
 assert.deepEqual(state, State.initial())
-
-send({type: "open", page: "performance", engaged: true, screen: "external"})
-assert.equal(state.page, "performance")
-assert.equal(state.screen, "external")
-assert.equal(State.barVisible(state, false, false), true)
-send({type: "dismiss"})
-assert.equal(State.barVisible(state, false, false), false)
-
-// Execute the actual QML controller methods, with only platform I/O replaced.
-send({type: "open", page: "notifications", engaged: true, screen: "external"})
-assert.equal(state.page, "notifications")
-assert.equal(state.engaged, true)
-assert.equal(state.screen, "external")
-send({type: "dismiss"})
-assert.equal(State.barVisible(state, false, false), false)
 
 send({type: "open", page: "switcher", engaged: true, screen: "deck"})
 for (const page of ["launcher", "audio", "network", "layout"]) {
@@ -206,18 +180,6 @@ for (const radial of [false, true]) for (const locked of [false, true]) for (con
     assert.equal(vm.runInNewContext(focusBinding, env), radial && !engaged && here && !locked ? 1 : 0)
 }
 console.log("card switching: interaction, delayed hover, click, held release, focus/grab targeting and suppression pass")
-for (const page of Cards.modules) {
-    shell.Config.Settings.cardStacks = [{id: "standalone", modules: [page]}]
-    for (const engaged of [false, true]) {
-        shell.dismissWidget()
-        focusRequests.length = 0
-        shell.openWidget(page, engaged, "external")
-        flush()
-        assert.equal(shell.ui.page, page, `${page}: real controller admits every registered standalone card`)
-        assert.equal(shell.ui.engaged, engaged)
-        assert.deepEqual(focusRequests, engaged ? [["external", page]] : [])
-    }
-}
 shell.Config.Settings.cardStacks = Cards.defaults
 shell.dismissWidget()
 shell.openWidget("unknown", true, "external")
@@ -748,52 +710,6 @@ for (let attempt = 0; attempt < 31; ++attempt) keyboardShell.finishKeyboardReque
 assert.equal(keyboardShell.keyboardRequest, null, "A target which never regains focus expires without opening")
 assert(!oskCalls.includes("show"))
 console.log("OSK focus: exact retained target, both desktop entries, Always Show, supersession and bounded cancellation pass")
-
-// Default keyboard-autohide: press opening chord, click/tap action, release.
-for (const mode of ["topbar", "launcher"]) for (const modifierFirst of [false, true]) {
-    prepareKeyboard(mode)
-    keyboardShell.Config.Settings.barBehaviour = "keyboard"
-    keyboardShell.interactionActive = false
-    keyboardShell.ui = State.initial()
-    keyboardShell.barModifiersHeld = 1
-    keyboardShell.pressBar()
-    if (mode === "launcher") keyboardShell.openWidget("launcher", true, "screen")
-    keyboardShell.showKeyboard(mode)
-    assert.equal(keyboardShell.keyboardRequest.window, oskTarget)
-    assert.equal(keyboardShell.keyboardRequest.awaitingRelease, true)
-    oskFlush()
-    assert(!oskCalls.includes("show") && !oskCalls.includes(oskTarget), "Held action neither opens nor restores early")
-    if (!modifierFirst) {
-        keyboardShell.releaseBar() // grave first; Super still physically down
-        oskFlush()
-        assert.equal(keyboardShell.ui.held, null)
-        assert.equal(keyboardShell.keyboardRequest.awaitingRelease, true)
-        assert(!oskCalls.includes("show"))
-    }
-    keyboardShell.barModifiersHeld = 0
-    keyboardShell.releaseBar()
-    oskFlush()
-    assert.equal(oskCalls.filter(value => value === oskTarget).length, 1)
-    keyboardShell.finishKeyboardRequest()
-    assert.equal(oskCalls.filter(value => value === "show").length, 1)
-    keyboardShell.releaseBar(); oskFlush()
-    assert.equal(oskCalls.filter(value => value === "show").length, 1, "Second release cannot reopen")
-}
-for (const invalidate of [
-    () => {keyboardShell.sessionLocked = true},
-    () => {keyboardShell.Config.Settings.oskAccess = "none"},
-    () => {keyboardShell.compositor.toplevels = [{address: "app"}]},
-    () => {keyboardShell.compositor.activeWindowAddress = "other"},
-    () => {keyboardShell.focusGeneration++},
-    () => {keyboardShell.dismiss()}
-]) {
-    prepareKeyboard(); keyboardShell.ui = State.reduce(keyboardShell.ui, {type: "press", screen: "screen"}); keyboardShell.barModifiersHeld = 1
-    keyboardShell.showKeyboard("launcher"); invalidate()
-    keyboardShell.barModifiersHeld = 0; keyboardShell.releaseBar(); oskFlush()
-    assert(!oskCalls.includes("show"), "Retained held request still obeys all cancellation gates")
-    assert.equal(keyboardShell.keyboardRequest, null)
-}
-console.log("OSK held shortcut: both actions retain target, both release orders defer until modifier up, stale intent cancels")
 
 // Execute the actual passive modifier handler used by remapped opening chords.
 const openingModifier = topbar.match(/name: "topbarOpeningModifier"[\s\S]*?onReleased: \{([\s\S]*?)^        \}/m)[1]

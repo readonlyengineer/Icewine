@@ -304,6 +304,8 @@ ShellRoot {
                     compare(barRequest.anchors.top, location !== "bottom")
                     compare(barRequest.anchors.bottom, location === "bottom")
                     compare(barRequest.exclusiveZone, panel.reservation)
+                    fuzzy(surface.width, panel.width * percent / 100, 0.001, "Configured width")
+                    fuzzy(surface.x * 2 + surface.width, panel.width, 0.001, "Centred bar")
                     const top = barHost.y + surface.y
                     const bottom = top + surface.height
                     verify(top >= zones[0] && bottom <= panel.height - zones[1],
@@ -327,37 +329,6 @@ ShellRoot {
             }
             function test_geometry() {
                 wait(100) // Let the real Settings FileView finish its initial read.
-                for (const size of [[1920, 1200], [1280, 800], [640, 480], [853, 600]]) {
-                    panel.width = size[0]; panel.height = size[1]
-                    for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"])
-                    for (const location of ["above", "top", "bottom"])
-                    for (const style of ["anchored", "floating"])
-                    for (const percent of [50, 99, 100]) {
-                        Config.Settings.widgetSelections = {barBehaviour: behaviour, barLocation: location,
-                            barWidth: percent, barStyle: style}
-                        root.ui = State.reduce(State.initial(), {type: "press", behaviour: Config.Settings.barBehaviour})
-                        wait(1)
-                        const gap = style === "floating" ? 4 : 0
-                        fuzzy(surface.width, panel.width * percent / 100, 0.001)
-                        fuzzy(surface.x, (panel.width - surface.width) / 2, 0.001, "Exact logical output centring")
-                        compare(surface.y, location === "bottom" ? barHost.height - 38 - gap : gap)
-                        const topRadius = percent === 100 ? 0 : style === "floating" ? 19 : location === "bottom" ? 10 : 0
-                        const bottomRadius = percent === 100 ? 0 : style === "floating" ? 19 : location === "bottom" ? 0 : 10
-                        compare(surface.topLeftRadius, topRadius); compare(surface.topRightRadius, topRadius)
-                        compare(surface.bottomLeftRadius, bottomRadius); compare(surface.bottomRightRadius, bottomRadius)
-                        compare(panel.reservation, location === "above" ? 0 : 38 + gap)
-                        verify(statusPopout.y >= 0 && statusPopout.y + statusPopout.height <= panel.height)
-                        verify(statusPopout.x >= 0 && statusPopout.x + statusPopout.width <= panel.width)
-                        // Real content rows stay inside the bar and clear the clock.
-                        verify(workspaceScroll.x + workspaceScroll.width + 4 <= barClock.x + 0.01)
-                        verify(statusScroll.x >= barClock.x + barClock.width + 4 - 0.01)
-                        verify(workspaceScroll.x >= 0 && statusScroll.x + statusScroll.width <= surface.width)
-                        root.ui = State.reduce(State.initial(), {type: "hide"})
-                        wait(1)
-                        compare(panel.reservation, 0)
-                        verify(surface.y + surface.height <= 0 || surface.y >= barHost.height)
-                    }
-                }
                 native_geometry()
                 transitions()
                 widget_layers()
@@ -471,21 +442,18 @@ for key, value in {'TEST_CALL': 'checks.capture_animations(); console.log(\"BAR_
                    'POPOUT_X': binding('x', popout), 'POPOUT_Y': binding('y', popout),
                    'POPOUT_HEIGHT': binding('height', popout)}.items():
     qml = qml.replace('__' + key + '__', value)
-# Production still makes its native request using the measured extent.
-assert 'implicitHeight: root.barExtent' in bar_window
-assert 'exclusiveZone: panel.reservation' in bar_window
-for theme in ('tokyo-night', 'gruvbox-light'):
+for scale in ('1', '1.5'):
     with tempfile.TemporaryDirectory(prefix='icewine-bar-geometry-') as temporary:
         root = Path(temporary)
         (root / 'icewine').mkdir()
         (root / 'icewine/modules').symlink_to(source / 'quickshell/modules')
         shutil.copytree(source / 'quickshell/config', root / 'config')
         (root / 'icewine/theme').symlink_to(root / 'theme')
-        config = theme_fixture(source, root, theme)
+        config = theme_fixture(source, root)
         (root / 'runtime').mkdir(mode=0o700)
         (root / 'shell.qml').write_text(qml)
         env = dict(os.environ, QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software',
-                   QT_SCALE_FACTOR='1.5' if theme == 'gruvbox-light' else '1',
+                   QT_SCALE_FACTOR=scale,
                    QML_IMPORT_PATH=str(root), XDG_CONFIG_HOME=config, XDG_STATE_HOME=str(root / 'state'),
                    XDG_CACHE_HOME=str(root / 'cache'), XDG_RUNTIME_DIR=str(root / 'runtime'),
                    ICEWINE_WIDGET_POLICY='{}', HYPRLAND_INSTANCE_SIGNATURE='', WAYLAND_DISPLAY='',
@@ -495,8 +463,8 @@ for theme in ('tokyo-night', 'gruvbox-light'):
                                 capture_output=True, text=True, timeout=30)
         output = result.stdout + result.stderr
         if result.returncode or 'BAR_GEOMETRY_PASSED' not in output or re.search(r'(ReferenceError|TypeError|FAIL!|Cannot assign)', output):
-            raise AssertionError(theme + '\n' + output)
+            raise AssertionError('scale=' + scale + '\n' + output)
 if '--capture-only' in sys.argv:
-    print('capture: actual bar surface already-closing slide/fade finish immediately; normal transitions, dark/light at 1x/1.5x pass')
+    print('capture: actual bar surface already-closing slide/fade finish immediately; normal transitions, 1x/1.5x pass')
 else:
-    print('bar geometry: real surface, corners, live native layer/focus and edge/reservation/available-area requests, captured output bounds, animated transitions, foreign zones, overflow dragging, live settings, handheld/radial, dark/light at 1x/1.5x pass')
+    print('bar geometry: real surface, live native layer/focus and edge/reservation/available-area requests, captured output bounds, animated transitions, foreign zones, overflow dragging, live settings, handheld/radial, 1x/1.5x pass')

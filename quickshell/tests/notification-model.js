@@ -1,34 +1,6 @@
 const assert = require("node:assert/strict")
 const notifications = require("../modules/notifications/Model.js")
-const { readFileSync } = require("node:fs")
-const { join } = require("node:path")
-
-// Guard the scene's input boundary; compositor click delivery needs a live session.
-const toasts = readFileSync(join(__dirname, "../modules/NotificationToasts.qml"), "utf8")
-const card = readFileSync(join(__dirname, "../modules/notifications/NotificationCard.qml"), "utf8")
-assert.doesNotMatch(toasts, /mask:\s*Region\s*\{\s*\}/,
-    "An empty input region sends notification clicks to the window below")
-assert.match(card, /MouseArea\s*\{\s*anchors.fill: parent\s*onClicked: root.dismissRequested\(\)/,
-    "The notification body must dismiss on click")
-for (const handler of card.matchAll(/TapHandler\s*\{([^}]+)\}/g))
-    assert.match(handler[1], /gesturePolicy: TapHandler.WithinBounds/,
-        "Buttons must capture clicks before the body-dismiss MouseArea")
-assert.match(card, /Accessible\.name:\s*"Go to source window"/,
-    "Source navigation must have an accessible name")
-assert.match(card, /Accessible\.role:\s*Accessible\.Button/,
-    "Source navigation must expose button semantics")
-assert.match(card, /Controls\.ToolTip\.text:\s*"Go to source window"/,
-    "Source navigation must explain itself on hover")
-assert.match(card, /notification\?\.appIcon === "battery-low"\s*\?\s*""/,
-    "Battery notifications must use the glyph instead of theme icon lookup")
-const sourceButton = card.match(/Controls\.Button\s*\{\s*id:\s*sourceButton\b([\s\S]+?)\n    \}\n\n    Column/)[1]
-assert.match(sourceButton, /root\.sourceRequested\(address\)/,
-    "Source navigation must use its isolated action")
-assert.doesNotMatch(sourceButton, /root\.dismissRequested\(\)/,
-    "Source navigation must not duplicate the card-body dismissal signal")
-assert.match(sourceButton, /text:\s*"󰅂"/,
-    "Source navigation must use the known-rendering directional icon")
-
+// Native control interaction lives in controls.py; this check owns notification policy.
 const window = (address, appId, fallbackClass = "") => ({
     address,
     wayland: appId === null ? null : { appId },

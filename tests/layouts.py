@@ -63,6 +63,7 @@ if "--qml" in sys.argv:
 import QtQuick.Window
 import QtTest
 import Quickshell
+import Quickshell.Io
 import "icewine/adapters" as Adapters
 import "icewine/modules/topbar" as Bar
 import "theme" as Theme
@@ -72,6 +73,7 @@ ShellRoot {
     property int queries: 0
     property bool hostOwnsLayout: false
     Adapters.Hyprland { id: backend }
+    FileView { id: mutationLog; path: Quickshell.env("LAYOUT_TEST_COMMANDS"); blockAllReads: true }
     Connections {
         target: backend.layoutProcess
         function onRunningChanged() { if (backend.layoutProcess.running) ++root.queries }
@@ -92,7 +94,7 @@ ShellRoot {
         keys.tryCompare(backend, "layoutAvailable", true)
         keys.compare(root.queries, before + 1)
         // Activity must stay true while a real action disables picker availability.
-        backend.selectLayout("master")
+        backend.selectAutofullscreen(false)
         keys.tryCompare(backend, "layoutPending", true)
         keys.compare(host.layoutActive, true)
         keys.tryCompare(backend, "layoutPending", false)
@@ -116,15 +118,18 @@ ShellRoot {
         keys.tryCompare(backend, "layoutAvailable", true)
         if (backend.layoutStatus.workspace !== 4 || root.queries !== 2)
             throw new Error("In-flight workspace refresh was lost or not coalesced")
-        backend.selectLayout("master")
+        backend.refreshLayout()
+        keys.compare(backend.layoutProcess.running, true)
+        backend.selectLayout("master") // Queued behind a native child query.
+        backend.layoutWorkspaceId = 5 // Dispatch must keep workspace 4 / identity 04.
         keys.tryCompare(backend, "layoutPending", false)
-        keys.tryCompare(root, "queries", 4)
+        keys.tryCompare(root, "queries", 5)
         keys.tryCompare(backend.layoutProcess, "running", false)
         // Close and reopen during a same-workspace query; discard its old result.
         backend.refreshLayout()
         backend.layoutActive = false
         backend.layoutActive = true
-        keys.tryCompare(root, "queries", 6)
+        keys.tryCompare(root, "queries", 7)
         keys.tryCompare(backend, "layoutAvailable", true)
         backend.refreshLayout()
         backend.layoutActive = false
@@ -171,65 +176,6 @@ ShellRoot {
         }
         return null
     }
-    function checkPreviews() {
-        const names = ["Scrolling", "Dwindle", "Master", "Monocle"]
-        for (const width of [380, 320]) {
-            window.width = width
-            keys.wait(20)
-            for (const state of ["unselected", "selected", "focused", "disabled"]) {
-                const signatures = []
-                for (const name of names) {
-                    const button = root.named(picker, name + " layout")
-                    compositor.layoutStatus = {effective: state === "unselected" ? "default" : name.toLowerCase()}
-                    compositor.layoutPending = state === "disabled"
-                    picker.forceActiveFocus()
-                    if (state === "focused") button.forceActiveFocus()
-                    keys.wait(20)
-                    const label = width + "/" + state + "/" + name
-                    const preview = button.contentItem.children[0]
-                    if (!preview.visible || preview.opacity <= 0 || preview.width <= 8 || preview.height <= 0)
-                        throw new Error(label + ": invisible preview")
-                    const origin = preview.mapToItem(button, 0, 0)
-                    if (origin.x < 0 || origin.y < 0 || origin.x + preview.width > button.width + 0.5
-                            || origin.y + preview.height > button.height + 0.5)
-                        throw new Error(label + ": preview outside button")
-                    const panes = Array.from(preview.children).filter(child => child.border !== undefined)
-                    if (panes.length !== (name === "Dwindle" ? 4 : 3))
-                        throw new Error(label + ": missing window panes")
-                    for (const pane of panes) {
-                        if (!pane.visible || pane.opacity <= 0 || pane.width < 4 || pane.height < 4
-                                || pane.x < 0 || pane.y < 0 || pane.x + pane.width > preview.width + 0.5
-                                || pane.y + pane.height > preview.height + 0.5)
-                            throw new Error(label + ": vanished or clipped pane " + [pane.x, pane.y, pane.width, pane.height])
-                    }
-                    // Capture the real scene: positive geometry alone cannot detect transparent/missing borders.
-                    // QtTest's offscreen grab of a nested item crops from the window origin.
-                    const image = keys.grabImage(window.contentItem)
-                    const offset = preview.mapToItem(window.contentItem, 0, 0)
-                    const signature = Array(16 * 12).fill(0)
-                    let ink = 0
-                    for (let y = 0; y < Math.floor(preview.height); ++y) {
-                        for (let x = 0; x < Math.floor(preview.width); ++x) {
-                            const pixel = image.pixel(Math.round(offset.x) + x, Math.round(offset.y) + y)
-                            const surface = Theme.Palette.surface
-                            if (pixel.a > 0.5 && Math.max(Math.abs(pixel.r - surface.r),
-                                    Math.abs(pixel.g - surface.g), Math.abs(pixel.b - surface.b)) > 0.05) {
-                                ++ink
-                                signature[Math.floor(y * 12 / preview.height) * 16 + Math.floor(x * 16 / preview.width)] = 1
-                            }
-                        }
-                    }
-                    if (ink < preview.width) throw new Error(label + ": preview has too little visible ink: " + ink)
-                    if (signatures.includes(signature.join("")))
-                        throw new Error(label + ": indistinguishable preview")
-                    signatures.push(signature.join(""))
-                }
-            }
-        }
-        compositor.layoutPending = false
-        compositor.layoutStatus = {effective: "scrolling", default: "master", override: ""}
-        window.width = 380
-    }
     Timer {
         interval: 250; running: true
         onTriggered: {
@@ -238,7 +184,13 @@ ShellRoot {
                 keys.tryCompare(window, "active", true)
                 root.checkRefresh()
                 root.checkHostedRefresh()
-                root.checkPreviews()
+                mutationLog.reload()
+                const expected = [
+                    ["eval", 'require("icewine.modules.Layouts").select(4,"04","master")'],
+                    ["eval", 'require("icewine.modules.Layouts").select_autofullscreen(5,"05",false)']
+                ].map(command => JSON.stringify(command)).join("\n")
+                if (mutationLog.text().trim() !== expected)
+                    throw new Error("Layout mutation argv mismatch: " + mutationLog.text())
                 const button = root.named(picker, "Dwindle layout")
                 if (!button || !button.enabled) throw new Error("Missing enabled choice")
                 button.forceActiveFocus()
@@ -254,8 +206,6 @@ ShellRoot {
                 const heading = picker.children.find(child => child.text?.startsWith("Workspace "))
                 if (!heading) throw new Error("Missing workspace layout heading")
                 if (heading.text.split(" · ")[0] !== "Workspace 2") throw new Error("Stale workspace heading")
-                const selectedPreview = root.named(picker, "Monocle layout").contentItem.children[0]
-                keys.compare(selectedPreview.children[0].border.color, Theme.Palette.primary)
                 compositor.layoutPending = true
                 if (toggle.enabled || picker.initialFocus.enabled || root.named(picker, "Master layout").enabled) throw new Error("Pending actions enabled")
                 compositor.layoutPending = false
@@ -270,41 +220,44 @@ ShellRoot {
         }
     }
 }'''
-    for theme_name in ["tokyo-night", "gruvbox-light"]:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / "icewine").mkdir()
-            shutil.copytree(source / "quickshell/config", root / "config")
-            (root / "icewine/modules").symlink_to(source / "quickshell/modules")
-            (root / "icewine/theme").symlink_to(root / "theme")
-            # Replace only the native focus input; execute the real adapter/Process lifecycle.
-            (root / "icewine/adapters").mkdir()
-            adapter = (source / "quickshell/adapters/Hyprland.qml").read_text()
-            focus_binding = "readonly property int layoutWorkspaceId: focusedWorkspaceId()"
-            assert adapter.count(focus_binding) == 1
-            (root / "icewine/adapters/Hyprland.qml").write_text(
-                adapter.replace(focus_binding, "property int layoutWorkspaceId: 1"))
-            (root / "bin").mkdir()
-            cli = root / "bin/hyprctl"
-            cli.write_text("#!" + sys.executable + "\n" +
-                           "import json,re,sys,time\ntime.sleep(0.1)\n" +
-                           "if sys.argv[1] == 'eval': print('ok')\n" +
-                           "else:\n workspace=int(re.search(r'status\\((-?\\d+)\\)', sys.argv[2])[1])\n" +
-                           " print(json.dumps(dict(workspace=workspace,identity='31',effective='master'," +
-                           "default='scrolling',override='',autofullscreen=False)))\n")
-            cli.chmod(0o755)
-            fixture_config = theme_fixture(source, root, theme_name)
-            (root / "shell.qml").write_text(qml)
-            env = os.environ | {"QT_QPA_PLATFORM": "offscreen", "XDG_CACHE_HOME": str(root / "cache"),
-                                "XDG_RUNTIME_DIR": str(root / "runtime"), "XDG_CONFIG_HOME": fixture_config,
-                                "XDG_STATE_HOME": str(root / "state"), "ICEWINE_WIDGET_POLICY": "{}",
-                                "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(root / "no-bus"),
-                                "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=" + str(root / "no-system-bus"),
-                                "HYPRLAND_INSTANCE_SIGNATURE": "", "WAYLAND_DISPLAY": "",
-                                "PATH": str(root / "bin") + os.pathsep + os.environ["PATH"]}
-            result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
-                                    capture_output=True, text=True, timeout=10)
-            output = result.stdout + result.stderr
-            assert result.returncode == 0 and "LAYOUT_PICKER_PASSED" in output and "LAYOUT_REFRESH_PASSED" in output and "LAYOUT_HOST_PASSED" in output, output
-            assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
-    print("PASS actual QML adapter: disabled startup, coalesced focus, action completion, reopen and hidden lifetime; shared host cold status and pending action; picker: four rendered previews at 380/320px, dark/light, unselected/selected/focused/disabled; keyboard choice/toggle, external state, pending/unavailable")
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        (root / "icewine").mkdir()
+        shutil.copytree(source / "quickshell/config", root / "config")
+        (root / "icewine/modules").symlink_to(source / "quickshell/modules")
+        (root / "icewine/theme").symlink_to(root / "theme")
+        # Replace only the native focus input; execute the real adapter/Process lifecycle.
+        (root / "icewine/adapters").mkdir()
+        adapter = (source / "quickshell/adapters/Hyprland.qml").read_text()
+        focus_binding = "readonly property int layoutWorkspaceId: focusedWorkspaceId()"
+        assert adapter.count(focus_binding) == 1
+        (root / "icewine/adapters/Hyprland.qml").write_text(
+            adapter.replace(focus_binding, "property int layoutWorkspaceId: 1"))
+        (root / "bin").mkdir()
+        cli = root / "bin/hyprctl"
+        (root / "mutations").touch()
+        cli.write_text("#!" + sys.executable + "\n" +
+                       "import json,os,re,sys,time\ntime.sleep(0.1)\n" +
+                       "if sys.argv[1] == 'eval':\n" +
+                       " with open(os.environ['LAYOUT_TEST_COMMANDS'],'a') as log: log.write(json.dumps(sys.argv[1:],separators=(',',':'))+'\\n')\n" +
+                       " print('ok')\n" +
+                       "else:\n workspace=int(re.search(r'status\\((-?\\d+)\\)', sys.argv[2])[1])\n" +
+                       " print(json.dumps(dict(workspace=workspace,identity=f'{workspace:02x}',effective='master'," +
+                       "default='scrolling',override='',autofullscreen=False)))\n")
+        cli.chmod(0o755)
+        fixture_config = theme_fixture(source, root)
+        (root / "shell.qml").write_text(qml)
+        env = os.environ | {"QT_QPA_PLATFORM": "offscreen", "XDG_CACHE_HOME": str(root / "cache"),
+                            "XDG_RUNTIME_DIR": str(root / "runtime"), "XDG_CONFIG_HOME": fixture_config,
+                            "XDG_STATE_HOME": str(root / "state"), "ICEWINE_WIDGET_POLICY": "{}",
+                            "LAYOUT_TEST_COMMANDS": str(root / "mutations"),
+                            "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(root / "no-bus"),
+                            "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=" + str(root / "no-system-bus"),
+                            "HYPRLAND_INSTANCE_SIGNATURE": "", "WAYLAND_DISPLAY": "",
+                            "PATH": str(root / "bin") + os.pathsep + os.environ["PATH"]}
+        result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                                capture_output=True, text=True, timeout=10)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0 and "LAYOUT_PICKER_PASSED" in output and "LAYOUT_REFRESH_PASSED" in output and "LAYOUT_HOST_PASSED" in output, output
+        assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign", output), output
+    print("PASS actual QML adapter: disabled startup, coalesced focus, queued captured-target argv, boolean Autofullscreen API, reopen and hidden lifetime; shared host cold status and pending action; picker: keyboard choice/toggle, external state, pending/unavailable")

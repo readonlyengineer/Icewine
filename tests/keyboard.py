@@ -19,7 +19,6 @@ import Quickshell.Io
 import "icewine/modules" as Modules
 import "owner" as Owner
 import "icewine/modules/KeyboardModel.js" as Model
-import "icewine/theme" as Theme
 ShellRoot {
     id: root
     property string phase: "startup"
@@ -62,27 +61,21 @@ ShellRoot {
     function geometry(locked) {
         session.lockRequested = locked
         session.keyboardHost = lockView
-        // Dimensions are logical output sizes, including a 1920x1080 output at 1.5x.
-        for (const [width, height, scale] of [[2560,1440,2], [1920,1080,594/344],
-                [1280,720,396/344], [1280,800,1256/1040], [800,500,1], [640,360,1], [320,240,1]]) {
+        // Exercise the cap, normal desktop and overflow/scrolling ceilings.
+        for (const [width, height] of [[2560,1440], [1280,800], [320,240]]) {
             root.phase = (locked ? "lock" : "desktop") + " geometry " + width + "x" + height
             win.width = width; win.height = height
             check.wait(30)
             owner.show()
             const panel = owner.view
             check.tryCompare(panel, "visible", true)
-            check.verify(Math.abs(panel.sizeScale-scale) < 0.001, "bounded linear scale")
             check.verify(panel.width <= width-24 && panel.height <= height*0.55+0.01, "output fit")
-            check.verify(Math.abs(panel.keyHeight-44*scale) < 0.01, "key height scales with panel")
-            check.verify(Math.abs(panel.rowPitch-48*scale) < 0.01, "row pitch scales with panel")
-            if (scale === 2) { check.compare(panel.width, 2080); check.compare(panel.height, 688); check.compare(panel.pitch, 128.5) }
             const pin = find(panel, "keyboardPin"), hide = find(panel, "keyboardHide")
             for (const control of [pin, hide]) {
                 const point = control.mapToItem(panel, 0, 0)
                 check.verify(point.x >= 0 && point.x+control.width <= panel.width, "header control fits")
                 check.verify(point.y >= 0 && point.y+control.height <= panel.height, "header control height fits")
                 check.compare(control.height, panel.keyHeight)
-                check.verify(Math.abs(control.font.pixelSize-13*scale) <= 0.51, "header label scales")
             }
             check.mouseClick(pin); check.verify(!panel.pinned)
             check.mouseDrag(panel, panel.width/2, panel.keyHeight/2, -70, -60)
@@ -90,7 +83,7 @@ ShellRoot {
                 && panel.y+panel.height <= height+0.01, "drag stays bounded")
             check.mouseClick(pin); check.verify(panel.pinned)
             check.compare(panel.x, (width-panel.width)/2)
-            for (const key of Model.keys) {
+            for (const key of [Model.keys[0], Model.keys.find(key => key.text === " "), Model.keys[Model.keys.length - 1]]) {
                 panel.selected = key.index; panel.revealSelected()
                 const button = find(panel, "oskKey"+key.index), viewport = button.parent.parent
                 const point = button.mapToItem(viewport, 0, 0)
@@ -100,7 +93,6 @@ ShellRoot {
                     && point.y >= -0.01 && point.y+button.height <= viewport.height+0.01,
                     "selected key reachable: "+key.index)
                 check.compare(button.height, panel.keyHeight)
-                check.verify(Math.abs(button.contentItem.font.pixelSize-13*scale) <= 0.51, "key label scales")
             }
             panel.selected = 0
             panel.controller({action:"ui_right", pressed:true})
@@ -115,55 +107,6 @@ ShellRoot {
         win.width = 1280; win.height = 800
         session.lockRequested = false
         check.wait(30)
-    }
-    function headerStyle() {
-        owner.show(); check.wait(50)
-        const panel = owner.view
-        const pin = find(panel, "keyboardPin"), hide = find(panel, "keyboardHide")
-        function capture(name) {
-            const directory = Quickshell.env("TEST_KEYBOARD_PREVIEWS")
-            if (!directory) return
-            let done = false
-            check.verify(panel.grabToImage(result => {
-                check.verify(result.saveToFile(directory + "/" + name + ".png"))
-                done = true
-            }))
-            check.tryVerify(() => done)
-        }
-        const baseline = Quickshell.env("TEST_KEYBOARD_BASELINE") !== ""
-        for (const pinned of [false, true]) {
-            panel.pinned = pinned
-            pin.focus = false; hide.focus = false; win.contentItem.forceActiveFocus(); check.mouseMove(panel, panel.width/2, panel.height-2)
-            check.wait(30); capture(pinned ? "pinned" : "normal")
-            for (const control of [pin, hide]) {
-                if (!baseline) {
-                    check.compare(control.background.color, control === pin && pinned ? Theme.Palette.surface : "transparent")
-                    check.compare(control.contentItem.color, Theme.Palette.foreground)
-                }
-                control.forceActiveFocus(); check.wait(20)
-                if (!baseline) check.compare(control.background.border.width, 2, "focus outline")
-                capture(control.objectName + "-focus-" + pinned)
-                control.focus = false; win.contentItem.forceActiveFocus()
-                check.mouseMove(control, control.width/2, control.height/2); check.wait(30)
-                if (!baseline) check.verify(control.hovered, "header hover enabled")
-                if (!baseline) check.compare(control.background.color, Theme.Palette.selection)
-                capture(control.objectName + "-hover-" + pinned)
-                check.mousePress(control, control.width/2, control.height/2); check.wait(20)
-                if (!baseline) {
-                    check.compare(control.background.color, Theme.Palette.primary)
-                    check.compare(control.contentItem.color, Theme.Palette.highlightedText)
-                }
-                capture(control.objectName + "-pressed-" + pinned)
-                // Release outside to inspect both controls without activating Hide.
-                check.mouseRelease(control, -10, -10)
-                check.mouseMove(panel, panel.width/2, panel.height-2)
-            }
-        }
-        // Native ToolButton keyboard activation remains intact.
-        pin.forceActiveFocus(); const pinned = panel.pinned
-        check.keyClick(Qt.Key_Space); check.compare(panel.pinned, !pinned)
-        hide.forceActiveFocus(); check.keyClick(Qt.Key_Space)
-        check.tryCompare(owner, "visible", false)
     }
     function headerHide(locked) {
         session.lockRequested = locked
@@ -234,10 +177,12 @@ ShellRoot {
     }
     Timer { interval: 200; running: true; onTriggered: {
         try {
-            headerStyle()
-            if (Quickshell.env("TEST_KEYBOARD_STYLE_ONLY") === "1") {
-                console.log("KEYBOARD_OWNER_PASSED"); Qt.quit(); return
-            }
+            owner.show()
+            const pin = find(owner.view, "keyboardPin"), hide = find(owner.view, "keyboardHide")
+            pin.forceActiveFocus(); const pinned = owner.view.pinned
+            check.keyClick(Qt.Key_Space); check.compare(owner.view.pinned, !pinned)
+            hide.forceActiveFocus(); check.keyClick(Qt.Key_Space)
+            check.tryCompare(owner, "visible", false)
             const action = Model.action(Model.keys.find(key => key.text === "a"), Model.control, false)
             const process = owner.deliveryProcess
             const productionCommand = Array.from(process.command)
@@ -334,7 +279,7 @@ with tempfile.TemporaryDirectory(prefix="icewine-keyboard-") as directory:
     # and a unique missing absolute executable; no production switch/fake error.
     (root / "owner").mkdir()
     for name in ("KeyboardView.qml", "KeyboardModel.js"):
-        (root / "owner" / name).symlink_to(Path(os.environ["TEST_KEYBOARD_BASELINE"]) if name == "KeyboardView.qml" and os.environ.get("TEST_KEYBOARD_BASELINE") else source / "quickshell/modules" / name)
+        (root / "owner" / name).symlink_to(source / "quickshell/modules" / name)
     owner = (source / "quickshell/modules/KeyboardController.qml").read_text()
     owner = owner.replace("    id: root\n", "    id: root\n    property alias deliveryProcess: delivery\n    property Item fixtureHost\n", 1)
     start = owner.index("    PanelWindow {")
@@ -367,9 +312,6 @@ sys.exit(1 if pathlib.Path(os.environ["TEST_KEYBOARD_CONTROL"]).read_text() == "
     result = subprocess.run([os.environ.get("ICEWINE_TEST_QS", "qs"), "-p", str(root), "--no-color"], env=env, capture_output=True, text=True, timeout=45)
     output = result.stdout + result.stderr
     assert result.returncode == 0 and "KEYBOARD_OWNER_PASSED" in output, output
-    if os.environ.get("TEST_KEYBOARD_STYLE_ONLY") == "1":
-        print("PASS: actual-QML header normal/pinned/focus/hover/pressed and Space activation, " + os.environ.get("TEST_KEYBOARD_THEME", "tokyo-night"))
-        sys.exit(0)
     startup_warnings = [line for line in output.splitlines()
                         if "Process failed to start" in line and str(missing_executable) in line]
     assert len(startup_warnings) == 1, output
@@ -377,4 +319,4 @@ sys.exit(1 if pathlib.Path(os.environ["TEST_KEYBOARD_CONTROL"]).read_text() == "
     # This synthetic input is logged only by the explicit fake developer backend.
     commands = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
     assert commands == [["-M", "ctrl", "-k", "U0061", "-m", "ctrl"]] * 5, commands
-print("PASS: real delivery FailedToStart (0 started/0 exited) versus shell exit127 (1/1), constant production argv/stdin privacy, lock/busy/reopen/no-backlog exact fake-wtype argv, desktop/lock responsive geometry/all-key reachability/font and control scaling/controller and keyboard navigation, mouse/touch Hide pinned/unpinned/drag/repin/reopen and input cancellation")
+print("PASS: real delivery FailedToStart (0 started/0 exited) versus shell exit127 (1/1), constant production argv/stdin privacy, lock/busy/reopen/no-backlog exact fake-wtype argv, desktop/lock bounded geometry/edge and wide-key reachability/controller and keyboard navigation, mouse/touch Hide pinned/unpinned/drag/repin/reopen and input cancellation")

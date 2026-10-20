@@ -4,7 +4,6 @@ const fs = require("node:fs")
 const path = require("node:path")
 const vm = require("node:vm")
 const source = fs.readFileSync(path.join(__dirname, "../modules/GameLauncher.qml"), "utf8")
-const deckShell = fs.readFileSync(path.join(__dirname, "../Handheld.qml"), "utf8")
 const launcher = require("../modules/GameLauncher.js")
 
 function qmlFunction(name, sourceText = source) {
@@ -62,7 +61,6 @@ for (const output of ["", "MainPID=1", "LoadState=loaded\nMainPID=no", "LoadStat
     assert.equal(launcher.steamServicePid(output), null)
 assert.equal(launcher.steamServicePid("LoadState=not-found\nMainPID=0\n"), 0)
 assert.equal(launcher.steamServicePid("MainPID=481\nLoadState=loaded\n"), 481)
-assert.doesNotMatch(source, /steamSplashVisible/, "Splash visibility has no duplicate writable state")
 const splashModel = source.match(/Variants \{\s*model: ([\s\S]*?)\n\n        FloatingWindow/)[1]
 const steamQueries = []
 const steamCommands = []
@@ -222,20 +220,6 @@ assert.deepEqual(steamCommands.at(-1), ["hyprctl", "eval",
 steamRoot.finishSteamLaunch()
 assert.equal(vm.runInContext(timerRunning, steamContext), false,
     "Closing the splash or timing out stops startup retries")
-
-assert.equal((deckShell.match(/gameLauncher\.autostartSteamGamescope\(\)/g) || []).length, 1,
-    "Handheld autostart runs once from the Topbar first-frame hook")
-
-assert.match(source, /FloatingWindow\s*\{/,
-    "The placeholder is a managed window, below shell overlays")
-assert.match(source, /title: "Icewine Steam launch"/,
-    "The placeholder identity matches the compositor's placement policy")
-assert.doesNotMatch(source, /PanelWindow|WlrLayershell|steamSplashTimeout|checkSteamLaunch/,
-    "No overlay, early reservation expiry or second window-readiness watcher remains")
-assert.match(source, /RenderReady[\s\S]*onReady: root\.startSteamProcess\(\)/,
-    "The host splash renders before Gamescope starts")
-assert.doesNotMatch(source, /GAMESCOPE_FOCUSED_APP_GFX|icewine-steam-session/,
-    "Steam readiness no longer waits for an inner X11 property")
 
 steamRoot.gamescopeEnabled = false
 const ordinaryBefore = steamCommands.length

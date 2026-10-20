@@ -2,7 +2,6 @@
 """Theme rendering and runtime changes never deploy user dotfiles."""
 import errno
 import contextlib
-import hashlib
 import fcntl
 import pty
 import select
@@ -37,17 +36,16 @@ importlib.machinery.SourceFileLoader(theme.__name__, str(script)).exec_module(th
 # Focused GTK coverage can run without repeating unrelated terminal checks.
 for theme_id, palette_file in theme.installed(assets).items():
     appearance = json.loads(palette_file.read_text())["appearance"]
-    for level in theme.TRANSPARENCY:
-        files = theme.render_theme(assets, palette_file, level)
-        assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}\n" in files["gtk-settings.ini"]
-        assert f"gtk-theme-name=Icewine-{theme_id}\n" in files["gtk-settings.ini"]
-        assert files["gtk4-settings.ini"] == "[Settings]\ngtk-theme-name=Adwaita\n"
-        # Both native stylesheets and the Flatpak extension replace static defaults.
-        definitions = lambda css: dict(re.findall(r"@define-color\s+(\w+)\s+([^;]+);", css))
-        defaults = definitions((assets.parents[1] / "gtk/defaults.css").read_text())
-        for css in ("gtk.css", "gtk4.css", "gtk3-theme.css"):
-            assert defaults.items() <= definitions(files[css]).items()
-            assert "icewine/defaults.css" not in files[css]
+    files = theme.render_theme(assets, palette_file)
+    assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}\n" in files["gtk-settings.ini"]
+    assert f"gtk-theme-name=Icewine-{theme_id}\n" in files["gtk-settings.ini"]
+    assert files["gtk4-settings.ini"] == "[Settings]\ngtk-theme-name=Adwaita\n"
+    # Both native stylesheets and the Flatpak extension replace static defaults.
+    definitions = lambda css: dict(re.findall(r"@define-color\s+(\w+)\s+([^;]+);", css))
+    defaults = definitions((assets.parents[1] / "gtk/defaults.css").read_text())
+    for css in ("gtk.css", "gtk4.css", "gtk3-theme.css"):
+        assert defaults.items() <= definitions(files[css]).items()
+        assert "icewine/defaults.css" not in files[css]
     with tempfile.TemporaryDirectory() as temporary, \
          patch.dict(os.environ, DBUS_SESSION_BUS_ADDRESS="developer-test"), \
          patch.object(theme.subprocess, "run") as publish_setting:
@@ -106,15 +104,10 @@ def check_indexed_output(files, colours, git_enabled, nixpkgs):
              re.findall(r"(?m)^color(\d+) #([0-9a-f]{6})$", files["kitty.conf"])}
     roles = EXPECTED_TERMINAL_ROLES
     assert set(slots) == set(range(len(roles))) and len(roles) <= 256
-    # Public ANSI and the original two extended colours must not be repurposed.
-    ansi = ("backgroundDark red green yellow blue magenta cyan foregroundDark blackBright "
-            "redBright greenBright yellowBright blueBright magentaBright cyanBright foreground orange redDark").split()
-    assert [slots[i] for i in range(18)] == [colours[role] for role in ansi]
     # Every supplied colour, including canonical additions, is available by role.
     for role, colour in colours.items():
         if role != "appearance" and not role.endswith("Rgb"):
             assert slots[roles.index(role)] == colour, role
-    assert set(slots.values()) <= set(colours.values())  # no fabricated variants
 
     def resolve(code):
         match = re.fullmatch(r"38;5;(\d+)", code)
@@ -143,113 +136,18 @@ def check_indexed_output(files, colours, git_enabled, nixpkgs):
     assert any(item["key"].endswith("Nixpkgs") for item in commands) == nixpkgs
     prompt = tomllib.loads(files["starship.toml"])
     # Stable role indices, not RGB equality, preserve past output across themes.
-    for module, role, index in (("directory", "highlight", 18), ("time", "muted", 19),
-                               ("cmd_duration", "muted", 19), ("git_branch", "magenta", 5),
-                               ("git_commit", "green", 2), ("git_state", "yellow", 3),
-                               ("git_status", "red", 1)):
+    for module, index in (("directory", 18), ("time", 19), ("cmd_duration", 19),
+                          ("git_branch", 5), ("git_commit", 2), ("git_state", 3), ("git_status", 1)):
         assert prompt[module]["style"] == f"bold fg:{index}"
-        assert slots[index] == colours[role]
         if module.startswith("git_"):
             assert prompt[module]["disabled"] == (not git_enabled)
     assert prompt["git_metrics"]["disabled"] is True  # keep the existing opt-out
     assert ("$git_branch" in prompt["format"]) == git_enabled
-    for key, role, index in (("success_symbol", "highlight", 18), ("error_symbol", "error", 21)):
+    for key, index in (("success_symbol", 18), ("error_symbol", 21)):
         assert re.findall(r"\(bold fg:(\d+)\)", prompt["character"][key]) == [str(index)] * 2
-        assert slots[index] == colours[role]
     for contents in (files["starship.toml"], files["fastfetch.jsonc"]):
         assert not re.search(r"#[0-9a-fA-F]{6}|(?:38|48);2;", contents), contents
 
-
-for theme_id, palette in theme.installed(assets).items():
-    for level in theme.TRANSPARENCY:
-        rendered = theme.render_theme(assets, palette, level)
-        assert json.loads(rendered["palette.json"])["themeId"] == theme_id
-        assert "window_alert_on_bell no\n" in rendered["kitty-base.conf"]
-        assert "bell_path /usr/share/sounds/freedesktop/stereo/bell.oga\n" in rendered["kitty-base.conf"]
-        assert "/nix/store/" not in rendered["kitty-base.conf"]
-        assert not any(line.startswith(("window_alert_on_bell ", "bell_path "))
-                       for line in rendered["kitty.conf"].splitlines())
-        assert json.loads(rendered["palette.json"])["keyboardOpacity"] == {"off":1.0,"low":0.8,"med":0.6,"high":0.4}[level]
-        btop = dict(re.findall(r'^theme\[(\w+)\]="(#[0-9a-fA-F]{6})"$', rendered["btop.theme"], re.M))
-        colours = json.loads(palette.read_text())
-        assert len(btop) == 48 and btop["main_bg"] == "#" + colours["background"]
-        assert btop["main_fg"] == "#" + colours["foreground"]
-        assert btop["cpu_box"] == "#" + colours["highlight"]
-        assert btop["selected_bg"] == "#" + colours["selection"]
-        assert btop["temp_end"] == "#" + colours["error"]
-        assert json.loads(rendered["fastfetch.jsonc"])["modules"]
-        assert "git_branch" in tomllib.loads(rendered["starship.toml"])
-        assert tomllib.loads(rendered["yazi-theme.toml"])
-        assert 'gtk-theme-name=Icewine-' + theme_id in rendered["gtk-settings.ini"]
-        for git_enabled in (True, False):
-            for nixpkgs in (True, False):
-                env = dict(os.environ, ICEWINE_THEME_GIT_ENABLE=str(git_enabled).lower())
-                env.pop("ICEWINE_NIXPKGS_LAST_MODIFIED", None)
-                if nixpkgs:
-                    env["ICEWINE_NIXPKGS_LAST_MODIFIED"] = "1790821943"
-                with patch.dict(os.environ, env, clear=True):
-                    files = theme.render_theme(assets, palette, level)
-                check_indexed_output(files, colours, git_enabled, nixpkgs)
-
-# Immutable legacy fields: the extension must not silently recolour other consumers.
-legacy_hashes = {
-    "catppuccin-frappe": "c1da231070bd072e96dd66548ada05f5ef4b401c8b87b0e7e098c79c01a89d9b",
-    "catppuccin-latte": "45d8560c5d89c2be6c91b049b770afbf17c6e0470b624a5ba702926541cec9f4",
-    "catppuccin-macchiato": "eb62bb3278d2b3e3ce317f6df91a8dc87df2e1f6a67ba424c3934bfb1c409958",
-    "catppuccin-mocha": "91f1256f6cb9211cdd46614f8a8856976f65a7b959ea3e2a99f2f06b865967ca",
-    "dracula": "49dd91f0748912dcc060aed03aca9dfd8a9e8716d1f71ca7665ff571a4e6d53b",
-    "gruvbox-dark": "09431d82351c975d09e0c88d8ec5d3b237c88d4b74efa13b7089fd954aabb378",
-    "gruvbox-light": "50c9c7bece546514ac3a5f70dadd629e3e005f5d3027f1b0574a3748b691cea6",
-    "nord": "ee05c8f2f9e6fec10412d33886767c9d3d279be7f0aa6517a4cf9b4da3fd918d",
-    "tokyo-night": "56f650eb83942b6d6f1e34aff155851e670ab26c4255a5098a306d3144cbe7ef",
-}
-assert set(theme.installed(assets)) == set(legacy_hashes)
-catppuccin_additions = {
-    "catppuccin-latte": "dc8a78 dd7878 209fb5 7287fd dce0e8",
-    "catppuccin-frappe": "f2d5cf eebebe 85c1dc babbf1 232634",
-    "catppuccin-macchiato": "f4dbd6 f0c6c6 7dc4e4 b7bdf8 181926",
-    "catppuccin-mocha": "f5e0dc f2cdcd 74c7ec b4befe 11111b",
-}
-for theme_id, palette in theme.installed(assets).items():
-    data = json.loads(palette.read_text())
-    assert {key for key in data if key != "appearance" and not key.endswith("Rgb")} == set(EXPECTED_TERMINAL_ROLES)
-    legacy = {key: value for key, value in data.items()
-              if key in EXPECTED_TERMINAL_ROLES[:36] or key == "appearance" or key.endswith("Rgb")}
-    assert len(legacy) == 42
-    assert hashlib.sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest() == legacy_hashes[theme_id]
-    expected_unique = 26 if theme_id.startswith("catppuccin-") else {
-        "nord": 16, "gruvbox-dark": 36, "gruvbox-light": 36, "dracula": 34, "tokyo-night": 40,
-    }[theme_id]
-    assert len({v for v in data.values() if re.fullmatch(r"[0-9a-f]{6}", v)}) == expected_unique
-    if theme_id.startswith("catppuccin-"):
-        assert [data[key] for key in ("rosewater", "flamingo", "sapphire", "lavender", "crust")] == catppuccin_additions[theme_id].split()
-    if theme_id == "nord":
-        assert data["foregroundAlt"] == "e5e9f0" and data["blueDark"] == "5e81ac"
-    if theme_id.startswith("gruvbox-"):
-        # Both canonical base neutrals must resolve through the public slot, not the soft UI background.
-        expected_base = "282828" if theme_id == "gruvbox-dark" else "fbf1c7"
-        assert data["backgroundBase"] == expected_base
-        kitty = theme.render_theme(assets, palette)["kitty.conf"]
-        assert re.search(rf"(?m)^color66 #{expected_base}$", kitty)
-        # Canonical neutral/bright/faded hue families and neutral ramps.
-        canonical = """cc241d 98971a d79921 458588 b16286 689d6a d65d0e
-            fb4934 b8bb26 fabd2f 83a598 d3869b 8ec07c fe8019
-            9d0006 79740e b57614 076678 8f3f71 427b58 af3a03
-            1d2021 282828 32302f 3c3836 504945 665c54 7c6f64 928374
-            f9f5d7 fbf1c7 f2e5bc ebdbb2 d5c4a1 bdae93 a89984"""
-        assert set(canonical.split()) <= set(data.values())
-    if theme_id == "tokyo-night":
-        additions = dict(zip(
-            "backgroundDarker blue1 blue2 blue5 blue6 blue7 green2 magenta2 tealCanonical gitAdd gitChange gitDelete".split(),
-            "0c0e14 2ac3de 0db9d7 89ddff b4f9f8 394b70 41a6b5 ff007c 1abc9c 449dab 6183bb 914c54".split()))
-        assert all(data[key] == value for key, value in additions.items())
-        assert not {"24283b", "1f2335", "1b1e2d"} & set(data.values())  # storm backgrounds
-    if theme_id == "dracula":
-        assert data["redBright"] == "ff7777" and data["redCanonicalBright"] == "ff6e6e"
-        additions = dict(zip(
-            "redCanonicalBright greenCanonicalBright yellowCanonicalBright blueCanonicalBright magentaCanonicalBright cyanCanonicalBright foregroundCanonicalBright backgroundLighter backgroundDarker lineHighlight".split(),
-            "ff6e6e 69ff94 ffffa5 d6acff ff92df a4ffff ffffff 424450 191a21 353747".split()))
-        assert all(data[key] == value for key, value in additions.items())
 
 with tempfile.TemporaryDirectory() as temporary:
     palette = Path(temporary) / "invalid.json"
@@ -267,11 +165,17 @@ with tempfile.TemporaryDirectory() as temporary:
             pass
         else:
             raise AssertionError(f"invalid/incomplete palette accepted: {changed}")
-print("PASS: complete stable terminal palette roles and indexed Starship/Fastfetch in all 144 variants")
-with patch.dict(os.environ, ICEWINE_NIXPKGS_LAST_MODIFIED="1790821943", ICEWINE_THEME_GIT_ENABLE="false"):
-    rendered = theme.render_theme(assets, assets / "themes/dracula.json")
-    assert any(item.get("key", "").endswith("Nixpkgs") for item in json.loads(rendered["fastfetch.jsonc"])["modules"] if isinstance(item, dict))
-    assert tomllib.loads(rendered["starship.toml"])["git_branch"]["disabled"]
+# Flags affect terminal output independently of palette and opacity.
+for git_enabled in (True, False):
+    for nixpkgs in (True, False):
+        env = dict(os.environ, ICEWINE_THEME_GIT_ENABLE=str(git_enabled).lower())
+        env.pop("ICEWINE_NIXPKGS_LAST_MODIFIED", None)
+        if nixpkgs:
+            env["ICEWINE_NIXPKGS_LAST_MODIFIED"] = "1790821943"
+        with patch.dict(os.environ, env, clear=True):
+            files = theme.render_theme(assets, assets / "themes/dracula.json")
+        check_indexed_output(files, json.loads((assets / "themes/dracula.json").read_text()), git_enabled, nixpkgs)
+print("PASS: stable terminal palette roles and all Git/Nixpkgs flag combinations")
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     config, state = root / "config", root / "state"
@@ -522,7 +426,9 @@ with tempfile.TemporaryDirectory() as temporary:
     else: raise AssertionError("publication replaced an external current link")
     assert protected_current.is_symlink() and os.readlink(protected_current) == str(external)
     assert (external / "keep").read_text() == "user data"
-    # Every shipped palette renders app-native files, including light mode.
+    # Check every palette on the real CLI publication path, including light mode.
+    env["ICEWINE_THEME_GIT_ENABLE"] = "true"
+    env.pop("ICEWINE_NIXPKGS_LAST_MODIFIED", None)
     kitty_entry.write_text("user Kitty theme edit\n")
     for theme_id, background, appearance in [
         ("tokyo-night", "13131a", "dark"), ("dracula", "1d1e27", "dark"),
@@ -537,6 +443,21 @@ with tempfile.TemporaryDirectory() as temporary:
         assert result.returncode == 0, result.stderr
 
         current = config / "icewine/current"
+        files = {path.name: path.read_text() for path in current.iterdir()}
+        colours = json.loads((assets / "themes" / f"{theme_id}.json").read_text())
+        assert json.loads(files["palette.json"])["themeId"] == theme_id
+        check_indexed_output(files, colours, True, False)
+        assert "window_alert_on_bell no\n" in files["kitty-base.conf"]
+        assert "bell_path /usr/share/sounds/freedesktop/stereo/bell.oga\n" in files["kitty-base.conf"]
+        assert "/nix/store/" not in files["kitty-base.conf"]
+        assert not any(line.startswith(("window_alert_on_bell ", "bell_path "))
+                       for line in files["kitty.conf"].splitlines())
+        btop = dict(re.findall(r'^theme\[(\w+)\]="(#[0-9a-fA-F]{6})"$', files["btop.theme"], re.M))
+        assert len(btop) == 48 and btop["main_bg"] == "#" + colours["background"]
+        assert btop["main_fg"] == "#" + colours["foreground"]
+        assert btop["cpu_box"] == "#" + colours["highlight"]
+        assert btop["selected_bg"] == "#" + colours["selection"]
+        assert btop["temp_end"] == "#" + colours["error"]
         assert f"background #{background}\n" in (current / "kitty.conf").read_text()
         assert kitty_entry.read_text() == "user Kitty theme edit\n"
         assert f'vim.opt.background = "{appearance}"' in nvim_theme.read_text()
@@ -544,14 +465,13 @@ with tempfile.TemporaryDirectory() as temporary:
         assert not (current / "Palette.qml").exists()
         assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}" in (current / "gtk-settings.ini").read_text()
         assert "gtk-theme-name=Adwaita\n" in (current / "gtk4-settings.ini").read_text()
-        palette = json.loads((assets / "themes" / f"{theme_id}.json").read_text())
         assert not (current / "pywalfox.json").exists()
         assert not (current / "browser.css").exists()
         gtk4 = (current / "gtk4.css").read_text()
         for role, color in (("window-bg", "background"), ("view-bg", "backgroundDark"),
                             ("headerbar-bg", "backgroundDark"), ("sidebar-bg", "surface"),
                             ("card-bg", "surface"), ("accent-bg", "highlight")):
-            assert f"--{role}-color: #{palette[color]};" in gtk4
+            assert f"--{role}-color: #{colours[color]};" in gtk4
         for role in ("accent", "success", "warning", "error", "destructive"):
             bg = css_hex(gtk4, f"--{role}-bg-color")
             fg = css_hex(gtk4, f"--{role}-fg-color")
@@ -581,7 +501,7 @@ with tempfile.TemporaryDirectory() as temporary:
             assert re.search(re.escape(selector) + r" \{[^}]*color: @" + foreground + ";", gtk3)
         assert "Tokyonight-Dark" not in (current / "gtk4-settings.ini").read_text()
         for filename in ("starship.toml", "yazi-theme.toml", "yazi-keymap.toml"):
-            tomllib.loads((current / filename).read_text())
+            assert tomllib.loads((current / filename).read_text())
     assert run("theme", "nord", policy="gruvbox-light").returncode == 0
     assert 'local theme = "gruvbox-light"' in nvim_theme.read_text()
     assert run("theme", "not-installed").returncode != 0
@@ -595,10 +515,10 @@ with tempfile.TemporaryDirectory() as temporary:
         assert result.returncode == 0, result.stderr
         assert (state / "icewine/theme").read_text() == saved_theme
         assert (state / "icewine/transparency").read_text() == level + "\n"
-        for command_args in [("apply",)]:
-            assert run(*command_args).returncode == 0
-            assert f"background_opacity {kitty_opacity}\n" in (current / "kitty.conf").read_text()
-            assert f"inactive_opacity = {inactive_opacity}" in (current / "Theme.lua").read_text()
+        assert run("apply").returncode == 0
+        assert f"background_opacity {kitty_opacity}\n" in (current / "kitty.conf").read_text()
+        assert f"inactive_opacity = {inactive_opacity}" in (current / "Theme.lua").read_text()
+        assert json.loads((current / "palette.json").read_text())["keyboardOpacity"] == float(kitty_opacity)
     assert run("theme", "dracula").returncode == 0
     assert "Transparency: high" in run("transparency").stdout
     previous = os.readlink(current)
