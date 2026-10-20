@@ -336,6 +336,12 @@ in {
       ${icewineCli}/bin/icewine-manage-backend apply "''${selections[@]}" overwrite=false
       test -L "$XDG_CONFIG_HOME/quickshell/icewine"
       test -L "$XDG_CONFIG_HOME/hypr/icewine"
+      for version in 3 4; do
+        css=gtk.css
+        [[ $version == 4 ]] && css=gtk4.css
+        printf '%s\n' "@import url(\"../icewine/current/$css\");" '/* Add your overrides below. */' > "$TMPDIR/expected-gtk.css"
+        cmp "$TMPDIR/expected-gtk.css" "$XDG_CONFIG_HOME/gtk-$version.0/gtk.css"
+      done
       test "$(readlink "$XDG_CONFIG_HOME/quickshell/icewine")" = /etc/icewine/implementation/quickshell
       implementation=${optIn.environment.etc."icewine/implementation".source}
       grep -Fx 'window_alert_on_bell no' "$implementation/kitty/defaults.conf"

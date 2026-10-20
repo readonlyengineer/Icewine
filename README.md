@@ -304,6 +304,10 @@ Shared implementation follows NixOS rebuilds and Arch package updates. After
 upgrading from direct Nix-store links, run Apply once to adopt the stable paths;
 edited entry points remain yours.
 
+For GTK, Apply also refreshes an unchanged old wrapper to use the self-contained
+palette CSS. If you edited `gtk-3.0/gtk.css` or `gtk-4.0/gtk.css`, remove only
+`@import url("icewine/defaults.css");` and keep the palette import and your overrides.
+
 | Application | Editable entry under `~/.config` |
 | --- | --- |
 | Hyprland | `hypr/hyprland.lua` |

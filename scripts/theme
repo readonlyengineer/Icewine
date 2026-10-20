@@ -523,8 +523,18 @@ def install_defaults(defaults, config, data, state, replace, app):
             expected = "link:" + str(target) if implementation else default_signature(shipped)
             if signature == expected:
                 continue
+            # Refresh only the exact old GTK wrapper; personal CSS remains untouched.
+            legacy_gtk = False
+            if root_name == "config" and relative.as_posix() in {"gtk-3.0/gtk.css", "gtk-4.0/gtk.css"} and not path.is_symlink() and path.is_file() and not implementation:
+                obsolete = b'@import url("icewine/defaults.css");\n'
+                contents = path.read_bytes()
+                palette = "gtk.css" if relative.parts[0] == "gtk-3.0" else "gtk4.css"
+                wrapper = f'@import url("../icewine/current/{palette}");\n/* Add your overrides below. */\n'.encode()
+                legacy_gtk = contents == obsolete + wrapper and shipped.read_bytes() == wrapper
+                if not replace and not legacy_gtk and obsolete in contents:
+                    print(f'Pending: remove obsolete @import url("icewine/defaults.css"); from preserved personal CSS: {path}', file=sys.stderr)
             # Package links may follow a package update only when we still own them.
-            if signature is not None and not replace and not (implementation and signature == entry["files"].get(relative.as_posix())):
+            if signature is not None and not replace and not legacy_gtk and not (implementation and signature == entry["files"].get(relative.as_posix())):
                 if root_name == "config" and relative.as_posix() == "btop/btop.conf" and not path.is_symlink() and path.is_file():
                     contents = path.read_bytes().decode("utf-8")
                     selected, count = re.subn(r'(?m)^([ \t]*color_theme[ \t]*=[ \t]*)[^\r\n]*',
@@ -543,7 +553,7 @@ def install_defaults(defaults, config, data, state, replace, app):
                 atomic_link(path, target, root=root, signature=signature, previous_target=previous_target)
             else:
                 contents = shipped.read_bytes()
-                atomic_text(path, contents, 0o644, root=root, signature=signature)
+                atomic_text(path, contents, path.stat().st_mode & 0o7777 if legacy_gtk else 0o644, root=root, signature=signature)
             entry["files"][relative.as_posix()] = default_signature(path)
             atomic_text(state / "default-files.json", json.dumps(records, sort_keys=True) + "\n")
 

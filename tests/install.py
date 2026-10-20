@@ -19,6 +19,48 @@ manage = types.ModuleType("icewine_manage")
 manage.__file__ = str(source / "scripts/manage")
 importlib.machinery.SourceFileLoader(manage.__name__, manage.__file__).exec_module(manage)
 
+
+def test_gtk_wrapper_refresh():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        defaults, config, data, state = (root / name for name in ("defaults", "config", "data", "state"))
+        for version, palette in ((3, "gtk.css"), (4, "gtk4.css")):
+            relative = f"gtk-{version}.0/gtk.css"
+            shipped, personal = defaults / "config" / relative, config / relative
+            shipped.parent.mkdir(parents=True)
+            personal.parent.mkdir(parents=True)
+            wrapper = f'@import url("../icewine/current/{palette}");\n/* Add your overrides below. */\n'.encode()
+            obsolete = b'@import url("icewine/defaults.css");\n'
+            shipped.write_bytes(wrapper)
+            # Exact shipped legacy bytes can be refreshed even before ownership records existed.
+            personal.write_bytes(obsolete + wrapper)
+            personal.chmod(0o600)
+            manage.theme.install_defaults(defaults, config, data, state, False, "gtk")
+            assert personal.read_bytes() == wrapper and personal.stat().st_mode & 0o777 == 0o600
+            records = manage.theme.default_records(state)
+            assert records["config"]["files"][relative] == manage.theme.default_signature(personal)
+            # Recorded ownership does not allow replacing a subsequently edited wrapper.
+            edited = obsolete + wrapper + b"button { color: red; }\n"
+            personal.write_bytes(edited)
+            with contextlib.redirect_stderr(io.StringIO()) as pending:
+                manage.theme.install_defaults(defaults, config, data, state, False, "gtk")
+            assert personal.read_bytes() == edited
+            assert "remove obsolete @import" in pending.getvalue()
+            # Host-supplied defaults are not an implicit migration instruction.
+            personal.write_bytes(obsolete + wrapper)
+            shipped.write_bytes(b"/* host policy */\n")
+            manage.theme.install_defaults(defaults, config, data, state, False, "gtk")
+            assert personal.read_bytes() == obsolete + wrapper
+            shipped.write_bytes(wrapper)
+            # Symlinked user files remain read-only even when the target has legacy bytes.
+            target = root / f"personal-{version}.css"
+            target.write_bytes(obsolete + wrapper)
+            personal.unlink()
+            personal.symlink_to(target)
+            manage.theme.install_defaults(defaults, config, data, state, False, "gtk")
+            assert personal.is_symlink() and target.read_bytes() == obsolete + wrapper
+
+
 def test_utility_choices():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -164,6 +206,8 @@ if sys.argv[2:] == ["--appearance-only"]:
     print("PASS: real backend appearance fields, policy, validation, layout fallback and ownership")
     sys.exit(0)
 
+
+test_gtk_wrapper_refresh()
 
 with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as temporary:
     root = Path(temporary)

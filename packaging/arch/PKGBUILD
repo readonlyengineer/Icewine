@@ -72,7 +72,7 @@ package_icewine() {
   for version in 3 4; do
     local css=gtk.css
     [[ $version == 4 ]] && css=gtk4.css
-    printf '%s\n' '@import url("icewine/defaults.css");' "@import url(\"../icewine/current/$css\");" '/* Add your overrides below. */' > "$defaults/gtk-$version.0/gtk.css"
+    printf '%s\n' "@import url(\"../icewine/current/$css\");" '/* Add your overrides below. */' > "$defaults/gtk-$version.0/gtk.css"
     ln -s /usr/share/icewine/gtk "$defaults/gtk-$version.0/icewine"
   done
   ln -s /usr/share/icewine/hyprland "$defaults/hypr/icewine"

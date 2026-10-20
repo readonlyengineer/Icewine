@@ -61,7 +61,7 @@ let
     ${lib.optionalString cfg.gtk.enable ''
       for version in 3 4; do
         mkdir -p $out/config/gtk-$version.0
-        printf '%s\n' '@import url("icewine/defaults.css");' "@import url(\"../icewine/current/gtk$version.css\");" '/* Add your overrides below. */' > $out/config/gtk-$version.0/gtk.css
+        printf '%s\n' "@import url(\"../icewine/current/gtk$version.css\");" '/* Add your overrides below. */' > $out/config/gtk-$version.0/gtk.css
       done
       substituteInPlace $out/config/gtk-3.0/gtk.css --replace-fail gtk3.css gtk.css
     ''}

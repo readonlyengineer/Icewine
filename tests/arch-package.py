@@ -157,6 +157,10 @@ assert (desktop / "usr/bin/icewine-shell").is_file()
 assert not (desktop / "usr/share/icewine/no-animations").exists()
 payload = desktop / "usr/share/icewine"
 defaults = payload / "defaults"
+for variant in ("defaults", "defaults-handheld"):
+    for version, css in ((3, "gtk.css"), (4, "gtk4.css")):
+        wrapper = f'@import url("../icewine/current/{css}");\n/* Add your overrides below. */\n'
+        assert (payload / variant / f"config/gtk-{version}.0/gtk.css").read_text() == wrapper
 assert (payload / "kitty/defaults.conf").read_text() == kitty_defaults
 assert (defaults / "config/kitty/kitty.conf").read_bytes() == (source / "kitty/kitty.conf").read_bytes()
 deck = payload / "quickshell/deck"

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Theme rendering and runtime changes never deploy user dotfiles."""
 import errno
+import contextlib
 import hashlib
 import fcntl
 import pty
@@ -41,6 +42,12 @@ for theme_id, palette_file in theme.installed(assets).items():
         assert f"gtk-application-prefer-dark-theme={int(appearance == 'dark')}\n" in files["gtk-settings.ini"]
         assert f"gtk-theme-name=Icewine-{theme_id}\n" in files["gtk-settings.ini"]
         assert files["gtk4-settings.ini"] == "[Settings]\ngtk-theme-name=Adwaita\n"
+        # Both native stylesheets and the Flatpak extension replace static defaults.
+        definitions = lambda css: dict(re.findall(r"@define-color\s+(\w+)\s+([^;]+);", css))
+        defaults = definitions((assets.parents[1] / "gtk/defaults.css").read_text())
+        for css in ("gtk.css", "gtk4.css", "gtk3-theme.css"):
+            assert defaults.items() <= definitions(files[css]).items()
+            assert "icewine/defaults.css" not in files[css]
     with tempfile.TemporaryDirectory() as temporary, \
          patch.dict(os.environ, DBUS_SESSION_BUS_ADDRESS="developer-test"), \
          patch.object(theme.subprocess, "run") as publish_setting:
@@ -51,6 +58,25 @@ for theme_id, palette_file in theme.installed(assets).items():
             for key, value in (("gtk-theme", "Icewine-" + theme_id),
                                ("color-scheme", "prefer-" + appearance))
         ]
+# Publication uses self-contained CSS and preserves an edited Flatpak extension.
+for theme_id in ("catppuccin-mocha", "catppuccin-latte"):
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        files = theme.render_theme(assets, theme.installed(assets)[theme_id], "off")
+        with patch.dict(os.environ, XDG_DATA_HOME=str(root / "data")), \
+             patch.object(theme.shutil, "which", return_value="flatpak"), \
+             patch.object(theme.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "x86_64\n")):
+            theme.install_flatpak_theme(root / "state", theme_id, files)
+            css = root / "data/flatpak/extension" / ("org.gtk.Gtk3theme.Icewine-" + theme_id) / "x86_64/3.22/gtk.css"
+            assert css.read_text() == files["gtk3-theme.css"]
+            assert re.findall(r'@import url\("([^"\n]+)"\)', css.read_text()) == [
+                "resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained" + ("-dark" if theme_id.endswith("mocha") else "") + ".css"]
+            css.write_text("/* personal extension */\n")
+            with contextlib.redirect_stderr(io.StringIO()) as pending:
+                theme.install_flatpak_theme(root / "state", theme_id, files)
+            assert css.read_text() == "/* personal extension */\n"
+            assert "preserving edited extension" in pending.getvalue()
+
 print("PASS: GTK3 dark/light preference, GTK4 settings and supported color-scheme publication")
 if "--gtk-only" in sys.argv[4:]:
     sys.exit(0)
