@@ -24,7 +24,7 @@ hl = {
 		return saved
 	end,
 	get_active_window = function() return active end,
-	get_active_workspace = function() return active and active.workspace or active_workspace end,
+	get_active_workspace = function() return active_workspace or active and active.workspace end,
 	get_active_special_workspace = function() return nil end,
 	get_config = function(name)
 		assert(name == "animations.enabled" or name == "cursor.no_warps")
@@ -51,10 +51,12 @@ hl = {
 	},
 	dispatch = function(request)
 		if request == "fit_into_view" then
-			assert(active and active.workspace.tiled_layout == "scrolling")
+			assert(active and hl.get_active_workspace().tiled_layout == "scrolling")
 			fitted[#fitted + 1] = active
 		elseif type(request) == "string" then
 			local width = assert(tonumber(request:match("^colresize (.+)$")))
+			assert(hl.get_active_workspace().tiled_layout == "scrolling", "colresize dispatched to non-scrolling workspace")
+			assert(not active.target_workspace or active.target_workspace == active.workspace, "colresize before layout target transfer")
 			active.size = { w = width * active.monitor.width }
 		elseif request.float then
 			if request.float.workspace.tiled_layout == "scrolling" and not request.float.floating and request.float.fullscreen then
@@ -65,7 +67,7 @@ hl = {
 		elseif request.workspace then
 			active, active_workspace = nil, request.workspace
 		elseif request.focus then
-			active, focuses = request.focus, focuses + 1
+			active, active_workspace, focuses = request.focus, nil, focuses + 1
 		elseif request.move then
 			assert(request.move.follow == false)
 			request.move.window.workspace = request.move.workspace
@@ -103,6 +105,7 @@ local boundary = { width = 2560, height = 1280 }
 local intermediate = { width = 2560, height = 1200 }
 local wide = { width = 5120, height = 1440 }
 local function window(monitor, width, fullscreen)
+	active_workspace = nil
 	active = {
 		mapped = true,
 		address = #windows + 1, monitor = monitor,
@@ -171,7 +174,7 @@ assert(#fitted == 1 and fitted[1] == moved,
 window(normal, 0.7, false)
 events["config.reloaded"]()
 active.monitor, active.size = wide, { w = wide.width }
-events["window.move_to_workspace"](active)
+events["window.move_to_workspace"](active); settle()
 check(0.7, false)
 
 -- An invalid monitor gets a numeric width fallback, but must not be classified
@@ -181,14 +184,14 @@ events["monitor.focused"](active.monitor)
 assert(configured == 1.0)
 events["window.open"](active)
 active.monitor, active.size = wide, { w = wide.width }
-events["window.move_to_workspace"](active)
+events["window.move_to_workspace"](active); settle()
 check(1.0, true)
 
 -- A valid narrow monitor's fullscreen default is not an explicit client choice.
 window(normal, 1.0, true)
 events["window.open"](active)
 active.monitor, active.size = wide, { w = wide.width }
-events["window.move_to_workspace"](active)
+events["window.move_to_workspace"](active); settle()
 check(0.5, false)
 print("window policy: defaults, user overrides, toggles, adjustments and invalid-monitor fallback pass")
 
@@ -258,6 +261,85 @@ local function tiled(ws, fullscreen)
 	ws.last_window = win
 	events["window.open"](win)
 	return win
+end
+-- Native move publishes the new workspace before transferring the layout
+-- target or following focus. Layout messages still route to the old page.
+for _, from in ipairs({ "dwindle", "scrolling" }) do
+	for _, to in ipairs({ "scrolling", "dwindle" }) do
+		for _, follow in ipairs({ false, true }) do
+			for _, intent in ipairs({ "automatic", "manual-off", "manual-on" }) do
+				workspaces, windows = {}, {}
+				policy = dofile(arg[1])
+				local source, destination = workspace(from), workspace(to)
+				local survivor, moved = tiled(source), tiled(source)
+				local resident = tiled(destination)
+				active = moved
+				if intent == "manual-off" then
+					if from == "scrolling" then policy.adjust_width(-0.3)
+					else policy.toggle_fullscreen(); policy.toggle_fullscreen() end
+				elseif intent == "manual-on" then
+					if moved.fullscreen then policy.toggle_fullscreen() end
+					policy.toggle_fullscreen()
+				end
+				local was_fullscreen = moved.fullscreen
+				if was_fullscreen then
+					moved.fullscreen = false; events["window.fullscreen"](moved)
+				end
+				source.windows, destination.windows = { survivor }, { resident, moved }
+				moved.workspace, moved.target_workspace, active_workspace = destination, source, source
+				-- Force a resize after transfer; geometry is owned by the native layout.
+				moved.size.w = normal.width * 0.4
+				local before = focuses
+				events["window.move_to_workspace"](moved)
+				assert(focuses == before and active == moved, "move callback changed native focus mid-transfer")
+				moved.target_workspace = destination
+				if was_fullscreen then
+					moved.fullscreen = true; events["window.fullscreen"](moved)
+				end
+				active = follow and moved or survivor
+				active_workspace = follow and destination or source
+				source.last_window, destination.last_window = survivor, moved
+				-- Native follow emits workspace.active, then window.active. Silent
+				-- moves can finish without either callback for the moved window.
+				if follow then events["workspace.active"](destination) end
+				events["window.active"](active)
+				settle()
+				assert(active == (follow and moved or survivor)
+					and hl.get_active_workspace() == (follow and destination or source), "move reconciliation stole focus")
+				assert(survivor.fullscreen, "move failed to restore source singleton/default")
+				assert(resident.fullscreen == (to == "scrolling"), "move failed to reconcile destination pair")
+				assert(moved.fullscreen == (intent == "manual-on" or intent == "automatic" and to == "scrolling"),
+					from .. " -> " .. to .. "/" .. tostring(follow) .. "/" .. intent .. ": move lost fullscreen intent")
+				if to == "scrolling" and not moved.fullscreen then
+					local expected = from == "scrolling" and intent == "manual-off" and 0.7 or 1
+					assert(math.abs(moved.size.w / normal.width - expected) < 0.001,
+						from .. " -> " .. to .. ": move lost scrolling width")
+				end
+			end
+		end
+	end
+end
+print("native page moves: scrolling/dwindle pairs, follow/silent, dispatch context, saved width, fullscreen intent and both workspaces pass")
+-- Deferred reconciliation must use the latest choice/membership: the window
+-- can close or receive an explicit Icewine off before the one-shot runs.
+for _, closing in ipairs({ false, true }) do
+	workspaces, windows = {}, {}
+	policy = dofile(arg[1])
+	local source, destination = workspace("dwindle"), workspace("scrolling")
+	local survivor, moved = tiled(source), tiled(source)
+	source.windows, destination.windows, moved.workspace = { survivor }, { moved }, destination
+	active_workspace = source
+	events["window.move_to_workspace"](moved)
+	active_workspace = destination
+	if closing then
+		events["window.close"](moved)
+		moved.mapped, active, active_workspace = false, survivor, source
+	else
+		-- Scrolling's automatic target is on, so this is an explicit off.
+		policy.toggle_fullscreen()
+	end
+	settle()
+	assert(survivor.fullscreen and not moved.fullscreen, "queued move erased newer off/close")
 end
 workspaces, windows = {}, {}
 policy = dofile(arg[1])
@@ -333,7 +415,7 @@ local source, destination = workspace("dwindle"), workspace("master")
 local first, moved = tiled(source), tiled(source)
 source.windows, destination.windows = { first }, { moved }
 moved.workspace = destination
-events["window.move_to_workspace"](moved)
+events["window.move_to_workspace"](moved); settle()
 assert(first.fullscreen and moved.fullscreen, "move did not reconcile source and destination")
 source.tiled_layout = "monocle"
 local next_window = tiled(source)
@@ -523,7 +605,7 @@ empty.tiled_layout = "monocle"; empty.tiled_layout = "master"
 events["config.props_refreshed"]()
 switched.windows, empty.windows = { floating, manual_off, manual_on, splash }, { automatic }
 automatic.workspace = empty
-events["window.move_to_workspace"](automatic)
+events["window.move_to_workspace"](automatic); settle()
 assert(automatic.fullscreen and not manual_off.fullscreen and manual_on.fullscreen)
 -- Reload retains known automatic intent and explicit user choices.
 events["config.reloaded"]()

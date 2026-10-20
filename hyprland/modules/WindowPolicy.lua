@@ -476,9 +476,15 @@ hl.on("window.move_to_workspace", function(win)
 	local state = state_for(win)
 	local previous = state.workspace
 	state.workspace = win.workspace
-	reconcile_tiling(previous)
-	reconcile_tiling(win.workspace)
-	apply_window(win)
+	state.moving = true
+	-- The native event precedes layout-target transfer and follow/refocus.
+	-- Wait until layout messages and fullscreen target the destination space.
+	hl.timer(function()
+		state.moving = nil
+		reconcile_tiling(previous)
+		reconcile_tiling(win.workspace)
+		apply_window(win)
+	end, { timeout = 1, type = "oneshot" })
 end)
 
 hl.on("window.active", function(win)
@@ -497,6 +503,12 @@ hl.on("window.fullscreen", function(win)
 		pending_fullscreen[key] = nil
 		if expected == fullscreen then return end
 	end
+
+	-- Native move restores its saved fullscreen mode after publishing the
+	-- workspace; it is not a new client choice. Reconcile after transfer.
+	-- Ponytail: unlabelled external requests in this same turn cannot be
+	-- distinguished from restoration without a native fullscreen reason.
+	if state.moving then return end
 
 	-- An observation matching the automatic target does not change intent.
 	if state.fullscreen == nil and fullscreen == select(2, window_target(win)) then return end
