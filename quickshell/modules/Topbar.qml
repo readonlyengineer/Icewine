@@ -51,10 +51,10 @@ Scope {
     onMouseBindsSuppressedChanged: compositor.supress_mouse_binds(mouseBindsSuppressed)
     Component.onCompleted: compositor.supress_mouse_binds(mouseBindsSuppressed)
     readonly property bool interactionWanted: !sessionLocked && !ui.suppressed
-        && (ui.held || ui.latched || ui.page !== "" || radialVisible || hoveredScreen !== "")
+        && (ui.held !== null || ui.latched || ui.page !== "" || radialVisible || hoveredScreen !== ""
+            || keyboardRequest?.awaitingRelease === true)
     onInteractionWantedChanged: if (!interactionWanted) finishInteraction()
     property bool interactionActive: false
-    property string previousWindow: ""
     property var previousToplevel: null
     property int focusGeneration: 0
     property int widgetFocusGeneration: 0
@@ -86,7 +86,7 @@ Scope {
             return
         // An invalidated original target must not fall back to the newly active app.
         const window = interactionActive
-            ? (previousWindow ? previousToplevel : null)
+            ? previousToplevel
             : compositor.toplevels.find(candidate => candidate.address === compositor.activeWindowAddress)
         if (!window || !compositor.toplevels.includes(window)) return
         cancelClipboardPaste()
@@ -156,7 +156,7 @@ Scope {
     function pasteClipboard(entry) {
         const window = previousToplevel
         const stableId = String(window?.lastIpcObject?.stableId ?? "")
-        if (sessionLocked || ui.held || clipboardPaste || !previousWindow || !window
+        if (sessionLocked || ui.held || clipboardPaste || !window
                 || !compositor.toplevels.includes(window) || !/^[0-9a-fA-F]{1,16}$/.test(stableId)) {
             clipboardHistory.error = ui.held ? "Release the opening shortcut before paste"
                 : "Paste unavailable: no original application"
@@ -179,7 +179,7 @@ Scope {
         const intent = clipboardPaste
         if (!intent || intent.phase !== "loading" || intent.request !== request) return
         if (!clipboardPasteValid() || !Cards.containing(Config.Settings.cardStacks, "clipboard")?.modules.includes(ui.page)
-                || previousWindow !== intent.window.address) {
+                || previousToplevel !== intent.window) {
             cancelClipboardPaste()
             return
         }
@@ -248,44 +248,41 @@ Scope {
         ui = State.reduce(ui, { type: "resume" })
         keyboard?.hide()
         ++focusGeneration
-        previousWindow = compositor.activeWindowAddress
-        previousToplevel = compositor.toplevels.find(window => window.address === previousWindow) ?? null
+        previousToplevel = compositor.toplevels.find(window => window.address === compositor.activeWindowAddress) ?? null
         interactionActive = true
     }
 
     function pressBar() {
-        if (sessionLocked) return
+        if (sessionLocked || ui.held) return
         cancelClipboardPaste()
         beginInteraction()
-        const closing = Config.Settings.barBehaviour === "toggle" && ui.latched && !ui.held
-        ui = State.reduce(ui, { type: "press", behaviour: Config.Settings.barBehaviour })
-        if (closing) { dismissWidget(); hoveredScreen = "" }
+        const screen = focusedScreenName()
+        ui = State.reduce(ui, { type: "press", behaviour: Config.Settings.barBehaviour,
+            screen: screen, fullscreen: compositor.fullscreenScreens.includes(screen) })
+        if (ui.held.toggle && !ui.latched) { dismissWidget(); hoveredScreen = "" }
     }
 
     function releaseBar() {
+        ui = State.reduce(ui, { type: "release" })
         if (keyboardRequest?.awaitingRelease) {
-            // A click under the opening chord retains intent until Super is up.
-            // Keep its interaction alive if grave was released before Super.
+            // Physical hold ends now; the request owns the modifier wait.
             if (barModifiersHeld > 0) return
             handoffKeyboardRequest()
         }
-        ui = State.reduce(ui, { type: "release" })
     }
 
     function finishInteraction() {
         if (!interactionActive)
             return
         interactionActive = false
-        const address = previousWindow
         const window = previousToplevel
         const generation = ++focusGeneration
-        previousWindow = ""
         previousToplevel = null
         // Let the layer release its keyboard ownership before restoring focus.
         Qt.callLater(() => {
-            if (address && window && root.compositor.toplevels.includes(window)
+            if (window && root.compositor.toplevels.includes(window)
                     && generation === root.focusGeneration && !root.interactionWanted && !root.sessionLocked)
-                root.compositor.activateWindow(address)
+                root.compositor.activateWindow(window.address)
         })
     }
 
@@ -338,20 +335,16 @@ Scope {
     }
 
     function dismiss(suppress = true) {
-        cancelKeyboardRequest()
-        if (clipboardPaste?.phase !== "handoff") cancelClipboardPaste()
-        ++widgetFocusGeneration
-        if (ui.engaged) radial?.drainInput()
-        widgetDismissed()
+        dismissWidget()
         ui = State.reduce(ui, { type: suppress ? "hide" : "reset" })
         hoveredScreen = ""
         radial?.dismiss()
     }
 
     function yieldFocus() {
-        cancelKeyboardRequest()
-        previousWindow = ""
+        previousToplevel = null
         ++focusGeneration
+        cancelKeyboardRequest()
     }
 
     // Ordinary app handoffs release focus; capture/lock explicitly suppress chrome.
@@ -395,26 +388,29 @@ Scope {
         target: Quickshell
         function onScreensChanged() {
             if (!Quickshell.screens.some(screen => screen.name === root.hoveredScreen)) root.hoveredScreen = ""
+            if (root.ui.held && !Quickshell.screens.some(screen => screen.name === root.ui.held.screen)) root.releaseBar()
             if (root.ui.page && !Quickshell.screens.some(screen => screen.name === root.ui.screen)) root.dismissWidget()
         }
     }
 
     Connections {
         target: root.compositor
+        function onFullscreenScreensChanged() {
+            root.ui = State.reduce(root.ui, { type: "fullscreen", screens: root.compositor.fullscreenScreens })
+        }
         function onNavigationRequested() { root.cancelClipboardPaste(); root.handoff(false) }
         function onActiveWindowAddressChanged() {
             const address = root.compositor.activeWindowAddress
+            // Invalidate before cancellation can synchronously finish the last
+            // interaction owner. Requested handoffs still own their target.
+            if (address && address !== root.previousToplevel?.address
+                    && address !== root.keyboardRequest?.window?.address
+                    && address !== root.clipboardPaste?.window?.address)
+                root.yieldFocus()
             if (root.keyboardRequest && address && address !== root.keyboardRequest.window.address)
                 root.cancelKeyboardRequest()
             if (root.clipboardPaste && address && address !== root.clipboardPaste.window.address)
                 root.cancelClipboardPaste()
-            // Never undo an application launch or an explicit focus change.
-            if (root.interactionActive && address && address !== root.previousWindow)
-                root.previousWindow = ""
-        }
-        function onMonitorsChanged() {
-            if (root.ui.page && !Quickshell.screens.some(screen => screen.name === root.ui.screen))
-                root.dismissWidget()
         }
         function onConfigReloaded() {
             root.barModifiersHeld = 0
@@ -473,7 +469,8 @@ Scope {
             readonly property string keyboardScreen: root.widgetEngaged ? root.ui.screen : root.radial?.monitorName ?? ""
             readonly property string hoverPage: logo.visible && logo.hovered ? "launcher" : nowPlaying.visible && nowPlaying.hovered ? "media" : statusIcons.hoveredPage
             readonly property bool widgetHovered: statusPopout.hovered
-            readonly property int reservation: root.barVisible && Config.Settings.barLocation !== "above" ? root.barExtent : 0
+            readonly property bool overlapsWindows: Config.Settings.barLocation === "above" || root.compositor.fullscreenScreens.includes(screen.name)
+            readonly property int reservation: root.barVisible && !overlapsWindows ? root.barExtent : 0
             readonly property bool pointerInside: barHover.hovered || edgeHover.hovered || (widgetHere && widgetHovered)
             onPointerInsideChanged: {
                 if (pointerInside) {
@@ -503,8 +500,8 @@ Scope {
                     Region { item: edge.enabled ? edge : null }
                 }
                 WlrLayershell.namespace: "quickshell:topbar"
-                // Open cards bring only their output's bar above fullscreen.
-                WlrLayershell.layer: Config.Settings.barLocation === "above" || (root.barVisible && statusPopout.shown) ? WlrLayer.Overlay : WlrLayer.Top
+                // Temporary holds and cards are the explicit overlay owners.
+                WlrLayershell.layer: Config.Settings.barLocation === "above" || (root.barVisible && (statusPopout.shown || (root.ui.held?.screen === panel.screen.name && !root.ui.held.toggle))) ? WlrLayer.Overlay : WlrLayer.Top
                 WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
                 Item {
@@ -730,8 +727,8 @@ Scope {
             FocusScope {
                 id: input
                 anchors.fill: parent
-                // Above mode overlays windows, so only it needs a content inset.
-                anchors.topMargin: Config.Settings.barLocation === "above" ? root.barExtent : 0
+                anchors.topMargin: !root.bottomBar && panel.overlapsWindows ? root.barExtent : 0
+                anchors.bottomMargin: root.bottomBar && panel.overlapsWindows ? root.barExtent : 0
                 focus: true
 
                 Rectangle {

@@ -4,10 +4,7 @@ const fs = require("node:fs")
 const path = require("node:path")
 const vm = require("node:vm")
 const Cards = require("../modules/topbar/CardModules.js")
-// Execute the QML script with its real registry import supplied to Node's VM.
-const State = vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../modules/ShellState.js"), "utf8")
-    .replace(/^\.import "topbar\/CardModules\.js" as Cards\n/, "") + "\nmodule.exports",
-    {Cards, module: {exports: {}}})
+const State = require("../modules/ShellState.js")
 const Menu = require("../deck/DeckMenu.js")
 
 // Guard the scene's input boundary as well as the controller below. Qt's real
@@ -81,8 +78,6 @@ assert.equal(state.screen, "external")
 send({type: "dismiss"})
 assert.equal(State.barVisible(state, true, false), true, "Closing widget does not close radial")
 assert.equal(State.barVisible(state, false, false), false)
-send({type: "open", page: "unknown", engaged: true, screen: "deck"})
-assert.equal(state.page, "")
 send({type: "press"})
 send({type: "open", page: "launcher", engaged: true, screen: "deck"})
 send({type: "reset"})
@@ -95,9 +90,6 @@ assert.equal(State.barVisible(state, false, false), true)
 send({type: "dismiss"})
 assert.equal(State.barVisible(state, false, false), false)
 
-// Retired Screenshot requests are rejected; Notifications is the Clipboard entry.
-send({type: "open", page: "screenshot", engaged: true, screen: "external"})
-assert.equal(state.page, "")
 // Execute the actual QML controller methods, with only platform I/O replaced.
 send({type: "open", page: "notifications", engaged: true, screen: "external"})
 assert.equal(state.page, "notifications")
@@ -125,13 +117,15 @@ function controller(file, properties) {
 
 const callbacks = [], focused = [], focusRequests = []
 const shell = controller("../modules/Topbar.qml", {
+    Quickshell: {screens: [{name: "external"}]},
     Cards, Config: {Settings: {cardStacks: Cards.defaults, windowSwitcher: true}},
     keyboard: null, State, focusWidgetRequested: (...args) => focusRequests.push(args), ui: State.initial(), hoveredScreen: "", sessionLocked: false,
-    interactionActive: false, previousWindow: "", previousToplevel: null, focusGeneration: 0, widgetFocusGeneration: 0,
+    interactionActive: false, previousToplevel: null, focusGeneration: 0, widgetFocusGeneration: 0,
     clipboardPaste: null, keyboardRequest: null, barModifiersHeld: 0,
     keyboardWait: {attempts: 0, start() {}, stop() {}},
     layoutsEnabled: true, barVisible: false, radial: {dismiss() {}, drainInput() {}}, widgetDismissed() {},
     compositor: {activeWindowAddress: "original", toplevels: [{address: "original"}],
+        fullscreenScreens: [], monitorFor: () => ({focused: true}),
         activateWindow: address => focused.push(address), activateToplevel: window => focused.push(window)},
     Qt: {callLater: fn => callbacks.push(fn)}
 })
@@ -173,14 +167,14 @@ for (const behaviour of Cards.barBehaviours) {
         assert.equal(shell.ui.engaged, false)
         assert.equal(drains, before + 1, "Leaving engagement drains held controller input")
         assert.deepEqual(focusRequests, [], "Stale explicit focus cannot activate the old card")
-        assert.equal(shell.ui.held, true)
+        assert.ok(shell.ui.held)
         assert.equal(shell.ui.latched, latch)
         shell.openWidget(page, true, "deck")
         flush()
         assert.deepEqual(focusRequests, [["deck", page]], "Click immediately switches monitor and keyboard target")
     }
     shell.releaseBar()
-    assert.equal(shell.ui.held, false)
+    assert.equal(shell.ui.held, null)
     assert.equal(shell.ui.engaged, true, "Opening-key release retains the switched card")
     shell.handoff(true)
     shell.barVisible = false
@@ -203,9 +197,9 @@ focusRequests.length = 0
 // radial-only input keeps its prior exclusive policy. Native delivery is separate.
 const focusBinding = topbar.match(/^            WlrLayershell.keyboardFocus: ([\s\S]*?)\n\n/m)[1]
 const grabBinding = topbar.match(/HyprlandFocusGrab \{[\s\S]*?active: ([^\n]+)/)[1]
-for (const page of ["audio", "launcher", "switcher", ""]) for (const engaged of [false, true])
+for (const engaged of [false, true])
 for (const radial of [false, true]) for (const locked of [false, true]) for (const here of [false, true]) {
-    const env = {root: {ui: {page}, widgetEngaged: engaged, radialVisible: radial, sessionLocked: locked},
+    const env = {root: {widgetEngaged: engaged, radialVisible: radial, sessionLocked: locked},
         panel: {widgetHere: here}, screen: {name: "external"}, keyboardScreen: here ? "external" : "deck",
         WlrKeyboardFocus: {Exclusive: 1, None: 0}}
     assert.equal(vm.runInNewContext(grabBinding, env), here && engaged && !locked)
@@ -226,6 +220,8 @@ for (const page of Cards.modules) {
 }
 shell.Config.Settings.cardStacks = Cards.defaults
 shell.dismissWidget()
+shell.openWidget("unknown", true, "external")
+assert.equal(shell.ui.page, "", "Unknown public input is rejected before reaching the reducer")
 flush()
 focusRequests.length = 0
 for (let repeat = 0; repeat < 2; ++repeat) {
@@ -288,105 +284,6 @@ flush()
 assert.equal(focusRequests.length, 1, "Hover does not request keyboard focus")
 shell.dismissWidget()
 flush()
-const panelFocus = topbar.match(/            function focusWidget\(openingPage\) \{[\s\S]*?^            \}/m)[0]
-const acquireKeyboard = topbar.match(/            function acquireKeyboard\(\) \{[\s\S]*?^            \}/m)[0]
-const grabActivated = topbar.match(/id: widgetGrab[\s\S]*?onActiveChanged: \{([\s\S]*?)^                \}/m)[1]
-const initialGrabWindows = topbar.match(/id: widgetGrab[\s\S]*?windows: ([^\n]+)/)[1]
-const routes = []
-const panel = vm.createContext({widgetHere: true, root: {widgetEngaged: true, sessionLocked: false},
-    barWindow: {}, widgetGrab: {active: true},
-    switcher: {item: null}, statusPopout: {
-        openPage: page => routes.push(page), focusInitial: () => routes.push("restore")}})
-panel.panel = panel
-const widgetSurface = vm.runInContext("panel", panel)
-// Model only the protocol contract: keep a permitted keyboard surface, otherwise
-// pick the LAST permitted surface. This adversarial choice exposes bar ambiguity.
-let entered = panel.barWindow, requestedWindows = []
-let readySurfaces = new Set([widgetSurface, panel.barWindow])
-const commits = []
-Object.defineProperty(panel.widgetGrab, "windows", {get() {return requestedWindows}, set(windows) {
-    requestedWindows = Array.from(windows)
-    const submitted = requestedWindows.filter(window => readySurfaces.has(window))
-    if (panel.widgetGrab.active) assert.ok(submitted.length, "Acquisition never empties the native whitelist")
-    commits.push(submitted)
-    if (!submitted.includes(entered)) entered = submitted.at(-1)
-}})
-const acquisitionCallbacks = []
-const flushAcquisition = () => { while (acquisitionCallbacks.length) acquisitionCallbacks.shift()() }
-panel.Qt = {callLater: fn => acquisitionCallbacks.push(fn)}
-const grabChanged = active => { panel.active = active; vm.runInContext(grabActivated, panel) }
-vm.runInContext(acquireKeyboard, panel)
-vm.runInContext(panelFocus, panel)
-const acquire = request => {
-    entered = panel.barWindow
-    commits.length = 0
-    request()
-    flushAcquisition()
-    assert.equal(entered, widgetSurface, "Native keyboard must leave the bar for the widget panel")
-    assert.ok(commits.at(-1).includes(panel.barWindow), "Bar pointer input is re-admitted")
-}
-acquire(() => panel.focusWidget("launcher"))
-panel.focusWidget("")
-panel.focusWidget("layout")
-assert.deepEqual(routes, ["launcher", "restore", "restore", "layout", "restore"],
-    "Every module uses the shared entry and ordinary restoration preserves selection")
-acquire(() => grabChanged(true))
-assert.equal(routes.length, 5, "Preview engagement acquires native focus without resetting the clicked control")
-acquire(() => panel.focusWidget("")) // Subsequent explicit bar click while already engaged.
-const acquiredRoutes = routes.length
-for (const disable of [() => {panel.widgetHere = false}, () => {panel.root.widgetEngaged = false},
-    () => {panel.root.sessionLocked = true}, () => {panel.widgetGrab.active = false}]) {
-    Object.assign(panel.root, {widgetEngaged: true, sessionLocked: false})
-    panel.widgetHere = true; panel.widgetGrab.active = true
-    disable(); commits.length = 0
-    panel.acquireKeyboard()
-    assert.equal(commits.length, 0, "Inactive, preview, locked or other-output panel cannot acquire")
-}
-Object.assign(panel.root, {widgetEngaged: true, sessionLocked: false})
-panel.widgetGrab.active = true
-panel.widgetHere = false
-panel.focusWidget("layout")
-assert.equal(routes.length, acquiredRoutes, "Another monitor cannot take Layout focus")
-// Surface readiness is separate from object membership. A recreated output may
-// retain engagement while its bar is ready before its widget wl_surface exists.
-panel.widgetHere = true
-for (let lifetime = 0; lifetime < 2; ++lifetime) {
-    panel.widgetGrab.active = false
-    readySurfaces = new Set([panel.barWindow])
-    if (lifetime === 0) panel.widgetGrab.windows = vm.runInContext(initialGrabWindows, panel)
-    else grabChanged(false) // Deactivation must restore the same initial invariant.
-    const activateSubmitted = () => {
-        const submitted = requestedWindows.filter(window => readySurfaces.has(window))
-        if (submitted.length && !panel.widgetGrab.active) {
-            panel.widgetGrab.active = true
-            entered = submitted.at(-1)
-            grabChanged(true)
-        }
-    }
-    activateSubmitted()
-    assert.equal(panel.widgetGrab.active, false, "A ready bar cannot activate the widget grab")
-    assert.equal(acquisitionCallbacks.length, 0)
-    commits.length = 0
-    panel.acquireKeyboard()
-    assert.equal(commits.length, 0, "An explicit open waits for the deferred widget surface")
-    readySurfaces.add(widgetSurface)
-    activateSubmitted() // The wrapper's delayed surface addition emits first activation.
-    assert.equal(entered, widgetSurface)
-    assert.equal(requestedWindows.length, 1, "Do not edit the wrapper's list inside activation delivery")
-    flushAcquisition()
-    assert.equal(panel.widgetGrab.active, true)
-    assert.equal(entered, widgetSurface)
-    assert.ok(commits.every(members => members.includes(widgetSurface)), "Every acquisition commit retains the native widget surface")
-    assert.ok(requestedWindows.includes(panel.barWindow), "Late widget acquisition re-admits the ready bar")
-}
-grabChanged(true)
-panel.root.sessionLocked = true
-commits.length = 0
-flushAcquisition()
-assert.equal(commits.length, 0, "A lock between activation and the queued callback cancels acquisition")
-panel.root.sessionLocked = false
-console.log("grab lifecycle: bar-first/deferred widget, queued activation, deactivation and re-engagement pass (surface model)")
-console.log("native keyboard requests: singleton commit forces widget entry, bar restored, activation/explicit paths and guards pass (protocol model)")
 shell.layoutsEnabled = false
 shell.openWidget("layout", true, "external")
 flush()
@@ -525,7 +422,7 @@ deck.keyboard = null
 
 // Capture-only handoff suppresses held/latched/hovered/always bars without animation.
 for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"]) {
-    shell.ui = Object.assign(State.initial(), {held: true, latched: true, page: "audio", engaged: true})
+    shell.ui = Object.assign(State.initial(), {held: {screen: "external", toggle: false}, latched: true, page: "audio", engaged: true})
     shell.hoveredScreen = "external"
     shell.instantHandoff(true)
     assert.equal(shell.instantBarHide, true)
@@ -576,7 +473,7 @@ shell.clipboardHistory = {selection: ["text/plain;charset=utf-8", "a".repeat(64)
     request(action, id) { assert.equal(action, "load"); this.entry = id; return ++this.serial }, serial: 0}
 shell.pasteWait = {attempts: 0, start() {this.running = true}, stop() {this.running = false}}
 shell.pasteDelivery = {running: false}
-shell.Quickshell = {execDetached() {}}
+shell.Quickshell = {screens: [{name: "external"}], execDetached() {}}
 const originalPasteWindow = {address: "paste-target", lastIpcObject: {stableId: "1abc"}}
 shell.compositor.toplevels = [originalPasteWindow]
 shell.compositor.activeWindowAddress = originalPasteWindow.address
@@ -654,10 +551,10 @@ flush()
 assert.equal(shell.clipboardPaste, null, "Changing widgets cancels pending paste")
 console.log("clipboard focus: confirmed load, retained live target, handoff, single delivery and cancellation pass")
 shell.clipboardPaste = null
-shell.ui.held = true
+shell.ui = State.reduce(shell.ui, {type: "press", screen: "external"})
 shell.pasteClipboard("epoch:7")
 assert.equal(shell.clipboardPaste, null, "Held opening modifiers cannot reach paste delivery")
-shell.ui.held = false
+shell.ui = State.reduce(shell.ui, {type: "release"})
 
 // All visibility modes share engagement/radial/handoff lifetime rules.
 for (const behaviour of Cards.barBehaviours) {
@@ -681,20 +578,39 @@ for (const behaviour of Cards.barBehaviours) {
     mode = State.reduce(mode, {type: "resume"})
     assert.equal(State.barVisible(mode, false, true, behaviour), true)
 }
-// Switcher intent must not become an independent reason to reveal the bar.
-for (const behaviour of Cards.barBehaviours) for (const held of [false, true]) {
-    for (const latched of [false, true]) for (const hovered of [false, true]) {
-        for (const radial of [false, true]) {
-            let mode = Object.assign(State.initial(), {held, latched})
-            const visible = State.barVisible(mode, radial, hovered, behaviour)
-            mode = State.reduce(mode, {type: "open", page: "switcher", engaged: true, screen: "external"})
-            assert.equal(State.barVisible(mode, radial, hovered, behaviour), visible)
-            mode = State.reduce(mode, {type: "dismiss"})
-            assert.equal(State.barVisible(mode, radial, hovered, behaviour), visible)
-            assert.equal(mode.held, held)
-            assert.equal(mode.latched, latched)
-        }
-    }
+// Fullscreen normalises every configured press to the same temporary owner.
+for (const behaviour of Cards.barBehaviours) {
+    const held = State.reduce(Object.assign(State.initial(), {latched: true}), {
+        type: "press", behaviour, fullscreen: true, screen: "external"})
+    assert.equal(State.barVisible(held, false, false, behaviour), true)
+    const released = State.reduce(held, {type: "release"})
+    assert.equal(State.barVisible(released, false, false, behaviour), behaviour === "always")
+}
+const fullscreenChanged = topbar.match(/function onFullscreenScreensChanged\(\) \{([\s\S]*?)^        \}/m)[1]
+for (const screens of [["external"], ["deck"]]) {
+    shell.ui = State.reduce(State.initial(), {type: "press", behaviour: "toggle", screen: "external"})
+    shell.compositor.fullscreenScreens = screens
+    vm.runInNewContext(fullscreenChanged, {root: shell, State})
+    shell.ui = State.reduce(shell.ui, {type: "open", page: "audio", engaged: true, screen: "deck"})
+    shell.releaseBar()
+    shell.dismissWidget()
+    assert.equal(State.barVisible(shell.ui, false, false, "toggle"), !screens.includes("external"),
+        "Fullscreen changes only its held output; widget state copies do not lose that conversion")
+}
+shell.compositor.fullscreenScreens = []
+// Switcher adds no bar owner; preserve each independent reason once.
+for (const [mode, radial, hovered, behaviour] of [
+    [State.initial(), false, false, "keyboard"],
+    [State.reduce(State.initial(), {type: "press"}), false, false, "keyboard"],
+    [State.reduce(State.initial(), {type: "press", behaviour: "toggle"}), false, false, "toggle"],
+    [State.initial(), true, false, "keyboard"],
+    [State.initial(), false, true, "keyboard-mouse"],
+    [State.initial(), false, false, "always"]
+]) {
+    const visible = State.barVisible(mode, radial, hovered, behaviour)
+    const opened = State.reduce(mode, {type: "open", page: "switcher", engaged: true, screen: "external"})
+    assert.equal(State.barVisible(opened, radial, hovered, behaviour), visible)
+    assert.deepEqual(State.reduce(opened, {type: "dismiss"}), mode)
 }
 // Run the shipped focus-grab dismissal callback as well as selection.
 const clearSwitcher = topbar.match(/onCleared: ([\s\S]*?)^            \}/m)[1]
@@ -704,7 +620,7 @@ for (const page of ["launcher", "audio", "switcher"]) {
     assert.equal(shell.ui.page, page, "An old monitor's cleared grab cannot dismiss the new target")
     vm.runInNewContext(clearSwitcher, {root: shell, panel: {widgetHere: true}})
     assert.equal(shell.ui.page, "", "Compositor grab dismissal closes every engaged widget")
-    assert.equal(shell.previousWindow, "", "External focus wins over retained app restoration")
+    assert.equal(shell.previousToplevel, null, "External focus wins over retained app restoration")
     flush()
 }
 for (const close of [() => shell.dismissWidget(), () => shell.activateSwitcherWindow(shell.compositor.toplevels[0]),
@@ -723,78 +639,6 @@ for (const close of [() => shell.dismissWidget(), () => shell.activateSwitcherWi
     flush()
 }
 console.log("switcher visibility preserves independent hold, toggle, hover, radial and Always Show reasons")
-// Evaluate the shipped bindings, including Bottom popouts and native requests,
-// rather than implementing an alternative geometry model inside the test.
-const expression = (source, property) => source.match(new RegExp(`^ *${property}: (.+)$`, "m"))[1]
-const surfaceSource = topbar.split("id: surface")[1].split("// Consume")[0]
-const popoutSource = topbar.split("id: statusPopout")[1]
-const edgeSource = topbar.split("id: edge\n")[1].split("HoverHandler")[0]
-const layerShell = controller("../modules/Topbar.qml", {...shell,
-    ui: State.initial(), interactionActive: false, previousWindow: "", radial: null,
-    Config: {Settings: {...shell.Config.Settings}}, Qt: {callLater() {}}})
-Object.defineProperty(layerShell, "widgetEngaged", {get: () => layerShell.ui.engaged})
-const barWindowSource = topbar.split("property PanelWindow barWindow: PanelWindow")[1]
-const layerFor = screen => {
-    const env = {root: {ui: layerShell.ui, barVisible: !layerShell.sessionLocked
-        && State.barVisible(layerShell.ui, false, false, layerShell.Config.Settings.barBehaviour)},
-        screen: {name: screen}, Config: layerShell.Config, panel: {}, statusPopout: {}, WlrLayer: {Overlay: 1, Top: 0}}
-    env.panel.widgetHere = vm.runInNewContext(expression(topbar, "readonly property bool widgetHere"), env)
-    env.statusPopout.shown = vm.runInNewContext(expression(popoutSource, "shown"), env)
-    return vm.runInNewContext(expression(barWindowSource, "WlrLayershell.layer"), env)
-}
-for (const behaviour of Cards.barBehaviours) for (const location of Cards.barLocations) {
-    layerShell.Config.Settings.barBehaviour = behaviour
-    layerShell.Config.Settings.barLocation = location
-    layerShell.ui = State.initial()
-    const idleLayer = location === "above" ? 1 : 0
-    assert.equal(layerFor("external"), idleLayer)
-    layerShell.pressBar()
-    assert.equal(layerFor("external"), idleLayer, "Showing only the bar retains ordinary fullscreen policy")
-    for (const engaged of [false, true]) {
-        layerShell.openWidget("audio", engaged, "external")
-        assert.equal(layerFor("external"), 1, "Opening a preview or engaged card promotes its bar")
-        assert.equal(layerFor("deck"), idleLayer, "The other output keeps its layer")
-        layerShell.releaseBar()
-        assert.equal(layerFor("external"), 1, "Held shortcut release leaves the open card's bar promoted")
-        layerShell.openWidget("network", engaged, "deck")
-        assert.equal(layerFor("external"), idleLayer, "Changing output restores the old bar")
-        assert.equal(layerFor("deck"), 1)
-        layerShell.sessionLocked = true
-        assert.equal(layerFor("deck"), idleLayer, "Lock hides chrome even before dismissal")
-        layerShell.sessionLocked = false
-        vm.runInNewContext(topbar.match(/function onScreensChanged\(\) \{([\s\S]*?)^        \}/m)[1],
-            {root: layerShell, Quickshell: {screens: [{name: "external"}]}})
-        assert.equal(layerFor("deck"), idleLayer, "Removing the owning output clears the interaction")
-    }
-    layerShell.openWidget("switcher", true, "external")
-    assert.equal(layerFor("external"), idleLayer, "Switcher does not promote an independently visible bar")
-    layerShell.openWidget("launcher", true, "external")
-    layerShell.instantHandoff(true)
-    assert.equal(layerFor("external"), idleLayer, "Instant capture suppression removes promotion synchronously")
-    assert.equal(layerShell.ui.suppressed, true)
-}
-console.log("widget bar layers: owning output, previews/engagement, release, switch, dismiss/removal, lock and instant capture pass")
-for (const behaviour of Cards.barBehaviours) for (const location of Cards.barLocations) {
-    for (const height of [80, 600, 1440]) for (const visible of [false, true]) {
-        const env = {root: {bottomBar: location === "bottom", barVisible: visible, barHeight: 38, barGap: 0, barExtent: 38, sessionLocked: false},
-            Config: {Settings: {barBehaviour: behaviour, barLocation: location}},
-            panel: {height, width: 1280}, input: {height}, parent: {height}, height: 38, implicitHeight: 500}
-        const value = source => vm.runInNewContext(source, env)
-        const reservation = value(expression(topbar, "readonly property int reservation"))
-        assert.equal(reservation, visible && location !== "above" ? 38 : 0)
-        const y = value(expression(surfaceSource, "readonly property real targetY"))
-        if (visible) assert.equal(y, location === "bottom" ? height - 38 : 0)
-        else assert.ok(y <= -38 || y >= height, "Hidden visual leaves the usable screen")
-        env.height = value(expression(popoutSource, "height"))
-        const popoutY = value(expression(popoutSource, "y"))
-        assert.ok(popoutY >= 0 && popoutY + env.height <= height, "Popout remains inside native usable height")
-        assert.equal(value(expression(edgeSource, "enabled")), behaviour === "keyboard-mouse")
-        env.height = 1
-        assert.equal(value(expression(edgeSource, "y")), location === "bottom" ? height - 1 : 0)
-        env.root.sessionLocked = true
-        assert.equal(value(expression(edgeSource, "enabled")), false, "Lock removes mouse edge input")
-    }
-}
 // Always-visible chrome must not prevent restoring focus after a widget closes.
 shell.ui = State.initial()
 shell.interactionWanted = false
@@ -804,7 +648,7 @@ shell.beginInteraction()
 shell.finishInteraction()
 flush()
 assert.equal(focused.at(-1), originalPasteWindow.address)
-console.log("bar modes: press/release/repeat, toggle, handoff, lock edge, all 12 placements and passive focus pass")
+console.log("bar modes and original-target focus lifetime pass; native fixture owns geometry/grab checks")
 
 // Execute the actual launcher caller and shared handoff, with only platform
 // launch/focus delivery substituted. No later focus/navigation event resumes it.
@@ -834,16 +678,18 @@ console.log("ordinary launcher/media/clipboard/window/controller handoffs preser
 // Execute actual Topbar handoff and delivery readiness with a mocked compositor.
 const oskCallbacks = [], oskCalls = [], oskTarget = {address: "app"}
 const keyboardShell = controller("../modules/Topbar.qml", {
+    Quickshell: {screens: [{name: "screen"}]},
     State, Cards, Config: {Settings: {oskAccess: "launcher", barBehaviour: "always", cardStacks: Cards.defaults}},
     focusWidgetRequested() {},
     keyboard: {busy: false, show() { oskCalls.push("show") }, hide() {}}, keyboardRequest: null,
     keyboardWait: {attempts: 0, start() { oskCalls.push("wait") }, stop() {}}, barModifiersHeld: 0,
     sessionLocked: false, radialVisible: false, interactionActive: true,
-    previousWindow: "app", previousToplevel: oskTarget, focusGeneration: 0, widgetFocusGeneration: 0,
+    previousToplevel: oskTarget, focusGeneration: 0, widgetFocusGeneration: 0,
     ui: State.reduce(State.initial(), {type: "open", page: "launcher", engaged: true, screen: "screen"}),
     hoveredScreen: "screen", clipboardPaste: null,
     radial: {drainInput() {}, dismiss() {}}, widgetDismissed() {},
     compositor: {activeWindowAddress: "app", toplevels: [oskTarget],
+        fullscreenScreens: [], monitorFor: () => ({focused: true}),
         activateToplevel(window) { oskCalls.push(window) }, activateWindow() { throw Error("wrong restoration path") }},
     Qt: {callLater: fn => oskCallbacks.push(fn)}
 })
@@ -851,7 +697,7 @@ const oskFlush = () => { while (oskCallbacks.length) oskCallbacks.shift()() }
 function prepareKeyboard(mode = "launcher") {
     keyboardShell.cancelKeyboardRequest(); oskFlush(); oskCalls.length = 0
     Object.assign(keyboardShell, {sessionLocked: false, radialVisible: false, interactionActive: true,
-        previousWindow: "app", previousToplevel: oskTarget, clipboardPaste: null, barModifiersHeld: 0,
+        previousToplevel: oskTarget, clipboardPaste: null, barModifiersHeld: 0,
         ui: State.reduce(State.initial(), {type: "open", page: "launcher", engaged: true, screen: "screen"})})
     keyboardShell.Config.Settings.oskAccess = mode
     keyboardShell.keyboard.busy = false
@@ -890,7 +736,7 @@ for (const mode of ["none", "topbar"]) {
     prepareKeyboard(mode); keyboardShell.showKeyboard("launcher"); oskFlush()
     assert.equal(keyboardShell.keyboardRequest, null)
 }
-for (const invalidate of [() => {keyboardShell.previousWindow = ""},
+for (const invalidate of [() => {keyboardShell.previousToplevel = null},
     () => {keyboardShell.keyboard.busy = true}]) {
     prepareKeyboard(); invalidate(); keyboardShell.showKeyboard("launcher"); oskFlush()
     assert.equal(keyboardShell.keyboardRequest, null)
@@ -920,7 +766,7 @@ for (const mode of ["topbar", "launcher"]) for (const modifierFirst of [false, t
     if (!modifierFirst) {
         keyboardShell.releaseBar() // grave first; Super still physically down
         oskFlush()
-        assert.equal(keyboardShell.ui.held, true)
+        assert.equal(keyboardShell.ui.held, null)
         assert.equal(keyboardShell.keyboardRequest.awaitingRelease, true)
         assert(!oskCalls.includes("show"))
     }
@@ -941,7 +787,7 @@ for (const invalidate of [
     () => {keyboardShell.focusGeneration++},
     () => {keyboardShell.dismiss()}
 ]) {
-    prepareKeyboard(); keyboardShell.ui.held = true; keyboardShell.barModifiersHeld = 1
+    prepareKeyboard(); keyboardShell.ui = State.reduce(keyboardShell.ui, {type: "press", screen: "screen"}); keyboardShell.barModifiersHeld = 1
     keyboardShell.showKeyboard("launcher"); invalidate()
     keyboardShell.barModifiersHeld = 0; keyboardShell.releaseBar(); oskFlush()
     assert(!oskCalls.includes("show"), "Retained held request still obeys all cancellation gates")
@@ -958,7 +804,7 @@ keyboardShell.pressBar()
 keyboardShell.barModifiersHeld = 2
 vm.runInNewContext(openingModifier, {root: keyboardShell})
 assert.equal(keyboardShell.barModifiersHeld, 1)
-assert.equal(keyboardShell.ui.held, true, "Unrelated modifier release must not end the taskbar hold")
+assert.ok(keyboardShell.ui.held, "Unrelated modifier release must not end the taskbar hold")
 keyboardShell.showKeyboard("launcher")
 assert.equal(keyboardShell.keyboardRequest.awaitingRelease, true)
 vm.runInNewContext(openingModifier, {root: keyboardShell})

@@ -1,22 +1,22 @@
-.import "topbar/CardModules.js" as Cards
-
 // Only user intent lives here. Hover, animation and controller routing are
 // separate inputs, never alternative owners of widget lifetime.
-function initial() {
-    return { held: false, latched: false, suppressed: false, page: "", engaged: false, screen: "" }
+function initial(suppressed = false) {
+    return { held: null, latched: false, suppressed: suppressed, page: "", engaged: false, screen: "" }
 }
 
 function reduce(state, event) {
     switch (event.type) {
     case "press":
         if (state.held) return state
-        return Object.assign({}, state, { held: true, suppressed: false,
-            latched: event.behaviour === "toggle" ? !state.latched : false })
+        const toggle = event.behaviour === "toggle" && !event.fullscreen
+        return Object.assign({}, state, { held: { screen: event.screen, toggle: toggle }, suppressed: false,
+            latched: toggle ? !state.latched : false })
+    case "fullscreen":
+        return state.held?.toggle && event.screens.includes(state.held.screen)
+            ? Object.assign({}, state, { held: { screen: state.held.screen, toggle: false }, latched: false }) : state
     case "release":
-        return Object.assign({}, state, { held: false })
+        return Object.assign({}, state, { held: null })
     case "open":
-        if (event.page !== "switcher" && !Cards.modules.includes(event.page))
-            return state
         // Returning to this icon must not release its card's keyboard ownership.
         if (state.engaged && !event.engaged && state.page === event.page && state.screen === event.screen)
             return state
@@ -30,9 +30,8 @@ function reduce(state, event) {
     case "resume":
         return Object.assign({}, state, { suppressed: false })
     case "hide":
-        return Object.assign(initial(), { suppressed: true })
     case "reset":
-        return initial()
+        return initial(event.type === "hide")
     default:
         return state
     }
@@ -40,7 +39,7 @@ function reduce(state, event) {
 
 function barVisible(state, radialVisible, hovered, behaviour) {
     if (state.suppressed && !radialVisible) return false
-    return behaviour === "always" || (behaviour === "toggle" ? state.latched : state.held)
+    return behaviour === "always" || state.latched || (state.held !== null && !state.held.toggle)
         || radialVisible || (state.page !== "" && state.page !== "switcher") || hovered
 }
 

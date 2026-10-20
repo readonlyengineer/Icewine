@@ -15,6 +15,33 @@ QtObject {
 
     readonly property string activeWindowAddress: Hyprland.activeToplevel?.address ?? ""
     readonly property var toplevels: Hyprland.toplevels.values
+    readonly property var fullscreenScreens: Hyprland.monitors.values.filter(monitor =>
+        Hyprland.workspaces.values.some(workspace => workspace.hasFullscreen
+            && workspace.monitor?.name === monitor.name
+            && (workspace.id > 0 ? workspace.active
+                : workspace.id < 0 && workspace.id === monitor.lastIpcObject?.specialWorkspace?.id)))
+        .map(monitor => monitor.name)
+
+    // Native refresh drops busy calls. Keep one follow-up until a snapshot
+    // arrives; no event during that request can be lost permanently.
+    property bool specialRefreshPending: false
+    function flushSpecialRefresh() {
+        if (!specialRefreshPending) return
+        specialRefreshPending = false
+        Qt.callLater(Hyprland.refreshMonitors)
+    }
+    property Instantiator monitorUpdates: Instantiator {
+        model: Hyprland.monitors
+        onObjectAdded: (_, object) => {
+            // monitoraddedv2 creates placeholders before any snapshot completes.
+            if (object.modelData.lastIpcObject?.name) adapter.flushSpecialRefresh()
+        }
+        delegate: Connections {
+            required property var modelData
+            target: modelData
+            function onLastIpcObjectChanged() { adapter.flushSpecialRefresh() }
+        }
+    }
 
     readonly property string activeWindowClass: String(
         Hyprland.activeToplevel?.wayland?.appId
@@ -253,7 +280,11 @@ QtObject {
 
         function onRawEvent(event) {
             const name = event.name
-            if (/^monitor(added|removed)/.test(name)) {
+            // qs 0.3.2 does not refresh its visible-special snapshot itself.
+            if (name === "activespecialv2") {
+                adapter.specialRefreshPending = true
+                Qt.callLater(Hyprland.refreshMonitors)
+            } else if (/^monitor(added|removed)/.test(name)) {
                 adapter.monitorsChanged()
             } else if (name === "configreloaded") {
                 adapter.configReloaded()

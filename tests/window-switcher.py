@@ -84,6 +84,7 @@ ShellRoot {
         function activateToplevel(target) {
             if (toplevels.includes(target)) { restored = target.address; activeWindowAddress = target.address }
         }
+        property var fullscreenScreens: []
         function monitorFor(screen) { return {focused:true} }
     }
     QtObject { id: ws1; property int id: 1; property string name: "1"; property var monitor: ({name: "DP-1"}) }
@@ -98,6 +99,7 @@ ShellRoot {
             property string name
             property bool focused: true
             property var activeWorkspace
+            property var lastIpcObject: ({specialWorkspace: {id: 0}})
         }
     }
     Component {
@@ -106,6 +108,8 @@ ShellRoot {
             property int id
             property string name: String(id)
             property var monitor
+            property bool active: false
+            property bool hasFullscreen: false
             property var toplevels: QtObject { property var values: [] }
             function activate() { Hyprland.activatedWorkspace = id }
         }
@@ -380,7 +384,64 @@ ShellRoot {
                 for (const item of many) item.destroy()
                 console.log("SWITCHER_SIZING_PASSED")
             }
+            function fullscreenFlow() {
+                // Native special-workspace facts: active=false, visibility comes
+                // from the monitor snapshot, and that snapshot notifies readers.
+                const monitor = fixtureMonitor.createObject(shell, {name: "DP-1"})
+                const special = fixtureWorkspace.createObject(shell, {id: -99, monitor: monitor, hasFullscreen: true})
+                const inactive = fixtureWorkspace.createObject(shell, {id: 3, monitor: monitor, hasFullscreen: true})
+                Hyprland.monitors.values = [monitor]
+                Hyprland.workspaces.values = [special, inactive]
+                compare(workspaceCompositor.fullscreenScreens.length, 0)
+                monitor.lastIpcObject = {specialWorkspace: {id: -99}}
+                compare(workspaceCompositor.fullscreenScreens.join(","), "DP-1")
+                const before = Hyprland.monitorRefreshes
+                Hyprland.rawEvent({name: "activespecialv2"})
+                tryCompare(Hyprland, "monitorRefreshes", before + 1)
+                monitor.lastIpcObject = {specialWorkspace: {id: 0}}
+                tryCompare(Hyprland, "monitorRefreshes", before + 2)
+                compare(workspaceCompositor.fullscreenScreens.length, 0)
+
+                Config.Settings.widgetSelections = {barBehaviour: "toggle"}
+                topbar.dismiss(false)
+                topbar.pressBar()
+                mockCompositor.fullscreenScreens = ["DP-1"]
+                verify(topbar.barVisible && !topbar.ui.latched, "Conversion is synchronous, before release or exit")
+                mockCompositor.fullscreenScreens = []
+                topbar.openWidget("audio", true, "DP-2")
+                topbar.releaseBar()
+                verify(!topbar.ui.latched && topbar.ui.screen === "DP-2", "Release preserves independent widget")
+                topbar.dismiss(false)
+                topbar.pressBar()
+                wait(1)
+                verify(topbar.ui.latched && topbar.ui.held.toggle, "No stale callback can alter a later ordinary chord")
+                topbar.dismiss(false)
+                console.log("FULLSCREEN_FLOW_PASSED")
+            }
             function check() {
+                // A pending OSK request is the sole owner after physical release.
+                // Cancelling it on explicit focus must not restore the old app.
+                Config.Settings.widgetSelections = {barBehaviour: "keyboard", oskAccess: "topbar"}
+                topbar.dismiss(false)
+                mockCompositor.activeWindowAddress = b.address
+                mockCompositor.restored = ""
+                topbar.barModifiersHeld = 1
+                topbar.pressBar()
+                topbar.showKeyboard("topbar")
+                topbar.releaseBar()
+                verify(topbar.keyboardRequest?.awaitingRelease && topbar.interactionWanted)
+                mockCompositor.activeWindowAddress = a.address
+                compare(topbar.keyboardRequest, null)
+                wait(1)
+                compare(mockCompositor.restored, "", "Explicit focus wins over cancellation of the final owner")
+                topbar.barModifiersHeld = 0
+                mockCompositor.activeWindowAddress = b.address
+                topbar.pressBar()
+                topbar.releaseBar() // Queue ordinary restoration before the app choice.
+                mockCompositor.activeWindowAddress = a.address
+                wait(1)
+                compare(mockCompositor.restored, "", "Explicit focus also cancels already queued restoration")
+                fullscreenFlow()
                 workspacesAfterUnlock()
                 cardSwitching()
                 // Keep the real session/PAM-result handlers and topbar bindings.
@@ -603,13 +664,17 @@ ShellRoot {
                     }
                     if (!topbar.keyboardRequest) throw new Error("Held action dropped: " + mode + "/" + touch
                         + " held=" + topbar.ui.held + " modifiers=" + topbar.barModifiersHeld
-                        + " previous=" + topbar.previousWindow)
+                        + " previous=" + topbar.previousToplevel?.address)
                     compare(topbar.keyboardRequest.window, original)
                     verify(topbar.keyboardRequest.awaitingRelease)
+                    const request = topbar.keyboardRequest
+                    topbar.pressBar()
+                    compare(topbar.keyboardRequest, request, "Repeat preserves the pending action")
                     wait(80)
                     compare(mockKeyboard.opens, count, "No keyboard while opening modifier is held")
                     if (!touch) {
                         topbar.releaseBar() // grave released first; Super remains down.
+                        compare(topbar.ui.held, null)
                         wait(80)
                         verify(topbar.keyboardRequest?.awaitingRelease)
                         compare(mockKeyboard.opens, count)
@@ -820,9 +885,13 @@ with tempfile.TemporaryDirectory(prefix='.switcher-check-') as directory:
 import QtQuick
 QtObject {
     id: native
-    property var monitors: QtObject {
+    property var monitors: ListModel {
         property var values: []
-        onValuesChanged: native.lookup.values = values
+        onValuesChanged: {
+            native.lookup.values = values
+            clear()
+            for (const monitor of values) append({modelData: monitor})
+        }
     }
     property var workspaces: QtObject { property var values: [] }
     property var toplevels: QtObject { property var values: [] }
@@ -830,6 +899,8 @@ QtObject {
     property var focusedMonitor: null
     property var focusedWorkspace: null
     property bool usingLua: true
+    property int monitorRefreshes: 0
+    function refreshMonitors() { ++monitorRefreshes }
     property int activatedWorkspace: 0
     signal rawEvent(var event)
     // Model the C++ invokable's unobservable ObjectModel::valueList() read.
@@ -951,7 +1022,7 @@ Scope {
     output = result.stdout + result.stderr
     assert result.returncode == 0 and 'SWITCHER_PASSED' in output and 'SWITCHER_SIZING_PASSED' in output, output
     assert 'WORKSPACES_UNLOCK_PASSED' in output, output
-    assert 'CARD_SWITCHING_PASSED' in output, output
+    assert 'CARD_SWITCHING_PASSED' in output and 'FULLSCREEN_FLOW_PASSED' in output, output
     assert not re.search(r'ReferenceError|TypeError|Binding loop|Unable to assign|not a type', output), output
     # One lightweight mixed policy case exercises both fixed directions against
     # opposing saved choices; nullable user choice was covered by the watcher.

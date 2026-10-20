@@ -79,6 +79,7 @@ ShellRoot {
     }
     property var notificationService: ({count: 0, highestUrgency: 0, doNotDisturb: false, pulseToken: 0})
     property var compositor: ({
+        fullscreenScreens: [],
         monitorFor: screen => ({activeWorkspace: {id: 1}}),
         workspaceIdsForMonitor: monitor => [1,2,3,4,5,6,7,8,9,10],
         toplevelsForWorkspace: id => [], activateWorkspace: id => {}
@@ -117,6 +118,7 @@ ShellRoot {
             width: 1280; height: 800
             property var screen: ({name: "fixture"})
             readonly property bool widgetHere: __WIDGET_HERE__
+            readonly property bool overlapsWindows: __OVERLAPS_WINDOWS__
             readonly property int reservation: __RESERVATION__
             readonly property string hoverPage: __HOVER_PAGE__
             Item {
@@ -131,9 +133,10 @@ ShellRoot {
                 id: input
                 y: root.foreignTop + (!root.bottomBar ? panel.reservation : 0) + overlayRequest.margins.top + aboveInset
                 readonly property int aboveInset: __CONTENT_INSET__
+                readonly property int belowInset: __CONTENT_BOTTOM_INSET__
                 width: panel.width
                 height: panel.height - root.foreignTop - root.foreignBottom - panel.reservation
-                    - overlayRequest.margins.top - overlayRequest.margins.bottom - aboveInset
+                    - overlayRequest.margins.top - overlayRequest.margins.bottom - aboveInset - belowInset
             Rectangle {
                 id: statusPopout
                 readonly property bool shown: __POPOUT_SHOWN__
@@ -171,10 +174,10 @@ ShellRoot {
                 for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"])
                 for (const location of ["above", "top", "bottom"]) {
                     Config.Settings.widgetSelections = {barBehaviour: behaviour, barLocation: location}
-                    function send(type) { root.ui = State.reduce(root.ui, {type: type, behaviour: behaviour}) }
+                    function send(type) { root.ui = State.reduce(root.ui, {type: type, behaviour: behaviour, screen: "fixture"}) }
                     function settled(visible) {
                         compare(root.barVisible, visible)
-                        compare(barRequest.layer, location === "above" ? WlrLayer.Overlay : WlrLayer.Top)
+                        compare(barRequest.layer, location === "above" || (root.ui.held?.screen === "fixture" && !root.ui.held.toggle) ? WlrLayer.Overlay : WlrLayer.Top)
                         compare(barRequest.keyboardFocus, WlrKeyboardFocus.None)
                         compare(overlayRequest.layer, WlrLayer.Overlay, "Explicit widgets and radial retain their overlay")
                         tryCompare(surface, "opacity", visible ? 1 : 0)
@@ -233,18 +236,22 @@ ShellRoot {
                 root.instantBarHide = true
             }
             function widget_layers() {
+                for (const fullscreen of [false, true])
                 for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"])
                 for (const location of ["above", "top", "bottom"]) {
                     Config.Settings.widgetSelections = {barBehaviour: behaviour, barLocation: location}
                     root.ui = State.initial()
+                    root.compositor = Object.assign({}, root.compositor, {fullscreenScreens: fullscreen ? ["fixture"] : []})
                     function layer(expected) {
                         compare(barRequest.layer, location === "above" ? WlrLayer.Overlay : expected)
                         compare(barRequest.keyboardFocus, WlrKeyboardFocus.None)
-                        compare(barRequest.exclusiveZone, root.barVisible && location !== "above" ? root.barExtent : 0)
+                        compare(barRequest.exclusiveZone, root.barVisible && !panel.overlapsWindows ? root.barExtent : 0)
                         compare(barRequest.anchors.bottom, location === "bottom")
                     }
                     layer(WlrLayer.Top)
-                    root.ui = State.reduce(root.ui, {type: "press", behaviour: behaviour})
+                    root.ui = State.reduce(root.ui, {type: "press", behaviour: behaviour,
+                        screen: "fixture", fullscreen: fullscreen})
+                    layer(fullscreen || behaviour !== "toggle" ? WlrLayer.Overlay : WlrLayer.Top)
                     for (const engaged of [false, true]) {
                         root.ui = State.reduce(root.ui, {type: "open", page: "audio", engaged: engaged, screen: "fixture"})
                         layer(WlrLayer.Overlay)
@@ -274,6 +281,7 @@ ShellRoot {
                     compare(surface.opacity, 0)
                     compare(Config.Settings.barLocation, location)
                 }
+                root.compositor = Object.assign({}, root.compositor, {fullscreenScreens: []})
             }
             function native_geometry() {
                 // Captured failure: 2880x1800 at 1.5x => logical 1920x1200;
@@ -455,6 +463,8 @@ for key, value in {'TEST_CALL': 'checks.capture_animations(); console.log(\"BAR_
                    'BAR_VISIBLE': re.search(r'readonly property bool barVisible: ([\s\S]*?)\n    readonly', native)[1],
                    'CONTENT_INSET': binding('anchors.topMargin', native[native.index('                id: input'):]),
                    'RESERVATION': binding('readonly property int reservation'),
+                   'OVERLAPS_WINDOWS': binding('readonly property bool overlapsWindows'),
+                   'CONTENT_BOTTOM_INSET': binding('anchors.bottomMargin', native[native.index('                id: input'):]),
                    'WIDGET_HERE': binding('readonly property bool widgetHere'),
                    'POPOUT_SHOWN': binding('shown', popout),
                    'HOVER_PAGE': binding('readonly property string hoverPage'),
