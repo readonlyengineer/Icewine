@@ -257,6 +257,12 @@ experimental Arch/CachyOS packages; this adds no other distribution installer.
 
 ## Basic hotkeys
 
+In `icewine`, open **Hotkeys** and select Launcher, Terminal, File manager,
+Screenshot or Lock. Press Enter, type a chord such as `Super+Alt+F1`, then Enter
+to save; Escape cancels. Press `r` on the action to restore its default. Changes
+reload Hyprland and survive login in `$XDG_STATE_HOME/icewine/hotkeys`
+(`~/.local/state/icewine/hotkeys` when unset or empty). The table lists defaults.
+
 | Key | Action |
 | --- | --- |
 | ``Super+` `` (hold) | Display topbar |

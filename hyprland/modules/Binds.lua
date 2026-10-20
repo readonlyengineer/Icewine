@@ -5,6 +5,46 @@ local mainMod  = "SUPER"
 local apps     = require("icewine.modules.DefaultApps")
 local windows  = require("icewine.modules.WindowPolicy")
 
+-- Only ordinary press actions are managed here; never evaluate preference Lua.
+local hotkeys = {
+	launcher = "SUPER+SPACE", terminal = "SUPER+RETURN", filemanager = "SUPER+E",
+	screenshot = "SUPER+PRINT", lock = "SUPER+L",
+}
+local state_home = os.getenv("XDG_STATE_HOME")
+if not state_home or state_home == "" then
+	state_home = (os.getenv("HOME") or "") .. "/.local/state"
+end
+local file = io.open(state_home .. "/icewine/hotkeys", "r")
+if file then
+	local saved, seen, valid = {}, {}, true
+	for line in file:lines() do
+		local id, chord = line:match("^([a-z]+)=([A-Z0-9+]+)$")
+		local rest = chord and chord:match("^SUPER%+(.+)$")
+		if rest then
+			for _, modifier in ipairs({ "SHIFT", "CTRL", "ALT" }) do
+				rest = rest:gsub("^" .. modifier .. "%+", "")
+			end
+		end
+		local key_ok = rest and (rest:match("^[A-Z0-9]$") or rest == "RETURN" or rest == "SPACE" or rest == "PRINT"
+			or (rest:match("^F%d+$") and tonumber(rest:sub(2)) >= 1 and tonumber(rest:sub(2)) <= 12
+				and rest == "F" .. tonumber(rest:sub(2))))
+		if not id or not hotkeys[id] or saved[id] or not key_ok then valid = false; break end
+		saved[id] = chord
+	end
+	file:close()
+	for id, chord in pairs(hotkeys) do
+		chord = saved[id] or chord
+		if seen[chord] then valid = false end
+		seen[chord] = true
+	end
+	if valid then for id, chord in pairs(saved) do hotkeys[id] = chord end
+	else print("Invalid Icewine hotkeys; using defaults") end
+end
+-- Keep the shipped spelling for case-sensitive unbinds in neighbouring dotfiles.
+for id, chord in pairs(hotkeys) do
+	hotkeys[id] = chord:gsub("%+", " + "):gsub("PRINT$", "Print")
+end
+
 local function layout()
 	local ws = hl.get_active_special_workspace() or hl.get_active_workspace()
 	return ws and ws.tiled_layout
@@ -75,13 +115,13 @@ local function move_to_populated_workspace_edge(kind)
 end
 
 -- Application launchers
-hl.bind(mainMod .. " + RETURN", hl.dsp.exec_cmd(apps.terminal))
-hl.bind(mainMod .. " + SPACE",  topbar("launcher"))
+hl.bind(hotkeys.terminal, hl.dsp.exec_cmd(apps.terminal), { description = "icewine:terminal" })
+hl.bind(hotkeys.launcher, topbar("launcher"), { description = "icewine:launcher" })
 -- Toggle on chord release, after the opening key can no longer reach the overlay.
 hl.bind(mainMod .. " + W", hl.dsp.global("quickshell:windowSwitcher"), { transparent = true })
-hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd(apps.file_manager))
+hl.bind(hotkeys.filemanager, hl.dsp.exec_cmd(apps.file_manager), { description = "icewine:filemanager" })
 if apps.browser ~= "" then hl.bind(mainMod .. " + B", hl.dsp.exec_cmd(apps.browser)) end
-hl.bind(mainMod .. " + L",      hl.dsp.exec_cmd(apps.lock))
+hl.bind(hotkeys.lock, hl.dsp.exec_cmd(apps.lock), { description = "icewine:lock" })
 -- Lua global dispatchers need transparency so intervening clicks cannot shadow release.
 hl.bind(mainMod .. " + grave", hl.dsp.global("quickshell:topbarHold"), { transparent = true, dont_inhibit = true, submap_universal = true })
 -- Either release order ends the chord; ordinary key releases still reach apps.
@@ -101,7 +141,7 @@ hl.bind(mainMod .. " + SHIFT + P", topbar("performance"))
 hl.bind(mainMod .. " + SHIFT + D", topbar("layout"))
 
 -- Session control
-hl.bind(mainMod .. " + SHIFT + L", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || uwsm stop"))
+hl.bind(mainMod .. " + SHIFT + L", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || uwsm stop"), { description = "icewine:session-end" })
 hl.bind(mainMod .. " + CTRL + R",  hl.dsp.exec_cmd("hyprctl reload"))
 hl.bind(mainMod .. " + SHIFT + W", hl.dsp.dpms({ action = "on" })) -- DPMS-wake bandaid (old `dpms on` syntax errors under Hyprland 0.55)
 
@@ -116,7 +156,7 @@ hl.bind(mainMod .. " + F", windows.toggle_fullscreen)
 hl.bind(mainMod .. " + M", windows.toggle_width)
 
 -- Selected native screenshot utility; None reports disabled without launching a tool.
-hl.bind(mainMod .. " + Print", hl.dsp.exec_cmd("icewine screenshot"))
+hl.bind(hotkeys.screenshot, hl.dsp.exec_cmd("icewine screenshot"), { description = "icewine:screenshot" })
 
 -- Resolve the active layout at use time, including native runtime changes.
 for key, direction in pairs({ left = "l", right = "r", up = "u", down = "d" }) do

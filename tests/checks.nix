@@ -168,6 +168,7 @@ in {
     lua hyprland/tests/steam.lua
     lua hyprland/tests/window-policy.lua hyprland/modules/WindowPolicy.lua
     python3 tests/theme-cli.py scripts/theme scripts/icewine theme/assets
+    python3 tests/hotkeys.py
     python3 tests/layouts.py
     python3 tests/clipboard.py
     touch "$out"

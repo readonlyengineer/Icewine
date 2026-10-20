@@ -77,6 +77,50 @@ impl Appearance {
     }
 }
 
+const HOTKEY_ACTIONS: &[(&str, &str, &str)] = &[
+    ("launcher", "Launcher", "SUPER+SPACE"), ("terminal", "Terminal", "SUPER+RETURN"),
+    ("filemanager", "File manager", "SUPER+E"), ("screenshot", "Screenshot", "SUPER+PRINT"),
+    ("lock", "Lock", "SUPER+L"),
+];
+
+struct HotkeySettings { values: Vec<String>, revision: String, readonly: bool, live: bool }
+impl HotkeySettings {
+    fn load() -> io::Result<Self> {
+        let text = widget_command(&["hotkeys-state".into()])?;
+        let mut fields = BTreeMap::new();
+        for field in text.split_whitespace() {
+            let (name, value) = field.split_once('=').ok_or_else(|| io::Error::other("Invalid hotkey state"))?;
+            if fields.insert(name, value).is_some() { return Err(io::Error::other("Duplicate hotkey field")); }
+        }
+        let readonly = match fields.remove("readonly") { Some("true") => true, Some("false") => false,
+            _ => return Err(io::Error::other("Invalid hotkey ownership")) };
+        let live = match fields.remove("live") { Some("true") => true, Some("false") => false,
+            _ => return Err(io::Error::other("Invalid hotkey session state")) };
+        let revision = fields.remove("revision").filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit()))
+            .ok_or_else(|| io::Error::other("Invalid hotkey revision"))?.to_owned();
+        let mut values = Vec::new();
+        for (id, _, _) in HOTKEY_ACTIONS {
+            let chord = fields.remove(id).filter(|value| value.len() <= 48 && value.starts_with("SUPER+")
+                && value.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'+'))
+                .ok_or_else(|| io::Error::other("Invalid hotkey chord"))?;
+            values.push(chord.to_owned());
+        }
+        if !fields.is_empty() { return Err(io::Error::other("Unknown hotkey field")); }
+        Ok(Self { values, revision, readonly, live })
+    }
+
+    fn save(&self, action: usize, chord: &str) -> io::Result<String> {
+        widget_command(&["hotkeys-apply".into(), self.revision.clone(), HOTKEY_ACTIONS[action].0.into(), chord.into()])
+    }
+}
+
+fn hotkey_label(chord: &str) -> String {
+    chord.split('+').map(|part| match part {
+        "SUPER" => "Super".into(), "SHIFT" => "Shift".into(), "CTRL" => "Ctrl".into(), "ALT" => "Alt".into(),
+        "RETURN" => "Enter".into(), "SPACE" => "Space".into(), "PRINT" => "Print".into(), _ => part.to_owned(),
+    }).collect::<Vec<_>>().join("+")
+}
+
 const WIDGETS: &[(&str, &str, &str)] = &[
     ("notificationToasts", "Notification toasts", "Popup cards; history and sounds stay"),
     ("windowSwitcher", "Window switcher", "Optional window list and shortcut"),
@@ -322,6 +366,17 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
         Err(error) => (Widgets { enabled: [true; 2], ownership: [Ownership::Policy; 8], supported: false,
             revision: String::new(), stacks: Vec::new(), bar: [0; 4], width: 80 }, error.to_string()),
     };
+    let mut hot_settings = match HotkeySettings::load() {
+        Ok(value) => value,
+        Err(error) => {
+            message = error.to_string();
+            HotkeySettings { values: HOTKEY_ACTIONS.iter().map(|v| v.2.to_owned()).collect(), revision: String::new(), readonly: true, live: false }
+        }
+    };
+    let mut hot_cursor = 0usize;
+    let mut hot_edit: Option<(usize, String)> = None;
+    let mut hot_follow = false;
+    let mut hot_anchor = None;
     let mut taskbar = widgets.clone();
     let mut page = 0usize;
     let mut pane = false;
@@ -406,6 +461,9 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             let mut grid_columns = 2usize;
             let mut visible_grid_rows = 1usize;
             let mut hot_max_scroll = 0usize;
+            let mut hot_line_count = 0usize;
+            let mut hot_height = 0usize;
+            let mut hot_actions = Vec::new();
             terminal.draw(|frame| {
                 let area = frame.area();
                 if area.width < 80 || area.height < 24 {
@@ -429,15 +487,16 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     page_hits.push((rect, index));
                 }
                 let inner = Rect::new(content.x + 2, content.y + 1, content.width - 4, content.height - 2);
-                let title = if subpage == 1 { "Appearance / Theme" } else if subpage == 2 { "Appearance / Taskbar" } else if page == 0 && readonly { "Utilities - Read Only" } else { ["Utilities", "Appearance", "Widgets", "Hotkeys"][page] };
+                let title = if subpage == 1 { "Appearance / Theme" } else if subpage == 2 { "Appearance / Taskbar" } else if page == 3 && hot_settings.readonly { "Hotkeys - Read Only" } else if page == 0 && readonly { "Utilities - Read Only" } else { ["Utilities", "Appearance", "Widgets", "Hotkeys"][page] };
                 frame.render_widget(Paragraph::new(title).style(accent), Rect::new(inner.x, inner.y, inner.width, 1));
                 frame.render_widget(Paragraph::new(format!("├{}┤", "─".repeat(content.width.saturating_sub(2) as usize))).style(if pane { accent } else { muted }), Rect::new(content.x, content.y + 2, content.width, 1));
                 let footer = Rect::new(inner.x, inner.bottom() - 1, inner.width, 1);
                 if (page != 2 || subpage != 0) && subpage != 1 {
-                    frame.render_widget(Paragraph::new(if subpage > 0 { "Tab: Switch pane   Esc: Back" } else { "Tab: Switch pane   Esc: Close" }).style(muted), footer);
+                    frame.render_widget(Paragraph::new(if subpage > 0 { "Tab: Switch pane   Esc: Back" } else if page == 3 && !hot_settings.live { "Saved chords - no managed session. Esc: Close" } else if page == 3 { "↑/↓: Move  Enter: Edit  r: Reset  Esc: Close" } else { "Tab: Switch pane   Esc: Close" }).style(muted), footer);
                 }
                 let status_bottom = if page == 2 && subpage == 0 { footer.y + 1 } else if subpage > 0 { footer.y - 3 } else { footer.y - 1 };
-                let content_bottom = if message.is_empty() { status_bottom } else { status_bottom - 3 };
+                let content_bottom = (if message.is_empty() { status_bottom } else { status_bottom - 3 })
+                    .saturating_sub(if page == 3 && hot_edit.is_some() { 4 } else { 0 });
                 let body_y = content.y + if subpage == 0 && matches!(page, 0 | 2) { 3 } else { 4 };
                 let body = Rect::new(inner.x, body_y, inner.width, content_bottom.saturating_sub(body_y));
                 if page == 2 && subpage == 0 {
@@ -518,11 +577,35 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                         x += width + 1;
                     }
                 } else if page == 3 && subpage == 0 {
-                    let lines = hotkeys(&widgets, effective_screenshot, body.width as usize, accent);
-                    hot_max_scroll = lines.len().saturating_sub(body.height as usize);
+                    let (mut lines, actions) = hotkeys(&widgets, &hot_settings, effective_screenshot, body.width as usize, accent);
+                    hot_actions = actions;
+                    if let Some(index) = hot_anchor {
+                        if let Some((start, _, _)) = hot_actions.get(index) { hot_cursor = *start; }
+                        if hot_edit.is_none() { hot_anchor = None; }
+                    }
+                    hot_line_count = lines.len();
+                    hot_height = body.height as usize;
+                    hot_cursor = hot_cursor.min(lines.len().saturating_sub(1));
+                    hot_max_scroll = lines.len().saturating_sub(hot_height);
+                    if hot_follow || hot_edit.is_some() {
+                        let (start, end) = hot_actions.iter().find(|(start, end, _)| (*start..*end).contains(&hot_cursor))
+                            .map(|(start, end, _)| (*start, *end)).unwrap_or((hot_cursor, hot_cursor + 1));
+                        if start < hot_scroll { hot_scroll = start; }
+                        if end > hot_scroll + hot_height { hot_scroll = end.saturating_sub(hot_height); }
+                    }
+                    hot_follow = false;
                     hot_scroll = hot_scroll.min(hot_max_scroll);
-                    frame.render_widget(Paragraph::new(lines.into_iter().skip(hot_scroll).take(body.height as usize).collect::<Vec<_>>()).style(normal), body);
+                    for (start, end, _) in &hot_actions {
+                        if (*start..*end).contains(&hot_cursor) && pane {
+                            for line in &mut lines[*start..*end] { *line = line.clone().style(if hot_settings.readonly { muted } else { highlighted }); }
+                        }
+                    }
+                    frame.render_widget(Paragraph::new(lines.into_iter().skip(hot_scroll).take(hot_height).collect::<Vec<_>>()).style(normal), body);
                     hits.push((body, Control::Hotkeys));
+                    if let Some((action, draft)) = &hot_edit {
+                        let editor = format!("{}: {}_\nSuper + Shift/Ctrl/Alt + key\nEnter: Save   Esc: Cancel   Ctrl+U: Clear", HOTKEY_ACTIONS[*action].1, draft);
+                        frame.render_widget(Paragraph::new(editor).style(accent), Rect::new(body.x, body.bottom() + 1, body.width, 3));
+                    }
                 } else {
                     let mut top = body.y;
                     if page == 0 && subpage == 0 {
@@ -602,9 +685,12 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             let mut key = match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     if key.code == KeyCode::Char('c') && key.modifiers.contains(event::KeyModifiers::CONTROL) { return Ok(None); }
-                    if key.code == KeyCode::Char('q') { KeyCode::Esc } else { key.code }
+                    if key.code == KeyCode::Char('q') && hot_edit.is_none() { KeyCode::Esc }
+                    else if hot_edit.is_some() && key.code == KeyCode::Char('u') && key.modifiers.contains(event::KeyModifiers::CONTROL) { KeyCode::Delete }
+                    else { key.code }
                 }
                 Event::Mouse(mouse) => {
+                    if hot_edit.is_some() { continue; }
                     if terminal.size()?.width < 80 || terminal.size()?.height < 24 { continue; }
                     match mouse.kind {
                         event::MouseEventKind::Down(event::MouseButton::Left) => {
@@ -612,10 +698,11 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                                 if subpage != 0 { subpage = 0; colours = theme_colours(&appearance.themes[appearance.theme]).unwrap_or(colours); }
                                 page = *index; pane = false; focus = 0; member = None; placement = None; continue;
                             }
-                            if let Some((_, control)) = hits.iter().rev().find(|(r, _)| r.contains(Position::new(mouse.column, mouse.row))) {
+                            if let Some((hit, control)) = hits.iter().rev().find(|(r, _)| r.contains(Position::new(mouse.column, mouse.row))) {
                                 pane = true;
                                 match *control {
                                     Control::Stack(index) => { stack = index; focus = index; if placement.is_none() { member = None; remembered = widgets.stacks.get(index).and_then(|s| s.modules.first()).copied().unwrap_or(remembered); } if placement.is_some() && index < widgets.stacks.len() { activate = true; } }
+                                    Control::Hotkeys => { hot_cursor = hot_scroll + mouse.row.saturating_sub(hit.y) as usize; hot_follow = true; }
                                     Control::Card(module) => {
                                         if placement.is_some() { stack = widgets.location(module).map(|v| v.0).unwrap_or(widgets.stacks.len()); }
                                         else { member = Some(module); remembered = module; stack = widgets.location(module).map(|v| v.0).unwrap_or(widgets.stacks.len()); }
@@ -626,6 +713,12 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                                 KeyCode::Enter
                             } else { continue; }
                         }
+                        event::MouseEventKind::ScrollDown | event::MouseEventKind::ScrollUp if page == 3 && mouse.column >= 22 && hot_edit.is_none() => {
+                            pane = true;
+                            hot_scroll = if mouse.kind == event::MouseEventKind::ScrollDown { (hot_scroll + 1).min(hot_max_scroll) } else { hot_scroll.saturating_sub(1) };
+                            hot_cursor = hot_cursor.clamp(hot_scroll, hot_scroll + hot_height.saturating_sub(1));
+                            continue;
+                        },
                         event::MouseEventKind::ScrollDown => { pane = mouse.column >= 22; KeyCode::Down },
                         event::MouseEventKind::ScrollUp => { pane = mouse.column >= 22; KeyCode::Up },
                         _ => continue,
@@ -635,6 +728,30 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             };
             if terminal.size()?.width < 80 || terminal.size()?.height < 24 {
                 if key == KeyCode::Esc { return Ok(None); } continue;
+            }
+            if let Some((action, draft)) = &mut hot_edit {
+                match key {
+                    KeyCode::Esc => { hot_edit = None; message.clear(); hot_follow = true; },
+                    KeyCode::Backspace => { draft.pop(); },
+                    KeyCode::Delete => draft.clear(),
+                    KeyCode::Char(character) if character.is_ascii() && !character.is_ascii_control() && draft.len() < 32 => draft.push(character),
+                    KeyCode::Enter => {
+                        match hot_settings.save(*action, draft) {
+                            Ok(text) => {
+                                hot_edit = None;
+                                message = text;
+                                match HotkeySettings::load() {
+                                    Ok(value) => hot_settings = value,
+                                    Err(error) => { hot_settings.readonly = true; message = error.to_string(); },
+                                }
+                            },
+                            Err(error) => message = error.to_string(),
+                        }
+                        hot_follow = true;
+                    },
+                    _ => (),
+                }
+                continue;
             }
             if key == KeyCode::Tab || key == KeyCode::BackTab { pane = !pane; continue; }
             if key == KeyCode::Esc {
@@ -652,7 +769,27 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
             }
             if page == 3 && subpage == 0 {
                 match key {
-                    KeyCode::Down => hot_scroll = (hot_scroll + 1).min(hot_max_scroll), KeyCode::Up => hot_scroll = hot_scroll.saturating_sub(1), _ => () }
+                    KeyCode::Down => { hot_cursor = (hot_cursor + 1).min(hot_line_count.saturating_sub(1)); hot_follow = true; },
+                    KeyCode::Up => { hot_cursor = hot_cursor.saturating_sub(1); hot_follow = true; },
+                    KeyCode::PageDown => { hot_cursor = (hot_cursor + hot_height).min(hot_line_count.saturating_sub(1)); hot_follow = true; },
+                    KeyCode::PageUp => { hot_cursor = hot_cursor.saturating_sub(hot_height); hot_follow = true; },
+                    KeyCode::Enter | KeyCode::Char('r') if !hot_settings.readonly => {
+                        if let Some((index, (_, _, action))) = hot_actions.iter().enumerate().find(|(_, (start, end, _))| (*start..*end).contains(&hot_cursor)) {
+                            hot_anchor = Some(index);
+                            if key == KeyCode::Enter { hot_edit = Some((*action, hotkey_label(&hot_settings.values[*action]))); message.clear(); }
+                            else {
+                                message = match hot_settings.save(*action, "default") {
+                                    Ok(text) => match HotkeySettings::load() {
+                                        Ok(value) => { hot_settings = value; text },
+                                        Err(error) => { hot_settings.readonly = true; error.to_string() },
+                                    }, Err(error) => error.to_string(),
+                                };
+                            }
+                            hot_follow = true;
+                        }
+                    },
+                    _ => (),
+                }
                 continue;
             }
             if page == 2 && subpage == 0 {
@@ -799,7 +936,7 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
     ratatui::restore();
     result
 }
-fn hotkeys(widgets: &Widgets, screenshot: usize, width: usize, heading: Style) -> Vec<Line<'static>> {
+fn hotkeys(widgets: &Widgets, settings: &HotkeySettings, screenshot: usize, width: usize, heading: Style) -> (Vec<Line<'static>>, Vec<(usize, usize, usize)>) {
     let taskbar = match widgets.bar[0] { 2 => "toggle on press", 3 => "legacy always visible", _ => "hold to show; release hides" };
     let switcher = "Super+W  Window switcher";
     let capture = ["Super+Print  Screenshot (disabled)", "Super+Print  Hyprshot region", "Super+Print  Flameshot editor"][screenshot];
@@ -813,22 +950,30 @@ fn hotkeys(widgets: &Widgets, screenshot: usize, width: usize, heading: Style) -
         ("Desktop / session", "Super+L  Lock\nSuper+Shift+L  End session\nSuper+Ctrl+R  Reload Hyprland\nSuper+Shift+W  Wake displays\nSuper+Shift+wheel  Zoom\nSuper+Shift+Z  Reset zoom\nSuper+Shift+B/N/A/J/P/D  Widget cards\nMedia keys  Player and audio\nBrightness keys  Focused display brightness\n\nCards: Bluetooth, network, audio, battery, performance and layout.".into()),
     ];
     let mut lines = Vec::new();
+    let mut actions = Vec::new();
     for (title, text) in categories {
         if !lines.is_empty() { lines.push(Line::default()); }
         lines.push(Line::from(title).style(heading));
         lines.push(Line::default());
         for line in text.lines() {
+            let start = lines.len();
+            let mut action = None;
             let wrapped = match line.split_once("  ") {
-                Some((chord, label)) => columns(label, chord, 23, width),
+                Some((chord, label)) => {
+                    action = HOTKEY_ACTIONS.iter().position(|(_, _, value)| hotkey_label(value) == chord);
+                    let effective = action.map(|index| hotkey_label(&settings.values[index])).unwrap_or_else(|| chord.to_owned());
+                    columns(label, &effective, 23, width)
+                },
                 None => wrap_cells(line, width),
             };
             lines.extend(wrapped.into_iter().map(Line::from));
+            if let Some(action) = action { actions.push((start, lines.len(), action)); }
         }
     }
     lines.push(Line::default());
     let help = format!("Taskbar: {taskbar}. Window switcher requires its preference enabled.\nShipped Icewine bindings. Host/user overrides can change them; optional tools and the active layout affect availability. Up/Down or mouse wheel scrolls.");
     lines.extend(wrap_cells(&help, width).into_iter().map(Line::from));
-    lines
+    (lines, actions)
 }
 
 fn executable(name: &str) -> bool {

@@ -192,6 +192,154 @@ def widgets(argv, config, state):
     print("Widget preferences saved; the shipped shell watches this file.")
 
 
+# This bounded editor only accepts ordinary Super chords, never commands or Lua.
+HOTKEYS = {"launcher": "SUPER+SPACE", "terminal": "SUPER+RETURN", "filemanager": "SUPER+E",
+           "screenshot": "SUPER+PRINT", "lock": "SUPER+L"}
+HOTKEY_MODS = {"SUPER": 64, "SHIFT": 1, "CTRL": 4, "ALT": 8}
+
+
+def hotkey_chord(value):
+    parts = value.upper().replace(" ", "").split("+")
+    parts[-1] = {"ENTER": "RETURN"}.get(parts[-1], parts[-1])
+    mods, key = parts[:-1], parts[-1]
+    if (not mods or "SUPER" not in mods or len(set(mods)) != len(mods)
+            or any(mod not in HOTKEY_MODS for mod in mods)
+            or not re.fullmatch(r"[A-Z0-9]|RETURN|SPACE|PRINT|F[1-9]|F1[0-2]", key)):
+        raise ValueError("Use Super, optional Shift/Ctrl/Alt, and A-Z, 0-9, Enter, Space, Print or F1-F12")
+    return "+".join([mod for mod in HOTKEY_MODS if mod in mods] + [key])
+
+
+def hotkey_values(raw):
+    saved = {}
+    for line in (raw.decode("utf-8").removesuffix("\n").split("\n") if raw else []):
+        name, separator, chord = line.partition("=")
+        if not separator or name not in HOTKEYS or name in saved or hotkey_chord(chord) != chord:
+            raise ValueError("Invalid hotkey preferences")
+        saved[name] = chord
+    values = HOTKEYS | saved
+    if len(set(values.values())) != len(values):
+        raise ValueError("Hotkey conflicts with another managed action")
+    return values
+
+
+def hyprctl(*args):
+    result = subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=10)
+    if result.returncode:
+        raise ValueError("Hyprland request failed: " + (result.stderr or result.stdout).strip())
+    return result.stdout.strip()
+
+
+def hotkey_bindings():
+    bindings = json.loads(hyprctl("-j", "binds"))
+    if not isinstance(bindings, list) or any(not isinstance(bind, dict) or any(
+            type(bind.get(name, default)) is not type(default) for name, default in {
+                "key": "", "description": "", "submap": "", "modmask": 0, "keycode": 0,
+                "release": False, "mouse": False, "longPress": False, "repeat": False,
+                "non_consuming": False, "catch_all": False,
+            }.items()) for bind in bindings):
+        raise ValueError("Invalid Hyprland bindings")
+    return bindings
+
+
+def hotkey_matches(bind, chord):
+    parts = chord.split("+")
+    return (bind.get("key", "").upper() == parts[-1]
+            and bind.get("modmask") == sum(HOTKEY_MODS[mod] for mod in parts[:-1])
+            and not bind.get("submap") and not bind.get("keycode")
+            and not any(bind.get(flag) for flag in ("release", "mouse", "longPress", "repeat", "non_consuming", "catch_all")))
+
+
+def hotkey_current(bindings):
+    values = {}
+    for name in HOTKEYS:
+        matches = [bind for bind in bindings if bind.get("description") == "icewine:" + name]
+        if len(matches) != 1:
+            raise ValueError("Managed hotkeys unavailable in this session")
+        bind = matches[0]
+        chord = hotkey_chord("+".join([mod for mod, mask in HOTKEY_MODS.items() if bind.get("modmask", 0) & mask]
+                                     + [bind.get("key", "")]))
+        if not hotkey_matches(bind, chord):
+            raise ValueError("Managed hotkey semantics changed; reopen after reload")
+        values[name] = chord
+    return values
+
+
+def hotkey_managed(bindings, values):
+    if hotkey_current(bindings) != values:
+        raise ValueError("Managed hotkeys differ from this session; reload Hyprland and reopen")
+
+
+def hotkey_conflict(bindings, name, chord):
+    for bind in bindings:
+        if bind.get("description") == "icewine:" + name:
+            continue
+        # Ponytail: binds JSON omits ignore_mods and keycode-to-keysym mapping.
+        # Reserve noneditable symbols across modifiers/submaps; refuse opaque
+        # keycode/catchall binds. Widen only when the compositor exposes overlap.
+        managed = bind.get("description", "").removeprefix("icewine:") in HOTKEYS
+        # The shipped exact-modifier session chord shares L with Lock.
+        exact = managed or bind.get("description") == "icewine:session-end"
+        if ((exact and hotkey_matches(bind, chord)) or (not exact and
+                (bind.get("catch_all") or bind.get("keycode") or "code:" in bind.get("key", "").lower()
+                 or bind.get("key", "").upper() == chord.split("+")[-1]))):
+            raise ValueError("Hotkey conflicts with an existing binding")
+
+
+def hotkeys(argv, state):
+    path = state / "hotkeys"
+    raw = path.read_bytes() if path.exists() else b""
+    revision = hashlib.sha256(raw).hexdigest()
+    values = hotkey_values(raw)
+    readonly = theme.setting_readonly(path)
+    if argv == ["hotkeys-state"]:
+        live = False
+        try:
+            current = hotkey_current(hotkey_bindings())
+            readonly = readonly or current != values
+            values, live = current, True
+        except (OSError, ValueError, subprocess.SubprocessError):
+            readonly = True
+        print("readonly=" + str(readonly).lower(), "live=" + str(live).lower(), "revision=" + revision,
+              *[name + "=" + chord for name, chord in values.items()])
+        return
+    if len(argv) != 4 or argv[0] != "hotkeys-apply" or argv[2] not in HOTKEYS:
+        raise ValueError("Invalid hotkey request")
+    if readonly:
+        raise ValueError("Hotkeys are Read Only")
+    if argv[1] != revision:
+        raise ValueError("Hotkeys changed; reopen before saving")
+    name = argv[2]
+    chord = HOTKEYS[name] if argv[3] == "default" else hotkey_chord(argv[3])
+    selected = values | {name: chord}
+    if len(set(selected.values())) != len(selected):
+        raise ValueError("Hotkey conflicts with another managed action")
+    bindings = hotkey_bindings()
+    hotkey_managed(bindings, values)
+    hotkey_conflict(bindings, name, chord)
+    if hyprctl("configerrors"):
+        raise ValueError("Resolve Hyprland configuration errors before editing")
+    contents = "".join(name + "=" + chord + "\n" for name, chord in selected.items() if chord != HOTKEYS[name])
+    theme.atomic_text(path, contents, setting=True, signature=revision)
+    try:
+        hyprctl("reload")
+        if hyprctl("configerrors"):
+            raise ValueError("Hyprland configuration reload failed")
+        current = hotkey_bindings()
+        hotkey_managed(current, selected)
+        hotkey_conflict(current, name, chord)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        try:
+            theme.atomic_text(path, raw, setting=True, signature=hashlib.sha256(contents.encode()).hexdigest())
+            hyprctl("reload")
+            hotkey_managed(hotkey_bindings(), values)
+            if hyprctl("configerrors"):
+                raise ValueError("Hyprland configuration errors remain")
+        except (OSError, ValueError, subprocess.SubprocessError) as recovery:
+            raise ValueError(f"Hotkey save failed; recovery needs attention: {recovery}") from error
+        raise ValueError("Hotkey reload failed; previous bindings restored") from error
+    print("Hotkey saved")
+
+
 def run(argv, **kwargs):
     print("Running: " + " ".join(argv), flush=True)
     subprocess.run(argv, check=True, **kwargs)
@@ -387,6 +535,9 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
 def main(argv):
     config, data = theme.xdg("XDG_CONFIG_HOME", ".config"), theme.xdg("XDG_DATA_HOME", ".local/share")
     state = theme.xdg("XDG_STATE_HOME", ".local/state") / "icewine"
+    if argv == ["hotkeys-state"]:
+        hotkeys(argv, state)
+        return
     if argv == ["widget-icons"]:
         try:
             result = subprocess.run(["qs", "ipc", "call", "topbar", "icons"], capture_output=True, text=True, timeout=2)
@@ -446,14 +597,15 @@ def main(argv):
     if argv == ["widgets-state"]:
         widgets(argv, config, state)
         return
+    hotkey_request = bool(argv) and argv[0] == "hotkeys-apply"
     widget_request = bool(argv) and argv[0] == "widgets-apply"
-    readonly, previous = selections(state) if not widget_request else (False, {})
+    readonly, previous = selections(state) if not (widget_request or hotkey_request) else (False, {})
     if argv == ["state"]:
         print(" ".join(f"{name}={str(bit).lower()}" for name, bit in {"readonly": readonly, **previous}.items()))
         return
-    if not widget_request and (not argv or argv[0] != "apply"):
+    if not (widget_request or hotkey_request) and (not argv or argv[0] != "apply"):
         raise ValueError("invalid manager request")
-    if not widget_request:
+    if not (widget_request or hotkey_request):
         fields = {}
         for field in argv[1:]:
             name, separator, value = field.partition("=")
@@ -466,13 +618,16 @@ def main(argv):
         selected = validate(fields)
     if os.getuid() == 0:
         raise ValueError("run icewine as your desktop user")
-    lock_path = (state.resolve() if widget_request else state) / "defaults.lock"
+    lock_path = (state.resolve() if widget_request or hotkey_request else state) / "defaults.lock"
     theme.writable(lock_path)
     state.mkdir(parents=True, exist_ok=True)
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "r+") as lock:
         # Ponytail: one lock serialises explicit Apply; split by root if contention matters.
         fcntl.flock(lock, fcntl.LOCK_EX)
+        if hotkey_request:
+            hotkeys(argv, state)
+            return
         if widget_request:
             widgets(argv, config, state)
             return
@@ -483,7 +638,7 @@ def main(argv):
 if __name__ == "__main__":
     try:
         main(sys.argv[1:])
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"Icewine Apply failed: {error}", file=sys.stderr)
         if sys.argv[1:2] == ["apply"]:
             print("Earlier packages/files may have changed; no complete rollback occurred. Resolve the error, then reopen icewine and retry Apply with overwrite off. Keep the local split-package directory available.", file=sys.stderr)
