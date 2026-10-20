@@ -17,8 +17,8 @@ function reduce(state, event) {
     case "open":
         if (event.page !== "switcher" && !Cards.modules.includes(event.page))
             return state
-        // Hover can leave the window overview, but cannot replace an engaged popout.
-        if (state.engaged && state.page !== "switcher" && !event.engaged)
+        // Returning to this icon must not release its card's keyboard ownership.
+        if (state.engaged && !event.engaged && state.page === event.page && state.screen === event.screen)
             return state
         return Object.assign({}, state, {
             suppressed: false, page: event.page, engaged: event.engaged === true, screen: event.screen

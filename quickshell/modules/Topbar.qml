@@ -296,6 +296,7 @@ Scope {
         cancelClipboardPaste()
         const next = State.reduce(ui, { type: "open", page: page, engaged: engaged, screen: screenName })
         if (next === ui) return
+        if (ui.engaged && !next.engaged) radial?.drainInput()
         beginInteraction()
         ui = next
         const generation = ++widgetFocusGeneration
@@ -605,8 +606,19 @@ Scope {
 
             }
 
+            function acquireKeyboard() {
+                if (!widgetHere || !root.widgetEngaged || root.sessionLocked || !widgetGrab.active) return
+                // Initial panel-only activation establishes its submitted surface.
+                // Each assignment commits: removing the entered bar forces native
+                // keyboard entry onto the sole remaining surface, then re-admits
+                // bar pointer input without changing the entered widget surface.
+                widgetGrab.windows = [panel]
+                widgetGrab.windows = [panel, panel.barWindow]
+            }
+
             function focusWidget(openingPage) {
                 if (!widgetHere || !root.widgetEngaged) return
+                panel.acquireKeyboard()
                 if (switcher.item) switcher.item.forceActiveFocus()
                 else {
                     if (openingPage) statusPopout.openPage(openingPage)
@@ -616,7 +628,7 @@ Scope {
 
             onHoverPageChanged: {
                 previewOpen.stop()
-                if (hoverPage && (!root.widgetEngaged || root.ui.page === "switcher"))
+                if (hoverPage)
                     previewOpen.restart()
             }
 
@@ -643,15 +655,23 @@ Scope {
             color: "transparent"
             WlrLayershell.namespace: "icewine:widgets"
             WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.keyboardFocus: modal && root.ui.page !== "switcher"
+            // Engaged widgets use the bar-inclusive grab below. An exclusive
+            // layer also captures pointer input outside its mask on Hyprland.
+            WlrLayershell.keyboardFocus: root.radialVisible && !root.widgetEngaged
                 && screen.name === keyboardScreen && !root.sessionLocked
                 ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
             HyprlandFocusGrab {
-                windows: [panel, panel.barWindow]
-                active: panel.widgetHere && root.ui.page === "switcher"
-                    && root.widgetEngaged && !root.sessionLocked
-                onCleared: if (root.ui.page === "switcher") {
+                id: widgetGrab
+                // Only the widget surface may cause initial native activation.
+                windows: [panel]
+                active: panel.widgetHere && root.widgetEngaged && !root.sessionLocked
+                onActiveChanged: {
+                    // Let the wrapper finish its member-list update before editing it.
+                    if (active) Qt.callLater(panel.acquireKeyboard)
+                    else widgetGrab.windows = [panel]
+                }
+                onCleared: if (panel.widgetHere && root.widgetEngaged) {
                     root.yieldFocus()
                     root.dismissWidget()
                 }

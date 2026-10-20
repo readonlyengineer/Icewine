@@ -11,7 +11,7 @@ const State = vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../module
 const Menu = require("../deck/DeckMenu.js")
 
 // Guard the scene's input boundary as well as the controller below. Qt's real
-// mouse/touch delivery is checked separately in an isolated Wayland session.
+// mouse/touch delivery requires separate validation in a Wayland session.
 const topbar = fs.readFileSync(path.join(__dirname, "../modules/Topbar.qml"), "utf8")
 const barBackground = topbar.split("id: surface")[1]?.split("Row {")[0] ?? ""
 assert.match(barBackground, /MouseArea\s*\{\s*anchors\.fill: parent\s*acceptedButtons: Qt\.AllButtons/,
@@ -69,8 +69,12 @@ send({type: "engage"}) // Touch, drag or scroll, not just a completed click.
 send({type: "release"})
 assert.equal(State.barVisible(state, false, false), true, "Widget survives both hold releases")
 assert.equal(state.engaged, true)
+const engagedAudio = state
+send({type: "open", page: "audio", engaged: false, screen: "deck"})
+assert.equal(state, engagedAudio, "Returning to the same icon preserves engagement and selection")
 send({type: "open", page: "network", engaged: false, screen: "external"})
-assert.equal(state.page, "audio", "Hover cannot replace an engaged widget")
+assert.equal(state.page, "network", "Hover switches away from an engaged widget")
+assert.equal(state.engaged, false, "The destination is a normal preview")
 send({type: "open", page: "network", engaged: true, screen: "external"})
 assert.equal(state.page, "network")
 assert.equal(state.screen, "external")
@@ -132,6 +136,82 @@ const shell = controller("../modules/Topbar.qml", {
     Qt: {callLater: fn => callbacks.push(fn)}
 })
 const flush = () => { while (callbacks.length) callbacks.shift()() }
+Object.defineProperty(shell, "widgetEngaged", {get: () => shell.ui.engaged})
+// Exercise shared opening and the shipped delayed-hover scheduler after actual
+// engagement, including a queued keyboard focus request which hover supersedes.
+const hoverChanged = topbar.match(/            onHoverPageChanged: \{([\s\S]*?)^            \}/m)[1]
+const hoverTriggered = topbar.match(/id: previewOpen[\s\S]*?onTriggered: \{([\s\S]*?)^                \}/m)[1]
+let pendingPreview = false, drains = 0
+shell.radial.drainInput = () => drains++
+const hoverPanel = {hoverPage: "", screen: {name: "external"}}
+const hoverContext = {root: shell, panel: hoverPanel, hoverPage: "", previewOpen: {
+    stop() { pendingPreview = false }, restart() { pendingPreview = true }
+}}
+const hover = page => {
+    hoverContext.hoverPage = hoverPanel.hoverPage = page
+    vm.runInNewContext(hoverChanged, hoverContext)
+    assert.equal(pendingPreview, !!page)
+    if (pendingPreview) vm.runInNewContext(hoverTriggered, hoverContext)
+}
+for (const behaviour of Cards.barBehaviours) {
+    shell.Config.Settings.barBehaviour = behaviour
+    shell.ui = State.initial()
+    shell.pressBar()
+    shell.barVisible = true
+    const latch = shell.ui.latched
+    for (const page of ["launcher", "audio", "network", "launcher"]) {
+        shell.openWidget(page, true, "external")
+        shell.engageWidget()
+        const next = page === "audio" ? "network" : "audio"
+        focusRequests.length = 0
+        const before = drains
+        hover(page)
+        assert.equal(shell.ui.engaged, true, "Same-icon hover cannot unlock the current card")
+        hover(next)
+        flush()
+        assert.equal(shell.ui.page, next)
+        assert.equal(shell.ui.engaged, false)
+        assert.equal(drains, before + 1, "Leaving engagement drains held controller input")
+        assert.deepEqual(focusRequests, [], "Stale explicit focus cannot activate the old card")
+        assert.equal(shell.ui.held, true)
+        assert.equal(shell.ui.latched, latch)
+        shell.openWidget(page, true, "deck")
+        flush()
+        assert.deepEqual(focusRequests, [["deck", page]], "Click immediately switches monitor and keyboard target")
+    }
+    shell.releaseBar()
+    assert.equal(shell.ui.held, false)
+    assert.equal(shell.ui.engaged, true, "Opening-key release retains the switched card")
+    shell.handoff(true)
+    shell.barVisible = false
+    hover("network")
+    assert.equal(shell.ui.page, "", "A delayed hover cannot reopen capture-suppressed chrome")
+    shell.sessionLocked = true
+    shell.openWidget("audio", true, "external")
+    assert.equal(shell.ui.page, "", "Lock rejects explicit switching")
+    shell.sessionLocked = false
+}
+shell.radial.drainInput = () => {}
+shell.ui = State.initial()
+shell.barVisible = false
+shell.finishInteraction()
+flush()
+focused.length = 0
+focusRequests.length = 0
+
+// Evaluate actual focus/grab requests: cards and bar share the existing grab;
+// radial-only input keeps its prior exclusive policy. Native delivery is separate.
+const focusBinding = topbar.match(/^            WlrLayershell.keyboardFocus: ([\s\S]*?)\n\n/m)[1]
+const grabBinding = topbar.match(/HyprlandFocusGrab \{[\s\S]*?active: ([^\n]+)/)[1]
+for (const page of ["audio", "launcher", "switcher", ""]) for (const engaged of [false, true])
+for (const radial of [false, true]) for (const locked of [false, true]) for (const here of [false, true]) {
+    const env = {root: {ui: {page}, widgetEngaged: engaged, radialVisible: radial, sessionLocked: locked},
+        panel: {widgetHere: here}, screen: {name: "external"}, keyboardScreen: here ? "external" : "deck",
+        WlrKeyboardFocus: {Exclusive: 1, None: 0}}
+    assert.equal(vm.runInNewContext(grabBinding, env), here && engaged && !locked)
+    assert.equal(vm.runInNewContext(focusBinding, env), radial && !engaged && here && !locked ? 1 : 0)
+}
+console.log("card switching: interaction, delayed hover, click, held release, focus/grab targeting and suppression pass")
 for (const page of Cards.modules) {
     shell.Config.Settings.cardStacks = [{id: "standalone", modules: [page]}]
     for (const engaged of [false, true]) {
@@ -209,19 +289,104 @@ assert.equal(focusRequests.length, 1, "Hover does not request keyboard focus")
 shell.dismissWidget()
 flush()
 const panelFocus = topbar.match(/            function focusWidget\(openingPage\) \{[\s\S]*?^            \}/m)[0]
+const acquireKeyboard = topbar.match(/            function acquireKeyboard\(\) \{[\s\S]*?^            \}/m)[0]
+const grabActivated = topbar.match(/id: widgetGrab[\s\S]*?onActiveChanged: \{([\s\S]*?)^                \}/m)[1]
+const initialGrabWindows = topbar.match(/id: widgetGrab[\s\S]*?windows: ([^\n]+)/)[1]
 const routes = []
-const panel = vm.createContext({widgetHere: true, root: {widgetEngaged: true},
+const panel = vm.createContext({widgetHere: true, root: {widgetEngaged: true, sessionLocked: false},
+    barWindow: {}, widgetGrab: {active: true},
     switcher: {item: null}, statusPopout: {
         openPage: page => routes.push(page), focusInitial: () => routes.push("restore")}})
+panel.panel = panel
+const widgetSurface = vm.runInContext("panel", panel)
+// Model only the protocol contract: keep a permitted keyboard surface, otherwise
+// pick the LAST permitted surface. This adversarial choice exposes bar ambiguity.
+let entered = panel.barWindow, requestedWindows = []
+let readySurfaces = new Set([widgetSurface, panel.barWindow])
+const commits = []
+Object.defineProperty(panel.widgetGrab, "windows", {get() {return requestedWindows}, set(windows) {
+    requestedWindows = Array.from(windows)
+    const submitted = requestedWindows.filter(window => readySurfaces.has(window))
+    if (panel.widgetGrab.active) assert.ok(submitted.length, "Acquisition never empties the native whitelist")
+    commits.push(submitted)
+    if (!submitted.includes(entered)) entered = submitted.at(-1)
+}})
+const acquisitionCallbacks = []
+const flushAcquisition = () => { while (acquisitionCallbacks.length) acquisitionCallbacks.shift()() }
+panel.Qt = {callLater: fn => acquisitionCallbacks.push(fn)}
+const grabChanged = active => { panel.active = active; vm.runInContext(grabActivated, panel) }
+vm.runInContext(acquireKeyboard, panel)
 vm.runInContext(panelFocus, panel)
-panel.focusWidget("launcher")
+const acquire = request => {
+    entered = panel.barWindow
+    commits.length = 0
+    request()
+    flushAcquisition()
+    assert.equal(entered, widgetSurface, "Native keyboard must leave the bar for the widget panel")
+    assert.ok(commits.at(-1).includes(panel.barWindow), "Bar pointer input is re-admitted")
+}
+acquire(() => panel.focusWidget("launcher"))
 panel.focusWidget("")
 panel.focusWidget("layout")
 assert.deepEqual(routes, ["launcher", "restore", "restore", "layout", "restore"],
     "Every module uses the shared entry and ordinary restoration preserves selection")
+acquire(() => grabChanged(true))
+assert.equal(routes.length, 5, "Preview engagement acquires native focus without resetting the clicked control")
+acquire(() => panel.focusWidget("")) // Subsequent explicit bar click while already engaged.
+const acquiredRoutes = routes.length
+for (const disable of [() => {panel.widgetHere = false}, () => {panel.root.widgetEngaged = false},
+    () => {panel.root.sessionLocked = true}, () => {panel.widgetGrab.active = false}]) {
+    Object.assign(panel.root, {widgetEngaged: true, sessionLocked: false})
+    panel.widgetHere = true; panel.widgetGrab.active = true
+    disable(); commits.length = 0
+    panel.acquireKeyboard()
+    assert.equal(commits.length, 0, "Inactive, preview, locked or other-output panel cannot acquire")
+}
+Object.assign(panel.root, {widgetEngaged: true, sessionLocked: false})
+panel.widgetGrab.active = true
 panel.widgetHere = false
 panel.focusWidget("layout")
-assert.equal(routes.length, 5, "Another monitor cannot take Layout focus")
+assert.equal(routes.length, acquiredRoutes, "Another monitor cannot take Layout focus")
+// Surface readiness is separate from object membership. A recreated output may
+// retain engagement while its bar is ready before its widget wl_surface exists.
+panel.widgetHere = true
+for (let lifetime = 0; lifetime < 2; ++lifetime) {
+    panel.widgetGrab.active = false
+    readySurfaces = new Set([panel.barWindow])
+    if (lifetime === 0) panel.widgetGrab.windows = vm.runInContext(initialGrabWindows, panel)
+    else grabChanged(false) // Deactivation must restore the same initial invariant.
+    const activateSubmitted = () => {
+        const submitted = requestedWindows.filter(window => readySurfaces.has(window))
+        if (submitted.length && !panel.widgetGrab.active) {
+            panel.widgetGrab.active = true
+            entered = submitted.at(-1)
+            grabChanged(true)
+        }
+    }
+    activateSubmitted()
+    assert.equal(panel.widgetGrab.active, false, "A ready bar cannot activate the widget grab")
+    assert.equal(acquisitionCallbacks.length, 0)
+    commits.length = 0
+    panel.acquireKeyboard()
+    assert.equal(commits.length, 0, "An explicit open waits for the deferred widget surface")
+    readySurfaces.add(widgetSurface)
+    activateSubmitted() // The wrapper's delayed surface addition emits first activation.
+    assert.equal(entered, widgetSurface)
+    assert.equal(requestedWindows.length, 1, "Do not edit the wrapper's list inside activation delivery")
+    flushAcquisition()
+    assert.equal(panel.widgetGrab.active, true)
+    assert.equal(entered, widgetSurface)
+    assert.ok(commits.every(members => members.includes(widgetSurface)), "Every acquisition commit retains the native widget surface")
+    assert.ok(requestedWindows.includes(panel.barWindow), "Late widget acquisition re-admits the ready bar")
+}
+grabChanged(true)
+panel.root.sessionLocked = true
+commits.length = 0
+flushAcquisition()
+assert.equal(commits.length, 0, "A lock between activation and the queued callback cancels acquisition")
+panel.root.sessionLocked = false
+console.log("grab lifecycle: bar-first/deferred widget, queued activation, deactivation and re-engagement pass (surface model)")
+console.log("native keyboard requests: singleton commit forces widget entry, bar restored, activation/explicit paths and guards pass (protocol model)")
 shell.layoutsEnabled = false
 shell.openWidget("layout", true, "external")
 flush()
@@ -517,8 +682,17 @@ for (const behaviour of Cards.barBehaviours) for (const held of [false, true]) {
 }
 // Run the shipped focus-grab dismissal callback as well as selection.
 const clearSwitcher = topbar.match(/onCleared: ([\s\S]*?)^            \}/m)[1]
+for (const page of ["launcher", "audio", "switcher"]) {
+    shell.openWidget(page, true, "external")
+    vm.runInNewContext(clearSwitcher, {root: shell, panel: {widgetHere: false}})
+    assert.equal(shell.ui.page, page, "An old monitor's cleared grab cannot dismiss the new target")
+    vm.runInNewContext(clearSwitcher, {root: shell, panel: {widgetHere: true}})
+    assert.equal(shell.ui.page, "", "Compositor grab dismissal closes every engaged widget")
+    assert.equal(shell.previousWindow, "", "External focus wins over retained app restoration")
+    flush()
+}
 for (const close of [() => shell.dismissWidget(), () => shell.activateSwitcherWindow(shell.compositor.toplevels[0]),
-    () => vm.runInNewContext(clearSwitcher, {root: shell})]) {
+    () => vm.runInNewContext(clearSwitcher, {root: shell, panel: {widgetHere: true}})]) {
     shell.Config.Settings.barBehaviour = "toggle"
     shell.ui = State.reduce(State.initial(), {type: "press", behaviour: "toggle"})
     shell.ui = State.reduce(shell.ui, {type: "release"})

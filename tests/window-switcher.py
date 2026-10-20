@@ -37,7 +37,14 @@ ShellRoot {
         property int pulseToken: 0
     }
     QtObject { id: clock; property date date: new Date(2026, 9, 18, 12, 30) }
-    QtObject { id: statusPopout; property int backgroundCount: 0; property bool backgroundAttention: false }
+    QtObject {
+        id: statusPopout
+        property int backgroundCount: 0
+        property bool backgroundAttention: false
+        function openPage(page) {}
+        function focusInitial() {}
+    }
+    QtObject { id: switcher; property var item: null }
     Adapters.Hyprland { id: workspaceCompositor }
     Modules.NotificationService { id: notificationService }
     Modules.Topbar {
@@ -110,7 +117,38 @@ ShellRoot {
             id: workspacePanel
             anchors.fill: parent
             property var screen: ({name: "DP-1"})
+            readonly property bool widgetHere: topbar.ui.page !== "" && topbar.ui.screen === screen.name
+            property var barWindow: workspaceWindow
+            __PANEL_FOCUS__
+            // Observe actual QML setter/activation ordering using only the grab
+            // protocol contract. This is NOT compositor keyboard-enter evidence.
+            QtObject {
+                id: widgetGrab
+                property bool active: __GRAB_ACTIVE__
+                property var windows: __GRAB_WINDOWS__
+                property var entered: workspacePanel.barWindow
+                onWindowsChanged: {
+                    if (!windows.length) throw new Error("Acquisition dropped the grab")
+                    if (!windows.includes(entered)) entered = windows[windows.length - 1]
+                }
+                __GRAB_ACTIVATED__
+            }
+            Connections {
+                target: topbar
+                __FOCUS_REQUESTED__
+            }
+            readonly property string hoverPage: __HOVER_PAGE__
+            __HOVER_SCHEDULER__
             __WORKSPACE_SURFACE__
+            Bar.Widget {
+                id: interactionCard
+                y: 70; width: 350; height: 100
+                shown: topbar.ui.page !== "" && topbar.ui.page !== "switcher"
+                engaged: topbar.widgetEngaged
+                onEngageRequested: topbar.engageWidget()
+                onDismissRequested: topbar.dismissWidget()
+                Slider { id: interactionSlider; x: 20; y: 20; width: 250 }
+            }
         }
     }
     Window {
@@ -344,6 +382,7 @@ ShellRoot {
             }
             function check() {
                 workspacesAfterUnlock()
+                cardSwitching()
                 // Keep the real session/PAM-result handlers and topbar bindings.
                 // Only native lock delivery is replaced: acquisition notifies,
                 // unlock changes the getter without a notification (qs 0.3.2).
@@ -690,6 +729,70 @@ ShellRoot {
                 console.log("SWITCHER_PASSED")
                 Qt.quit()
             }
+            function cardSwitching() {
+                workspaceWindow.visible = true
+                workspaceWindow.requestActivate()
+                tryCompare(workspaceWindow, "active", true)
+                workspacePanel.screen = {name: "DP-1"}
+                for (const behaviour of ["keyboard", "keyboard-mouse", "toggle", "always"])
+                for (const location of ["above", "top", "bottom"]) {
+                    Config.Settings.widgetSelections = {barBehaviour: behaviour, barLocation: location, barWidth: 100}
+                    topbar.pressBar()
+                    wait(200)
+                    const audio = descendants(statusIcons, item => item.page === "audio")[0]
+                    const network = descendants(statusIcons, item => item.page === "network")[0]
+                    const targets = [[logo, "launcher"], [audio, "audio"], [network, "network"], [logo, "launcher"]]
+                    topbar.openWidget("network", false, "DP-1")
+                    for (const [icon, page] of targets) {
+                        // The shipped Widget PointHandler sees a real native control
+                        // press before the delayed preview of another visible icon.
+                        mouseMove(interactionSlider, 80, interactionSlider.height / 2)
+                        mouseClick(interactionSlider, 80, interactionSlider.height / 2)
+                        verify(topbar.widgetEngaged)
+                        mouseMove(icon, 10, 10)
+                        widgetGrab.entered = workspacePanel.barWindow
+                        mouseClick(icon, 10, 10)
+                        compare(topbar.ui.page, page, "Click switches immediately after card input")
+                        verify(topbar.widgetEngaged)
+                        tryCompare(widgetGrab, "entered", workspacePanel, 1000, "Explicit open acquires the widget even if the bar was entered")
+                        verify(widgetGrab.windows.includes(workspacePanel.barWindow))
+                        mouseMove(interactionSlider, 80, interactionSlider.height / 2)
+                        mouseClick(interactionSlider, 80, interactionSlider.height / 2)
+                        const [hoverIcon, hoverPage] = page === "launcher" ? [audio, "audio"] : [logo, "launcher"]
+                        mouseMove(hoverIcon, 10, 10)
+                        wait(200)
+                        if (topbar.ui.page !== hoverPage) throw new Error(behaviour + "/" + location + ": wanted=" + hoverPage
+                            + " actual=" + topbar.ui.page + " hover=" + workspacePanel.hoverPage
+                            + " bar=" + topbar.barVisible)
+                        verify(!topbar.widgetEngaged, "Hover opens a normal preview after card input")
+                        widgetGrab.entered = workspacePanel.barWindow
+                        mouseMove(interactionSlider, 80, interactionSlider.height / 2)
+                        mouseClick(interactionSlider, 80, interactionSlider.height / 2)
+                        tryCompare(widgetGrab, "entered", workspacePanel, 1000, "Preview engagement activation acquires native keyboard destination")
+                        mouseMove(hoverIcon, 10, 10)
+                        mouseClick(hoverIcon, 10, 10)
+                        compare(topbar.ui.page, hoverPage)
+                        verify(topbar.widgetEngaged, "Click engages the destination immediately")
+                        verify(topbar.ui.held, "Switching preserves the opening chord")
+                    }
+                    topbar.releaseBar()
+                    verify(!topbar.ui.held && topbar.widgetEngaged)
+                    interactionCard.forceActiveFocus()
+                    keyPress(Qt.Key_Escape)
+                    verify(topbar.widgetEngaged, "Escape acts on release")
+                    keyRelease(Qt.Key_Escape)
+                    compare(topbar.ui.page, "")
+                    topbar.handoff(true)
+                    wait(200)
+                    verify(!topbar.barVisible)
+                }
+                workspaceWindow.visible = false
+                Config.Settings.widgetSelections = {}
+                topbar.dismiss(false)
+                window.requestActivate()
+                tryCompare(window, "active", true)
+                console.log("CARD_SWITCHING_PASSED")
+            }
         }
         Timer {
             interval: 100; running: true
@@ -799,6 +902,17 @@ Scope {
     workspace_surface = native_topbar[surface_start:surface_end].replace('root.', 'topbar.')
     workspace_surface = workspace_surface.replace('panel.', 'workspacePanel.')
     workspace_surface = workspace_surface.replace('compositor: topbar.compositor', 'compositor: workspaceCompositor')
+    hover_page = re.search(r'readonly property string hoverPage: (.+)', native_topbar)[1]
+    hover_scheduler = re.search(r'            onHoverPageChanged: \{[\s\S]*?^            \}', native_topbar, re.M)[0]
+    hover_scheduler += '\n' + re.search(r'            Timer \{\n                id: previewOpen[\s\S]*?^            \}', native_topbar, re.M)[0]
+    hover_scheduler = hover_scheduler.replace('root.', 'topbar.').replace('panel.', 'workspacePanel.')
+    panel_focus = '\n'.join(re.findall(r'            function (?:acquireKeyboard|focusWidget)\([^\n]*\) \{[\s\S]*?^            \}', native_topbar, re.M))
+    panel_focus = re.sub(r'\bpanel\b', 'workspacePanel', panel_focus.replace('root.', 'topbar.'))
+    grab_source = native_topbar.split('id: widgetGrab')[1]
+    grab_active = re.search(r'active: (.+)', grab_source)[1].replace('root.', 'topbar.').replace('panel.', 'workspacePanel.')
+    grab_windows = re.search(r'windows: (.+)', grab_source)[1].replace('panel', 'workspacePanel')
+    grab_activated = re.search(r'onActiveChanged: \{[\s\S]*?^                \}', grab_source, re.M)[0].replace('panel', 'workspacePanel')
+    focus_requested = re.search(r'function onFocusWidgetRequested\([^\n]*\) \{[\s\S]*?^                \}', native_topbar, re.M)[0].replace('panel.', 'workspacePanel.')
     # Keep actual shared state/IPC/settings methods without Wayland panels or
     # host metric discovery. This does not establish real compositor capture.
     loader_start = native_topbar.index("                Loader {\n                    id: switcher")
@@ -815,7 +929,14 @@ Scope {
     (root / 'config').symlink_to(source / 'quickshell/config')
     fixture_config = theme_fixture(source, root)
     (root / 'shell.qml').write_text(qml.replace("__SIZING_LOADER__", sizing_loader)
-                                  .replace("__WORKSPACE_SURFACE__", workspace_surface))
+                                  .replace("__WORKSPACE_SURFACE__", workspace_surface)
+                                  .replace("__HOVER_PAGE__", hover_page)
+                                  .replace("__HOVER_SCHEDULER__", hover_scheduler)
+                                  .replace("__PANEL_FOCUS__", panel_focus)
+                                  .replace("__GRAB_ACTIVE__", grab_active)
+                                  .replace("__GRAB_WINDOWS__", grab_windows)
+                                  .replace("__GRAB_ACTIVATED__", grab_activated)
+                                  .replace("__FOCUS_REQUESTED__", focus_requested))
     (root / 'runtime').mkdir(mode=0o700)
     (root / 'state/icewine').mkdir(parents=True)
     env = dict(os.environ, QT_QPA_PLATFORM='offscreen', QML_IMPORT_PATH=str(root),
@@ -826,10 +947,11 @@ Scope {
                XDG_STATE_HOME=str(root / 'state'), ICEWINE_WIDGET_POLICY='{}')
     env["XDG_CONFIG_HOME"] = fixture_config
     result = subprocess.run(['qs', '-p', str(root), '--no-color'], env=env,
-                            capture_output=True, text=True, timeout=20)
+                            capture_output=True, text=True, timeout=40)
     output = result.stdout + result.stderr
     assert result.returncode == 0 and 'SWITCHER_PASSED' in output and 'SWITCHER_SIZING_PASSED' in output, output
     assert 'WORKSPACES_UNLOCK_PASSED' in output, output
+    assert 'CARD_SWITCHING_PASSED' in output, output
     assert not re.search(r'ReferenceError|TypeError|Binding loop|Unable to assign|not a type', output), output
     # One lightweight mixed policy case exercises both fixed directions against
     # opposing saved choices; nullable user choice was covered by the watcher.
@@ -909,4 +1031,4 @@ ShellRoot {
     output = result.stdout + result.stderr
     assert result.returncode == 0 and 'SESSION_RELOAD_PASSED' in output, output
     assert not re.search(r'ReferenceError|TypeError|Binding loop|Unable to assign|not a type', output), output
-    print('Switcher sizing, scrolling, keys, widget policy, lock/unlock privacy, pending/acquired reload and workspace lifecycle pass')
+    print('Card interaction/hover/click switching in all 12 bar modes/locations, switcher sizing, scrolling, keys, widget policy, lock/unlock privacy, pending/acquired reload and workspace lifecycle pass')
