@@ -333,8 +333,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         all_last_calls = all_calls
         last_widget_calls = [call for call in all_calls if call[0].startswith("widgets-")]
         return [call for call in all_calls if not call[0].startswith(("widgets-", "hotkeys-")) and call[0] not in ("appearance-state","theme-preview","widget-icons")]
-    ids = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras", "texteditor", "screenshot")
-    visible = 5 # Arch hides Login; Steam none hides its two children.
+    ids = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras", "texteditor", "screenshot", "media")
     def state(readonly=False, **selected):
         # Deliberately shuffle fields: identity must not depend on wire order.
         return " ".join([f"{name}={str(selected.get(name, "none" if name == "steam" else False)).lower()}" for name in reversed(ids)]
@@ -365,12 +364,12 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert not any(call[:2] == ["icewine", "theme"] for call in tools())
     def test_spacing():
         visual = state(desktop=True, terminal=True, filemanager=True, texteditor=True,
-                       shellExtras=True, steam="flatpak", gamescope=True, screenshot=True)
+                       shellExtras=True, steam="flatpak", gamescope=True, screenshot=True, media=True)
         def frame_for(title):
             return next(frame.decode().splitlines() for frame in reversed(last_frames)
                         if title in frame.decode().splitlines()[1])
         taskbar = page(1)+down*4+enter
-        for size in ((24,80), (30,100), (24,160), (48,80)):
+        for size in ((24,80), (30,100), (36,120), (24,160), (48,80)):
             for name, keys, title in (
                     ("utilities", esc, "Utilities"),
                     ("appearance", page(1)+esc, "Appearance"),
@@ -393,6 +392,19 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                     assert "Gradia (Flatpak/Flathub)" in screenshot and "[x]" in screenshot, (size, screenshot)
                     checkbox = next(line for line in frame if "Terminal Editor" in line)
                     assert screenshot.index("[x]") == checkbox.index("[x]"), (size, frame)
+                    media_row = next(i for i,line in enumerate(frame) if "Pictures and Video" in line)
+                    media = frame[media_row]
+                    assert "Pictures and Video imv, VLC" in media, (size, media)
+                    assert media.index("[x]") == checkbox.index("[x]"), (size, media)
+                    if size[1] == 80:
+                        assert frame[media_row+1][43:].startswith("(Flatpak/Flathub)"), (size, frame)
+                    else:
+                        assert "imv, VLC (Flatpak/Flathub)" in media, (size, media)
+                    # Focus-based scrolling must reveal all three actions at 80x24.
+                    run(tab+up+esc, visual, size=size, capture="utilities-actions")
+                    actions = frame_for("Utilities")
+                    assert all(label in "\n".join(actions) for label in
+                               ("Overwrite existing dotfiles", "[ Setup Monitors... ]", "[ Review and Apply ]"))
                 if name == "widgets" and size == (24,80):
                     assert all(label in "\n".join(frame) for label in ("Launcher", "Media", "Audio", "Network", "Notifications", "Battery", "Unassigned"))
             run(page(3)+esc, visual, size=size, capture="hotkeys-start")
@@ -424,11 +436,11 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         frame = frame_for("Widgets")
         assert "Widget preferences changed" in "\n".join(frame[-4:-1])
         assert "[ Save ]" in "\n".join(frame[:-4])
-        run(tab+down*10+enter, visual, size=(24,80), confirm=False, capture="review")
+        run(tab+up+enter, visual, size=(24,80), confirm=False, capture="review")
         frame = frame_for("Utilities / Review")
         assert "[ Apply ]   [ Back ]" in frame[20] and frame[0].startswith("╭")
         assert not any(call[0] == "apply" for call in all_last_calls)
-        run(tab+down*9+enter, state(), size=(24,80), widget_policy="invalid", confirm=False, capture="utilities-startup-error")
+        run(tab+up+enter, state(), size=(24,80), widget_policy="invalid", confirm=False, capture="utilities-startup-error")
         assert any(b"[ Review and Apply ]" in frame for frame in last_frames)
         assert not any(call[0] == "apply" for call in all_last_calls)
         run(esc, "", bootstrap=True, size=(24,80), capture="bootstrap")
@@ -587,7 +599,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     calls = run(b"i", "", bootstrap=True, apply_exit=1)
     assert len(calls)==1 and calls[0][0] == "sudo"
     for size in ((24,80), (24,160), (48,80), (48,160)):
-        run(esc, state(), size=size)
+        run(tab+up+esc, state(), size=size)
         assert b"Utilities" in last_output and b"Appearance" in last_output and b"Hotkeys" in last_output
         frame = last_frames[-1].decode().splitlines()
         assert all(line[20:22] == "  " for line in frame), "Page panes lost their two-cell gap"
@@ -608,14 +620,14 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     test_hotkeys()
     test_hotkey_editor()
     # Pane focus and keyboard utility Apply identify fields independently of wire order.
-    run(tab+b" "+down*9+enter, state())
+    run(tab+b" "+up+enter, state())
     choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
     assert choices["desktop"] == "true" and choices["overwrite"] == "false"
-    run(tab+b" "+down*9+enter, state(), confirm=False)
+    run(tab+b" "+up+enter, state(), confirm=False)
     assert not any(call[0] == "apply" for call in all_last_calls)
     # Screenshots is an ordinary checkbox; Review/Apply sends a boolean.
     for enabled in (False, True):
-        run(tab+down*5+b" "+down*4+enter, state(screenshot=enabled))
+        run(tab+down*5+b" "+down*5+enter, state(screenshot=enabled))
         choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
         assert choices["screenshot"] == str(not enabled).lower()
         assert b"Screenshots:" in last_output
@@ -623,8 +635,29 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert not any(call[0] == "apply" for call in all_last_calls)
     run(tab+right+esc, state(readonly=True, screenshot=True))
     assert not any(call[0] == "apply" for call in all_last_calls)
+    # Media is one keyed boolean; the long row remains usable through scroll/reflow.
+    for enabled in (False, True):
+        run(tab+down*6+b" "+down*4+enter, state(media=enabled), size=(24,80))
+        choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
+        assert choices["media"] == str(not enabled).lower()
+        assert b"Pictures and Video:" in last_output
+    wheel = b"\x1b[<65;40;10M"
+    run(tab+wheel*6+b" "+wheel*4+enter, state(), size=(24,80), capture="media-wheel")
+    assert applied([call for call in all_last_calls if call[0] in ("state", "apply")])["media"] == "true"
+    run(tab+down*6+b" "+esc, state(), size=(24,80), capture="media-cancel")
+    assert not any(call[0] == "apply" for call in all_last_calls)
+    run(tab+down*6, state(media=True), size=(24,80), capture="media-resize",
+        resize_steps=[((20,79),right), ((30,100),down*4+enter)])
+    assert applied([call for call in all_last_calls if call[0] in ("state", "apply")])["media"] == "true"
+    run(tab+right+esc, state(readonly=True, media=True), size=(24,80), capture="media-readonly")
+    assert not any(call[0] == "apply" for call in all_last_calls)
+    # An existing startup error reserves status space; scrolling still reaches Review.
+    run(tab+down*6+b" "+down*4+enter, state(), size=(24,80), widget_policy="invalid",
+        confirm=False, capture="media-error-scroll")
+    assert b"Pictures and Video:" in last_output
+    assert not any(call[0] == "apply" for call in all_last_calls)
     # Steam-none prerequisite rows remain visible and cannot enable Handheld.
-    run(tab+down*6+right+down+enter+esc, state())
+    run(tab+down*7+right+down+enter+esc, state())
     assert b"Requires Steam native" in last_output
     test_theme_preview()
     # Taskbar save scope is explicit. Legacy always survives unrelated Save/Cancel.
@@ -719,7 +752,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert (["icewine","wallpaper",picked] in tools()) == (bool(pick) and code == 0)
         assert not list(root.glob("icewine-picker-*"))
     for code in (0,1,127):
-        run(tab+down*8+enter+esc, state(), hyprmon_exit=code)
+        run(tab+up*2+enter+esc, state(), hyprmon_exit=code)
         assert ["hyprmon"] in tools()
         assert b"live/save changes remain" in last_output
     (root / "hyprmon").rename(root / "hyprmon-hidden")
@@ -728,7 +761,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert b"Hyprmon Unavailable" in last_output
     finally: (root / "hyprmon-hidden").rename(root / "hyprmon")
     # Fail malformed machine state before terminal ownership and commands.
-    for wire in (state()+" terminal=true", state().replace("screenshot=false","screenshot=invalid"), state().replace("terminal=false","terminal=1")):
+    for wire in (state()+" terminal=true", state().replace("screenshot=false","screenshot=invalid"), state().replace("terminal=false","terminal=1"), state().replace("media=false","media=1")):
         run(b"", wire, valid=False)
         assert not tools()
     good = "themes=dracula,tokyo-night selected=tokyo-night policy=false level=med desktopLayout=scrolling theme=false transparency=false wallpaper=false monitors=false layout=false"

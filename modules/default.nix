@@ -76,6 +76,7 @@ in {
     };
     terminal.enable = lib.mkEnableOption "Kitty terminal and defaults";
     filemanager.enable = lib.mkEnableOption "Yazi file manager and defaults";
+    media.enable = lib.mkEnableOption "native imv and VLC from Flathub" // { default = cfg.desktop.enable; };
     steam = lib.mkOption {
       type = lib.types.enum [ "none" "native" "flatpak" ];
       default = "none";
@@ -134,11 +135,12 @@ in {
     programs.steam.enable = lib.mkIf (cfg.steam == "native") true;
     nixpkgs.config.allowUnfreePackages = lib.optionals (cfg.steam == "native")
       [ "steam" "steam-unwrapped" ];
-    services.flatpak = lib.mkIf (cfg.steam == "flatpak" || cfg.screenshot) {
+    services.flatpak = lib.mkIf (cfg.steam == "flatpak" || cfg.screenshot || cfg.media.enable) {
       enable = true;
       remotes = [ { name = "flathub"; location = "https://dl.flathub.org/repo/flathub.flatpakrepo"; } ];
       packages = lib.optional (cfg.steam == "flatpak") "com.valvesoftware.Steam"
-        ++ lib.optional cfg.screenshot { appId = "be.alexandervanhee.gradia"; origin = "flathub"; };
+        ++ lib.optional cfg.screenshot { appId = "be.alexandervanhee.gradia"; origin = "flathub"; }
+        ++ lib.optional cfg.media.enable { appId = "org.videolan.VLC"; origin = "flathub"; };
     };
 
     programs.hyprland = lib.mkIf cfg.desktop.enable { enable = true; withUWSM = true; };
@@ -170,6 +172,7 @@ in {
       ++ lib.optional (cfg.steam != "none" && cfg.gamescope.enable) pkgs.gamescope
       ++ lib.optional cfg.gtk.enable pkgs.gsettings-desktop-schemas;
     users.users.${cfg.user}.packages = lib.optional cfg.terminal.enable pkgs.kitty
+      ++ lib.optional cfg.media.enable pkgs.imv
       ++ lib.optionals cfg.shellExtras.enable [ pkgs.starship pkgs.fastfetch ]
       ++ lib.optional cfg.monitors.enable cfg.monitors.package
       ++ lib.optional cfg.texteditor.enable (import ../editor/package.nix { inherit pkgs; });

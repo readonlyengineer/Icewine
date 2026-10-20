@@ -18,18 +18,18 @@ import types
 theme = types.ModuleType("icewine_theme")
 theme.__file__ = os.environ.get("ICEWINE_THEME_SCRIPT", str(Path(__file__).with_name("theme")))
 importlib.machinery.SourceFileLoader(theme.__name__, theme.__file__).exec_module(theme)
-FEATURES = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras", "texteditor", "screenshot")
+FEATURES = ("desktop", "terminal", "filemanager", "steam", "gamescope", "handheld", "login", "shellExtras", "texteditor", "screenshot", "media")
 APPS = {
     "desktop": ("hypr", "uwsm", "gtk", "user-dirs", "applications"),
     "terminal": ("kitty",), "filemanager": ("yazi",),
     "steam": (), "gamescope": ("gamescope",), "handheld": (), "login": (),
-    "shellExtras": ("starship", "fastfetch", "btop"), "texteditor": (), "screenshot": (),
+    "shellExtras": ("starship", "fastfetch", "btop"), "texteditor": (), "screenshot": (), "media": (),
 }
 PACKAGES = {
     "desktop": ("icewine-session",), "terminal": ("kitty",),
     "filemanager": ("yazi", "xdg-terminal-exec", "ffmpegthumbnailer", "7zip", "gvfs", "udisks2"),
     "steam": (), "gamescope": ("gamescope",), "handheld": ("icewine-handheld", "icewine-controller-idle", "inputplumber"),
-    "login": (), "shellExtras": ("starship", "fastfetch"), "texteditor": ("neovim", "git", "gcc", "make", "ripgrep", "fd", "unzip"), "screenshot": (),
+    "login": (), "shellExtras": ("starship", "fastfetch"), "texteditor": ("neovim", "git", "gcc", "make", "ripgrep", "fd", "unzip"), "screenshot": (), "media": ("imv",),
 }
 
 
@@ -41,12 +41,14 @@ def validate(value, *, saved=False):
             "steam": ("flatpak" if value["flatpak"] else "native") if value["gaming"] else "none",
             "gamescope": value["gaming"], "handheld": False,
         }
-    previous = set(FEATURES) - {"texteditor", "screenshot"}
+    previous = set(FEATURES) - {"texteditor", "screenshot", "media"}
     if saved and isinstance(value, dict) and set(value) == previous:
         value = value | {"texteditor": original.get("texteditor", False),
                          "screenshot": value["desktop"]}
     if saved and isinstance(value, dict) and value.get("screenshot") in ("none", "simple", "advanced"):
         value = value | {"screenshot": value["screenshot"] != "none"}
+    if saved and isinstance(value, dict) and set(value) == set(FEATURES) - {"media"}:
+        value = value | {"media": False}
     if (not isinstance(value, dict) or set(value) != set(FEATURES)
             or value["steam"] not in ("none", "native", "flatpak")
             or any(type(bit) is not bool for name, bit in value.items() if name != "steam")):
@@ -417,7 +419,7 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         packages = [package for feature in FEATURES if selected[feature] and feature != "steam" for package in PACKAGES[feature]]
         if selected["steam"] == "native":
             packages.append("steam")
-        if selected["steam"] == "flatpak" or selected["screenshot"]:
+        if selected["steam"] == "flatpak" or selected["screenshot"] or selected["media"]:
             packages.append("flatpak")
         local = []
         package_dir = os.environ.get("ICEWINE_PACKAGE_DIR")
@@ -437,9 +439,10 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
             run(["sudo", "pacman", "-S", "--needed", *packages])
         if local:
             run(["sudo", "pacman", "-U", *local])
-        if selected["steam"] == "flatpak" or selected["screenshot"]:
+        if selected["steam"] == "flatpak" or selected["screenshot"] or selected["media"]:
             run(["flatpak", "remote-add", "--user", "--if-not-exists", "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"])
             apps = (["com.valvesoftware.Steam"] if selected["steam"] == "flatpak" else []) + (["be.alexandervanhee.gradia"] if selected["screenshot"] else [])
+            apps += ["org.videolan.VLC"] if selected["media"] else []
             run(["flatpak", "install", "--user", "--noninteractive", "flathub", *apps])
     shell_running = False
     changed = any(applied[name] != selected[name] for name in ("steam", "gamescope", "handheld")) or selected["handheld"] or (state / "handheld-rules.sha256").exists()

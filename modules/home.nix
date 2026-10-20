@@ -148,7 +148,7 @@ let
       export XDG_CONFIG_HOME=''${XDG_CONFIG_HOME:-${configHome}}
       export XDG_STATE_HOME=''${XDG_STATE_HOME:-${stateHome}}
       export ICEWINE_MANAGE_SELECTIONS=${lib.escapeShellArg (builtins.toJSON ((lib.genAttrs
-        [ "desktop" "terminal" "filemanager" "handheld" "login" "shellExtras" "texteditor" ]
+        [ "desktop" "terminal" "filemanager" "handheld" "login" "shellExtras" "texteditor" "media" ]
         (name: cfg.${name}.enable)) // {
           steam = cfg.steam;
           screenshot = cfg.screenshot;

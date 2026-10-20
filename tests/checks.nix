@@ -29,8 +29,20 @@ let
     login.enable = true;
     shellExtras.enable = true;
   }; }]; }).config;
-  screenshotOnly = (desktopSystem.extendModules { modules = [{ services.icewine = { desktop.enable = true; steam = "none"; }; }]; }).config;
-  screenshotNone = (desktopSystem.extendModules { modules = [{ services.icewine = { desktop.enable = true; screenshot = false; }; }]; }).config;
+  screenshotOnly = (desktopSystem.extendModules { modules = [{ services.icewine = { desktop.enable = true; steam = "none"; media.enable = false; }; }]; }).config;
+  screenshotNone = (desktopSystem.extendModules { modules = [{ services.icewine = { desktop.enable = true; screenshot = false; media.enable = false; }; }]; }).config;
+  mediaOff = (desktopSystem.extendModules { modules = [{
+    boot.isContainer = true; # Full assertion fixtures have no disk/bootloader configuration.
+    services.icewine = { desktop.enable = true; screenshot = false; media.enable = false; };
+  }]; }).config;
+  mediaSystems = lib.concatMap (steam: map (screenshot:
+    (desktopSystem.extendModules { modules = [{
+      boot.isContainer = true;
+      services.icewine = {
+        desktop.enable = true;
+        inherit steam screenshot;
+      };
+    }]; }).config) [ false true ]) [ "none" "native" "flatpak" ];
   editorEnabled = (desktopSystem.extendModules { modules = [{ services.icewine.texteditor.enable = true; }]; }).config;
   monitorsOnly = (desktopSystem.extendModules { modules = [{ services.icewine.monitors = { enable = true; package = pkgs.hello; }; }]; }).config;
   nativeGaming = (desktopSystem.extendModules { modules = [{ services.icewine.steam = "native"; }]; }).config;
@@ -194,7 +206,7 @@ in {
     assert lib.all (config: lib.all (name: !(hasPackage name config.environment.systemPackages))
       [ "gradia" "hyprshot" "flameshot" ]) [ screenshotOnly screenshotNone optIn handheld ];
     assert handheld.services.icewine.screenshot && handheld.services.flatpak.enable;
-    assert map (package: package.appId) handheld.services.flatpak.packages == [ "be.alexandervanhee.gradia" ];
+    assert map (package: package.appId) handheld.services.flatpak.packages == [ "be.alexandervanhee.gradia" "org.videolan.VLC" ];
     assert handheld.services.icewine.steam == "native";
     assert hasPackage "icewine-editor" editorEnabled.users.users.demo.packages;
     assert !(hasPackage "icewine-editor" desktop.users.users.demo.packages);
@@ -203,7 +215,28 @@ in {
     assert desktop.services.icewine.steam == "none";
     assert !desktop.programs.hyprland.enable;
     assert !desktop.programs.steam.enable;
+    assert !desktop.services.icewine.media.enable;
     assert !desktop.services.flatpak.enable;
+    assert desktop.services.flatpak.packages == [ ];
+    assert !(hasPackage "imv" desktop.users.users.demo.packages);
+    assert !(hasPackage "imv" desktop.users.users.other.packages);
+    assert lib.all valid (mediaSystems ++ [ mediaOff ]);
+    assert !mediaOff.services.flatpak.enable;
+    assert !(hasPackage "imv" mediaOff.users.users.demo.packages);
+    assert mediaOff.xdg.mime.defaultApplications == { };
+    assert lib.all (config:
+      map (package: package.appId) config.services.flatpak.packages
+        == lib.optional (config.services.icewine.steam == "flatpak") "com.valvesoftware.Steam"
+          ++ lib.optional config.services.icewine.screenshot "be.alexandervanhee.gradia"
+          ++ [ "org.videolan.VLC" ]
+      && lib.all (package: package.origin == "flathub") config.services.flatpak.packages
+      && lib.any (remote: remote.name == "flathub") config.services.flatpak.remotes
+      && !config.services.flatpak.uninstallUnmanaged
+      && config.services.icewine.media.enable
+      && hasPackage "imv" config.users.users.demo.packages
+      && !(hasPackage "imv" config.users.users.other.packages)
+      && config.xdg.mime.defaultApplications == { }
+      && config.systemd.user.paths ? icewine-refresh-flatpak-icons) mediaSystems;
     assert !desktop.services.displayManager.sddm.enable;
     assert !desktop.programs.firefox.enable;
     assert desktop.programs.firefox.nativeMessagingHosts.packages == [ ];
@@ -227,12 +260,13 @@ in {
     assert optIn.programs.hyprland.enable && optIn.programs.hyprland.withUWSM;
     assert !optIn.programs.steam.enable;
     assert optIn.services.flatpak.enable;
-    assert map (package: package.appId) optIn.services.flatpak.packages == [ "com.valvesoftware.Steam" "be.alexandervanhee.gradia" ];
+    assert map (package: package.appId) optIn.services.flatpak.packages == [ "com.valvesoftware.Steam" "be.alexandervanhee.gradia" "org.videolan.VLC" ];
     assert !optIn.services.flatpak.uninstallUnmanaged;
     assert optIn.services.icewine.applications.steam == [ "flatpak" "run" "com.valvesoftware.Steam" ];
     assert hasPackage "kitty" optIn.users.users.demo.packages;
     assert !(hasPackage "nano" optIn.users.users.demo.packages);
     assert hasPackage "yazi" optIn.users.users.demo.packages;
+    assert hasPackage "ffmpegthumbnailer" optIn.users.users.demo.packages;
     assert hasPackage "fastfetch" optIn.users.users.demo.packages;
     assert hasPackage "starship" optIn.users.users.demo.packages;
     assert hasPackage "gamescope" optIn.environment.systemPackages;

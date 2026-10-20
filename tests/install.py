@@ -31,10 +31,10 @@ def test_utility_choices():
             assert not readonly and not state.exists()
             assert fresh == dict.fromkeys(manage.FEATURES, True) | {"handheld":False,"login":False,"steam":"flatpak"}
             state.mkdir(parents=True)
-            old = {name:value for name,value in fresh.items() if name not in {"texteditor","screenshot"}}
+            old = {name:value for name,value in fresh.items() if name not in {"texteditor","screenshot","media"}}
             (state / "manage.json").write_text(json.dumps(old))
             _, migrated = manage.selections(state)
-            assert migrated == old | {"texteditor":False,"screenshot":True}
+            assert migrated == old | {"texteditor":False,"screenshot":True,"media":False}
             assert json.loads((state / "manage.json").read_text()) == old
             for old_mode, enabled in (("none", False), ("simple", True), ("advanced", True), (False, False), (True, True)):
                 saved = fresh | {"screenshot":old_mode}
@@ -65,6 +65,23 @@ def test_utility_choices():
                 try: manage.validate(fresh | {"screenshot":value})
                 except ValueError: pass
                 else: raise AssertionError("live policy accepted a non-boolean screenshot")
+            # Missing media migrates only recognized saved schemas; reading is inert.
+            for screenshot in (False, True, "none", "simple", "advanced"):
+                saved = {name:value for name,value in fresh.items() if name != "media"} | {"screenshot":screenshot}
+                (state / "manage.json").write_text(json.dumps(saved))
+                expected = fresh | {"media":False, "screenshot":screenshot not in (False, "none")}
+                assert manage.selections(state)[1] == expected
+                assert json.loads((state / "manage.json").read_text()) == saved
+            for enabled in (False, True):
+                saved = fresh | {"media":enabled}
+                (state / "manage.json").write_text(json.dumps(saved))
+                assert manage.selections(state)[1] == saved
+            for invalid in (fresh | {"media":1}, fresh | {"media":"false"},
+                            {name:value for name,value in fresh.items() if name != "terminal"},
+                            fresh | {"unknown":False}):
+                try: manage.validate(invalid, saved=True)
+                except ValueError: pass
+                else: raise AssertionError("invalid media/schema accepted")
             # Preview reads the real installed palette without creating user configuration.
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 manage.main(["theme-preview","catppuccin-latte"])
@@ -570,33 +587,60 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         apply(("desktop",), readonly=True)
     for client, gamescope in [("none", False), ("native", False), ("native", True), ("flatpak", True)]:
         for screenshot in (False, True):
-            features = (("gamescope",) if gamescope else ()) + (("screenshot",) if screenshot else ())
-            with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
-                selected = apply(features, steam=client)
-            calls = [call.args[0] for call in commands.call_args_list]
-            packages = [package for call in calls if call[:4] == ["sudo", "pacman", "-S", "--needed"] for package in call[4:]]
-            apps = (["com.valvesoftware.Steam"] if client == "flatpak" else []) + (["be.alexandervanhee.gradia"] if screenshot else [])
-            assert ("steam" in packages) == (client == "native")
-            assert ("flatpak" in packages) == bool(apps)
-            installs = [call for call in calls if call[:2] == ["flatpak", "install"]]
-            assert installs == ([["flatpak", "install", "--user", "--noninteractive", "flathub", *apps]] if apps else [])
-            assert any(call[:2] == ["flatpak", "remote-add"] for call in calls) == bool(apps)
-            assert ("gamescope" in packages) == gamescope
-            assert not any(package in packages for package in ("hyprshot", "flameshot", "gradia", "bazaar"))
-            assert (data / "applications/steam-gamescope.desktop").exists() == gamescope
-            assert not any("-R" in call or "uninstall" in call for call in calls)
-            assert json.loads((state / "manage.json").read_text()) == selected
-    # A failed Gradia installation must not persist a successful selection.
-    before = (state / "manage.json").read_bytes()
-    def fail_install(argv, **kwargs):
-        if argv[:2] == ["flatpak", "install"]:
-            raise subprocess.CalledProcessError(1, argv)
-        return subprocess.CompletedProcess(argv, 0)
-    with patch.object(manage.subprocess, "run", side_effect=fail_install):
-        try: apply(("screenshot",))
-        except subprocess.CalledProcessError: pass
-        else: raise AssertionError("failed Gradia install reported success")
-    assert (state / "manage.json").read_bytes() == before
+            for media in (False, True):
+                features = (("gamescope",) if gamescope else ()) + (("screenshot",) if screenshot else ()) + (("media",) if media else ())
+                # Repeat explicit Apply: no duplicate Flatpak provider or uninstall.
+                for _ in range(2):
+                    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+                        selected = apply(features, steam=client)
+                    calls = [call.args[0] for call in commands.call_args_list]
+                    packages = [package for call in calls if call[:4] == ["sudo", "pacman", "-S", "--needed"] for package in call[4:]]
+                    apps = (["com.valvesoftware.Steam"] if client == "flatpak" else []) + (["be.alexandervanhee.gradia"] if screenshot else []) + (["org.videolan.VLC"] if media else [])
+                    assert ("steam" in packages) == (client == "native")
+                    assert ("imv" in packages) == media
+                    assert ("flatpak" in packages) == bool(apps)
+                    installs = [call for call in calls if call[:2] == ["flatpak", "install"]]
+                    assert installs == ([["flatpak", "install", "--user", "--noninteractive", "flathub", *apps]] if apps else [])
+                    assert any(call[:2] == ["flatpak", "remote-add"] for call in calls) == bool(apps)
+                    assert ("gamescope" in packages) == gamescope
+                    assert not any(package in packages for package in ("hyprshot", "flameshot", "gradia", "bazaar", "vlc", "ffmpeg", "mpv"))
+                    assert (data / "applications/steam-gamescope.desktop").exists() == gamescope
+                    assert not any("-R" in call or "uninstall" in call or call[0] == "xdg-mime" for call in calls)
+                    assert json.loads((state / "manage.json").read_text()) == selected
+                    assert json.loads((state / "applied.json").read_text()) == selected
+                    with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID":"arch"}):
+                        assert manage.selections(state)[1] == selected
+    # Media changes never rewrite existing MIME preferences, even with overwrite.
+    mime = config / "mimeapps.list"
+    original_mime = mime.read_bytes() if mime.exists() else None
+    preferences = b"[Default Applications]\nimage/png=personal.desktop;\nvideo/mp4=personal-video.desktop;\n"
+    mime.write_bytes(preferences)
+    with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+        for enabled in (True, False, False):
+            apply(("media",) if enabled else (), overwrite=True)
+            assert mime.read_bytes() == preferences
+        # Both old records lacking media are accepted on reapplication.
+        old = {name:value for name,value in false.items() if name != "media"}
+        for name in ("manage.json", "applied.json"):
+            (state / name).write_text(json.dumps(old))
+        apply()
+        assert json.loads((state / "manage.json").read_text()) == false
+        assert json.loads((state / "applied.json").read_text()) == false
+    if original_mime is None: mime.unlink()
+    else: mime.write_bytes(original_mime)
+    # Native package, remote and app failures must not record false success.
+    for features in (("screenshot",), ("media",)):
+        for prefix in (["sudo", "pacman"], ["flatpak", "remote-add"], ["flatpak", "install"]):
+            before = {name:(state / name).read_bytes() for name in ("manage.json", "applied.json")}
+            def fail_install(argv, **kwargs):
+                if argv[:2] == prefix:
+                    raise subprocess.CalledProcessError(1, argv)
+                return subprocess.CompletedProcess(argv, 0)
+            with patch.object(manage.subprocess, "run", side_effect=fail_install):
+                try: apply(features)
+                except subprocess.CalledProcessError: pass
+                else: raise AssertionError("failed utility install reported success")
+            assert {name:(state / name).read_bytes() for name in before} == before
     # Handheld transitions stop the live shell, idle/OSK/routing before policy
     # removal. Failure cannot persist a successful new selection.
     handheld = false | {"desktop": True, "steam": "native", "gamescope": True, "handheld": True}

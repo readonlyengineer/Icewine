@@ -6,6 +6,7 @@ const ROWS: &[(&str, &str, &str)] = &[
     ("desktop", "Desktop session", "Hyprland + Quickshell"), ("terminal", "Terminal", "Kitty"),
     ("filemanager", "File manager", "Yazi"), ("texteditor", "Terminal Editor", "Neovim + LazyVIM"),
     ("shellExtras", "Shell extras", "Starship / Fastfetch"), ("screenshot", "Screenshots", "Gradia (Flatpak/Flathub)"),
+    ("media", "Pictures and Video", "imv, VLC (Flatpak/Flathub)"),
     ("steam", "Steam", ""), ("gamescope", "Gamescope", "Nested Steam session"),
     ("handheld", "Handheld", "Handheld UI"), ("login", "Login styling", "Host configuration"),
 ];
@@ -615,8 +616,8 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                     let row_count = rows.len().saturating_sub(if subpage > 0 { 2 } else { 0 });
                     let mut laid_out = Vec::new();
                     let mut offset = 0u16;
-                    for (index, value) in rows.iter().take(row_count).enumerate() {
-                        if page == 0 && subpage == 0 && matches!(index, 6 | 9) { offset += 1; }
+                    for value in rows.iter().take(row_count) {
+                        if page == 0 && subpage == 0 && matches!(value.control, Control::Steam | Control::Overwrite) { offset += 1; }
                         let parts: Vec<_> = value.label.split('\t').collect();
                         let plain_value = value.value.strip_suffix(" - Read Only").unwrap_or(&value.value);
                         let mut displayed = if matches!(value.control, Control::Steam | Control::Utility("handheld") | Control::Transparency | Control::Layout | Control::Bar(_) | Control::BarWidth) {
@@ -628,15 +629,16 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                             displayed.push_str(if Line::from(displayed.as_str()).width() + 12 > body.width as usize - 20 { "\n- Read Only" } else { " - Read Only" });
                         }
                         let text = if parts.len() == 2 {
+                            let label_width = if value.control == Control::Utility("media") { 19 } else { 18 };
                             let padding = 14usize.saturating_sub(Line::from(displayed.as_str()).width()) / 2;
                             // Let Gradia's label use the existing gap before its aligned checkbox.
                             let extra = if value.control == Control::Utility("screenshot") { padding } else { 0 };
-                            let detail_width = body.width as usize - 18 - 14 + extra;
+                            let detail_width = body.width as usize - label_width - 14 + extra;
                             let details = wrap_cells(parts[1], detail_width);
                             let padding = padding - extra;
                             details.iter().enumerate().map(|(line, detail)| {
                                 let label = if line == 0 { parts[0] } else { "" };
-                                format!("{label:<18}{detail}{}{}{}", " ".repeat(detail_width - Line::from(detail.as_str()).width()), " ".repeat(padding), if line == 0 { displayed.as_str() } else { "" })
+                                format!("{label:<label_width$}{detail}{}{}{}", " ".repeat(detail_width - Line::from(detail.as_str()).width()), " ".repeat(padding), if line == 0 { displayed.as_str() } else { "" })
                             }).collect::<Vec<_>>()
                         } else if value.control == Control::Overwrite {
                             wrap_cells(&format!("{} {}", value.value, value.label), body.width as usize)

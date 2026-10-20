@@ -457,6 +457,14 @@ supplies its required runtime and Flathub support. Bazaar is not installed.
 
 ### Alternative applications and opt-outs
 
+Pictures and Video supplies native imv and VLC from Flathub, independently of
+Steam and Screenshots. It defaults on for fresh desktop setup; existing portable choices
+are preserved with this new group off. Disable it in Utilities or set
+`services.icewine.media.enable = false` on NixOS. Deselection stops provisioning
+without uninstalling existing Flatpaks or changing image/audio/video associations.
+The NixOS default follows `desktop.enable`; other sessions that explicitly enable
+media must supply their own XDG desktop portals.
+
 Optional utility switches install and configure Icewine's defaults. They do not
 select replacement applications. Enabling Yazi sets the directory default on Arch
 Apply; NixOS supplies a per-user package default without writing user MIME files.
