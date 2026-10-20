@@ -136,8 +136,6 @@ end
 hl.bind(mainMod .. " + SHIFT + B", topbar("bluetooth"))
 hl.bind(mainMod .. " + SHIFT + N", topbar("network"))
 hl.bind(mainMod .. " + SHIFT + A", topbar("audio"))
-hl.bind(mainMod .. " + SHIFT + J", topbar("battery"))
-hl.bind(mainMod .. " + SHIFT + P", topbar("performance"))
 hl.bind(mainMod .. " + SHIFT + D", topbar("layout"))
 
 -- Session control
@@ -148,7 +146,7 @@ hl.bind(mainMod .. " + SHIFT + W", hl.dsp.dpms({ action = "on" })) -- DPMS-wake 
 -- Window management
 hl.bind(mainMod .. " + Q", hl.dsp.window.close())
 hl.bind(mainMod .. " + V", windows.toggle_floating)
-hl.bind(mainMod .. " + P", hl.dsp.window.pseudo())
+hl.bind(mainMod .. " + P", topbar("battery"))
 hl.bind(mainMod .. " + J", function()
 	if layout() == "scrolling" then hl.dispatch(hl.dsp.layout("consume_or_expel next")) end
 end)

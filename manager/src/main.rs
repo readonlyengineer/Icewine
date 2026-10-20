@@ -1083,9 +1083,9 @@ fn hotkeys(widgets: &Widgets, settings: &HotkeySettings, screenshot: bool, width
     let categories = [
         ("Common", common),
         ("Applications", format!("Super+Enter  Configured terminal\nSuper+Space  Launcher\nSuper+E  Configured file manager\nSuper+B  Browser (if configured)\n{switcher}\n{capture}")),
-        ("Windows", format!("{switcher}\nSuper+Q  Close\nSuper+V  Toggle floating\nSuper+F  Fullscreen\nSuper+M  Toggle width\nSuper+P  Pseudo tile\nSuper+J  Join/split column (scrolling only)\nSuper+Arrows  Focus\nSuper+Shift+Arrows  Swap\nSuper+Ctrl+Arrows  Resize\nAlt+Tab  Cycle and raise\nSuper+mouse drag  Move/resize\n\nScrolling left/right uses columns. Monocle focus cycles; directional swap and resize have no effect.")),
+        ("Windows", format!("{switcher}\nSuper+Q  Close\nSuper+V  Toggle floating\nSuper+F  Fullscreen\nSuper+M  Toggle width\nSuper+J  Join/split column (scrolling only)\nSuper+Arrows  Focus\nSuper+Shift+Arrows  Swap\nSuper+Ctrl+Arrows  Resize\nAlt+Tab  Cycle and raise\nSuper+mouse drag  Move/resize\n\nScrolling left/right uses columns. Monocle focus cycles; directional swap and resize have no effect.")),
         ("Workspaces", "Super+1–0  Switch workspace 1–10\nSuper+Shift+1–0  Move window\nSuper+PageUp/PageDown  Relative workspace\nSuper+Shift+PageUp/PageDown  Move window\nSuper+Tab  Next populated workspace\nSuper+Shift+Tab  Move to next populated\nSuper+Home/End  First/last populated\nSuper+Shift+Home/End  Move window".into()),
-        ("Desktop / session", "Super+L  Lock\nSuper+Shift+L  End session\nSuper+Ctrl+R  Reload Hyprland\nSuper+Shift+W  Wake displays\nSuper+Shift+wheel  Zoom\nSuper+Shift+Z  Reset zoom\nSuper+Shift+B/N/A/J/P/D  Widget cards\nMedia keys  Player and audio\nBrightness keys  Focused display brightness\n\nCards: Bluetooth, network, audio, battery, performance and layout.".into()),
+        ("Desktop / session", "Super+L  Lock\nSuper+P  Power menu\nSuper+Shift+L  End session\nSuper+Ctrl+R  Reload Hyprland\nSuper+Shift+W  Wake displays\nSuper+Shift+wheel  Zoom\nSuper+Shift+Z  Reset zoom\nSuper+Shift+B/N/A/D  Widget cards\nMedia keys  Player and audio\nBrightness keys  Focused display brightness\n\nCards: Bluetooth, network, audio and layout.".into()),
     ];
     let mut lines = Vec::new();
     let mut actions = Vec::new();

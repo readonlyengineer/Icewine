@@ -281,6 +281,7 @@ reload Hyprland and survive login in `$XDG_STATE_HOME/icewine/hotkeys`
 
 Monocle arrows cycle its stack; directional swapping and resizing have no effect.
 `Super+J` stacks/unstacks scrolling windows; `Super+M` toggles scrolling column width.
+`Super+P` opens the power menu.
 
 ## Managing dot files
 
