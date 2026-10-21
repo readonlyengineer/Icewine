@@ -19,7 +19,9 @@ hl = {
     bind = function(key, action, options)
         local chord = key:gsub("%s", ""):upper()
         assert(not bindings[chord], "Duplicate registration: " .. chord)
-        bindings[chord] = { action = action, options = options or {}, keys = key }
+        bindings[chord] = { action = action, options = options or {}, keys = key, enabled = true,
+            set_enabled = function(self, enabled) self.enabled = enabled end }
+        return bindings[chord]
     end,
 }
 local module = dofile("hyprland/modules/Binds.lua")
@@ -41,6 +43,21 @@ for key, direction in pairs({ left = "l", right = "r", up = "u", down = "d" }) d
     by_id["focus_" .. key].action(); assert(dispatched.direction == direction)
     by_id["swap_" .. key].action(); assert(dispatched.direction == direction)
     by_id["resize_" .. key].action(); assert(dispatched.relative == true)
+end
+-- Preview capture toggles only available internal handles, never saved actions.
+for chord, action in pairs({ TAB = "quickshell:previewTab", ["SHIFT+TAB"] = "quickshell:previewBacktab" }) do
+    local binding = assert(bindings[chord])
+    if binding.options.description == "icewine:preview-tab" or binding.options.description == "icewine:preview-backtab" then
+        assert(not binding.enabled and binding.action == action)
+        assert(not binding.options.non_consuming and not binding.options.ignore_mods)
+    end
+end
+for _, enabled in ipairs({false, true, false}) do
+    module.set_preview_tabs(enabled)
+    for _, binding in pairs(bindings) do
+        local preview = binding.options.description == "icewine:preview-tab" or binding.options.description == "icewine:preview-backtab"
+        assert(binding.enabled == (not preview or enabled))
+    end
 end
 -- Suppress/restore the selected mouse chords, preserving keyboard bindings.
 local move, resize = definitions.chord("drag_move"), definitions.chord("drag_resize")

@@ -41,8 +41,12 @@ ShellRoot {
         id: statusPopout
         property int backgroundCount: 0
         property bool backgroundAttention: false
-        function openPage(page) {}
-        function focusInitial() {}
+        readonly property var currentItem: previewStack
+        readonly property bool shown: interactionCard.shown
+        property bool entryPending: false
+        property int opens: 0
+        function openPage(page) { ++opens }
+        function focusInitial() { previewStack.initialFocus?.forceActiveFocus() }
     }
     QtObject { id: switcher; property var item: null }
     Adapters.Hyprland { id: workspaceCompositor }
@@ -54,6 +58,7 @@ ShellRoot {
         session: mockSession
         keyboard: mockKeyboard
         sessionLocked: mockSession.locked
+        fixturePanel: workspacePanel
         function focusedScreenName() { return "DP-1" } // Offscreen output has no name.
     }
     QtObject {
@@ -75,11 +80,13 @@ ShellRoot {
         property var toplevels: [a, b, c]
         property string activeWindowAddress: "0x2"
         property bool suppressed: false
+        property bool previewTabs: false
         property string restored: ""
         signal navigationRequested()
         signal monitorsChanged()
         signal configReloaded()
         function supress_mouse_binds(value) { suppressed = value }
+        function setPreviewTabs(value) { previewTabs = value }
         function activateWindow(address) { restored = address }
         function activateToplevel(target) {
             if (toplevels.includes(target)) { restored = target.address; activeWindowAddress = target.address }
@@ -123,6 +130,7 @@ ShellRoot {
             property var screen: ({name: "DP-1"})
             readonly property bool widgetHere: topbar.ui.page !== "" && topbar.ui.screen === screen.name
             property var barWindow: workspaceWindow
+            readonly property bool previewTabsReady: __PREVIEW_TABS_READY__
             __PANEL_FOCUS__
             // Observe actual QML setter/activation ordering using only the grab
             // protocol contract. This is NOT compositor keyboard-enter evidence.
@@ -140,18 +148,27 @@ ShellRoot {
             Connections {
                 target: topbar
                 __FOCUS_REQUESTED__
+                function onPreviewTabRequested(direction) { workspacePanel.cyclePreview(direction) }
             }
             readonly property string hoverPage: __HOVER_PAGE__
             __HOVER_SCHEDULER__
             __WORKSPACE_SURFACE__
             Bar.Widget {
                 id: interactionCard
-                y: 70; width: 350; height: 100
+                y: 70; width: 350; height: 480
                 shown: topbar.ui.page !== "" && topbar.ui.page !== "switcher"
                 engaged: topbar.widgetEngaged
                 onEngageRequested: topbar.engageWidget()
                 onDismissRequested: topbar.dismissWidget()
                 Slider { id: interactionSlider; x: 20; y: 20; width: 250 }
+                Bar.CardStack {
+                    id: previewStack
+                    y: 210; width: 350; height: 240
+                    cards: [previewFirst, previewSecond, previewThird]
+                    Bar.Card { id: previewFirst; stack: previewStack; index: 0 }
+                    Bar.Card { id: previewSecond; stack: previewStack; index: 1 }
+                    Bar.Card { id: previewThird; stack: previewStack; index: 2 }
+                }
             }
         }
     }
@@ -722,6 +739,35 @@ ShellRoot {
                     const audio = descendants(statusIcons, item => item.page === "audio")[0]
                     const network = descendants(statusIcons, item => item.page === "network")[0]
                     const targets = [[logo, "launcher"], [audio, "audio"], [network, "network"], [logo, "launcher"]]
+                    mouseMove(audio, 10, 10)
+                    tryCompare(topbar, "previewTabsWanted", true)
+                    previewStack.resetSelection()
+                    const opens = statusPopout.opens
+                    topbar.fixturePreviewTab.pressed()
+                    verify(!topbar.widgetEngaged, "Entry press remains with selective binding until release")
+                    topbar.fixturePreviewTab.released()
+                    verify(topbar.widgetEngaged && !mockCompositor.previewTabs)
+                    if (previewStack.selectedCard !== 1) throw new Error("Forward entry selected=" + previewStack.selectedCard)
+                    compare(statusPopout.opens, opens, "Handoff must not reopen the initial card")
+                    tryCompare(previewStack, "exchanging", false, 900)
+                    keyClick(Qt.Key_Tab)
+                    if (previewStack.selectedCard !== 2) throw new Error("Engaged Tab selected=" + previewStack.selectedCard + " focus=" + workspaceWindow.activeFocusItem)
+                    topbar.fixturePreviewTab.released()
+                    compare(previewStack.selectedCard, 2, "Late native callback must not cycle twice")
+                    wait(200)
+                    compare(previewStack.selectedCard, 2, "Stationary icon hover preserves selection")
+                    topbar.dismissWidget()
+                    topbar.openWidget("audio", false, "DP-1")
+                    previewStack.resetSelection()
+                    topbar.fixturePreviewBacktab.pressed()
+                    topbar.fixturePreviewBacktab.released()
+                    compare(previewStack.selectedCard, 2, "Reverse entry wraps through shared cycle helper")
+                    topbar.dismissWidget()
+                    topbar.openWidget("audio", false, "DP-1")
+                    topbar.fixturePreviewTab.pressed()
+                    topbar.openWidget("network", false, "DP-1")
+                    topbar.fixturePreviewTab.released()
+                    verify(!topbar.widgetEngaged, "Replacement cancels an armed entry release")
                     topbar.openWidget("network", false, "DP-1")
                     for (const [icon, page] of targets) {
                         // The shipped Widget PointHandler sees a real native control
@@ -892,8 +938,10 @@ Scope {
     hover_scheduler = re.search(r'            onHoverPageChanged: \{[\s\S]*?^            \}', native_topbar, re.M)[0]
     hover_scheduler += '\n' + re.search(r'            Timer \{\n                id: previewOpen[\s\S]*?^            \}', native_topbar, re.M)[0]
     hover_scheduler = hover_scheduler.replace('root.', 'topbar.').replace('panel.', 'workspacePanel.')
-    panel_focus = '\n'.join(re.findall(r'            function (?:acquireKeyboard|focusWidget)\([^\n]*\) \{[\s\S]*?^            \}', native_topbar, re.M))
+    panel_focus = '\n'.join(re.findall(r'            function (?:acquireKeyboard|focusWidget|cyclePreview)\([^\n]*\) \{[\s\S]*?^            \}', native_topbar, re.M))
     panel_focus = re.sub(r'\bpanel\b', 'workspacePanel', panel_focus.replace('root.', 'topbar.'))
+    preview_ready = re.search(r'readonly property bool previewTabsReady: ([\s\S]*?)\n            readonly property bool overlapsWindows', native_topbar)[1]
+    preview_ready = preview_ready.replace('root.', 'topbar.')
     grab_source = native_topbar.split('id: widgetGrab')[1]
     grab_active = re.search(r'active: (.+)', grab_source)[1].replace('root.', 'topbar.').replace('panel.', 'workspacePanel.')
     grab_windows = re.search(r'windows: (.+)', grab_source)[1].replace('panel', 'workspacePanel')
@@ -908,8 +956,17 @@ Scope {
     sizing_loader = sizing_loader.replace("sourceComponent: WindowSwitcher {", "sourceComponent: Modules.WindowSwitcher {")
     panel_start = native_topbar.index("    Variants {")
     panel_end = native_topbar.index("    IpcHandler {", panel_start)
-    topbar_source.write_text((native_topbar[:panel_start]
-        + "    QtObject { id: panels; property var instances: [] }\n"
+    # Substitute only native shortcut delivery; run the production callbacks.
+    shortcut_topbar = native_topbar[:panel_start]
+    for name in ("previewTab", "previewBacktab"):
+        shortcut_topbar = shortcut_topbar.replace('GlobalShortcut {\n        name: "' + name + '"',
+            'QtObject {\n        id: ' + name + '\n        property string name: "' + name + '"\n'
+            '        signal pressed()\n        signal released()')
+    shortcut_topbar = shortcut_topbar.replace('    id: root',
+        '    id: root\n    property var fixturePanel\n    property var fixturePreviewTab: previewTab\n'
+        '    property var fixturePreviewBacktab: previewBacktab', 1)
+    topbar_source.write_text((shortcut_topbar
+        + "    QtObject { id: panels; property var instances: root.fixturePanel ? [root.fixturePanel] : [] }\n"
         + native_topbar[panel_end:]).replace("Bar.SystemMetrics { id: metrics }", "QtObject { id: metrics }"))
     (root / 'icewine/theme').symlink_to(root / 'theme')
     (root / 'config').symlink_to(source / 'quickshell/config')
@@ -919,6 +976,7 @@ Scope {
                                   .replace("__HOVER_PAGE__", hover_page)
                                   .replace("__HOVER_SCHEDULER__", hover_scheduler)
                                   .replace("__PANEL_FOCUS__", panel_focus)
+                                  .replace("__PREVIEW_TABS_READY__", preview_ready)
                                   .replace("__GRAB_ACTIVE__", grab_active)
                                   .replace("__GRAB_WINDOWS__", grab_windows)
                                   .replace("__GRAB_ACTIVATED__", grab_activated)

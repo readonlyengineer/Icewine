@@ -165,6 +165,22 @@ end)
 
 -- Scratchpad
 
+-- Saved managed chords take precedence over the corresponding preview direction.
+local configured = {}
+for _, chord in pairs(bindings.values) do configured[chord] = true end
+local preview_tabs = {}
+if not configured.TAB then
+	table.insert(preview_tabs, hl.bind("Tab", hl.dsp.global("quickshell:previewTab"), { transparent = true, description = "icewine:preview-tab" }))
+end
+if not configured["SHIFT+TAB"] then
+	table.insert(preview_tabs, hl.bind("SHIFT + Tab", hl.dsp.global("quickshell:previewBacktab"), { transparent = true, description = "icewine:preview-backtab" }))
+end
+local function set_preview_tabs(enabled)
+	assert(type(enabled) == "boolean", "enabled must be a boolean")
+	for _, binding in ipairs(preview_tabs) do binding:set_enabled(enabled) end
+end
+set_preview_tabs(false)
+
 -- Mouse drag binds (LMB move, RMB resize)
 local function supress_mouse_binds(enabled)
 	assert(type(enabled) == "boolean", "enabled must be a boolean")
@@ -217,4 +233,4 @@ hl.gesture({ fingers = 3, direction = "down", action = function()
 	hl.dispatch(hl.dsp.focus({ workspace = "r-1" }))
 end })
 
-return { supress_mouse_binds = supress_mouse_binds }
+return { supress_mouse_binds = supress_mouse_binds, set_preview_tabs = set_preview_tabs }

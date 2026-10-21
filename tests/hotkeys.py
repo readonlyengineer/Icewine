@@ -90,6 +90,22 @@ else: sys.exit("Unexpected compositor call")
         self.assertEqual(self.path.read_bytes(), b"")
         for name, chord in DEFAULTS.items(): self.assertEqual(self.fields()[name], chord)
 
+    def test_saved_tab_actions_preserve_preview_direction_precedence(self):
+        for saved in ({}, {"launcher": "TAB"}, {"launcher": "SHIFT+TAB"},
+                      {"terminal": "TAB"}, {"taskbar": "SHIFT+TAB"},
+                      {"terminal": "TAB", "taskbar": "SHIFT+TAB"}):
+            with self.subTest(saved=saved):
+                contents = "".join(name + "=" + chord + "\n" for name, chord in saved.items())
+                self.path.write_text(contents)
+                rows = json.loads(self.snapshot())  # Real preference loader and registration fixture.
+                for name, chord in saved.items():
+                    row = next(row for row in rows if row["description"] == "icewine:" + name)
+                    self.assertEqual((row["modmask"], row["key"].upper()), (int(chord.startswith("SHIFT+")), "TAB"))
+                for chord, description in (("TAB", "icewine:preview-tab"), ("SHIFT+TAB", "icewine:preview-backtab")):
+                    self.assertEqual(sum(row["description"] == description for row in rows),
+                                     0 if chord in saved.values() else 1)
+                self.assertEqual(self.path.read_text(), contents)
+
     def test_hold_modifiers_and_input_kinds(self):
         self.save("taskbar", "CTRL+ALT+F1")
         rows = json.loads(self.snapshot())

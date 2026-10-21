@@ -49,7 +49,12 @@ Scope {
         && (radialVisible || widgetEngaged || (barVisible && hoveredScreen !== "")
             || panels.instances.some(panel => panel.widgetHere && panel.widgetHovered))
     onMouseBindsSuppressedChanged: compositor.supress_mouse_binds(mouseBindsSuppressed)
-    Component.onCompleted: compositor.supress_mouse_binds(mouseBindsSuppressed)
+    readonly property bool previewTabsWanted: panels.instances.some(panel => panel.previewTabsReady)
+    onPreviewTabsWantedChanged: compositor.setPreviewTabs(previewTabsWanted)
+    Component.onCompleted: {
+        compositor.supress_mouse_binds(mouseBindsSuppressed)
+        compositor.setPreviewTabs(previewTabsWanted)
+    }
     readonly property bool interactionWanted: !sessionLocked && !ui.suppressed
         && (ui.held !== null || ui.latched || ui.page !== "" || radialVisible || hoveredScreen !== ""
             || keyboardRequest?.awaitingRelease === true)
@@ -234,6 +239,7 @@ Scope {
 
     signal widgetDismissed()
     signal focusWidgetRequested(string screenName, string openingPage)
+    signal previewTabRequested(int direction)
     signal rendered()
 
     function focusedScreenName() {
@@ -416,6 +422,7 @@ Scope {
             root.barModifiersHeld = 0
             root.ui = State.reduce(root.ui, { type: "release" })
             root.compositor.supress_mouse_binds(root.mouseBindsSuppressed)
+            root.compositor.setPreviewTabs(root.previewTabsWanted)
         }
     }
 
@@ -455,6 +462,20 @@ Scope {
         }
     }
 
+    // Consume the entry chord through release before acquiring widget focus.
+    GlobalShortcut {
+        name: "previewTab"
+        property int generation: -1
+        onPressed: generation = root.widgetFocusGeneration
+        onReleased: if (generation === root.widgetFocusGeneration) root.previewTabRequested(1)
+    }
+    GlobalShortcut {
+        name: "previewBacktab"
+        property int generation: -1
+        onPressed: generation = root.widgetFocusGeneration
+        onReleased: if (generation === root.widgetFocusGeneration) root.previewTabRequested(-1)
+    }
+
     Variants {
         id: panels
         model: Quickshell.screens
@@ -469,6 +490,9 @@ Scope {
             readonly property string keyboardScreen: root.widgetEngaged ? root.ui.screen : root.radial?.monitorName ?? ""
             readonly property string hoverPage: logo.visible && logo.hovered ? "launcher" : nowPlaying.visible && nowPlaying.hovered ? "media" : statusIcons.hoveredPage
             readonly property bool widgetHovered: statusPopout.hovered
+            readonly property bool previewTabsReady: widgetHere && root.barVisible && !root.widgetEngaged
+                && !root.sessionLocked && !root.ui.suppressed && hoverPage === root.ui.page
+                && statusPopout.shown && !statusPopout.entryPending && statusPopout.currentItem.available
             readonly property bool overlapsWindows: Config.Settings.barLocation === "above" || root.compositor.fullscreenScreens.includes(screen.name)
             readonly property int reservation: root.barVisible && !overlapsWindows ? root.barExtent : 0
             readonly property bool pointerInside: barHover.hovered || edgeHover.hovered || (widgetHere && widgetHovered)
@@ -652,6 +676,13 @@ Scope {
                 }
             }
 
+            function cyclePreview(direction) {
+                if (!previewTabsReady) return
+                root.engageWidget()
+                statusPopout.currentItem.cycleCard(direction)
+                panel.focusWidget("")
+            }
+
             onHoverPageChanged: {
                 previewOpen.stop()
                 if (hoverPage)
@@ -828,6 +859,7 @@ Scope {
             Connections {
                 target: root
                 function onWidgetDismissed() { previewOpen.stop() }
+                function onPreviewTabRequested(direction) { panel.cyclePreview(direction) }
                 function onFocusWidgetRequested(screenName, openingPage) {
                     if (screenName === panel.screen.name) panel.focusWidget(openingPage)
                 }

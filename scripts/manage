@@ -313,7 +313,8 @@ def hotkey_conflict(bindings, name, chord):
         # Ponytail: binds JSON omits ignore_mods and keycode-to-keysym mapping.
         # Reserve custom symbols across modifiers/submaps; refuse opaque
         # keycode/catchall binds until the compositor exposes their overlap.
-        managed = bind.get("description", "").removeprefix("icewine:") in HOTKEYS
+        managed = (bind.get("description", "").removeprefix("icewine:") in HOTKEYS
+                   or bind.get("description") in ("icewine:preview-tab", "icewine:preview-backtab"))
         if ((managed and hotkey_same_chord(bind, chord)) or (not managed and
                 (bind.get("catch_all") or bind.get("keycode") or "code:" in bind.get("key", "").lower()
                  or bind.get("key", "").upper() == chord.split("+")[-1]))):

@@ -65,7 +65,10 @@ A superseding selection or membership change cancels pending selector/motion
 activation, including when the focus target stays the same.
 
 Tab selects the next card in declared `cards` order, wrapping; Shift+Tab selects
-the previous. A fresh opposite press reverses the existing sweep; a third-card
+the previous. In a taskbar-icon hover preview, the first Tab or Shift+Tab switches
+on release and engages the widget; the pointer can stay over the icon without
+resetting selection. A saved Tab or Shift+Tab hotkey takes precedence and disables
+that preview-entry direction. A fresh opposite press reverses the existing sweep; a third-card
 request queues as described above. Held Tab does not repeat selection. Selection
 moves focus through the stationary motion target to the selected card's
 `initialFocus`. In a one-card stack, Tab keeps the card selected. Escape still

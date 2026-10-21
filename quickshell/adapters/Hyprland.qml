@@ -101,6 +101,30 @@ QtObject {
         }
     }
 
+    // Ponytail: preview Tab arming/cancellation has IPC latency, like hover
+    // protection above. Reload Hyprland after a shell crash; compositor-side
+    // preview ownership would remove that timing/recovery ceiling.
+    property var pendingPreviewTabs: null
+    function setPreviewTabs(enabled) {
+        pendingPreviewTabs = enabled
+        flushPreviewTabs()
+    }
+    function flushPreviewTabs() {
+        if (previewTabs.running || pendingPreviewTabs === null) return
+        previewTabs.command = ["hyprctl", "eval",
+            'require("icewine.modules.Binds").set_preview_tabs('
+                + (pendingPreviewTabs ? "true" : "false") + ')']
+        pendingPreviewTabs = null
+        previewTabs.running = true
+    }
+    property Process previewTabs: Process {
+        onExited: (exitCode, exitStatus) => {
+            if (exitCode !== 0 || exitStatus !== 0)
+                console.warn("Failed to update preview Tab bindings; reload Hyprland to reset them")
+            Qt.callLater(adapter.flushPreviewTabs)
+        }
+    }
+
     function monitorFor(screen) {
         // The native lookup does not track monitor model replacement in QML bindings.
         return Hyprland.monitors.values.find(monitor => monitor.name === screen?.name) ?? null

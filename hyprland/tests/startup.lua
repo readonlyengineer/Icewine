@@ -19,6 +19,7 @@ hl = setmetatable({
         binds = binds + 1
         commands[key] = commands[key] or {}
         table.insert(commands[key], type(action) == "table" and action.command or false)
+        return { set_enabled = function() end }
     end,
     env = function(name, value) environment[name] = value end,
     on = function(name, callback)

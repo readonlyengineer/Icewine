@@ -14,7 +14,10 @@ hl = {
 		assert(gesture.fingers == 3 and not gestures[gesture.direction])
 		gestures[gesture.direction] = gesture.action
 	end,
-	bind = function(key, callback, opts) binds[key], options[key] = callback, opts or {} end,
+	bind = function(key, callback, opts)
+		binds[key], options[key] = callback, opts or {}
+		return { set_enabled = function() end }
+	end,
 	unbind = function(key) binds[key] = nil end,
 	get_workspaces = function() return workspaces end,
 	get_active_workspace = function() return active end,
