@@ -4,9 +4,11 @@ Requires Quickshell with Qt Quick Effects and Qt Virtual Keyboard. No compositor
 attempted: the fixture owns auth outcomes; the existing lifecycle checks exercise
 the real session handlers separately. This is not device validation.
 """
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -57,11 +59,17 @@ ShellRoot {
         readonly property url sourceUrl: Wallpaper.source(dataHome, selectionAvailable, revision)
     }
     QtObject { id: external; property bool busy: false }
-    Modules.SessionControl { id: keyboardOwner; authenticationRequired: true; lockRequested: true; keyboardController: external }
+    Modules.SessionControl {
+        id: keyboardOwner
+        authenticationRequired: true; lockRequested: true; keyboardController: external
+        // Resume tests exercise state changes without sending compositor commands.
+        function wakeDisplay() {}
+    }
     QtObject {
         id: session
         property var wallpaper: wallpaperOwner
         property bool locked: true
+        readonly property bool preparingForSleep: keyboardOwner.preparingForSleep
         property alias authenticationRequired: keyboardOwner.authenticationRequired
         property string password: ""
         property alias authenticating: keyboardOwner.authenticating
@@ -86,6 +94,15 @@ ShellRoot {
         }
         function toggleKeyboard(host) { keyboardOwner.toggleKeyboard(host) }
     }
+    // Exercise the intact topbar clock declaration alongside the actual lock surface.
+    Scope {
+        id: clockFixture
+        property var session: root.fixtureSession
+        property alias nativeClock: clock
+        @TOPBAR_CLOCK@
+    }
+    SignalSpy { id: lockTicks; signalName: "dateChanged" }
+    SignalSpy { id: barTicks; target: clockFixture.nativeClock; signalName: "dateChanged" }
     Window {
         id: win
         visible: true; width: 1280; height: 800
@@ -144,6 +161,71 @@ ShellRoot {
                 keys.compare(toggle.height, 44)
                 keys.compare(toggle.font.pixelSize, 24)
                 const clock = find(view, item => item.objectName === "lockClock")
+                root.phase = "native clock pause and resume"
+                const nativeClock = Array.from(view.data).find(item => item.date !== undefined && item.precision !== undefined)
+                keys.verify(nativeClock !== undefined, "actual surface SystemClock exists")
+                lockTicks.target = nativeClock
+                function logind(sleeping) {
+                    keyboardOwner.handleLogind("/org/freedesktop/login1: org.freedesktop.login1.Manager.PrepareForSleep (" + sleeping + ",)")
+                }
+                const nativeClocks = [nativeClock, clockFixture.nativeClock]
+                function checkUnpairedResume() {
+                    keys.verify(!keyboardOwner.preparingForSleep, "pause flag is already clear before resume")
+                    lockTicks.clear(); barTicks.clear()
+                    logind(false)
+                    keys.verify(lockTicks.count > 0 && barTicks.count > 0,
+                        "received resume resamples both real clocks even with an already-clear pause flag")
+                    keys.verify(nativeClocks.every(timer => timer.enabled) && field.activeFocus
+                        && keyboardOwner.lockRequested && !session.authenticating,
+                        "unpaired resume retains enabled clocks, focus, lock intent and authentication state")
+                }
+                checkUnpairedResume()
+                // Hold the real clocks over one wall minute, without suspending the
+                // host or modifying its clock. This models stale data, not GPU recovery.
+                logind(true)
+                for (const timer of nativeClocks) keys.verify(!timer.enabled, "sleep pauses every clock consumer")
+                const before = nativeClock.date.getTime()
+                const beforeDate = Qt.formatDate(nativeClock.date, "yyyy-MM-dd")
+                const now = new Date()
+                keys.wait(60100 - now.getSeconds() * 1000 - now.getMilliseconds())
+                keys.compare(nativeClock.date.getTime(), before, "paused clock retains stale minute")
+                for (let cycle = 0; cycle < 3; ++cycle) {
+                    lockTicks.clear(); barTicks.clear()
+                    logind(false)
+                    for (const timer of nativeClocks) {
+                        keys.verify(timer.enabled, "resume enables native clock")
+                        const current = new Date()
+                        keys.compare(Qt.formatDateTime(timer.date, "yyyy-MM-dd HH:mm"),
+                            Qt.formatDateTime(current, "yyyy-MM-dd HH:mm"), "resume samples current local date/minute")
+                    }
+                    keys.verify(lockTicks.count > 0 && barTicks.count > 0, "both existing clocks notify synchronously on resume")
+                    keys.verify(Qt.formatDate(nativeClock.date, "yyyy-MM-dd") !== beforeDate,
+                        "resume refreshes date across fixture-local midnight")
+                    keys.compare(clock.text, Qt.formatTime(nativeClock.date, Qt.locale().timeFormat(Locale.ShortFormat)))
+                    keys.compare(find(view, item => item.objectName === "lockDate").text,
+                        Qt.formatDate(nativeClock.date, Qt.locale().dateFormat(Locale.LongFormat)))
+                    keys.verify(field.activeFocus && keyboardOwner.lockRequested && !session.authenticating,
+                        "resume retains lock intent, focus and idle authentication")
+                    if (cycle < 2) logind(true)
+                }
+                root.phase = "continued native minute updates"
+                // Lose the monitor after sleep and recover without a resume edge.
+                logind(true)
+                lockTicks.clear(); barTicks.clear()
+                const monitor = keyboardOwner.fixtureLogindMonitor
+                monitor.running = false
+                monitor.exited(1, 0)
+                keys.verify(!keyboardOwner.preparingForSleep && nativeClock.enabled && clockFixture.nativeClock.enabled,
+                    "monitor loss cannot strand clocks while paused")
+                keys.verify(lockTicks.count > 0 && barTicks.count > 0, "monitor loss resamples both native clocks")
+                keys.verify(field.activeFocus && keyboardOwner.lockRequested && !session.authenticating,
+                    "monitor loss retains focus, lock intent and authentication state")
+                keys.tryCompare(monitor, "running", true, 2000, "existing retry restarts the monitor without a resume edge")
+                checkUnpairedResume()
+                lockTicks.clear(); barTicks.clear()
+                const resumed = new Date()
+                keys.wait(60100 - resumed.getSeconds() * 1000 - resumed.getMilliseconds())
+                keys.tryVerify(() => lockTicks.count > 0 && barTicks.count > 0, 4000, "native minute timers continue after resume")
                 function luminance(rgb) {
                     return rgb.map(v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
                         .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0)
@@ -576,17 +658,34 @@ ShellRoot {
     }
 }
 '''
+topbar = (source / "quickshell/modules/Topbar.qml").read_text()
+clock_declaration = re.search(r"    SystemClock \{[^}]+\}", topbar)[0]
+qml = qml.replace("@TOPBAR_CLOCK@", clock_declaration.replace("root.", "clockFixture."))
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     (root / "icewine").mkdir()
-    (root / "icewine/modules").symlink_to(source / "quickshell/modules")
+    shutil.copytree(source / "quickshell/modules", root / "icewine/modules")
+    # Control only the monitor transport: a missing fixture gdbus must not
+    # spontaneously exit during the intentional paused minute. Keep its actual
+    # exit handler and the real reconnect Timer for explicit recovery checks.
+    session_source = root / "icewine/modules/SessionControl.qml"
+    native_session = session_source.read_text()
+    monitor = re.search(r"    Process \{\n        id: logindEvents[\s\S]*?^    \}", native_session, re.M)[0]
+    monitor_exit = re.search(r"        onExited: \{[\s\S]*?^        \}", monitor, re.M)[0]
+    native_session = native_session.replace(monitor, '''    QtObject {
+        id: logindEvents
+        property bool running: true
+        signal exited(int exitCode, int exitStatus)
+''' + monitor_exit + '\n    }')
+    native_session = native_session.replace('    property bool preparingForSleep: false',
+        '    readonly property var fixtureLogindMonitor: logindEvents\n    property bool preparingForSleep: false')
+    session_source.write_text(native_session)
     (root / "icewine/theme").symlink_to(root / "theme")
     config = theme_fixture(source, root)
     import runpy
     render = runpy.run_path(str(source / "scripts/theme"))
     assets = source / "theme/assets"
     light = render["render_theme"](assets, assets / "themes/gruvbox-light.json")["palette.json"]
-    import shutil
     (root / "data/wallpapers").mkdir(parents=True)
     shutil.copyfile(source / "theme/assets/flower-branch.png", root / "data/wallpapers/default.jpg")
     (root / "data/selected/wallpapers").mkdir(parents=True)
@@ -598,18 +697,23 @@ with tempfile.TemporaryDirectory() as directory:
     captures = os.environ.get("ICEWINE_LOCK_CAPTURES")
     if captures:
         Path(captures).mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
+    # Start this process near local midnight using POSIX TZ; neither the host's
+    # timezone nor wall clock changes. Both Qt and JS use this local date.
+    utc = datetime.now(timezone.utc)
+    east = (23 * 3600 + 59 * 60 - (utc.hour * 3600 + utc.minute * 60 + utc.second)) % 86400
+    fixture_timezone = f"UTC-{east // 3600:02}:{east // 60 % 60:02}:{east % 60:02}"
+    env = dict(os.environ, TZ=fixture_timezone, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
                QT_DEBUG_PLUGINS="1",
                QT_IM_MODULE="qtvirtualkeyboard", QT_VIRTUALKEYBOARD_DESKTOP_DISABLE="1",
                XDG_CONFIG_HOME=config, QML_IMPORT_PATH=str(root), XDG_DATA_HOME=str(root / "data"), XDG_CACHE_HOME=str(root / "cache"),
                XDG_RUNTIME_DIR=str(root / "runtime"), DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(root / "no-bus"),
                DBUS_SYSTEM_BUS_ADDRESS="unix:path=" + str(root / "no-system-bus"), ICEWINE_LIGHT_PALETTE=light)
     result = subprocess.run([os.environ.get("ICEWINE_TEST_QS", "qs"), "-p", str(root), "--no-color"], env=env,
-                            capture_output=True, text=True, timeout=25)
+                            capture_output=True, text=True, timeout=150)
     output = result.stdout + result.stderr
     if captures:
         (Path(captures) / "quickshell.log").write_text(output)
     assert result.returncode == 0 and "CLOCK_LOCK_PASSED" in output, output
     assert re.search(r'libqtvirtualkeyboardplugin\.so[^\n]*loaded library', output), output
     assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign|is not installed|not a type", output), output
-print("PASS: actual clock lock surface, failure/retry/busy/clearing, policy, focus, shared 84-key OSK, arm/cancel/repeat/modifiers/pin/transparency and small screens; playing/paused selection, capability-aware playback inputs, metadata/removal, lower media/OSK geometry and authentication focus")
+print("PASS: native sleep/resume refresh for lock/topbar clocks, continued minute ticks; actual clock lock surface, failure/retry/busy/clearing, policy, focus, shared 84-key OSK, arm/cancel/repeat/modifiers/pin/transparency and small screens; playing/paused selection, capability-aware playback inputs, metadata/removal, lower media/OSK geometry and authentication focus")

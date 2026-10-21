@@ -64,7 +64,8 @@ FocusScope {
         // Keep foreground text readable with both light and dark palettes.
         color: Theme.Palette.alpha(Theme.Palette.background, 0.9)
     }
-    SystemClock { id: time; precision: SystemClock.Minutes }
+    // Re-enabling after logind resume samples wall time before the next minute tick.
+    SystemClock { id: time; precision: SystemClock.Minutes; enabled: !root.session.preparingForSleep }
     Timer { id: editFeedback; interval: 180 }
     Column {
         anchors.horizontalCenter: parent.horizontalCenter

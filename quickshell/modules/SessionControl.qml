@@ -21,6 +21,7 @@ Scope {
     property string password: ""
     property bool authenticating: false
     property bool failed: false
+    property bool preparingForSleep: false
     // A user service without a session ID uses logind's primary display session.
     // For simultaneous graphical sessions, supply an explicit XDG_SESSION_ID.
     readonly property string logindSessionId: Quickshell.env("XDG_SESSION_ID") || "auto"
@@ -152,9 +153,14 @@ Scope {
 
     function handleLogind(line) {
         var event = SessionModel.logindEvent(line, logindSessionPath)
+        if (event === "sleep")
+            preparingForSleep = true
         if (event === "lock" || event === "sleep") {
             beginLock()
         } else if (event === "resume") {
+            // Force a native refresh even after a missed sleep edge or monitor loss.
+            preparingForSleep = true
+            preparingForSleep = false
             wakeDisplay()
         }
     }
@@ -282,6 +288,7 @@ Scope {
         running: true
         stdout: SplitParser { onRead: data => root.handleLogind(data) }
         onExited: {
+            root.preparingForSleep = false
             root.logindSessionPath = ""
             logindReconnect.restart()
         }

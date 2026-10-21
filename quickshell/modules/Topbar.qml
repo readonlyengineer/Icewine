@@ -426,7 +426,7 @@ Scope {
         }
     }
 
-    SystemClock { id: clock; precision: SystemClock.Minutes }
+    SystemClock { id: clock; precision: SystemClock.Minutes; enabled: !root.session.preparingForSleep }
     Bar.SystemMetrics { id: metrics }
 
     // One ordered Wayland event stream; no racing press/release subprocesses.

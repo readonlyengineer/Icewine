@@ -53,8 +53,46 @@ context.handleLogind(signal("Session.Unlock ()"))
 assert.deepEqual(events, [], "logind unlock must not release the session lock")
 context.handleLogind(signal("Session.Lock ()"))
 context.handleLogind(signal("Manager.PrepareForSleep (true,)", "/org/freedesktop/login1"))
+assert.equal(context.preparingForSleep, true)
 context.handleLogind(signal("Manager.PrepareForSleep (false,)", "/org/freedesktop/login1"))
 assert.deepEqual(events, ["lock", "lock", "wake"])
+assert.equal(context.preparingForSleep, false)
+context.handleLogind(signal("Session.Lock ()"))
+assert.equal(context.preparingForSleep, false, "ordinary lock does not pause clocks")
+
+// Monitor loss can miss resume; run the actual exit and retry handlers, without
+// releasing lock ownership or disturbing an in-progress authentication response.
+const monitorExit = source.match(/    Process \{\n        id: logindEvents[\s\S]*?        onExited: \{([\s\S]*?)^        \}/m)[1]
+const reconnect = source.match(/    Timer \{\n        id: logindReconnect[\s\S]*?        onTriggered: \{([\s\S]*?)^        \}/m)[1]
+const disconnected = vm.createContext({
+    SessionModel: Session, logindSessionPath: path, preparingForSleep: false,
+    lockRequested: true, authenticating: true, password: "pending-response",
+    keyboardHost: { name: "focused-lock-surface" }, lockState: { acquired: true },
+    sessionLock: { locked: true },
+    beginLock() {}, wakeDisplay() { assert.fail("monitor recovery must not dispatch display commands") },
+    releaseLock() { assert.fail("monitor recovery must not unlock") },
+    logindReconnect: { restart() { disconnected.retries++ } }, retries: 0,
+    logindSession: { running: false }, logindEvents: { running: false }
+})
+disconnected.root = disconnected
+vm.runInContext(handler + "\nfunction monitorExited() {" + monitorExit
+    + "}\nfunction retryMonitor() {" + reconnect + "}", disconnected)
+disconnected.handleLogind(signal("Manager.PrepareForSleep (true,)", "/org/freedesktop/login1"))
+assert.equal(disconnected.preparingForSleep, true)
+const focusedHost = disconnected.keyboardHost
+disconnected.monitorExited()
+disconnected.retryMonitor() // No PrepareForSleep(false) is delivered.
+assert.equal(disconnected.preparingForSleep, false, "a missed resume cannot leave clocks disabled")
+assert.equal(disconnected.logindSessionPath, "")
+assert.equal(disconnected.retries, 1)
+assert.equal(disconnected.logindSession.running, true)
+assert.equal(disconnected.logindEvents.running, true)
+assert.equal(disconnected.lockRequested, true)
+assert.equal(disconnected.lockState.acquired, true)
+assert.equal(disconnected.sessionLock.locked, true)
+assert.equal(disconnected.authenticating, true)
+assert.equal(disconnected.password, "pending-response")
+assert.equal(disconnected.keyboardHost, focusedHost)
 
 // Execute the production lifecycle, substituting only native/helper boundaries.
 const handlers = ["writeLockHint", "restoreLock", "beginLock", "finishLockHint", "releaseLock",
