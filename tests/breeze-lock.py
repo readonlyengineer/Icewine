@@ -28,6 +28,9 @@ ShellRoot {
     property var players: []
     QtObject {
         id: firstPlayer
+        property bool canTogglePlaying: true
+        property int toggles: 0
+        function togglePlaying() { ++toggles; isPlaying = !isPlaying }
         property bool isPlaying: false
         property string trackTitle: "First track"
         property string trackArtist: "First artist"
@@ -36,6 +39,8 @@ ShellRoot {
     Component {
         id: playerFactory
         QtObject {
+            property bool canTogglePlaying: true
+            function togglePlaying() { isPlaying = !isPlaying }
             property bool isPlaying: true
             property string trackTitle: "Second track"
             property string trackArtist: "Second artist"
@@ -166,7 +171,7 @@ ShellRoot {
                 const media = find(view, item => item.objectName === "lockNowPlaying")
                 const title = find(view, item => item.objectName === "lockTrackTitle")
                 const artist = find(view, item => item.objectName === "lockTrackArtist")
-                const idleHeight = media.parent.height
+                const playPause = find(view, item => item.objectName === "lockPlayPause")
                 keys.verify(!media.visible)
                 capture("no-playback-dark")
                 const secondPlayer = playerFactory.createObject(root)
@@ -191,9 +196,38 @@ ShellRoot {
                 firstPlayer.isPlaying = false
                 keys.compare(view.player, secondPlayer, "pause selects remaining playback")
                 secondPlayer.isPlaying = false
-                keys.verify(!media.visible, "all paused/stopped players collapse media")
-                keys.tryCompare(media.parent, "height", idleHeight, 1000, "no reserved placeholder spacing")
-                keys.compare(title.text, "", "no stale title on pause")
+                keys.compare(view.player, firstPlayer, "all paused: first available player wins")
+                keys.verify(media.visible && playPause.enabled, "paused player retains resume control")
+                keys.compare(playPause.Accessible.name, "Play")
+                capture("paused-dark")
+                firstPlayer.canTogglePlaying = false
+                keys.verify(!playPause.enabled, "native capability disables unavailable action")
+                keys.mouseClick(playPause)
+                keys.compare(firstPlayer.toggles, 0)
+                capture("unavailable-dark")
+                firstPlayer.canTogglePlaying = true
+                for (const input of ["pointer", "touch", "space", "return", "enter"]) {
+                    const before = firstPlayer.toggles
+                    if (input === "pointer") keys.mouseClick(playPause)
+                    else if (input === "touch") {
+                        keys.touchEvent(playPause).press(0, playPause, 48, 22).commit()
+                        keys.touchEvent(playPause).release(0, playPause, 48, 22).commit()
+                    } else {
+                        field.forceActiveFocus()
+                        keys.keyClick(Qt.Key_Tab); keys.keyClick(Qt.Key_Tab)
+                        keys.verify(playPause.activeFocus, "Tab reaches media without diverting typing")
+                        keys.keyClick(input === "space" ? Qt.Key_Space : input === "return" ? Qt.Key_Return : Qt.Key_Enter)
+                    }
+                    keys.compare(firstPlayer.toggles, before + 1, input + " toggles once")
+                    keys.compare(playPause.text, firstPlayer.isPlaying ? "Pause" : "Play")
+                    keys.verify(field.activeFocus && session.locked && session.submissions === 0,
+                        input + " restores password focus without authentication")
+                }
+                keys.keyClick(Qt.Key_Backtab, Qt.ShiftModifier)
+                keys.verify(playPause.activeFocus, "Backtab from editor reaches media")
+                keys.keyClick(Qt.Key_Tab)
+                keys.verify(field.activeFocus, "Tab from media restores editor")
+                firstPlayer.isPlaying = false
                 secondPlayer.isPlaying = true
                 secondPlayer.trackTitle = ""
                 secondPlayer.trackArtist = ""
@@ -205,10 +239,11 @@ ShellRoot {
                 root.players = [firstPlayer]
                 secondPlayer.destroy()
                 keys.wait(20)
-                keys.compare(view.player, null, "departed playing object is not retained")
-                keys.verify(!media.visible)
+                keys.compare(view.player, firstPlayer, "departed playing object falls back to available paused player")
+                keys.verify(media.visible)
                 root.players = []
-                keys.tryCompare(media.parent, "height", idleHeight)
+                keys.verify(!media.visible, "no player leaves no placeholder")
+                keys.compare(title.text, "", "no stale metadata after removal")
                 firstPlayer.trackTitle = "A very long title ".repeat(30)
                 firstPlayer.trackArtist = "A very long artist ".repeat(30)
                 firstPlayer.isPlaying = true
@@ -289,6 +324,7 @@ ShellRoot {
                 field.forceActiveFocus()
                 root.phase = "external chord crossing lock acquisition"
                 external.busy = true
+                keys.verify(!playPause.enabled, "external chord also disables playback")
                 keys.verify(!field.enabled, "password disabled until external chord settles")
                 keys.verify(toggle.visible && !toggle.enabled, "external input keeps OSK prompt visible and disabled")
                 keys.keyClick(Qt.Key_X)
@@ -299,7 +335,7 @@ ShellRoot {
                 keys.keyClick(Qt.Key_Tab)
                 const footer = find(view, item => item.objectName === "lockKeyboard")
                 keys.verify(footer.activeFocus, "Tab reaches keyboard control")
-                keys.keyClick(Qt.Key_Tab, Qt.ShiftModifier)
+                keys.keyClick(Qt.Key_Backtab, Qt.ShiftModifier)
                 keys.verify(field.activeFocus, "Backtab returns to concealed input")
                 keys.touchEvent(footer).press(0, footer, footer.width/2, footer.height/2).commit()
                 keys.touchEvent(footer).release(0, footer, footer.width/2, footer.height/2).commit()
@@ -310,6 +346,7 @@ ShellRoot {
                 field.forceActiveFocus()
                 root.phase = "submission and busy state"
                 keys.keyClick(Qt.Key_Return)
+                keys.verify(!playPause.enabled, "authentication disables playback")
                 keys.verify(session.authenticating && session.locked, "submit retains lock")
                 keys.verify(toggle.visible && !toggle.enabled, "busy authentication keeps OSK prompt visible and disabled")
                 keys.compare(prompt.text, "Authenticating…")
@@ -352,6 +389,10 @@ ShellRoot {
                     keys.verify(media.visible && media.width <= Math.min(440, win.width - 32))
                     keys.verify(mediaPos.x >= 0 && mediaPos.x + media.width <= win.width,
                         "long metadata fits output width")
+                    keys.verify(mediaPos.y >= prompt.mapToItem(view, 0, prompt.height).y + 8 - 0.01,
+                        "independent lower media clears authentication above OSK")
+                    keys.verify(playPause.mapToItem(view, 0, 0).x >= toggle.x + toggle.width,
+                        "media control clears the OSK toggle horizontally")
                     keys.verify(mediaPos.y >= 0 && mediaPos.y + media.height <= panel.y + 0.01,
                         "media remains above OSK")
                     keys.verify(prompt.mapToItem(view, 0, 0).y + prompt.height <= panel.y + 0.01,
@@ -499,6 +540,13 @@ ShellRoot {
                 root.phase = "authentication-disabled policy"
                 session.authenticationRequired = false
                 keys.verify(toggle.visible && !toggle.enabled, "no-password policy retains prompt without opening a hidden editor")
+                root.players = [firstPlayer]
+                keys.mouseClick(playPause)
+                keys.verify(session.locked, "no-auth media click must not unlock")
+                playPause.forceActiveFocus()
+                keys.keyClick(Qt.Key_Return)
+                keys.verify(session.locked, "no-auth media Enter must not unlock")
+                root.players = []
                 view.forceActiveFocus()
                 keys.keyClick(Qt.Key_Return)
                 keys.verify(!session.locked, "authentication-required policy retained")
@@ -564,4 +612,4 @@ with tempfile.TemporaryDirectory() as directory:
     assert result.returncode == 0 and "CLOCK_LOCK_PASSED" in output, output
     assert re.search(r'libqtvirtualkeyboardplugin\.so[^\n]*loaded library', output), output
     assert not re.search(r"ReferenceError|TypeError|Binding loop|Unable to assign|is not installed|not a type", output), output
-print("PASS: actual clock lock surface, failure/retry/busy/clearing, policy, focus, shared 84-key OSK, arm/cancel/repeat/modifiers/pin/transparency and small screens; playing selection/metadata/removal/collapse and display focus")
+print("PASS: actual clock lock surface, failure/retry/busy/clearing, policy, focus, shared 84-key OSK, arm/cancel/repeat/modifiers/pin/transparency and small screens; playing/paused selection, capability-aware playback inputs, metadata/removal, lower media/OSK geometry and authentication focus")

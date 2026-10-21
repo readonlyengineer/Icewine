@@ -6,13 +6,14 @@ import QtQuick.Effects
 import Quickshell
 import Quickshell.Services.Mpris
 import qs.icewine.theme as Theme
+import "topbar/popouts" as Popouts
 
 FocusScope {
     id: root
     required property var session
     property var players: Mpris.players.values
-    // Match the topbar's first-playing policy, without its paused control fallback.
-    readonly property var player: players.find(candidate => candidate.isPlaying) ?? null
+    // Match the topbar: first playing player, then first available (including paused).
+    readonly property var player: players.find(candidate => candidate.isPlaying) ?? players[0] ?? null
     readonly property bool animationsEnabled: Theme.Palette.animate
     readonly property real keyboardInset: session.keyboardHost === root && session.keyboardVisible
         ? session.keyboardHeight : 0
@@ -67,7 +68,8 @@ FocusScope {
     Timer { id: editFeedback; interval: 180 }
     Column {
         anchors.horizontalCenter: parent.horizontalCenter
-        y: Math.max(8, (root.height - root.keyboardInset - height) / 2)
+        y: Math.max(8, Math.min((root.height - root.keyboardInset - height) / 2,
+            nowPlaying.visible ? nowPlaying.y - height - (root.keyboardInset > 0 ? 8 : 16) : root.height - root.keyboardInset - height - 8))
         width: Math.max(0, parent.width - 32)
         spacing: root.keyboardInset > 0 ? 4 : 8
         Text {
@@ -78,7 +80,8 @@ FocusScope {
             // Budget the clock after the other rows so media cannot crowd the OSK.
             height: Math.min(implicitHeight, Math.max(34, root.height - root.keyboardInset
                 - date.height - (nowPlaying.visible ? nowPlaying.height : 0)
-                - password.height - statusText.height - 4 * parent.spacing - 24))
+                - password.height - statusText.height - 3 * parent.spacing
+                - (nowPlaying.visible ? 56 : 24)))
             horizontalAlignment: Text.AlignHCenter
             fontSizeMode: Text.Fit
             minimumPixelSize: 28
@@ -103,39 +106,6 @@ FocusScope {
             color: Theme.Palette.foreground
             wrapMode: Text.WordWrap
         }
-        Column {
-            id: nowPlaying
-            objectName: "lockNowPlaying"
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: Math.min(parent.width, 440)
-            visible: root.player !== null
-            spacing: 2
-            Text {
-                objectName: "lockTrackTitle"
-                width: parent.width
-                text: root.player ? "♫ " + (root.player.trackTitle || qsTr("Unknown track")) : ""
-                textFormat: Text.PlainText
-                horizontalAlignment: Text.AlignHCenter
-                font.family: "JetBrainsMono Nerd Font"
-                font.pixelSize: 16
-                color: Theme.Palette.foreground
-                elide: Text.ElideRight
-                maximumLineCount: 1
-            }
-            Text {
-                objectName: "lockTrackArtist"
-                width: parent.width
-                text: root.player?.trackArtist || root.player?.identity || ""
-                textFormat: Text.PlainText
-                visible: text !== ""
-                horizontalAlignment: Text.AlignHCenter
-                font.family: "JetBrainsMono Nerd Font"
-                font.pixelSize: 14
-                color: Theme.Palette.foreground
-                elide: Text.ElideRight
-                maximumLineCount: 1
-            }
-        }
         TextInput {
             id: password
             objectName: "lockPassword"
@@ -151,7 +121,7 @@ FocusScope {
             Accessible.name: qsTr("Password")
             text: root.session.password
             KeyNavigation.tab: keyboardToggle
-            KeyNavigation.backtab: keyboardToggle
+            KeyNavigation.backtab: playPause.enabled && nowPlaying.visible ? playPause : keyboardToggle
             onTextEdited: {
                 if (root.session.password === text) return
                 root.session.password = text
@@ -189,6 +159,67 @@ FocusScope {
             wrapMode: Text.WordWrap
         }
     }
+    Item {
+        id: nowPlaying
+        objectName: "lockNowPlaying"
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: root.keyboardInset + 12
+        width: Math.max(0, Math.min(parent.width - 128, 440))
+        visible: root.player !== null
+        height: Math.max(metadata.height, playPause.height)
+        Column {
+            id: metadata
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.max(0, parent.width - playPause.width - 12)
+            spacing: 4
+            Text {
+                objectName: "lockTrackTitle"
+                width: parent.width
+                text: root.player ? "♫ " + (root.player.trackTitle || qsTr("Unknown track")) : ""
+                textFormat: Text.PlainText
+                horizontalAlignment: Text.AlignHCenter
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: 16
+                color: Theme.Palette.foreground
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
+            Text {
+                objectName: "lockTrackArtist"
+                width: parent.width
+                text: root.player?.trackArtist || root.player?.identity || ""
+                textFormat: Text.PlainText
+                visible: text !== ""
+                horizontalAlignment: Text.AlignHCenter
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: 14
+                color: Theme.Palette.foreground
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
+        }
+        Popouts.ActionButton {
+            id: playPause
+            objectName: "lockPlayPause"
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: 96
+            height: 44
+            font.pixelSize: 14
+            text: root.player?.isPlaying ? qsTr("Pause") : qsTr("Play")
+            Accessible.name: text
+            focusPolicy: Qt.TabFocus
+            enabled: !root.inputBusy && (root.player?.canTogglePlaying ?? false)
+            KeyNavigation.tab: password.visible ? password : keyboardToggle
+            KeyNavigation.backtab: keyboardToggle
+            onClicked: {
+                if (root.player?.canTogglePlaying) root.player.togglePlaying()
+                if (root.session.authenticationRequired) password.forceActiveFocus()
+                else root.forceActiveFocus()
+            }
+        }
+    }
     TapHandler {
         enabled: !root.inputBusy && !root.session.authenticationRequired
         onTapped: root.session.submit()
@@ -209,7 +240,8 @@ FocusScope {
         Accessible.name: qsTr("Toggle virtual keyboard")
         focusPolicy: Qt.TabFocus
         enabled: root.session.authenticationRequired && !root.inputBusy
-        KeyNavigation.tab: root.session.keyboardVisible ? root.session.keyboardView.firstControl : password
+        KeyNavigation.tab: root.session.keyboardVisible ? root.session.keyboardView.firstControl
+            : playPause.enabled && nowPlaying.visible ? playPause : password
         KeyNavigation.backtab: password
         onClicked: {
             password.forceActiveFocus()
