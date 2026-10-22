@@ -1126,10 +1126,11 @@ fn review_utilities(lines: Vec<String>) -> io::Result<bool> {
     let mut terminal = ratatui::init();
     let result = (|| {
         crossterm::execute!(io::stdout(), event::EnableMouseCapture)?;
-        let mut scroll = 0u16;
-        let mut apply = false; // Review starts on Back.
+        let mut scroll = 0usize;
+        let mut apply = false; // Review starts on Exit; it never applies on initial Enter.
         loop {
             let mut buttons = [Rect::default(); 2];
+            let mut max_scroll = 0usize;
             terminal.draw(|frame| {
                 if frame.area().width < 80 || frame.area().height < 24 {
                     frame.render_widget(Paragraph::new("Icewine needs an 80 x 24 terminal.\nResize to continue; Esc: cancel."), frame.area()); return;
@@ -1140,19 +1141,28 @@ fn review_utilities(lines: Vec<String>) -> io::Result<bool> {
                 frame.render_widget(Paragraph::new("Utilities / Review"), Rect::new(inner.x, inner.y, inner.width, 1));
                 frame.render_widget(Paragraph::new(format!("├{}┤", "─".repeat(area.width as usize - 2))), Rect::new(area.x, area.y + 2, area.width, 1));
                 let body = Rect::new(inner.x, area.y + 4, inner.width, inner.height - 7);
-                frame.render_widget(Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).scroll((scroll, 0)), body);
+                let wrapped = lines.iter().flat_map(|line| {
+                    let style = if line.ends_with(':') { Style::default().fg(Color::Cyan).bold() } else { Style::default() };
+                    wrap_cells(line, body.width as usize).into_iter().map(move |text| Line::styled(text, style))
+                }).collect::<Vec<_>>();
+                max_scroll = wrapped.len().saturating_sub(body.height as usize);
+                scroll = scroll.min(max_scroll);
+                frame.render_widget(Paragraph::new(format!("Lines {}-{} of {}   Up/Down or wheel: scroll",
+                    scroll + 1, (scroll + body.height as usize).min(wrapped.len()), wrapped.len())),
+                    Rect::new(inner.x, area.y + 3, inner.width, 1));
+                frame.render_widget(Paragraph::new(wrapped.into_iter().skip(scroll).take(body.height as usize).collect::<Vec<_>>()), body);
                 buttons = [Rect::new(inner.x, inner.bottom() - 3, 9, 1), Rect::new(inner.x + 12, inner.bottom() - 3, 8, 1)];
-                for (index, label) in ["[ Apply ]", "[ Back ]"].iter().enumerate() {
+                for (index, label) in ["[ Apply ]", "[ Exit ]"].iter().enumerate() {
                     frame.render_widget(Paragraph::new(*label).style(if apply == (index == 0) { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default().fg(Color::Cyan) }), buttons[index]);
                 }
-                frame.render_widget(Paragraph::new("Up/Down: scroll   Left/Right: action   I: apply   Esc: Back"), Rect::new(inner.x, inner.bottom() - 1, inner.width, 1));
+                frame.render_widget(Paragraph::new("Left/Right/Tab: action   Enter/Space: choose   I: Apply\nEsc/Q/Ctrl+C: Exit without Apply"), Rect::new(inner.x, inner.bottom() - 2, inner.width, 2));
             })?;
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => return Ok(false),
                     KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(false),
                     _ if terminal.size()?.width < 80 || terminal.size()?.height < 24 => (),
-                    KeyCode::Down => scroll = scroll.saturating_add(1).min(lines.len().saturating_mul(3) as u16),
+                    KeyCode::Down => scroll = scroll.saturating_add(1).min(max_scroll),
                     KeyCode::Up => scroll = scroll.saturating_sub(1),
                     KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => apply = !apply,
                     KeyCode::Enter | KeyCode::Char(' ') => return Ok(apply),
@@ -1163,51 +1173,13 @@ fn review_utilities(lines: Vec<String>) -> io::Result<bool> {
                         if buttons[0].contains(Position::new(mouse.column, mouse.row)) { return Ok(true); }
                         if buttons[1].contains(Position::new(mouse.column, mouse.row)) { return Ok(false); }
                     }
-                    event::MouseEventKind::ScrollDown => scroll = scroll.saturating_add(1).min(lines.len().saturating_mul(3) as u16),
+                    event::MouseEventKind::ScrollDown => scroll = scroll.saturating_add(1).min(max_scroll),
                     event::MouseEventKind::ScrollUp => scroll = scroll.saturating_sub(1), _ => (),
                 }, _ => (),
             }
         }
     })();
     let _ = crossterm::execute!(io::stdout(), event::DisableMouseCapture);
-    ratatui::restore();
-    result
-}
-
-fn confirm(title: &str, lines: Vec<String>) -> io::Result<bool> {
-    let mut scroll = 0u16;
-    let mut terminal = ratatui::init();
-    let result = (|| {
-        loop {
-            terminal.draw(|frame| {
-                if frame.area().width < 80 || frame.area().height < 24 {
-                    frame.render_widget(Paragraph::new("Icewine needs an 80 x 24 terminal.\nResize to continue; Esc: cancel."), frame.area());
-                    return;
-                }
-                let area = frame.area();
-                let inner = Rect::new(area.x + 2, area.y + 1, area.width - 4, area.height - 2);
-                frame.render_widget(Block::bordered().border_type(BorderType::Rounded), area);
-                frame.render_widget(Paragraph::new(title.trim()), Rect::new(inner.x, inner.y, inner.width, 1));
-                frame.render_widget(Paragraph::new(format!("├{}┤", "─".repeat(area.width as usize - 2))), Rect::new(area.x, area.y + 2, area.width, 1));
-                let body = Rect::new(inner.x, area.y + 4, inner.width, inner.height - 6);
-                let help = Rect::new(inner.x, inner.bottom() - 2, inner.width, 2);
-                frame.render_widget(Paragraph::new(lines.join("\n"))
-                    .wrap(ratatui::widgets::Wrap { trim: false }).scroll((scroll, 0)), body);
-                frame.render_widget(Paragraph::new("Up/down: scroll   I: continue\nEsc/Q/Ctrl+C: cancel"), help);
-            })?;
-            let Event::Key(key) = event::read()? else { continue };
-            if key.kind != KeyEventKind::Press { continue; }
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => return Ok(false),
-                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(false),
-                _ if terminal.size()?.width < 80 || terminal.size()?.height < 24 => (),
-                KeyCode::Down => scroll = scroll.saturating_add(1).min(lines.iter().map(|line| line.len()).sum::<usize>().min(u16::MAX as usize) as u16),
-                KeyCode::Up => scroll = scroll.saturating_sub(1),
-                KeyCode::Char('i') => return Ok(true),
-                _ => (),
-            }
-        }
-    })();
     ratatui::restore();
     result
 }
@@ -1289,21 +1261,35 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
         let choices = ROWS.iter().map(|(id, label, _)| format!("{label}: {}",
             if *id == "steam" { STEAM[steam].to_owned() } else { selected[id].to_string() })).collect::<Vec<_>>();
-        let mut plan = vec![if readonly { "Host packages/services remain unchanged; deploy selected user defaults.".into() }
-            else { "Install selected packages; configure selected utilities; deselection keeps packages.".into() }];
+        let mut plan = vec!["Apply:".into(), if readonly {
+            "Deploy selected user defaults. Host packages, services and device permissions stay under host policy.".into()
+        } else {
+            "Install and configure selected utilities. Deselection keeps installed packages.".into()
+        }, "".into(), "Files:".into(), if overwrite {
+            "Overwrite selected defaults WITHOUT backups.".into()
+        } else {
+            "Preserve existing dotfiles; create missing defaults. btop selects the Icewine theme in regular configs.".into()
+        }, "Create missing shared Quickshell/wallpaper defaults and publish theme outputs. Ownership and read-only protections still apply.".into(),
+            "".into(), "Exit / recovery:".into(),
+            "Exit leaves these utility choices unapplied. Earlier settings, packages and core-default writes remain.".into(),
+            "Apply can leave package/file changes after failure or interruption. Resolve the error, then retry Apply with overwrite off.".into()];
         if onboarding {
-            plan.push("Headless login: install icewine-login, greetd and tuigreet; enable greetd for next boot; set graphical.target as boot default. Existing login services block this path.".into());
-            plan.push("Authenticate at the console greeter to start Icewine. No automatic login. Ctrl+Alt+F2 keeps a recovery TTY.".into());
+            plan.extend(["Exit before Apply returns to the TTY. Retry the retained onboard launcher; keep its build directory.".into(),
+                "Successful Apply leaves this desktop running. Use session exit to return to the TTY; no automatic reboot.".into(),
+                "".into(), "Login changes:".into(),
+                "Install icewine-login, greetd and tuigreet; enable greetd for next boot and set graphical.target as boot default. Existing host login services/configuration block takeover.".into(),
+                "Authenticate at the console greeter to start Icewine; no automatic login. Keep a recovery TTY (Ctrl+Alt+F2).".into()]);
         }
-        plan.push("Create missing shared Quickshell/wallpaper defaults and publish theme outputs.".into());
+        if !readonly {
+            plan.extend(["".into(), "Host requirements:".into(),
+                "Selected utilities may need services/device permissions, Multilib for native Steam or private packages for Handheld.".into()]);
+        }
+        if selected["texteditor"] {
+            plan.extend(["".into(), "Terminal Editor:".into(),
+                "Use isolated icewine-nvim data. Arch first launch downloads LazyVim plugins; personal nvim and host EDITOR/VISUAL stay unchanged.".into()]);
+        }
+        plan.extend(["".into(), "Selections:".into()]);
         plan.extend(choices);
-        if selected["texteditor"] { plan.push("Terminal Editor: isolated icewine-nvim data; Arch first launch downloads LazyVim plugins. Personal nvim and host EDITOR/VISUAL stay unchanged.".into()); }
-        plan.push(if overwrite { "Overwrite selected defaults WITHOUT backups.".into() }
-            else { "Preserve existing dotfiles; create missing defaults. btop selects the Icewine theme in regular configs.".into() });
-        plan.push(if readonly { "Host services and device permissions remain host policy.".into() }
-            else { "Host prerequisites: services/device permissions; Multilib for native Steam; private packages for Handheld.".into() });
-        plan.push("Earlier package/file changes can remain after failure or interruption. Retry Apply after resolving the error.".into());
-        plan.push("Cancel leaves utility choices unapplied; earlier Appearance changes remain.".into());
         if !review_utilities(plan)? {
             if onboarding { eprintln!("Onboarding Apply cancelled. Prepared packages remain available; retry the retained onboard launcher."); }
             return Ok(ExitCode::SUCCESS);

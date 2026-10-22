@@ -37,17 +37,22 @@ printf '%s\n' "$sessions" | while read -r session rest; do
     esac
 done
 printf '%s\n' 'Experimental Icewine onboarding (Arch/CachyOS x86_64).' \
-    'A full distro upgrade (pacman -Syu) precedes prerequisite installation and source builds.' \
-    'Build/session prerequisites: base-devel git python go hyprland kitty and a pacman Rust provider.' \
-    'Then: install icewine, icewine-session and icewine-hyprmon with their runtime dependencies.' \
-    'Core runtime includes Quickshell/Qt, theme/fonts, bindings, UWSM, audio and portals.' \
-    'Pacman shows every dependency and asks before both prerequisite transactions.' \
-    'Prepare missing core Hyprland/Quickshell/wallpaper defaults and the saved/default theme.' \
-    'Personal files are preserved; these prerequisite/default writes remain after cancellation.' \
-    'Then automatically start the Icewine onboarding session and its full TUI.' \
-    'Optional utilities wait for session-stage Apply; successful Apply leaves the desktop running.' \
-    'Keep a recovery TTY (Ctrl+Alt+F2). No login service changes until final Apply; no automatic reboot.' \
-    'Accept prerequisite installation and core-default preparation? Type yes to continue:'
+    '' 'Prepare the desktop:' \
+    '  A full distro upgrade (pacman -Syu), then build/session prerequisites:' \
+    '  base-devel, git, python, go, Hyprland, Kitty and a pacman Rust provider.' \
+    '  Build source unprivileged; install icewine, icewine-session and' \
+    '  icewine-hyprmon with runtime dependencies (Quickshell/Qt, theme/fonts,' \
+    '  bindings, UWSM, audio and portals). Pacman asks before both transactions.' \
+    '' 'Files and cancellation:' \
+    '  Prepare missing Hyprland/Quickshell/wallpaper defaults and saved/default' \
+    '  theme. Preserve personal files. Packages and core-default writes remain' \
+    '  after cancellation or failure; retain the build directory for recovery.' \
+    '' 'Then start the onboarding desktop automatically:' \
+    '  Use the full TUI there; optional utilities wait for Apply.' \
+    '  Login service changes wait for Apply. Successful Apply keeps the desktop' \
+    '  running; no automatic reboot. Keep a recovery TTY (Ctrl+Alt+F2).' \
+    '' 'Accept upgrade, prerequisites and core-default preparation?' \
+    'Type yes to continue; any other answer exits:'
 read -r answer || exit 1
 [ "$answer" = yes ] || exit 0
 for package in hyprmon hyprmon-bin; do

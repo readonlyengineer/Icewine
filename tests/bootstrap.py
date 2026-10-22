@@ -168,9 +168,13 @@ elif name=="makepkg":
         assert code != 0 and b"BOOT_MANAGER" not in output, (mode, output)
         if mode in ("prerequisite", "nixos", "existing-hyprmon", "existing-session", "session-query-fail", "remote", "inactive-tty"):
             assert not any(call[0]=="git" for call in calls)
-    for answer in (b"no\n", b"\x03"):
+    for answer in (b"no\n", b"YES\n", b"\x03"):
         code, output, calls=run(answer=answer)
-        assert b"full distro upgrade (pacman -Syu)" in output, output
+        for disclosure in (b"full distro upgrade (pacman -Syu)", b"core-default writes remain",
+                           b"after cancellation or failure", b"Login service changes wait for Apply",
+                           b"no automatic reboot", b"Ctrl+Alt+F2", b"any other answer exits"):
+            assert disclosure in output, (disclosure, output)
+        assert all(len(line) <= 80 for line in output.splitlines() if not line.startswith(b"^C"))
         assert b"BOOT_MANAGER" not in output and not any(call[0]=="git" for call in calls)
     code, output, calls=run(tty=False)
     assert code != 0 and not any(call[0]=="git" for call in calls)

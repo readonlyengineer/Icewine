@@ -101,6 +101,7 @@ parser.add_argument("--preview-only", action="store_true", help="run the existin
 parser.add_argument("--frames-only", action="store_true", help="capture representative visual states without repeating the semantic suite")
 parser.add_argument("--background-only", action="store_true", help="check terminal-default cells across pages, previews, errors and resize")
 parser.add_argument("--hotkeys-only", action="store_true", help="check continuous Hotkeys scrolling, editing, wrapping, mouse, focus and resize")
+parser.add_argument("--warnings-only", action="store_true", help="check Review warnings, safe actions, scroll bounds and resize")
 parser.add_argument("--onboarding-only", action="store_true", help="check session stage, full settings, monitor handoff and optional wallpaper picker")
 parser.add_argument("--utilities-only", action="store_true", help="check Utilities columns, focus, actions and resize in ordinary/onboarding modes")
 parser.add_argument("--spacing-only", action="store_true", help="check page geometry, wrapping and action placement with synthetic data")
@@ -214,7 +215,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, onboard=False, reboot=False, in_session=True, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None, hotkeys=None, hotkey_readonly=False, hotkey_error="", default_apps=None, default_readonly=(), default_error="", default_empty=False, default_many=False, missing_session=()):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, onboard=False, reboot=False, in_session=True, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None, hotkeys=None, hotkey_readonly=False, hotkey_error="", default_apps=None, default_readonly=(), default_error="", default_empty=False, default_many=False, missing_session=(), review_keys=None):
         global last_output, last_frames, last_widget_calls, all_last_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.write_text("")  # A run may legitimately invoke no external tools.
@@ -308,7 +309,10 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             frames = rendered_frames(output, size, resize_events=resize_events)
             rendered = b"\n".join(frames)
             if sent and not reviewed and b"Utilities / Review" in rendered:
-                os.write(master, b"i" if confirm else b"\x1b")
+                if review_keys is None:
+                    os.write(master, b"i" if confirm else b"\x1b")
+                else:
+                    send_keys(review_keys)
                 reviewed = True
             if (onboard or bootstrap) and reviewed and not reboot_prompted and b"Icewine ready: reboot?" in rendered:
                 os.write(master, b"i" if reboot else b"\x1b")
@@ -421,6 +425,79 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         previews = [call for call in all_last_calls if call[0] == "theme-preview"]
         assert previews[-1] == ["theme-preview", "tokyo-night"]
         assert not any(call[:2] == ["icewine", "theme"] for call in tools())
+    def test_warnings():
+        def reviews():
+            return [frame.decode().splitlines() for frame in last_frames if b"Utilities / Review" in frame]
+        def body_text():
+            return " ".join(" ".join(line[2:-2].strip() for frame in reviews() for line in frame[4:-4]).split())
+        def no_apply():
+            assert not any(call[0] == "apply" for call in all_last_calls)
+            assert not tools()
+        visual = state(desktop=True, terminal=True, texteditor=True, media=True)
+        wheel_down = b"\x1b[<65;40;10M"
+        for size in ((24,80), (36,120)):
+            for mode in ("ordinary", "onboarding", "host-managed"):
+                onboard = mode == "onboarding"
+                wire = state(readonly=True, desktop=True, texteditor=True) if mode == "host-managed" else visual
+                for overwrite in (False, True):
+                    opening = tab+up*3+b" "+down*2+enter if overwrite else tab+up+enter
+                    run(opening, wire, onboard=onboard, size=size,
+                        review_keys=down*80+up+down+esc,
+                        capture=f"warnings-{mode}-overwrite-{overwrite}")
+                    no_apply()
+                    text = body_text()
+                    for meaning in ("Files:", "Ownership and read-only protections", "Earlier settings, packages and core-default writes remain",
+                                    "failure or interruption", "overwrite off", "personal nvim", "EDITOR/VISUAL", "Selections:"):
+                        assert meaning in text, (mode, meaning, text)
+                    assert ("WITHOUT backups" in text) == overwrite
+                    if not overwrite: assert "Preserve existing dotfiles" in text and "btop" in text
+                    if mode == "host-managed":
+                        assert "Host packages, services and device permissions" in text and "host policy" in text
+                        assert "Host requirements:" not in text
+                    else: assert "Multilib" in text and "Handheld" in text
+                    if onboard:
+                        for meaning in ("greetd", "graphical.target", "block takeover", "no automatic login", "Ctrl+Alt+F2", "retained onboard launcher", "no automatic reboot"):
+                            assert meaning in text, (meaning, text)
+                    frames = reviews()
+                    for frame in frames:
+                        assert len(frame) == size[0]
+                        assert "[ Apply ]   [ Exit ]" in frame[-4]
+                        assert "Enter/Space" in frame[-3] and "Ctrl+C" in frame[-2]
+                    # At the end, repeated Down cannot scroll into a blank page.
+                    start, end, total = map(int, re.search(r"Lines (\d+)-(\d+) of (\d+)", frames[-1][3]).groups())
+                    assert end == total and start == max(1, total-(size[0]-9)+1)
+                    assert frames[-1][4:-4] == frames[-3][4:-4]
+                # Safe focus and the direct Apply path work in every context.
+                run(tab+up+enter, wire, onboard=onboard, size=size, review_keys=enter, capture="warnings-safe-focus")
+                no_apply()
+                calls = run(tab+up+enter, wire, onboard=onboard, size=size, review_keys=b"i", capture="warnings-direct-apply")
+                assert applied(calls)["overwrite"] == "false"
+                assert not tools()
+            # The shared renderer keeps all keyboard and mouse action paths.
+            for keys in (b" ", esc, b"q", b"\x03", click(16,size[0]-3), left+right+enter):
+                run(tab+up+enter, visual, size=size, review_keys=keys, capture="warnings-safe-exit")
+                no_apply()
+            for keys in (left+enter, right+b" ", tab+enter, b"\x1b[Z"+enter, click(4,size[0]-3)):
+                calls = run(tab+up+enter, visual, size=size, review_keys=keys, capture="warnings-apply")
+                assert applied(calls)["overwrite"] == "false"
+                assert not tools()
+            # Wheel scrolling uses the same end bound and returns to the first line.
+            run(tab+up+enter, visual, size=size, review_keys=wheel_down*80+up*80+esc, capture="warnings-wheel-return")
+            assert "Lines 1-" in reviews()[-1][3]
+            no_apply()
+        for onboard in (False, True):
+            # Activation keys and clicks do nothing while undersized. The draft
+            # and safe focus survive reflow, including a scrolled wider frame.
+            run(tab+up+enter, visual, onboard=onboard, size=(24,80), review_keys=down*20,
+                resize_steps=[((20,79),b"i"+enter+click(4,17)),((36,120),down*80),((24,80),esc)],
+                capture="warnings-resize")
+            no_apply()
+            assert b"Icewine needs an 80 x 24 terminal." in last_output
+            assert "Selections:" in body_text()
+        run(tab+up+enter, visual, apply_exit=1, review_keys=b"i", capture="warnings-apply-failure")
+        assert any(call[0] == "apply" for call in all_last_calls)
+        print("PASS: Review warnings, overwrite/host/session consequences, safe actions, scrolling and resize")
+
     def test_utilities():
         for onboard in (False, True):
             for size in ((24,80), (24,100), (36,120)):
@@ -620,7 +697,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert "[ Save ]" in "\n".join(frame[:-4])
         run(tab+up+enter, visual, size=(24,80), confirm=False, capture="review")
         frame = frame_for("Utilities / Review")
-        assert "[ Apply ]   [ Back ]" in frame[20] and frame[0].startswith("╭")
+        assert "[ Apply ]   [ Exit ]" in frame[20] and frame[0].startswith("╭")
         assert not any(call[0] == "apply" for call in all_last_calls)
         run(tab+up+enter, state(), size=(24,80), widget_policy="invalid", confirm=False, capture="utilities-startup-error")
         assert any(b"[ Review and Apply ]" in frame for frame in last_frames)
@@ -807,6 +884,10 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert not changes()
         print('PASS: Default Apps geometry, eight choosers, explicit use/cancel, PDF, missing/readonly/error states and mouse/focus')
 
+    if options.warnings_only:
+        test_warnings()
+        sys.exit(0)
+
     if options.onboarding_only:
         test_onboarding()
         sys.exit(0)
@@ -837,6 +918,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         test_theme_preview()
         print("PASS: native Theme preview cancel/commit and keyboard preview exit")
         sys.exit(0)
+    test_warnings()
     no_tty = subprocess.run([str(binary)], stdin=subprocess.DEVNULL, capture_output=True)
     assert no_tty.returncode == 1 and b"A terminal is required" in no_tty.stderr
     assert run(b"", "", valid=False, bootstrap=True, archives={}) == []
@@ -910,22 +992,26 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert choices["desktop"] == "true" and choices["overwrite"] == "false"
     run(tab+b" "+up+enter, state(), confirm=False)
     assert not any(call[0] == "apply" for call in all_last_calls)
+    # Selections follow the warning groups. Scroll Review before confirming,
+    # then check its visible value and the exact backend choice independently.
     # Screenshots is an ordinary checkbox; Review/Apply sends a boolean.
     for enabled in (False, True):
-        run(tab+down*5+b" "+down*5+enter, state(screenshot=enabled))
+        run(tab+down*5+b" "+down*5+enter, state(screenshot=enabled), review_keys=down*80+b"i")
         choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
         assert choices["screenshot"] == str(not enabled).lower()
-        assert b"Screenshots:" in last_output
+        assert any(f"Screenshots: {str(not enabled).lower()}".encode() in frame
+                   for frame in last_frames if b"Utilities / Review" in frame)
     run(tab+down*5+b" "+esc, state())
     assert not any(call[0] == "apply" for call in all_last_calls)
     run(tab+right+esc, state(readonly=True, screenshot=True))
     assert not any(call[0] == "apply" for call in all_last_calls)
     # Media is one keyed boolean; the long row remains usable through scroll/reflow.
     for enabled in (False, True):
-        run(tab+down*6+b" "+down*4+enter, state(media=enabled), size=(24,80))
+        run(tab+down*6+b" "+down*4+enter, state(media=enabled), size=(24,80), review_keys=down*80+b"i")
         choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
         assert choices["media"] == str(not enabled).lower()
-        assert b"Pictures and Video:" in last_output
+        assert any(f"Pictures and Video: {str(not enabled).lower()}".encode() in frame
+                   for frame in last_frames if b"Utilities / Review" in frame)
     wheel = b"\x1b[<65;40;10M"
     run(tab+wheel*6+b" "+wheel*4+enter, state(), size=(24,80), capture="media-wheel")
     assert applied([call for call in all_last_calls if call[0] in ("state", "apply")])["media"] == "true"
@@ -938,8 +1024,9 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert not any(call[0] == "apply" for call in all_last_calls)
     # An existing startup error reserves status space; scrolling still reaches Review.
     run(tab+down*6+b" "+down*4+enter, state(), size=(24,80), widget_policy="invalid",
-        confirm=False, capture="media-error-scroll")
-    assert b"Pictures and Video:" in last_output
+        confirm=False, review_keys=down*80+esc, capture="media-error-scroll")
+    assert any(b"Pictures and Video: true" in frame
+               for frame in last_frames if b"Utilities / Review" in frame)
     assert not any(call[0] == "apply" for call in all_last_calls)
     # Steam-none prerequisite rows remain visible and cannot enable Handheld.
     run(tab+down*7+right+down+enter+esc, state())
