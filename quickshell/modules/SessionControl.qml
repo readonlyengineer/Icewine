@@ -312,7 +312,7 @@ Scope {
         }
         function status(): string {
             return JSON.stringify({ requested: root.lockRequested, locked: root.locked, secure: sessionLock.secure,
-                authenticationRequired: root.authenticationRequired })
+                nativeLocked: sessionLock.locked, authenticationRequired: root.authenticationRequired })
         }
     }
 }
