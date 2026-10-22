@@ -2,6 +2,7 @@
 """Exercise explicit Apply with isolated dotfiles and mocked host operations."""
 import errno
 import contextlib
+import configparser
 import io
 import importlib.machinery
 import json
@@ -206,6 +207,207 @@ if sys.argv[2:] == ["--appearance-only"]:
     print("PASS: real backend appearance fields, policy, validation, layout fallback and ownership")
     sys.exit(0)
 
+
+def test_onboarding_core():
+    with tempfile.TemporaryDirectory(prefix="icewine core roots ") as temporary:
+        root = Path(temporary)
+        config, data, state, defaults = (root / name for name in ("config", "data", "state/icewine", "defaults"))
+        for relative, original in {
+            "config/hypr/hyprland.lua": "hyprland/hyprland.lua",
+            "config/quickshell/shell.qml": "quickshell/shell.qml",
+            "config/quickshell/config/Settings.qml": "quickshell/config/Settings.qml",
+            "config/quickshell/config/qmldir": "quickshell/config/qmldir",
+            "data/wallpapers/default.jpg": "theme/assets/flower-branch.png",
+            "config/kitty/kitty.conf": "kitty/kitty.conf",
+            "config/yazi/keymap.toml": "theme/assets/templates/yazi-keymap.toml",
+        }.items():
+            destination = defaults / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source / original, destination)
+        (defaults / "config/hypr/icewine").symlink_to(source / "hyprland")
+        (defaults / "config/quickshell/icewine").symlink_to(source / "quickshell")
+        env = dict(HOME=str(root), XDG_CONFIG_HOME=str(config), XDG_DATA_HOME=str(data),
+            XDG_STATE_HOME=str(state.parent), ICEWINE_DEFAULT_FILES=str(defaults),
+            ICEWINE_THEME_ASSETS=str(source / "theme/assets"),
+            ICEWINE_WIDGET_SETTINGS=str(defaults / "config/quickshell/config/Settings.qml"),
+            ICEWINE_WIDGET_SHELLS=str(defaults / "config/quickshell/shell.qml"))
+        with patch.dict(os.environ, env), patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "arch"}), \
+                patch.object(manage, "onboarding_login") as preflight, \
+                patch.object(manage.subprocess, "run", side_effect=AssertionError("core preparation changed packages/services")):
+            manage.main(["onboarding-prepare"])
+            assert preflight.call_count == 1
+            assert (config / "icewine/current/Theme.lua").is_file()
+            assert manage.widget_state(config, state)[2]
+            assert (config / "hypr/icewine/modules/Binds.lua").read_bytes() == (source / "hyprland/modules/Binds.lua").read_bytes()
+            assert not (config / "kitty").exists() and not (config / "yazi").exists()
+            assert not (state / "manage.json").exists() and not (state / "applied.json").exists()
+            assert (data / "wallpapers/default.jpg").is_file()
+            manifest = json.loads((state / "default-files.json").read_text())
+            assert manifest["config"]["root"] == str(config)
+            assert "hypr/hyprland.lua" in manifest["config"]["files"]
+            # Actual personal main/sidecar and saved settings are never overwritten
+            # merely to launch. Monitor Save and normal Apply share these roots.
+            main, sidecar = config / "hypr/hyprland.lua", config / "hypr/hyprmon.lua"
+            main.write_text("-- personal main\n")
+            sidecar.write_text("-- personal saved monitor preferences\n")
+            (state / "widgets.json").write_text('{"barWidth":81}\n')
+            manage.main(["onboarding-prepare"])
+            assert main.read_text() == "-- personal main\n"
+            assert sidecar.read_text() == "-- personal saved monitor preferences\n"
+            assert json.loads((state / "widgets.json").read_text()) == {"barWidth": 81}
+            settings = config / "quickshell/config/Settings.qml"
+            settings.write_text("// personal settings\n")
+            try: manage.main(["onboarding-prepare"])
+            except ValueError as error: assert "Custom Quickshell files preserved" in str(error)
+            else: raise AssertionError("Unsupported custom shell was presented as full onboarding")
+            assert settings.read_text() == "// personal settings\n"
+    print("PASS: real core preparation, persistent theme/bind/widget/monitor roots, ownership and deferred extras")
+
+
+def test_session_runtime():
+    # Model only the Requires/PartOf/start edges used by the shipped native
+    # units. Real Apply runs; all host commands stay inside this fixture.
+    units = {}
+    for directory in (source / "packaging/arch", source / "packaging/arch/handheld"):
+        for path in directory.iterdir():
+            if path.suffix in (".target", ".service", ".path"):
+                # Repeated PathChanged entries are valid; dependency fields in
+                # these units are single lines and are the only fields modeled.
+                unit = configparser.ConfigParser(interpolation=None, strict=False)
+                unit.read(path)
+                units[path.name] = unit
+    def fields(name, key, section="Unit"):
+        return units[name].get(section, key, fallback="").split()
+    target, shell = "icewine-session.target", "icewine.service"
+    core = {target, *fields(target, "Requires"), *fields(target, "Wants")}
+    assert core == {target, shell, "icewine-idle.service", "icewine-polkit.service", "icewine-refresh-flatpak-icons.path"}
+    assert all(target in fields(name, "PartOf") for name in core - {target})
+    assert all(target in fields(name, "WantedBy", "Install") for name in manage.HANDHELD_UNITS)
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        config, data, state, defaults, archives = (root / name for name in ("config", "data", "state", "defaults", "archives"))
+        for path in (config, data, state, defaults / "config", defaults / "data", archives):
+            path.mkdir(parents=True, exist_ok=True)
+        for package in ("login", "steam-native", "steam-flatpak", "gamescope"):
+            (archives / f"icewine-{package}-0.1-1-x86_64.pkg.tar.zst").touch()
+        empty = dict.fromkeys(manage.FEATURES, False) | {"steam": "none"}
+        desktop = empty | {"desktop": True}
+        native = desktop | {"steam": "native", "gamescope": True}
+        handheld = native | {"handheld": True}
+        flatpak = native | {"steam": "flatpak"}
+        for onboarding, previous, selected, initial, failure, readonly in (
+            (True, empty, native, "group", None, False),
+            (True, native, native, "group", None, False),
+            (True, flatpak, flatpak, "group", None, False),
+            (True, desktop, desktop, "group", None, False),
+            (False, empty, native, "group", None, False),
+            (False, flatpak, flatpak, "group", None, False),
+            (False, empty, native, "shell", None, False),
+            (False, empty, native, "none", None, False),
+            (False, native, handheld, "group", None, False),
+            (False, handheld, desktop, "group", None, False),
+            (True, native, native, "group", "start", False),
+            (False, native, handheld, "group", "start", False),
+            (False, handheld, desktop, "group", "daemon-reload", False),
+            (False, empty, native, "shell", "start", False),
+            # Nix supplies immutable selections; even an old applied record
+            # must never trigger systemd/package operations on that path.
+            (False, empty, native, "group", None, True),
+        ):
+            for name in ("manage.json", "applied.json"):
+                (state / name).write_text(json.dumps(previous))
+            before = {name: (state / name).read_bytes() for name in ("manage.json", "applied.json")}
+            session = {"ICEWINE_STEAM_CLIENT": "none" if onboarding else previous["steam"],
+                       "ICEWINE_STEAM_ENABLED": str(not onboarding and previous["steam"] != "none").lower(),
+                       "ICEWINE_GAMESCOPE_ENABLED": str(not onboarding and previous["gamescope"]).lower(),
+                       "ICEWINE_HANDHELD_ENABLED": str(not onboarding and previous["handheld"]).lower()}
+            active, enabled, calls = set(), set(manage.HANDHELD_UNITS) if previous["handheld"] else set(), []
+            def start(name):
+                if name in active or name not in units:
+                    return
+                if any(session.get(key) != value for key, value in (field.split("=", 1) for field in fields(name, "ConditionEnvironment"))):
+                    return
+                active.add(name)
+                for child in fields(name, "Requires") + fields(name, "Wants") + [unit for unit in enabled if name in fields(unit, "WantedBy", "Install")]:
+                    start(child)
+            def stop(name):
+                active.discard(name)
+                for child in list(active):
+                    if name in fields(child, "PartOf") + fields(child, "Requires"):
+                        stop(child)
+            if initial == "group":
+                start(target)
+                assert core <= active
+                # This is the old bug's actual unit propagation, rather than
+                # an assumption that stop(shell) leaves the group untouched.
+                stop(shell)
+                assert not core & active
+                start(target)
+            elif initial == "shell":
+                start(shell)
+            initial_active = active.copy()
+            def host(argv, **kwargs):
+                calls.append(argv)
+                if argv[:2] == ["systemctl", "--user"]:
+                    command, *args = argv[2:]
+                    if command == "is-active":
+                        return subprocess.CompletedProcess(argv, 0 if args[-1] in active else 3)
+                    if command == "stop":
+                        for name in args: stop(name)
+                    elif command == "start":
+                        for name in args: start(name)
+                    elif command == "enable":
+                        enabled.update(args)
+                    elif command == "disable":
+                        enabled.difference_update(args[1:])
+                        for name in args[1:]: stop(name)
+                    elif command == "set-environment":
+                        session.update(field.split("=", 1) for field in args)
+                    if command == failure:
+                        # Start failure may leave a partially started target.
+                        raise subprocess.CalledProcessError(1, argv)
+                return subprocess.CompletedProcess(argv, 0)
+            env = {"HOME": str(root), "XDG_CONFIG_HOME": str(config), "XDG_DATA_HOME": str(data), "XDG_STATE_HOME": str(root / "xdg-state"),
+                   "ICEWINE_ONBOARDING": "1" if onboarding else "0", "ICEWINE_PACKAGE_DIR": str(archives),
+                   "ICEWINE_DEFAULT_FILES": str(defaults), "ICEWINE_HANDHELD_DEFAULT_FILES": str(defaults),
+                   "ICEWINE_THEME_ASSETS": str(source / "theme/assets"), "ICEWINE_THEME_POLICY": ""}
+            with patch.dict(os.environ, env | session), patch.object(manage, "onboarding_login"), \
+                 patch.object(manage.platform, "freedesktop_os_release", return_value={"ID": "nixos" if readonly else "arch"}), \
+                 patch.object(manage, "handheld_policy"), patch.object(manage.subprocess, "run", side_effect=host):
+                try:
+                    manage.apply(selected, False, readonly, selected, config, data, state)
+                except subprocess.CalledProcessError:
+                    assert failure
+                else:
+                    assert not failure
+            runtime_calls = [call for call in calls if call[:2] == ["systemctl", "--user"]]
+            if readonly:
+                assert not calls and active == initial_active
+            elif failure:
+                assert not active and not enabled
+                assert {name: (state / name).read_bytes() for name in before} == before
+                assert session["ICEWINE_STEAM_CLIENT"] == previous["steam"]
+                assert session["ICEWINE_HANDHELD_ENABLED"] == "false"
+            elif not onboarding and previous == selected:
+                assert not runtime_calls and active == initial_active
+            else:
+                assert session["ICEWINE_STEAM_CLIENT"] == selected["steam"]
+                assert session["ICEWINE_STEAM_ENABLED"] == str(selected["steam"] != "none").lower()
+                assert session["ICEWINE_GAMESCOPE_ENABLED"] == str(selected["gamescope"]).lower()
+                assert active == initial_active - set(manage.HANDHELD_UNITS) | (set(manage.HANDHELD_UNITS) if selected["handheld"] and initial != "none" else set())
+                if initial != "none":
+                    unit = target if initial == "group" else shell
+                    publish = next(call for call in calls if call[:3] == ["systemctl", "--user", "set-environment"])
+                    assert calls.index(["systemctl", "--user", "stop", unit]) < calls.index(publish) < calls.index(["systemctl", "--user", "start", unit])
+                    if initial == "group": assert core <= active
+                else:
+                    assert not any(call[2] in ("start", "stop") for call in runtime_calls)
+    print("PASS: real Apply repeat onboarding, native Requires/PartOf support lifecycle, standalone/inactive/Nix paths and Handheld failure cleanup")
+
+
+test_session_runtime()
+
+test_onboarding_core()
 
 test_gtk_wrapper_refresh()
 
@@ -558,12 +760,14 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     # Fresh onboarding adds the login package and only schedules a greeter after Apply.
     login_archive = archives / "icewine-login-0.1-1-x86_64.pkg.tar.zst"
     login_archive.write_bytes(b"prepared login")
+    base_archive = archives / "icewine-0.1-1-x86_64.pkg.tar.zst"
+    base_archive.write_bytes(b"prepared base")
     with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives), ICEWINE_ONBOARDING="1"), \
          patch.object(manage, "onboarding_login") as preflight, \
          patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
         apply(("desktop",))
         calls = [call.args[0] for call in commands.call_args_list]
-        assert ["sudo", "pacman", "-U", str(session_archive), str(login_archive)] == calls[0]
+        assert ["sudo", "pacman", "-U", str(login_archive)] == calls[0]
         assert calls[-3:] == [["sudo", "systemctl", "daemon-reload"],
                               ["sudo", "systemctl", "enable", "greetd.service"],
                               ["sudo", "systemctl", "set-default", "graphical.target"]]
@@ -588,6 +792,50 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
             else:
                 raise AssertionError("Onboarding accepted an unsupported selection")
         assert not preflight.called and not commands.called
+    # All optional combinations use one changing transaction and preserve
+    # existing packages; repo dependencies belong to the real split metadata.
+    utility_packages = {"terminal": "terminal", "filemanager": "filemanager",
+                        "shellExtras": "shell-extras", "texteditor": "editor",
+                        "screenshot": "screenshot", "media": "media", "gamescope": "gamescope"}
+    optional_archives = {}
+    for name in (*utility_packages.values(), "steam-native", "steam-flatpak"):
+        archive = archives / f"icewine-{name}-0.1-1-x86_64.pkg.tar.zst"
+        archive.touch()
+        optional_archives[name] = str(archive)
+    for client in ("none", "native", "flatpak"):
+        for options in ((), ("terminal",), ("filemanager", "shellExtras", "texteditor", "screenshot", "media"),
+                        tuple(utility_packages) if client != "none" else ("media", "screenshot")):
+            with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives), ICEWINE_ONBOARDING="1"), \
+                 patch.object(manage, "onboarding_login"), \
+                 patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+                apply(("desktop", *options), steam=client)
+                calls = [call.args[0] for call in commands.call_args_list]
+                changes = [call for call in calls if call[:2] == ["sudo", "pacman"]]
+                expected = [str(login_archive)]
+                expected += [optional_archives[name] for feature, name in utility_packages.items() if feature in options]
+                if client != "none": expected += [optional_archives["steam-" + client]]
+                assert changes == [["sudo", "pacman", "-U", *expected]], changes
+                assert not any("-R" in call or "-S" in call for call in changes)
+                assert any(call[:2] == ["flatpak", "install"] for call in calls) == (client == "flatpak" or bool({"media", "screenshot"} & set(options)))
+    # Missing/duplicate/non-regular selected archives fail before any transaction.
+    for kind in ("missing", "duplicate", "symlink", "directory"):
+        login_archive.unlink()
+        if kind == "duplicate":
+            login_archive.touch()
+            extra = archives / "icewine-login-0.2-1-x86_64.pkg.tar.zst"
+            extra.touch()
+        elif kind == "symlink": login_archive.symlink_to(session_archive)
+        elif kind == "directory": login_archive.mkdir()
+        with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives), ICEWINE_ONBOARDING="1"), \
+             patch.object(manage, "onboarding_login"), patch.object(manage, "run") as host:
+            try: apply(("desktop",))
+            except ValueError: pass
+            else: raise AssertionError(f"Accepted {kind} login archive")
+            assert not host.called
+        if kind == "duplicate": extra.unlink()
+        if login_archive.is_dir(): login_archive.rmdir()
+        else: login_archive.unlink(missing_ok=True)
+        login_archive.touch()
     login_archive.unlink()
     # A prepared directory need not supply unrelated/private dependency archives.
     with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives), ICEWINE_HANDHELD_DEFAULT_FILES=str(defaults)), \
@@ -729,7 +977,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
          patch.object(manage, "run", side_effect=lambda argv: events.append(argv)), \
          patch.object(manage, "handheld_policy", side_effect=lambda *args: events.append(["policy", args[-1]])):
         apply()
-    assert events.index(["systemctl", "--user", "stop", "icewine.service"]) < events.index(["systemctl", "--user", "disable", "--now", *manage.HANDHELD_UNITS]) < events.index(["policy", False])
+    assert events.index(["systemctl", "--user", "stop", "icewine-session.target"]) < events.index(["systemctl", "--user", "disable", "--now", *manage.HANDHELD_UNITS]) < events.index(["policy", False])
     before = (state / "manage.json").read_bytes()
     with patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
          patch.object(manage, "run", side_effect=lambda argv: (_ for _ in ()).throw(subprocess.CalledProcessError(1, argv)) if "daemon-reload" in argv else None):
@@ -757,7 +1005,7 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
     def restart(argv):
         if argv[:3] == ["systemctl", "--user", "set-environment"]:
             session.update(field.split("=", 1) for field in argv[3:])
-        if argv == ["systemctl", "--user", "start", "icewine.service"]:
+        if argv == ["systemctl", "--user", "start", "icewine-session.target"]:
             assert json.loads((state / "manage.json").read_text())["steam"] == "none"
             result = original_run(["bash", str(wrapper_bin / "icewine-steam"), "literal argument"],
                                   env=os.environ | session | {"PATH": str(wrapper_bin) + ":" + os.environ["PATH"]}, capture_output=True, text=True)

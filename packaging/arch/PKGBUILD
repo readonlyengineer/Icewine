@@ -1,6 +1,8 @@
 # Build from an Icewine source archive; see the project README.
 pkgbase=icewine
-pkgname=(icewine icewine-session icewine-handheld icewine-login)
+pkgname=(icewine icewine-session icewine-handheld icewine-login
+  icewine-terminal icewine-filemanager icewine-shell-extras icewine-editor
+  icewine-screenshot icewine-media icewine-steam-native icewine-steam-flatpak icewine-gamescope)
 pkgver=0.1
 pkgrel=1
 arch=(x86_64)
@@ -132,4 +134,49 @@ package_icewine-login() {
   cd "$srcdir/icewine"
   install -Dm644 packaging/arch/login.toml "$pkgdir/usr/share/icewine/login.toml"
   install -Dm644 packaging/arch/login.conf "$pkgdir/usr/lib/systemd/system/greetd.service.d/icewine.conf"
+}
+
+package_icewine-terminal() {
+  pkgdesc='Icewine terminal utility dependencies'
+  depends=(kitty)
+}
+
+package_icewine-filemanager() {
+  pkgdesc='Icewine filemanager utility dependencies'
+  depends=(yazi xdg-terminal-exec ffmpegthumbnailer 7zip gvfs udisks2)
+}
+
+package_icewine-shell-extras() {
+  pkgdesc='Icewine shell-extras utility dependencies'
+  depends=(starship fastfetch)
+}
+
+package_icewine-editor() {
+  pkgdesc='Icewine editor utility dependencies'
+  depends=(neovim git gcc make ripgrep fd unzip)
+}
+
+package_icewine-screenshot() {
+  pkgdesc='Icewine screenshot utility dependencies'
+  depends=(flatpak)
+}
+
+package_icewine-media() {
+  pkgdesc='Icewine media utility dependencies'
+  depends=(imv flatpak)
+}
+
+package_icewine-steam-native() {
+  pkgdesc='Icewine steam-native utility dependencies'
+  depends=(steam)
+}
+
+package_icewine-steam-flatpak() {
+  pkgdesc='Icewine steam-flatpak utility dependencies'
+  depends=(flatpak)
+}
+
+package_icewine-gamescope() {
+  pkgdesc='Icewine gamescope utility dependencies'
+  depends=(gamescope)
 }

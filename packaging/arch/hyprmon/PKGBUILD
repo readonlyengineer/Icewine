@@ -1,0 +1,42 @@
+# Released HyprMon plus the same Lua compatibility fixes used by Nixos.
+pkgname=icewine-hyprmon
+pkgver=0.0.17
+pkgrel=1
+pkgdesc='HyprMon with Lua live IPC and managed-entry-safe saves'
+arch=(x86_64)
+url='https://github.com/erans/hyprmon'
+license=(Apache-2.0)
+depends=(hyprland)
+makedepends=('go>=1.26')
+provides=("hyprmon=$pkgver")
+conflicts=(hyprmon hyprmon-bin)
+source=("hyprmon-$pkgver.tar.gz::https://codeload.github.com/erans/hyprmon/tar.gz/refs/tags/v$pkgver"
+  lua-live.patch lua-fmt.patch lua-writer.patch lua-checks.patch)
+sha256sums=(5f14e8b8553f660c3c44f590b2c9f6f3056e86569690bd44b5797787fc22abb1
+  3155f665d0b7dffe7e10901fce983fbf5528e89fd396e5472e8a08dd08a5a20c
+  fd04b5aad38a8ef71ead65527c84c23cee601bd93fee790c1d8a2101297a409c
+  4495efd03f7bd66854e61156f2ee136e4d1e39a9bb78b6833aae15ff2dde7cb0
+  f6ca7599dc2b6bb0dcf1770220b04e1625a42b64fb34df251550bb6456bc33e5)
+
+prepare() {
+  cd "$srcdir/hyprmon-$pkgver"
+  for name in lua-live lua-fmt lua-writer lua-checks; do
+    patch -p1 < "$srcdir/$name.patch"
+  done
+}
+
+build() {
+  cd "$srcdir/hyprmon-$pkgver"
+  go build -trimpath -o hyprmon .
+}
+
+check() {
+  cd "$srcdir/hyprmon-$pkgver"
+  go test ./...
+}
+
+package() {
+  cd "$srcdir/hyprmon-$pkgver"
+  install -Dm755 hyprmon "$pkgdir/usr/bin/hyprmon"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

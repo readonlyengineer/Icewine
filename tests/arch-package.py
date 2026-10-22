@@ -29,6 +29,19 @@ assert (source / "kitty/kitty.conf").read_text().splitlines()[1:] == [
     "include icewine/defaults.conf", "include ../icewine/current/kitty.conf"]
 print("PASS: shared Kitty attention/sound defaults, native sound dependencies and include precedence")
 
+# Source PKGBUILD functions without running build/package toolchains.
+manage_module = importlib.machinery.SourceFileLoader("native_manage", str(source / "scripts/manage")).load_module()
+utility_contract = {"terminal": manage_module.PACKAGES["terminal"],
+    "filemanager": manage_module.PACKAGES["filemanager"], "shell-extras": manage_module.PACKAGES["shellExtras"],
+    "editor": manage_module.PACKAGES["texteditor"], "screenshot": ("flatpak",),
+    "media": (*manage_module.PACKAGES["media"], "flatpak"), "gamescope": manage_module.PACKAGES["gamescope"],
+    "steam-native": ("steam",), "steam-flatpak": ("flatpak",)}
+for utility, dependencies in utility_contract.items():
+    result = subprocess.run(["bash", "-c", 'source "$1"; "$2"; printf "%s\\n" "${depends[@]}"',
+        "contract", str(native / "PKGBUILD"), "package_icewine-" + utility], capture_output=True, text=True, check=True)
+    assert result.stdout.splitlines() == list(dependencies), (utility, result.stdout)
+print("PASS: selected native utility split-package dependencies match ordinary Apply")
+
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     commands = root / "bin"
@@ -143,10 +156,57 @@ with tempfile.TemporaryDirectory() as directory:
     assert shortcuts.commands(path) == [["/games/My Game", "--flag", "two words"]]
 print("PASS: real python-vdf shortcut binary API and literal command filtering")
 
+# The private entry loads real core modules/theme while preserving a personal
+# main entry; only installed absolute paths are redirected by the Lua harness.
+if shutil.which("lua"):
+    with tempfile.TemporaryDirectory(prefix="icewine onboarding roots ") as temporary:
+        config = Path(temporary)
+        (config / "hypr").mkdir()
+        personal = config / "hypr/hyprland.lua"
+        personal.write_text('error("Personal entry must not be executed just to onboard")\n')
+        (config / "hypr/hyprmon.lua").write_text('hl.monitor({output="saved-monitor", mode="preferred", position="auto", scale=1})\n')
+        (config / "hypr/icewine").symlink_to(source / "hyprland")
+        stage = config / "private-stage"
+        (stage / "lua").mkdir(parents=True)
+        (stage / "lua/icewine").symlink_to(source / "hyprland")
+        manage_module.theme.publish(config, manage_module.theme.render_theme(source / "theme/assets", source / "theme/assets/themes/dracula.json"))
+        before = personal.read_bytes()
+        subprocess.run(["lua", str(source / "hyprland/tests/startup.lua"), str(personal), "onboarding",
+            str(native / "onboarding.lua"), str(source / "hyprland/hyprland.lua")],
+            env=os.environ | {"XDG_CONFIG_HOME": str(config), "ICEWINE_ONBOARDING_DIR": str(stage)}, check=True)
+        assert personal.read_bytes() == before
+else:
+    print("SKIP: Lua unavailable; onboarding Lua execution awaits native integration")
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    tools = root / "tools"
+    tools.mkdir()
+    log = root / "calls"
+    backend = tools / "icewine-manage-backend"
+    backend.write_text('#!/bin/sh\nprintf called >> "$ENV_TEST_LOG"\nprintf "%s\\n" "steam=native gamescope=true handheld=true"\n')
+    backend.chmod(0o755)
+    native_env = root / "env"
+    native_env.write_text((native / "env").read_text().replace('. /usr/share/icewine/session/env', '. "$ENV_TEST_SESSION"'))
+    env = os.environ | {"PATH": str(tools) + ":" + os.environ["PATH"], "ENV_TEST_LOG": str(log),
+        "ENV_TEST_SESSION": str(source / "session/env")}
+    for stage in ("session", ""):
+        result = subprocess.run(["sh", "-c", '. "$1"; printf "%s %s %s %s" "$ICEWINE_STEAM_CLIENT" "$ICEWINE_STEAM_ENABLED" "$ICEWINE_GAMESCOPE_ENABLED" "$ICEWINE_HANDHELD_ENABLED"',
+            "session-env", str(native_env)], env=env | {"ICEWINE_ONBOARDING_STAGE": stage}, capture_output=True, text=True, check=True)
+        assert result.stdout == ("none false false false" if stage else "native true true true"), result.stdout
+        assert log.exists() == (not stage), "Proposed utility selections leaked into pre-Apply runtime"
+print("PASS: onboarding optional runtime stays off; ordinary session selections remain unchanged")
+
 if len(sys.argv) == 2:
     sys.exit(0)
 
-desktop, session, handheld, idle, login = map(Path, sys.argv[2:7])
+desktop, session, handheld, idle, login, hyprmon = map(Path, sys.argv[2:8])
+assert (hyprmon / "usr/bin/hyprmon").is_file()
+assert (hyprmon / "usr/share/licenses/icewine-hyprmon/LICENSE").is_file()
+for utility, dependencies in utility_contract.items():
+    metadata = (desktop.parent / ("icewine-" + utility) / ".PKGINFO").read_text()
+    assert [line.removeprefix("depend = ") for line in metadata.splitlines() if line.startswith("depend = ")] == list(dependencies)
+
 login_config = tomllib.loads((login / "usr/share/icewine/login.toml").read_text())
 assert login_config == {"terminal": {"vt": 1}, "default_session": {
     "command": "/usr/bin/tuigreet --cmd /usr/bin/icewine-session", "user": "greeter"}}

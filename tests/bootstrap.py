@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (home / ".config").mkdir(parents=True)
     # These programs only create synthetic download/build outputs inside TMPDIR.
     stub = tools / "stub"
-    stub.write_text("#!" + sys.executable + "\n" + '''import json,os,pathlib,sys
+    stub.write_text("#!" + sys.executable + "\n" + '''import json,os,pathlib,subprocess,sys
 name=pathlib.Path(sys.argv[0]).name
 args=sys.argv[1:]
 with open(os.environ["BOOT_LOG"],"a") as stream: stream.write(json.dumps([name,*args])+"\\n")
@@ -31,11 +31,59 @@ mode=os.environ["BOOT_MODE"]
 if name=="id": print("1000")
 elif name=="uname": print("x86_64")
 elif name=="sed": print("nixos" if mode=="nixos" else "arch")
-elif name=="pacman": sys.exit(1 if mode in ("no-provider", "native-rust", "unowned") else 0)
+elif name=="loginctl":
+ if mode=="session-query-fail" and args[0]=="show-session" and args[1]=="7": sys.exit(1)
+ if args[0]=="list-sessions": print("7 1000 desktop seat0 tty1")
+ elif "Type" in args: print("wayland" if mode=="existing-session" and args[1]=="7" else "tty")
+ elif "Remote" in args: print("yes" if mode=="remote" else "no")
+ elif "Active" in args: print("no" if mode=="inactive-tty" else "yes")
+elif name=="uwsm":
+ if args[:2]==["check","is-active"]: sys.exit(0 if mode=="active-uwsm" else 1)
+ if args[0]=="start":
+  assert args[1:]==["-U","run","-g","-1","-eD","Icewine:Hyprland","-N","Icewine","--","start-hyprland","--","--config",os.environ["ICEWINE_ONBOARDING_DIR"]+"/onboard.lua"],args
+  assert os.environ["UWSM_WAIT_VARNAMES"]=="ICEWINE_ONBOARDING_READY"
+  if mode=="session-fail": sys.exit(1)
+  env=dict(os.environ,WAYLAND_DISPLAY="wayland-fixture",HYPRLAND_INSTANCE_SIGNATURE="fixture")
+  sys.exit(subprocess.run(["sh",os.environ["ICEWINE_ONBOARDING_RUNNER"],"terminal"],env=env).returncode)
+ if args[0]=="finalize":
+  assert args==["finalize","ICEWINE_ONBOARDING_READY=1"],args
+  sys.exit(1 if mode=="finalize-fail" else 0)
+elif name=="hyprctl": print('["bad config"]' if mode=="config-error" else '[]')
+elif name=="systemctl":
+ assert args==["--user","start","icewine-session.target"],args
+ sys.exit(1 if mode=="core-service-fail" else 0)
+elif name=="qs":
+ assert args==["ipc","call","theme","refresh"],args
+ print("failed: not ready" if mode=="shell-not-ready" else "applied: fixture")
+elif name=="sleep": pass
+elif name=="icewine-manage-backend":
+ assert args==["onboarding-prepare"],args
+ sys.exit(1 if mode=="core-defaults-fail" else 0)
+elif name=="kitty":
+ if mode=="kitty-fail": sys.exit(1)
+ assert args[:6]==["--class","icewine-onboarding","--config","NONE","-o","font_family=JetBrainsMono Nerd Font"],args
+ assert args[6:]==["sh",os.environ["ICEWINE_ONBOARDING_RUNNER"],"tui"],args
+ status=subprocess.run(args[6:]).returncode
+ # Terminal success does not necessarily preserve its child's exit status.
+ sys.exit(0 if mode=="tui-fail" else status)
+elif name=="icewine-manage":
+ assert args==["--bootstrap",os.environ["ICEWINE_PACKAGE_DIR"],"a"*40],args
+ assert os.environ["ICEWINE_ONBOARDING_STAGE"]=="session"
+ assert os.environ["HYPRLAND_CONFIG"]==os.environ["HOME"]+"/.config/hypr/hyprland.lua"
+ if mode=="tui-fail": sys.exit(1)
+ if mode!="tui-cancel": pathlib.Path(os.environ["ICEWINE_ONBOARDING_RESULT"]).write_text("applied\\n")
+ print("BOOT_MANAGER",*args)
+elif name=="pacman":
+ if args[0]=="-Qq": sys.exit(0 if mode=="existing-hyprmon" and args[1]=="hyprmon-bin" else 1)
+ sys.exit(1 if mode in ("no-provider", "native-rust", "unowned") else 0)
 elif name=="sudo":
- assert args[:5]==["pacman","-Syu","--needed","base-devel","git"],args
- if mode in ("no-provider", "native-rust"): pathlib.Path(os.environ["TMPDIR"], "provider-installed").touch()
- sys.exit(1 if mode=="prerequisite" else 0)
+ if args[1]=="-Syu":
+  assert args[:9]==["pacman","-Syu","--needed","base-devel","git","python","go","hyprland","kitty"],args
+  if mode in ("no-provider", "native-rust"): pathlib.Path(os.environ["TMPDIR"], "provider-installed").touch()
+  sys.exit(1 if mode=="prerequisite" else 0)
+ assert args[:2]==["pacman","-U"],args
+ assert [pathlib.Path(path).name for path in args[2:]]==["icewine-0.1-1-x86_64.pkg.tar.zst","icewine-session-0.1-1-x86_64.pkg.tar.zst","icewine-hyprmon-0.0.17-1-x86_64.pkg.tar.zst"],args
+ sys.exit(1 if mode=="hyprmon-install" else 0)
 elif name in ("cargo", "rustc"):
  if mode in ("no-provider", "native-rust"): sys.exit(0 if pathlib.Path(os.environ["TMPDIR"], "provider-installed").exists() else 1)
  if mode in ("proxy", "toolchain-fail"):
@@ -60,21 +108,28 @@ elif name=="git":
   sys.stdout.buffer.write(b"synthetic local archive")
  if "show" in args: print("# synthetic recipe, never executed")
 elif name=="makepkg":
- if mode=="build": sys.exit(1)
- target=pathlib.Path("src/icewine/manager/target/release/icewine-manage")
- target.parent.mkdir(parents=True)
- target.write_text("#!/bin/sh\\nprintf 'BOOT_MANAGER %s\\\\n' \\\"$*\\\"\\n")
- target.chmod(0o755)
+ if pathlib.Path.cwd().name=="hyprmon":
+  if mode=="hyprmon-build": sys.exit(1)
+  pathlib.Path("icewine-hyprmon-0.0.17-1-x86_64.pkg.tar.zst").touch()
+ else:
+  if mode=="build": sys.exit(1)
+  recipe=pathlib.Path("src/icewine/packaging/arch")
+  (recipe/"hyprmon").mkdir(parents=True)
+  (recipe/"hyprmon/PKGBUILD").write_text("# synthetic recipe, never executed")
+  (recipe/"onboard").write_text(pathlib.Path(os.environ["BOOT_SOURCE"],"packaging/arch/onboard").read_text())
+  (recipe/"onboarding.lua").write_text(pathlib.Path(os.environ["BOOT_SOURCE"],"packaging/arch/onboarding.lua").read_text())
+  for name in ("icewine", "icewine-session"):
+   pathlib.Path(name+"-0.1-1-x86_64.pkg.tar.zst").touch()
 ''')
     stub.chmod(0o755)
-    for name in ("id", "uname", "sed", "pacman", "git", "makepkg", "cargo", "rustc", "rustup", "sudo", "python3"):
+    for name in ("id", "uname", "sed", "pacman", "git", "makepkg", "cargo", "rustc", "rustup", "sudo", "python3", "go", "loginctl", "uwsm", "hyprctl", "systemctl", "qs", "kitty", "sleep", "icewine-manage", "icewine-manage-backend"):
         (tools / name).symlink_to(stub)
     def run(mode="ok", answer=b"yes\n", tty=True, latest=False, shell="sh"):
         log.unlink(missing_ok=True)
         work = root / (mode + "-work")
         work.mkdir(exist_ok=True)
         env = dict(os.environ, HOME=str(home), PATH=str(tools)+":"+os.environ["PATH"],
-                   BOOT_LOG=str(log), BOOT_MODE=mode, TMPDIR=str(work))
+                   BOOT_LOG=str(log), BOOT_MODE=mode, BOOT_SOURCE=str(source), TMPDIR=str(work))
         command = ([shell, "-c", 'cat "$argv[1]" | sh', str(source / "install.sh")]
                    if shell == "fish" else
                    [shell, "-c", 'cat "$1" | sh' if latest else 'cat "$1" | sh -s -- "$2"',
@@ -108,13 +163,14 @@ elif name=="makepkg":
         os.close(master)
         calls=[] if not log.exists() else [json.loads(line) for line in log.read_text().splitlines()]
         return code, bytes(output), calls
-    for mode in ("download", "mismatch", "integrity", "build", "prerequisite", "nixos", "toolchain-fail"):
+    for mode in ("download", "mismatch", "integrity", "build", "prerequisite", "nixos", "toolchain-fail", "hyprmon-build", "hyprmon-install", "existing-hyprmon", "existing-session", "session-query-fail", "remote", "inactive-tty", "active-uwsm", "session-fail", "finalize-fail", "config-error", "core-service-fail", "shell-not-ready", "kitty-fail", "tui-fail", "core-defaults-fail"):
         code, output, calls = run(mode)
         assert code != 0 and b"BOOT_MANAGER" not in output, (mode, output)
-        if mode in ("prerequisite", "nixos"):
+        if mode in ("prerequisite", "nixos", "existing-hyprmon", "existing-session", "session-query-fail", "remote", "inactive-tty"):
             assert not any(call[0]=="git" for call in calls)
     for answer in (b"no\n", b"\x03"):
         code, output, calls=run(answer=answer)
+        assert b"full distro upgrade (pacman -Syu)" in output, output
         assert b"BOOT_MANAGER" not in output and not any(call[0]=="git" for call in calls)
     code, output, calls=run(tty=False)
     assert code != 0 and not any(call[0]=="git" for call in calls)
@@ -148,6 +204,18 @@ elif name=="makepkg":
     assert not any(call[0] == "rustup" for call in calls), "working toolchain was replaced"
     fetch=next(call for call in calls if call[0]=="git" and "fetch" in call)
     assert fetch[-1]==revision
+    transactions=[call for call in calls if call[0]=="sudo"]
+    assert len(transactions)==2 and transactions[0][2]=="-Syu" and transactions[1][2]=="-U", transactions
+    assert all(name not in transactions[0] for name in ("yazi", "flatpak", "neovim", "imv", "steam", "starship", "fastfetch", "gamescope"))
+    prepared = next(i for i, call in enumerate(calls) if call == ["icewine-manage-backend", "onboarding-prepare"])
+    started = next(i for i, call in enumerate(calls) if call[:2] == ["uwsm", "start"])
+    shell_ready = next(i for i, call in enumerate(calls) if call[0] == "qs")
+    manager = next(i for i, call in enumerate(calls) if call[0] == "icewine-manage")
+    assert calls.index(transactions[1]) < prepared < started < shell_ready < manager
+    assert not any(call == ["uwsm", "stop"] for call in calls), "successful Apply forced session logout"
+    code, output, calls = run("tui-cancel")
+    assert code == 0 and ["uwsm", "stop"] in calls, output
     builds=[call for call in calls if call[0]=="makepkg"]
+    assert len(builds)==2
     assert builds and all("-s" not in call and "-i" not in call and "--syncdeps" not in call and "--install" not in call for call in builds)
-print("PASS: piped TTY bootstrap, revision/integrity, cancellation, NixOS ownership and acquisition/build/prerequisite failures")
+print("PASS: TTY prerequisites, core/session ordering, owned session and shell readiness, no forced successful logout, cancellation/recovery/retry; revision/integrity, cancellation, NixOS ownership and acquisition/build/prerequisite failures")

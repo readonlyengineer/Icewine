@@ -1,0 +1,221 @@
+diff --git a/hyprland_test.go b/hyprland_test.go
+index 8c60b7c..34a4b30 100644
+--- a/hyprland_test.go
++++ b/hyprland_test.go
+@@ -2,8 +2,10 @@ package main
+ 
+ import (
+ 	"os"
++	"os/exec"
+ 	"path/filepath"
+ 	"strings"
++	"sync"
+ 	"testing"
+ )
+ 
+@@ -510,6 +512,9 @@ func TestWriteLuaConfigDoesNotDuplicateRequire(t *testing.T) {
+ 		t.Fatal(err)
+ 	}
+ 	mainConfig := string(mainData)
++	if mainConfig != input {
++		t.Fatalf("existing Lua entry changed after repeated saves: %q", mainConfig)
++	}
+ 	if strings.Count(mainConfig, `require("hyprmon")`) != 1 {
+ 		t.Fatalf("hyprland.lua should contain exactly one managed require after repeated writes:\n%s", mainConfig)
+ 	}
+@@ -538,3 +543,195 @@ func TestEnsureHyprmonLuaRequireIgnoresCommentedRequire(t *testing.T) {
+ 		t.Fatalf("expected managed require block:\n%s", got)
+ 	}
+ }
++
++// Exercise actual IPC dispatch without talking to a compositor.
++func TestApplySaveReloadWithFakeHyprctl(t *testing.T) {
++	sh, err := exec.LookPath("sh")
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, extension := range []string{"lua", "conf"} {
++		t.Run(extension, func(t *testing.T) {
++			dir := t.TempDir()
++			logPath := filepath.Join(dir, "calls")
++			fake := "#!" + sh + "\nprintf '%s\n' \"$@\" >> \"$HYPRMON_TEST_LOG\"\n"
++			if err := os.WriteFile(filepath.Join(dir, "hyprctl"), []byte(fake), 0700); err != nil {
++				t.Fatal(err)
++			}
++			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
++			t.Setenv("HYPRMON_TEST_LOG", logPath)
++			configPath := filepath.Join(dir, "hyprland."+extension)
++			input := "-- unrelated user setting\nrequire(\"hyprmon\")\n"
++			if extension == "conf" {
++				input = "# unrelated user setting\n"
++			}
++			if err := os.WriteFile(configPath, []byte(input), 0600); err != nil {
++				t.Fatal(err)
++			}
++			t.Setenv("HYPRLAND_CONFIG", configPath)
++			monitor := Monitor{Name: "DP-1", PxW: 1920, PxH: 1080, Hz: 60, Scale: 1}
++			if err := applyMonitor(monitor); err != nil {
++				t.Fatal(err)
++			}
++			monitor.Active = true
++			if err := applyMonitor(monitor); err != nil {
++				t.Fatal(err)
++			}
++			if err := writeConfig([]Monitor{monitor}); err != nil {
++				t.Fatal(err)
++			}
++			if err := reloadConfig(); err != nil {
++				t.Fatal(err)
++			}
++			calls, err := os.ReadFile(logPath)
++			if err != nil {
++				t.Fatal(err)
++			}
++			want := "keyword\nmonitor\nDP-1,disable\nkeyword\nmonitor\nDP-1,1920x1080@60.00,0x0,1.00\nreload\n"
++			if extension == "lua" {
++				want = "eval\nhl.monitor({ output = \"DP-1\", disabled = true })\neval\nhl.monitor({ output = \"DP-1\", mode = \"1920x1080@60.00\", position = \"0x0\", scale = 1.00, disabled = false })\nreload\n"
++			}
++			if string(calls) != want {
++				t.Fatalf("IPC calls = %q, want %q", calls, want)
++			}
++			entry, err := os.ReadFile(configPath)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if extension == "lua" && string(entry) != input {
++				t.Fatalf("save changed unrelated Lua entry: %q", entry)
++			}
++		})
++	}
++}
++
++// Bounded diagnostic for issue #92: asynchronous Save commands may overlap.
++// A passing run cannot establish absence of filesystem interleavings.
++func TestConcurrentLuaSavesPreserveEntry(t *testing.T) {
++	dir := t.TempDir()
++	configPath := filepath.Join(dir, "hyprland.lua")
++	t.Setenv("HYPRLAND_CONFIG", configPath)
++	input := "-- unrelated user configuration\nrequire(\"hyprmon\")\n"
++	monitors := []Monitor{{Name: "DP-1", Active: true, PxW: 1920, PxH: 1080, Hz: 60, Scale: 1}}
++	for round := 0; round < 64; round++ {
++		// Keep the original include-present reproduction and cover first saves too.
++		input := input
++		if round%2 == 1 {
++			input = "-- unrelated user configuration\n"
++		}
++		want := ensureHyprmonLuaRequire(input)
++		if err := os.WriteFile(configPath, []byte(input), 0600); err != nil {
++			t.Fatal(err)
++		}
++		var workers sync.WaitGroup
++		start := make(chan struct{})
++		errors := make(chan error, 32)
++		for i := 0; i < 32; i++ {
++			workers.Add(1)
++			go func() {
++				defer workers.Done()
++				<-start
++				errors <- writeConfig(monitors)
++			}()
++		}
++		close(start)
++		workers.Wait()
++		close(errors)
++		for err := range errors {
++			if err != nil {
++				t.Fatal(err)
++			}
++		}
++		entry, err := os.ReadFile(configPath)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if string(entry) != want {
++			t.Fatalf("concurrent saves changed Lua entry in round %d: got %q, want %q", round, entry, want)
++		}
++		sidecar, err := os.ReadFile(filepath.Join(dir, "hyprmon.lua"))
++		if err != nil {
++			t.Fatal(err)
++		}
++		if !strings.Contains(string(sidecar), `hl.monitor({ output = "DP-1", mode = "1920x1080@60.00", position = "0x0", scale = 1.00, disabled = false })`) {
++			t.Fatalf("concurrent saves damaged sidecar in round %d: %q", round, sidecar)
++		}
++	}
++}
++
++func TestLuaSavePreservesManagedFiles(t *testing.T) {
++	for _, tc := range []struct {
++		name           string
++		importPresent  bool
++		managedSidecar bool
++		wantError      bool
++	}{
++		{"managed-main-writable-sidecar", true, false, false},
++		{"managed-main-and-sidecar", true, true, true},
++		{"managed-main-missing-import", false, false, true},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			dir := t.TempDir()
++			mainPath := filepath.Join(dir, "hyprland.lua")
++			mainTarget := filepath.Join(dir, "managed-main")
++			input := "-- declarative main\n"
++			if tc.importPresent {
++				input += "require(\"hyprmon\")\n"
++			}
++			if err := os.WriteFile(mainTarget, []byte(input), 0444); err != nil {
++				t.Fatal(err)
++			}
++			if err := os.Symlink(mainTarget, mainPath); err != nil {
++				t.Fatal(err)
++			}
++			sidecarPath := filepath.Join(dir, "hyprmon.lua")
++			sidecarTarget := sidecarPath
++			const sidecarInput = "-- declarative monitor settings\n"
++			if tc.managedSidecar {
++				sidecarTarget = filepath.Join(dir, "managed-sidecar")
++				// Home Manager can insert another symlink before the store file.
++				link := filepath.Join(dir, "home-manager-sidecar")
++				if err := os.Symlink(sidecarTarget, link); err != nil {
++					t.Fatal(err)
++				}
++				if err := os.Symlink(link, sidecarPath); err != nil {
++					t.Fatal(err)
++				}
++			}
++			mode := os.FileMode(0600)
++			if tc.managedSidecar {
++				mode = 0444
++			}
++			if err := os.WriteFile(sidecarTarget, []byte(sidecarInput), mode); err != nil {
++				t.Fatal(err)
++			}
++			t.Setenv("HYPRLAND_CONFIG", mainPath)
++			err := writeConfig([]Monitor{{Name: "DP-1", Active: false}})
++			if (err != nil) != tc.wantError {
++				t.Fatalf("Save error = %v, want error %v", err, tc.wantError)
++			}
++			got, err := os.ReadFile(mainTarget)
++			if err != nil || string(got) != input {
++				t.Fatalf("main changed: %q, %v", got, err)
++			}
++			if link, err := os.Readlink(mainPath); err != nil || link != mainTarget {
++				t.Fatalf("main symlink changed: %q, %v", link, err)
++			}
++			got, err = os.ReadFile(sidecarPath)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if tc.wantError && string(got) != sidecarInput {
++				t.Fatalf("failed Save changed sidecar: %q", got)
++			}
++			if !tc.wantError && !strings.Contains(string(got), `hl.monitor({ output = "DP-1", disabled = true })`) {
++				t.Fatalf("writable sidecar not saved: %q", got)
++			}
++			if tc.managedSidecar {
++				if _, err := os.Readlink(sidecarPath); err != nil {
++					t.Fatalf("sidecar symlink replaced: %v", err)
++				}
++			}
++		})
++	}
++}

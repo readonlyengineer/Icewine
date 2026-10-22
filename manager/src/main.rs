@@ -1214,7 +1214,7 @@ fn confirm(title: &str, lines: Vec<String>) -> io::Result<bool> {
     result
 }
 
-fn bootstrap(directory: &str, revision: &str) -> Result<ExitCode, Box<dyn std::error::Error>> {
+fn prepared(directory: &str, revision: &str) -> Result<(), Box<dyn std::error::Error>> {
     let directory = fs::canonicalize(directory)?;
     if revision.len() != 40 || !revision.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
         || fs::read_to_string(directory.join("source-revision"))?.trim() != revision {
@@ -1233,26 +1233,8 @@ fn bootstrap(directory: &str, revision: &str) -> Result<ExitCode, Box<dyn std::e
     if archives.len() != 1 || !archives[0].is_file() || archives[0].is_symlink() {
         return Err("Expected one regular Icewine base archive; preparation incomplete".into());
     }
-    if !confirm(" Icewine onboarding: base package ", vec![
-        "Experimental Arch/CachyOS x86_64; installed sessions remain unqualified.".into(),
-        format!("Source commit: {revision}"),
-        "Prerequisites prepared; keep a recovery TTY (Ctrl+Alt+F2).".into(),
-        "Plan: sudo pacman -U the prepared base archive and its runtime dependencies.".into(),
-        format!("Archive: {}", archives[0].display()),
-        "Pacman will show its transaction and request approval. User configuration is untouched here.".into(),
-        "Then review the utility selections in the installed manager before applying them.".into(),
-        "Cancel retains prerequisites/build files; the base package and user configuration are unchanged.".into(),
-    ])? {
-        eprintln!("Base installation cancelled. Prerequisites may be installed; retry the bootstrap to continue.");
-        return Ok(ExitCode::SUCCESS);
-    }
-    let status = Command::new("sudo").args(["pacman", "-U"]).arg(&archives[0]).status()?;
-    if !status.success() {
-        eprintln!("Base installation failed; packages may have changed. Retained archives: {}. Retry this bootstrap or inspect pacman output before proceeding.", directory.display());
-        return Ok(ExitCode::FAILURE);
-    }
-    let status = Command::new("icewine-manage").arg("--onboard").env("ICEWINE_PACKAGE_DIR", &directory).status()?;
-    Ok(if status.success() { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+    std::env::set_var("ICEWINE_PACKAGE_DIR", &directory);
+    Ok(())
 }
 
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
@@ -1260,8 +1242,17 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         return Err("A terminal is required; run icewine from a TTY".into());
     }
     let args = std::env::args().collect::<Vec<_>>();
-    if args.len() == 4 && args[1] == "--bootstrap" { return bootstrap(&args[2], &args[3]); }
-    let onboarding = args.len() == 2 && args[1] == "--onboard";
+    let bootstrap = args.len() == 4 && args[1] == "--bootstrap";
+    if bootstrap { prepared(&args[2], &args[3])?; }
+    let onboarding = bootstrap || (args.len() == 2 && args[1] == "--onboard");
+    if onboarding && (std::env::var("ICEWINE_ONBOARDING_STAGE").as_deref() != Ok("session")
+        || std::env::var("WAYLAND_DISPLAY").unwrap_or_default().is_empty()
+        || std::env::var("HYPRLAND_INSTANCE_SIGNATURE").unwrap_or_default().is_empty()) {
+        return Err("Full onboarding runs inside its session; retry the retained onboard launcher from a local TTY".into());
+    }
+    let onboarding_result = if onboarding {
+        Some(fs::canonicalize(std::env::var("ICEWINE_ONBOARDING_DIR")?)?.join("applied"))
+    } else { None };
     if onboarding { std::env::set_var("ICEWINE_ONBOARDING", "1"); }
     else { std::env::remove_var("ICEWINE_ONBOARDING"); }
     if args.len() != 1 && !onboarding { return Err("Usage: icewine".into()); }
@@ -1316,23 +1307,20 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         plan.push("Earlier package/file changes can remain after failure or interruption. Retry Apply after resolving the error.".into());
         plan.push("Cancel leaves utility choices unapplied; earlier Appearance changes remain.".into());
         if !review_utilities(plan)? {
-            if onboarding { eprintln!("Onboarding Apply cancelled. Base package remains installed; retry with ICEWINE_PACKAGE_DIR=<retained-build> icewine-manage --onboard."); }
+            if onboarding { eprintln!("Onboarding Apply cancelled. Prepared packages remain available; retry the retained onboard launcher."); }
             return Ok(ExitCode::SUCCESS);
         }
         let status = Command::new("icewine-manage-backend").arg("apply")
             .args(selected.iter().map(|(id, value)| format!("{id}={value}")))
             .arg(format!("steam={}", STEAM[steam]))
             .arg(format!("overwrite={overwrite}")).status()?;
-        if onboarding && status.success() && confirm(" Icewine ready: reboot? ", vec![
-            "Apply completed. Reboot to the authenticated Icewine login.".into(),
-            "I: reboot now; Esc/Q: stay in this TTY and reboot later.".into(),
-        ])? {
-            let reboot = Command::new("sudo").args(["systemctl", "reboot"]).status()?;
-            if !reboot.success() { return Err("Reboot failed; setup is retained. Reboot later from this TTY.".into()); }
+        if onboarding && status.success() {
+            fs::write(onboarding_result.as_ref().unwrap(), "applied\n")?;
+            println!("Apply completed. The Icewine desktop stays running; use its session-exit action to return to the TTY.");
         }
         return Ok(if status.success() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
     }
-    if onboarding { eprintln!("Onboarding cancelled before Apply. Base package remains installed; retry with ICEWINE_PACKAGE_DIR=<retained-build> icewine-manage --onboard."); }
+    if onboarding { eprintln!("Onboarding cancelled before Apply. Prepared packages remain available; retry the retained onboard launcher."); }
     Ok(ExitCode::SUCCESS)
 }
 

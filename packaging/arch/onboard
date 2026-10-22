@@ -1,0 +1,89 @@
+#!/bin/sh
+set -eu
+fail() { printf 'Icewine onboarding: %s\n' "$*" >&2; exit 1; }
+case ${1:-} in
+  tui)
+    [ "${ICEWINE_ONBOARDING_STAGE:-}" = session ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || fail 'Missing owned session context'
+    status=0
+    icewine-manage --bootstrap "$ICEWINE_PACKAGE_DIR" "$ICEWINE_SOURCE_REVISION" || status=$?
+    # Preserve the frontend status independently of the terminal's exit status.
+    if [ ! -f "$ICEWINE_ONBOARDING_RESULT" ]; then
+        printf '%s\n' "$status" > "$ICEWINE_ONBOARDING_DIR/exit-code"
+    fi
+    exit "$status"
+    ;;
+  terminal)
+    [ "${ICEWINE_ONBOARDING_STAGE:-}" = session ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || fail 'Missing owned session context'
+    # UWSM cleans up the owned compositor, services and activation environment.
+    finish() {
+        code=$?
+        if [ ! -f "$ICEWINE_ONBOARDING_RESULT" ]; then
+            if [ ! -f "$ICEWINE_ONBOARDING_DIR/exit-code" ]; then
+                printf '%s\n' "$code" > "$ICEWINE_ONBOARDING_DIR/exit-code"
+            fi
+            uwsm stop || true
+        fi
+    }
+    trap finish EXIT
+    errors=$(hyprctl -j configerrors)
+    [ "$(printf '%s' "$errors" | tr -d '[:space:]')" = '[]' ] || fail "Onboarding Lua config errors: $errors"
+    uwsm finalize ICEWINE_ONBOARDING_READY=1
+    systemctl --user start icewine-session.target
+    # Service activation is not shell readiness. Bound the actual IPC handshake.
+    ready=false
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        response=$(timeout 2 qs ipc call theme refresh 2>/dev/null) || response=
+        case $response in applied:*) ready=true; break ;; esac
+        sleep 1
+    done
+    [ "$ready" = true ] || fail 'Core shell/theme IPC did not become ready; inspect the user journal and retry'
+    export HYPRLAND_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprland.lua"
+    kitty --class icewine-onboarding --config NONE -o 'font_family=JetBrainsMono Nerd Font' \
+        sh "$ICEWINE_ONBOARDING_RUNNER" tui
+    ;;
+  *)
+    [ "$#" = 2 ] || fail 'Usage: sh onboard BUILD_DIRECTORY SOURCE_REVISION'
+    [ "$(id -u)" != 0 ] || fail 'Run as the desktop user, never root'
+    [ -t 0 ] && [ -t 1 ] || fail 'A local TTY is required'
+    [ -z "${WAYLAND_DISPLAY:-}${DISPLAY:-}${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || fail 'Leave the existing desktop session before retrying'
+    [ "$(loginctl show-session self -p Type --value)" = tty ] || fail 'A local TTY login is required'
+    [ "$(loginctl show-session self -p Remote --value)" = no ] || fail 'Remote onboarding is unsupported'
+    [ "$(loginctl show-session self -p Active --value)" = yes ] || fail 'Switch to this TTY before onboarding'
+    sessions=$(loginctl list-sessions --no-legend --no-pager) || fail 'Cannot check existing sessions'
+    printf '%s\n' "$sessions" | while read -r session rest; do
+        [ -n "$session" ] || continue
+        kind=$(loginctl show-session "$session" -p Type --value) || fail 'Cannot inspect an existing session'
+        case $kind in
+            wayland|x11) fail 'Preserve existing graphical sessions; log out before onboarding' ;;
+        esac
+    done
+    if uwsm check is-active; then fail 'A compositor or graphical session is already active'; fi
+    build=$(CDPATH= cd -- "$1" && pwd)
+    [ "$(cat "$build/source-revision")" = "$2" ] || fail 'Prepared source revision mismatch'
+    case $2 in *[!0-9a-f]*|'') fail 'Invalid prepared revision' ;; esac
+    [ "${#2}" = 40 ] || fail 'Invalid prepared revision'
+    export ICEWINE_PACKAGE_DIR="$build" ICEWINE_SOURCE_REVISION="$2"
+    ICEWINE_ONBOARDING_RUNNER=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
+    export ICEWINE_ONBOARDING_RUNNER ICEWINE_ONBOARDING_STAGE=session
+    ICEWINE_ONBOARDING_DIR=$(mktemp -d "$build/onboarding.XXXXXXXX")
+    export ICEWINE_ONBOARDING_DIR ICEWINE_ONBOARDING_RESULT="$ICEWINE_ONBOARDING_DIR/applied"
+    # Do not declare startup ready if the Lua callback never runs.
+    export UWSM_WAIT_VARNAMES=ICEWINE_ONBOARDING_READY UWSM_WAIT_VARNAMES_TIMEOUT=15
+    trap 'code=$?; printf "Session exit: %s; retained preparation: %s\nRetry: sh \"%s\" \"%s\" \"%s\"\n" "$code" "$build" "$ICEWINE_ONBOARDING_RUNNER" "$build" "$ICEWINE_SOURCE_REVISION"' EXIT
+    icewine-manage-backend onboarding-prepare
+    mkdir "$ICEWINE_ONBOARDING_DIR/lua"
+    ln -s /usr/share/icewine/hyprland "$ICEWINE_ONBOARDING_DIR/lua/icewine"
+    cp "$build/src/icewine/packaging/arch/onboarding.lua" "$ICEWINE_ONBOARDING_DIR/onboard.lua"
+    printf '%s\n' 'Starting the Icewine onboarding desktop. Keep Ctrl+Alt+F2 for recovery.'
+    status=0
+    uwsm start -U run -g -1 -eD Icewine:Hyprland -N Icewine -- start-hyprland -- --config "$ICEWINE_ONBOARDING_DIR/onboard.lua" || status=$?
+    if [ -f "$ICEWINE_ONBOARDING_DIR/exit-code" ]; then
+        status=$(cat "$ICEWINE_ONBOARDING_DIR/exit-code")
+        printf 'Onboarding ended before Apply (status %s); core packages/defaults remain. Inspect: journalctl --user -b\n' "$status"
+    elif [ ! -f "$ICEWINE_ONBOARDING_RESULT" ]; then
+        printf '%s\n' 'Session ended before Apply; core packages/defaults remain. Inspect: journalctl --user -b'
+        [ "$status" != 0 ] || status=1
+    fi
+    exit "$status"
+    ;;
+esac

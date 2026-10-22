@@ -459,6 +459,25 @@ def onboarding_login():
             raise ValueError("A login service is running; headless onboarding requires a TTY-only host")
 
 
+def prepare_onboarding(config, data, state):
+    if platform.freedesktop_os_release().get("ID") not in {"arch", "cachyos"}:
+        raise ValueError("session onboarding supports only Arch/CachyOS")
+    onboarding_login()  # Read-only ownership preflight; service changes stay at Apply.
+    defaults = os.environ.get("ICEWINE_DEFAULT_FILES", "/usr/share/icewine/defaults")
+    assets = Path(os.environ.get("ICEWINE_THEME_ASSETS", "/usr/share/icewine/theme"))
+    themes = theme.installed(assets)
+    theme_id, _ = theme.effective(state, themes)
+    if not theme.render_readonly(config):
+        theme.publish(config, theme.render_theme(assets, themes[theme_id], theme.transparency_level(state)))
+    for app in ("hypr", "quickshell", "wallpapers"):
+        theme.install_defaults(defaults, config, data, state, False, app)
+    if not (config / "icewine/current/Theme.lua").is_file():
+        raise ValueError("Core theme is unavailable; preserve personal files and inspect the retained preparation")
+    if not widget_state(config, state)[2]:
+        raise ValueError("Custom Quickshell files preserved; full onboarding requires the shipped core Settings.qml and shell.qml")
+    print("Prepared missing core defaults; existing personal files and utility selections are preserved.")
+
+
 def apply(selected, overwrite, readonly, previous, config, data, state):
     if readonly and selected != previous:
         raise ValueError("utility selections are read-only (host policy or symlink)")
@@ -485,14 +504,22 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
         if selected["steam"] == "flatpak" or selected["screenshot"] or selected["media"]:
             packages.append("flatpak")
         if onboarding:
-            packages.append("icewine-login")
+            # Native split metadata packages keep optional dependencies in the
+            # same -U transaction as the prepared desktop/login archives.
+            packages = ["icewine-login"]
+            utilities = {"terminal": "terminal", "filemanager": "filemanager",
+                         "shellExtras": "shell-extras", "texteditor": "editor",
+                         "screenshot": "screenshot", "media": "media", "gamescope": "gamescope"}
+            packages += ["icewine-" + package for feature, package in utilities.items() if selected[feature]]
+            if selected["steam"] != "none":
+                packages.append("icewine-steam-" + selected["steam"])
         local = []
         package_dir = os.environ.get("ICEWINE_PACKAGE_DIR")
-        for package in ("icewine-session", "icewine-handheld", "icewine-keyboard", "icewine-controller-idle", "icewine-login"):
+        for package in (list(packages) if onboarding else ("icewine-session", "icewine-handheld", "icewine-keyboard", "icewine-controller-idle", "icewine-login")):
             if package not in packages:
                 continue
             archives = sorted(path for path in Path(package_dir).glob(package + "-[0-9]*.pkg.tar.*") if path.suffix != ".sig") if package_dir else []
-            if len(archives) > 1:
+            if len(archives) > 1 or (onboarding and (len(archives) != 1 or not archives[0].is_file() or archives[0].is_symlink())):
                 raise ValueError(f"expected one {package} archive in {package_dir}")
             if archives:
                 # Prepared source takes precedence even at the same package version.
@@ -509,13 +536,21 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
             apps = (["com.valvesoftware.Steam"] if selected["steam"] == "flatpak" else []) + (["be.alexandervanhee.gradia"] if selected["screenshot"] else [])
             apps += ["org.videolan.VLC"] if selected["media"] else []
             run(["flatpak", "install", "--user", "--noninteractive", "flathub", *apps])
-    shell_running = False
-    changed = any(applied[name] != selected[name] for name in ("steam", "gamescope", "handheld")) or selected["handheld"] or (state / "handheld-rules.sha256").exists()
+    runtime_unit = None
+    # Each onboarding session starts optional runtime off, even when a previous
+    # successful Apply saved the same choices. Confirm them in this session too.
+    changed = onboarding or any(applied[name] != selected[name] for name in ("steam", "gamescope", "handheld")) or selected["handheld"] or (state / "handheld-rules.sha256").exists()
     try:
         if not readonly and changed:
-            shell_running = subprocess.run(["systemctl", "--user", "is-active", "--quiet", "icewine.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
-            if shell_running:
-                run(["systemctl", "--user", "stop", "icewine.service"])
+            # The native target Requires the shell: stopping just the shell also
+            # stops the target and its PartOf helpers. Restore the active group.
+            # A standalone shell still has its original, narrower lifecycle.
+            for unit in ("icewine-session.target", "icewine.service"):
+                if subprocess.run(["systemctl", "--user", "is-active", "--quiet", unit], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                    runtime_unit = unit
+                    break
+            if runtime_unit:
+                run(["systemctl", "--user", "stop", runtime_unit])
             if applied["handheld"] or (state / "handheld-rules.sha256").exists():
                 # Stop routing before removing its permission; ExecStopPost restores
                 # controller defaults even after a failed oneshot start.
@@ -566,19 +601,19 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
             if selected["handheld"]:
                 run(["sudo", "systemctl", "start", "inputplumber.service"])
                 run(["systemctl", "--user", "enable", *HANDHELD_UNITS])
-                if shell_running:
+                if runtime_unit:
                     run(["systemctl", "--user", "start", *reversed(HANDHELD_UNITS)])
-            if shell_running:
-                run(["systemctl", "--user", "start", "icewine.service"])
+            if runtime_unit:
+                run(["systemctl", "--user", "start", runtime_unit])
     except Exception:
         if not readonly and changed:
             # Leave the shell stopped and routes restored on a failed transition.
             # A retained ownership record makes a later Apply retry teardown.
-            if shell_running:
+            if runtime_unit:
                 try:
-                    run(["systemctl", "--user", "stop", "icewine.service"])
+                    run(["systemctl", "--user", "stop", runtime_unit])
                 except subprocess.CalledProcessError as error:
-                    print(f"Failed to stop Icewine shell: {error}", file=sys.stderr)
+                    print(f"Failed to stop Icewine runtime: {error}", file=sys.stderr)
             if selected["handheld"] or applied["handheld"] or (state / "handheld-rules.sha256").exists():
                 try:
                     run(["systemctl", "--user", "disable", "--now", *HANDHELD_UNITS])
@@ -1029,13 +1064,14 @@ def main(argv):
         return
     hotkey_request = bool(argv) and argv[0] == "hotkeys-apply"
     widget_request = bool(argv) and argv[0] == "widgets-apply"
-    readonly, previous = selections(state) if not (widget_request or hotkey_request) else (False, {})
+    prepare_request = argv == ["onboarding-prepare"]
+    readonly, previous = selections(state) if not (widget_request or hotkey_request or prepare_request) else (False, {})
     if argv == ["state"]:
         print(" ".join(f"{name}={str(bit).lower()}" for name, bit in {"readonly": readonly, **previous}.items()))
         return
-    if not (widget_request or hotkey_request) and (not argv or argv[0] != "apply"):
+    if not (widget_request or hotkey_request or prepare_request) and (not argv or argv[0] != "apply"):
         raise ValueError("invalid manager request")
-    if not (widget_request or hotkey_request):
+    if not (widget_request or hotkey_request or prepare_request):
         fields = {}
         for field in argv[1:]:
             name, separator, value = field.partition("=")
@@ -1055,6 +1091,9 @@ def main(argv):
     with os.fdopen(fd, "r+") as lock:
         # Ponytail: one lock serialises explicit Apply; split by root if contention matters.
         fcntl.flock(lock, fcntl.LOCK_EX)
+        if prepare_request:
+            prepare_onboarding(config, data, state)
+            return
         if hotkey_request:
             hotkeys(argv, state)
             return
@@ -1071,6 +1110,6 @@ if __name__ == "__main__":
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"Icewine Apply failed: {error}", file=sys.stderr)
         if sys.argv[1:2] == ["apply"]:
-            retry = "icewine-manage --onboard" if os.environ.get("ICEWINE_ONBOARDING") == "1" else "icewine"
+            retry = "the retained onboard launcher" if os.environ.get("ICEWINE_ONBOARDING") == "1" else "icewine"
             print(f"Earlier packages/files may have changed; no complete rollback occurred. Resolve the error, then reopen {retry} and retry Apply with overwrite off. Keep the local split-package directory available.", file=sys.stderr)
         sys.exit(1)

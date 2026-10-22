@@ -212,7 +212,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, onboard=False, reboot=False, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None, hotkeys=None, hotkey_readonly=False, hotkey_error="", default_apps=None, default_readonly=(), default_error="", default_empty=False, default_many=False):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, onboard=False, reboot=False, in_session=True, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None, hotkeys=None, hotkey_readonly=False, hotkey_error="", default_apps=None, default_readonly=(), default_error="", default_empty=False, default_many=False):
         global last_output, last_frames, last_widget_calls, all_last_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.write_text("")  # A run may legitimately invoke no external tools.
@@ -241,6 +241,13 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                    TUI_COMMAND_FAIL=str(int(command_fail)), TUI_DELIVERY_FAIL=str(int(delivery_fail)),
                    TUI_APPEARANCE=str(appearance_state), XDG_DATA_HOME=str(root / "data"), XDG_STATE_HOME=str(root / "state"),
                    ICEWINE_WALLPAPER_DATA_HOME=str(root / "data"), TMPDIR=str(root))
+        session_stage = root / "onboarding-stage"
+        session_stage.mkdir(exist_ok=True)
+        (session_stage / "applied").unlink(missing_ok=True)
+        env.pop("ICEWINE_ONBOARDING_STAGE", None)
+        if (onboard or bootstrap) and in_session:
+            env.update(ICEWINE_ONBOARDING_STAGE="session", ICEWINE_ONBOARDING_DIR=str(session_stage),
+                       WAYLAND_DISPLAY="wayland-fixture", HYPRLAND_INSTANCE_SIGNATURE="fixture")
         arguments = [str(binary)]
         if bootstrap:
             package_dir = Path(tempfile.mkdtemp(dir=root))
@@ -299,12 +306,11 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             if sent and not reviewed and b"Utilities / Review" in rendered:
                 os.write(master, b"i" if confirm else b"\x1b")
                 reviewed = True
-            if onboard and reviewed and not reboot_prompted and b"Icewine ready: reboot?" in rendered:
+            if (onboard or bootstrap) and reviewed and not reboot_prompted and b"Icewine ready: reboot?" in rendered:
                 os.write(master, b"i" if reboot else b"\x1b")
                 reboot_prompted = True
             if not sent and frames:
                 assert (b"Icewine needs an 80 x 24 terminal." if size[1] < 80 or size[0] < 24 else
-                        b"Icewine onboarding: base package" if bootstrap else
                         b"Utilities") in rendered
                 send_keys(keys)
                 sent = True
@@ -359,18 +365,18 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert code == (0 if valid and apply_exit == 0 else 1), output.decode(errors="replace")
         if bootstrap:
             if not valid:
-                assert not sent and (b"preparation incomplete" in output or b"Invalid prepared source revision" in output)
+                assert not sent and (b"preparation incomplete" in output or b"Invalid prepared source revision" in output or b"Full onboarding runs inside its session" in output)
                 assert tool_log.read_text() == ""
                 return []
             if size[1] < 80 or size[0] < 24:
                 assert sent and b"Resize to continue; Esc: cancel." in rendered
             else:
                 assert sent
-            if apply_exit: assert b"Base installation failed; packages may have changed" in output
+            all_last_calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
             return [] if not tool_log.exists() else [json.loads(line) for line in tool_log.read_text().splitlines()]
         if not valid:
             assert not sent
-            return [call for line in log.read_text().splitlines() if (call := json.loads(line))[0] != "appearance-state"]
+            return [call for line in (log.read_text().splitlines() if log.exists() else []) if (call := json.loads(line))[0] != "appearance-state"]
         assert sent, output.decode(errors="replace")
         if size[1] < 80 or size[0] < 24:
             assert b"Resize to continue; Esc: cancel." in rendered
@@ -492,7 +498,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         run(tab+up+enter, state(), size=(24,80), widget_policy="invalid", confirm=False, capture="utilities-startup-error")
         assert any(b"[ Review and Apply ]" in frame for frame in last_frames)
         assert not any(call[0] == "apply" for call in all_last_calls)
-        run(esc, "", bootstrap=True, size=(24,80), capture="bootstrap")
+        run(esc, state(), bootstrap=True, size=(24,80), capture="bootstrap")
         print("PASS: spacing, wrapping, read-only values, status/action separation and native captures")
     def hotkey_bodies():
         bodies = []
@@ -707,28 +713,31 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         "icewine-next-1-x86_64.pkg.tar.zst", "icewine-1..2-1-x86_64.pkg.tar.zst",
         "icewine-1--x86_64.pkg.tar.zst", "icewine-1-1-x86_64.pkg.tar.")}
     assert run(b"", "", valid=False, bootstrap=True, archives=ignored) == []
-    calls = run(b"i", "", bootstrap=True, archives={base: "file", **ignored})
-    assert calls[0][:3] == ["sudo", "pacman", "-U"] and Path(calls[0][3]).name == base
-    assert len(calls) == 2 and calls[1] == ["icewine-manage", "--onboard"]
+    assert run(esc, state(), bootstrap=True, archives={base: "file", **ignored}) == []
+    assert not any(call[0] == "apply" for call in all_last_calls)
     assert run(b"", "", valid=False, bootstrap=True,
                archives={base: "file", "icewine-0.1-1-x86_64.pkg.tar.xz": "file"}) == []
     for kind in ("symlink", "directory", "fifo"):
         assert run(b"", "", valid=False, bootstrap=True, archives={base: kind}) == []
     for revision in ("a"*39, "A"*40, "g"*40, "b"*40):
         assert run(b"", "", valid=False, bootstrap=True, revision=revision) == []
-    assert run(b"\x1b", "", bootstrap=True) == []
-    assert run(b"\x03", "", bootstrap=True) == []
-    assert run(b"i\x1b", "", bootstrap=True, size=(24, 79)) == []
-    calls = run(b"i", "", bootstrap=True)
-    assert calls[0][:3] == ["sudo", "pacman", "-U"] and len(calls)==2
-    assert calls[1] == ["icewine-manage", "--onboard"]
-    calls = run(b"i", "", bootstrap=True, apply_exit=1)
-    assert len(calls)==1 and calls[0][0] == "sudo"
-    for reboot_choice in (False, True):
-        run(tab+up+enter, state(), onboard=True, reboot=reboot_choice)
-        assert b"Icewine ready: reboot?" in last_output
-        assert (["sudo", "systemctl", "reboot"] in tools()) == reboot_choice
-        assert applied([call for call in all_last_calls if call[0] in ("state", "apply")])["desktop"] == "true"
+    assert run(esc, state(), bootstrap=True) == []
+    assert run(b"\x03", state(), bootstrap=True) == []
+    assert run(b"i\x1b", state(), bootstrap=True, size=(24, 79)) == []
+    assert run(tab+up+enter, state(), bootstrap=True, confirm=False) == []
+    assert not any(call[0] == "apply" for call in all_last_calls)
+    assert run(tab+up+enter, state(), bootstrap=True) == []
+    assert any(call[0] == "apply" for call in all_last_calls)
+    assert not any(call[0] == "sudo" and "pacman" in call for call in all_last_calls)
+    assert run(tab+up+enter, state(), bootstrap=True, apply_exit=1) == []
+    assert any(call[0] == "apply" for call in all_last_calls)
+    assert run(b"", "", valid=False, onboard=True, in_session=False) == []
+    assert run(b"", "", valid=False, bootstrap=True, in_session=False) == []
+    run(tab+up+enter, state(), onboard=True)
+    assert b"Icewine ready: reboot?" not in last_output
+    assert ["sudo", "systemctl", "reboot"] not in tools()
+    assert (root / "onboarding-stage/applied").read_text() == "applied\n"
+    assert applied([call for call in all_last_calls if call[0] in ("state", "apply")])["desktop"] == "true"
     run(tab+up+enter, state(desktop=True, handheld=True, steam="native", gamescope=True), onboard=True)
     choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
     assert choices["desktop"] == "true" and choices["handheld"] == "false"

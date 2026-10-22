@@ -9,6 +9,19 @@ let
     url = "https://github.com/nowrep/wljoywake/archive/refs/tags/v0.3.tar.gz";
     sha256 = "d02d0d20c6b7712a17c4891b0c28e562d6f9021de28225979453242292be8230";
   };
+  hyprmonSource = pkgs.fetchurl {
+    name = "hyprmon-0.0.17.tar.gz";
+    url = "https://codeload.github.com/erans/hyprmon/tar.gz/refs/tags/v0.0.17";
+    sha256 = "5f14e8b8553f660c3c44f590b2c9f6f3056e86569690bd44b5797787fc22abb1";
+  };
+  # Reuse the released module graph/hash; makepkg below builds and tests the
+  # exact patched native recipe with this offline vendor tree.
+  hyprmonModules = (pkgs.buildGoModule {
+    pname = "icewine-hyprmon-modules";
+    version = "0.0.17";
+    src = hyprmonSource;
+    vendorHash = "sha256-U2fw/1tnRwmd9qzEcrMduZbbNU67NbDhG2Id5IHj5js=";
+  }).goModules;
 in pkgs.stdenv.mkDerivation {
   pname = "icewine-native-packages";
   version = "0.1";
@@ -20,7 +33,7 @@ in pkgs.stdenv.mkDerivation {
   dontWrapQtApps = true;
   nativeBuildInputs = [ pkgs.pacman pkgs.libarchive pkgs.fakeroot
     (pkgs.python3.withPackages (python: [ python.vdf ])) pkgs.lua pkgs.zstd pkgs.fish
-    pkgs.meson pkgs.ninja pkgs.pkg-config pkgs.wayland-scanner
+    pkgs.go pkgs.meson pkgs.ninja pkgs.pkg-config pkgs.wayland-scanner
     pkgs.qt6.qtdeclarative pkgs.cargo pkgs.rustc pkgs.rustPlatform.cargoSetupHook ];
   buildInputs = [ pkgs.wayland pkgs.wayland-protocols pkgs.udev ];
   buildPhase = ''
@@ -60,7 +73,16 @@ in pkgs.stdenv.mkDerivation {
   cp icewine/packaging/arch/dependencies/* dependencies/
   cp ${idleSource} dependencies/wljoywake-0.3.tar.gz
   (cd dependencies; makepkg --nodeps --nosign --config "$PWD/../makepkg.conf")
-  for archive in *.pkg.tar.zst dependencies/*.pkg.tar.zst; do
+  mkdir hyprmon
+  cp icewine/packaging/arch/hyprmon/* hyprmon/
+  cp ${hyprmonSource} hyprmon/hyprmon-0.0.17.tar.gz
+  (cd hyprmon
+    makepkg --nodeps --nosign --nobuild --config "$PWD/../makepkg.conf"
+    cp -r ${hyprmonModules} src/hyprmon-0.0.17/vendor
+    chmod -R u+w src/hyprmon-0.0.17/vendor
+    GOFLAGS=-mod=vendor makepkg --nodeps --nosign --check --noextract --config "$PWD/../makepkg.conf"
+  )
+  for archive in *.pkg.tar.zst dependencies/*.pkg.tar.zst hyprmon/*.pkg.tar.zst; do
     bsdtar -tf "$archive" > "$out/$(basename "$archive").files"
     bsdtar -xOf "$archive" .PKGINFO > "$out/$(basename "$archive").PKGINFO"
     cp "$archive" "$out/"
@@ -70,6 +92,6 @@ in pkgs.stdenv.mkDerivation {
   python icewine/tests/bootstrap.py "$PWD/icewine"
   python icewine/tests/onboarding-login.py "$PWD/icewine"
   python icewine/tests/handheld.py "$PWD/icewine"
-  python icewine/tests/arch-package.py "$PWD/icewine" "$PWD/pkg/icewine" "$PWD/pkg/icewine-session" "$PWD/pkg/icewine-handheld" "$PWD/dependencies/pkg/icewine-controller-idle" "$PWD/pkg/icewine-login"
+  python icewine/tests/arch-package.py "$PWD/icewine" "$PWD/pkg/icewine" "$PWD/pkg/icewine-session" "$PWD/pkg/icewine-handheld" "$PWD/dependencies/pkg/icewine-controller-idle" "$PWD/pkg/icewine-login" "$PWD/hyprmon/pkg/icewine-hyprmon"
 '';
 }

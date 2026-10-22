@@ -4,7 +4,7 @@ local emptyBrowser = arg[3] == "empty-browser"
 local legacyBrowser = not emptyBrowser and arg[3]
 local config = assert(os.getenv("XDG_CONFIG_HOME")) .. "/hypr/"
 local binds, generalLayout = 0, nil
-local environment, commands, callbacks, launches = {}, {}, {}, {}
+local environment, commands, callbacks, launches, descriptions, monitors = {}, {}, {}, {}, {}, {}
 local getenv = os.getenv
 os.getenv = function(name)
     if name == "EDITOR" then return "user-editor --flag" end
@@ -15,7 +15,9 @@ local action = setmetatable({}, { __index = function() return function() return 
 hl = setmetatable({
     dsp = setmetatable({ window = action, exec_cmd = function(command) return { command = command } end }, { __index = function() return function() return {} end end }),
     config = function(values) if values.general and values.general.layout then generalLayout = values.general.layout end end,
-    bind = function(key, action)
+    monitor = function(value) monitors[value.output] = true end,
+    bind = function(key, action, options)
+        if options and options.description then descriptions[options.description] = options end
         binds = binds + 1
         commands[key] = commands[key] or {}
         table.insert(commands[key], type(action) == "table" and action.command or false)
@@ -23,10 +25,35 @@ hl = setmetatable({
     end,
     env = function(name, value) environment[name] = value end,
     on = function(name, callback)
-        if debug.getinfo(callback, "S").source == "@" .. entry then callbacks[name] = callback end
+        if debug.getinfo(callback, "S").source == "@" .. entry
+            or (profile == "onboarding" and debug.getinfo(callback, "S").source == "@" .. arg[3]) then callbacks[name] = callback end
     end,
     exec_cmd = function(command) table.insert(launches, command) end,
 }, { __index = function() return function() end end })
+if profile == "onboarding" then
+    local original_dofile = dofile
+    dofile = function(path)
+        if path == "/usr/share/icewine/defaults/config/hypr/hyprland.lua" then path = assert(arg[4]) end
+        return original_dofile(path)
+    end
+    dofile(assert(arg[3]))
+    assert(binds > 20 and package.loaded["icewine.modules.Binds"] and package.loaded["icewine.modules.WindowPolicy"])
+    assert(descriptions["icewine:terminal"], "Managed hotkey action descriptions missing")
+    local helpers = 0
+    for name, options in pairs(descriptions) do
+        if name:match("^icewine:taskbar%-modifier%-") then
+            assert(options.non_consuming)
+            helpers = helpers + 1
+        end
+    end
+    assert(helpers > 0, "Managed taskbar modifier helpers missing")
+    assert(monitors["saved-monitor"], "Persistent real monitor preferences were not imported")
+    assert(callbacks["hyprland.start"] and not callbacks["config.reloaded"])
+    callbacks["hyprland.start"]()
+    assert(#launches == 1 and launches[1] == 'sh "$ICEWINE_ONBOARDING_RUNNER" terminal')
+    print("packaged Hyprland onboarding managed-bind/theme/monitor/session callback checks passed")
+    return
+end
 -- Exercise the real packaged bootstrap, then an ordinary inline override.
 assert(not io.open(config .. "modules/Binds.lua"), "Shared aliases leaked into user configuration")
 local file = assert(io.open(entry))

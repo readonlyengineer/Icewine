@@ -1,0 +1,63 @@
+diff --git a/hyprland.go b/hyprland.go
+index 6cf18bd..bd8cd44 100644
+--- a/hyprland.go
++++ b/hyprland.go
+@@ -9,6 +9,7 @@ import (
+ 	"path/filepath"
+ 	"strconv"
+ 	"strings"
++	"sync"
+ 	"time"
+ )
+ 
+@@ -609,7 +610,13 @@ func generateLuaMonitorRule(m Monitor) string {
+ 	return fmt.Sprintf("hl.monitor({ %s })", strings.Join(fields, ", "))
+ }
+ 
++// Ponytail: serialise in-process saves only; multi-process saves need file locking.
++var configWriteMu sync.Mutex
++
+ func writeConfig(monitors []Monitor) error {
++	configWriteMu.Lock()
++	defer configWriteMu.Unlock()
++
+ 	target, err := getConfigTarget()
+ 	if err != nil {
+ 		return fmt.Errorf("could not determine config path: %w", err)
+@@ -757,23 +764,27 @@ func writeLuaConfig(configPath string, monitors []Monitor) error {
+ 		return fmt.Errorf("failed to read lua config: %w", err)
+ 	}
+ 
+-	if err == nil {
+-		backupPath := fmt.Sprintf("%s.bak.%d", configPath, time.Now().Unix())
+-		if err := os.WriteFile(backupPath, input, backupFileMode); err != nil {
+-			return fmt.Errorf("failed to create backup: %w", err)
++	// An existing import needs no main-entry write, including managed symlinks.
++	if !hasHyprmonLuaRequire(string(input)) {
++		if err == nil {
++			backupPath := fmt.Sprintf("%s.bak.%d", configPath, time.Now().Unix())
++			if err := os.WriteFile(backupPath, input, backupFileMode); err != nil {
++				return fmt.Errorf("failed to create backup: %w", err)
++			}
++		}
++		// Fail on an unwritable main entry before changing the monitor sidecar.
++		mainConfig := ensureHyprmonLuaRequire(string(input))
++		if err := os.WriteFile(configPath, []byte(mainConfig), configFileMode); err != nil {
++			return fmt.Errorf("failed to write lua config include: %w", err)
+ 		}
+ 	}
+ 
+ 	sidecarPath := filepath.Join(configDir, "hyprmon.lua")
++	// Write through symlinks; never replace a declaratively managed sidecar.
+ 	if err := os.WriteFile(sidecarPath, []byte(generateLuaMonitorConfig(monitors)), configFileMode); err != nil {
+ 		return fmt.Errorf("failed to write lua monitor config: %w", err)
+ 	}
+ 
+-	mainConfig := ensureHyprmonLuaRequire(string(input))
+-	if err := os.WriteFile(configPath, []byte(mainConfig), configFileMode); err != nil {
+-		return fmt.Errorf("failed to write lua config include: %w", err)
+-	}
+-
+ 	return nil
+ }
+ 

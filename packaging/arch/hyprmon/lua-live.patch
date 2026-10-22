@@ -1,0 +1,97 @@
+From a1e525e8bd76e3fdfabb71d9fa6aff18905313b0 Mon Sep 17 00:00:00 2001
+From: Jens Forstmann <19289807+JensForstmann@users.noreply.github.com>
+Date: Wed, 10 Jun 2026 04:57:45 +0200
+Subject: [PATCH] fix: Apply config when using Lua config (#83)
+
+---
+ hyprland.go      | 20 ++++++++++++++++++++
+ hyprland_test.go | 10 +++++-----
+ 2 files changed, 25 insertions(+), 5 deletions(-)
+
+diff --git a/hyprland.go b/hyprland.go
+index 00cda1c..bf978d2 100644
+--- a/hyprland.go
++++ b/hyprland.go
+@@ -325,6 +325,25 @@ func parseMode(modeStr string) *Mode {
+ }
+ 
+ func applyMonitor(m Monitor) error {
++	target, err := getConfigTarget()
++	if err != nil {
++		return fmt.Errorf("could not determine config path: %w", err)
++	}
++
++	switch target.Format {
++	case configFormatLua:
++		return applyMonitorLua(m)
++	default:
++		return applyMonitorHyprlang(m)
++	}
++}
++
++func applyMonitorLua(m Monitor) error {
++	_, err := execHyprctl("eval", generateLuaMonitorRule(m))
++	return err
++}
++
++func applyMonitorHyprlang(m Monitor) error {
+ 	// Validate monitor name to prevent command injection
+ 	if !isValidMonitorName(m.Name) {
+ 		return fmt.Errorf("invalid monitor name: %s", m.Name)
+@@ -556,6 +575,7 @@ func generateLuaMonitorRule(m Monitor) string {
+ 		fmt.Sprintf("mode = %s", luaString(fmt.Sprintf("%dx%d@%.2f", m.PxW, m.PxH, m.Hz))),
+ 		fmt.Sprintf("position = %s", luaString(fmt.Sprintf("%dx%d", m.X, m.Y))),
+ 		fmt.Sprintf("scale = %.2f", m.Scale),
++		fmt.Sprintf("disabled = false"),
+ 	)
+ 
+ 	if m.IsMirrored && m.MirrorSource != "" {
+diff --git a/hyprland_test.go b/hyprland_test.go
+index 6903c00..8c60b7c 100644
+--- a/hyprland_test.go
++++ b/hyprland_test.go
+@@ -293,7 +293,7 @@ func TestGenerateLuaMonitorRule(t *testing.T) {
+ 	}
+ 
+ 	got := generateLuaMonitorRule(m)
+-	want := `hl.monitor({ output = "DP-1", mode = "2560x1440@144.00", position = "0x-200", scale = 1.25 })`
++	want := `hl.monitor({ output = "DP-1", mode = "2560x1440@144.00", position = "0x-200", scale = 1.25, disabled = false })`
+ 	if got != want {
+ 		t.Fatalf("generateLuaMonitorRule() = %q, want %q", got, want)
+ 	}
+@@ -323,7 +323,7 @@ func TestGenerateLuaMonitorRuleUsesDescFormat(t *testing.T) {
+ 	}
+ 
+ 	got := generateLuaMonitorRule(m)
+-	want := `hl.monitor({ output = "desc:Dell Inc. DELL U3419W 5HJB6T2", mode = "3440x1440@60.00", position = "0x0", scale = 1.00 })`
++	want := `hl.monitor({ output = "desc:Dell Inc. DELL U3419W 5HJB6T2", mode = "3440x1440@60.00", position = "0x0", scale = 1.00, disabled = false })`
+ 	if got != want {
+ 		t.Fatalf("generateLuaMonitorRule() = %q, want %q", got, want)
+ 	}
+@@ -342,7 +342,7 @@ func TestGenerateLuaMonitorRuleMirrored(t *testing.T) {
+ 	}
+ 
+ 	got := generateLuaMonitorRule(m)
+-	want := `hl.monitor({ output = "DP-2", mode = "1920x1080@60.00", position = "0x0", scale = 1.00, mirror = "DP-1" })`
++	want := `hl.monitor({ output = "DP-2", mode = "1920x1080@60.00", position = "0x0", scale = 1.00, disabled = false, mirror = "DP-1" })`
+ 	if got != want {
+ 		t.Fatalf("generateLuaMonitorRule() = %q, want %q", got, want)
+ 	}
+@@ -367,7 +367,7 @@ func TestGenerateLuaMonitorRuleAdvanced(t *testing.T) {
+ 	}
+ 
+ 	got := generateLuaMonitorRule(m)
+-	want := `hl.monitor({ output = "DP-1", mode = "3840x2160@60.00", position = "0x0", scale = 1.00, bitdepth = 10, cm = "hdr", sdrbrightness = 1.20, sdrsaturation = 0.90, vrr = 1, transform = 1 })`
++	want := `hl.monitor({ output = "DP-1", mode = "3840x2160@60.00", position = "0x0", scale = 1.00, disabled = false, bitdepth = 10, cm = "hdr", sdrbrightness = 1.20, sdrsaturation = 0.90, vrr = 1, transform = 1 })`
+ 	if got != want {
+ 		t.Fatalf("generateLuaMonitorRule() = %q, want %q", got, want)
+ 	}
+@@ -477,7 +477,7 @@ func TestWriteConfigUsesLuaSidecarForLua(t *testing.T) {
+ 		t.Fatalf("failed to read hyprmon.lua: %v", err)
+ 	}
+ 	sidecar := string(sidecarData)
+-	wantRule := `hl.monitor({ output = "DP-1", mode = "2560x1440@144.00", position = "0x-200", scale = 1.25 })`
++	wantRule := `hl.monitor({ output = "DP-1", mode = "2560x1440@144.00", position = "0x-200", scale = 1.25, disabled = false })`
+ 	if !strings.Contains(sidecar, wantRule) {
+ 		t.Fatalf("hyprmon.lua did not contain generated rule %q:\n%s", wantRule, sidecar)
+ 	}

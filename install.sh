@@ -21,16 +21,44 @@ esac
 [ "$(uname -m)" = x86_64 ] || fail 'Experimental bootstrap supports only x86_64'
 # Reopen the controlling terminal: stdin may still be the curl script pipe.
 exec </dev/tty >/dev/tty 2>&1 || exit 1
-for tool in pacman sudo tar sha256sum mktemp sed tr; do
+for tool in pacman sudo tar sha256sum mktemp sed tr loginctl; do
     command -v "$tool" >/dev/null || fail "Missing base-system tool: $tool"
 done
+[ -z "${WAYLAND_DISPLAY:-}${DISPLAY:-}${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || fail 'Start onboarding from a local TTY outside any desktop session'
+[ "$(loginctl show-session self -p Type --value)" = tty ] || fail 'A local TTY login is required'
+[ "$(loginctl show-session self -p Remote --value)" = no ] || fail 'Remote onboarding is unsupported'
+[ "$(loginctl show-session self -p Active --value)" = yes ] || fail 'Switch to this TTY before onboarding'
+sessions=$(loginctl list-sessions --no-legend --no-pager) || fail 'Cannot check existing sessions'
+printf '%s\n' "$sessions" | while read -r session rest; do
+    [ -n "$session" ] || continue
+    kind=$(loginctl show-session "$session" -p Type --value) || fail 'Cannot inspect an existing session'
+    case $kind in
+        wayland|x11) fail 'Preserve existing graphical sessions; log out before onboarding' ;;
+    esac
+done
 printf '%s\n' 'Experimental Icewine onboarding (Arch/CachyOS x86_64).' \
-    'First: full distro upgrade and install base-devel, git, python and a Rust provider.' \
-    'Then: fetch source and build packages unprivileged; configure choices in the TUI.' \
-    'Package changes remain if you cancel later. Keep a recovery TTY (Ctrl+Alt+F2).' \
-    'Prepare source and packages? Type yes to continue:'
+    'A full distro upgrade (pacman -Syu) precedes prerequisite installation and source builds.' \
+    'Build/session prerequisites: base-devel git python go hyprland kitty and a pacman Rust provider.' \
+    'Then: install icewine, icewine-session and icewine-hyprmon with their runtime dependencies.' \
+    'Core runtime includes Quickshell/Qt, theme/fonts, bindings, UWSM, audio and portals.' \
+    'Pacman shows every dependency and asks before both prerequisite transactions.' \
+    'Prepare missing core Hyprland/Quickshell/wallpaper defaults and the saved/default theme.' \
+    'Personal files are preserved; these prerequisite/default writes remain after cancellation.' \
+    'Then automatically start the Icewine onboarding session and its full TUI.' \
+    'Optional utilities wait for session-stage Apply; successful Apply leaves the desktop running.' \
+    'Keep a recovery TTY (Ctrl+Alt+F2). No login service changes until final Apply; no automatic reboot.' \
+    'Accept prerequisite installation and core-default preparation? Type yes to continue:'
 read -r answer || exit 1
 [ "$answer" = yes ] || exit 0
+for package in hyprmon hyprmon-bin; do
+    if pacman -Qq "$package" >/dev/null 2>&1; then
+        fail "Preserve installed $package; resolve its Lua compatibility before source onboarding"
+    fi
+done
+if command -v hyprmon >/dev/null; then
+    owner=$(pacman -Qqo "$(command -v hyprmon)") || fail 'Preserve existing unowned HyprMon'
+    [ "$owner" = icewine-hyprmon ] || fail "Preserve HyprMon owned by $owner"
+fi
 work=$(mktemp -d "${TMPDIR:-/tmp}/icewine-install.XXXXXXXX")
 stage=prerequisites
 # Retain partial work for diagnosis/retry; never remove user files or old packages.
@@ -46,8 +74,8 @@ if ! pacman -T cargo >/dev/null 2>&1; then
     fi
     if command -v rustup >/dev/null; then rust_package=rustup; else rust_package=rust; fi
 fi
-sudo pacman -Syu --needed base-devel git python $rust_package
-for tool in git makepkg cargo rustc python3; do
+sudo pacman -Syu --needed base-devel git python go hyprland kitty $rust_package
+for tool in git makepkg cargo rustc python3 go; do
     command -v "$tool" >/dev/null || fail "Prerequisite installation did not provide $tool"
 done
 stage=acquisition
@@ -80,10 +108,26 @@ if ! cargo --version >/dev/null 2>&1 || ! rustc --version >/dev/null 2>&1; then
 fi
 stage=build
 (cd "$work/build"; sha256sum icewine.tar.gz > source-archive.sha256; makepkg --nosign)
-stage=manager
+stage=hyprmon
+mkdir "$work/hyprmon"
+cp "$work/build/src/icewine/packaging/arch/hyprmon/"* "$work/hyprmon/"
+(cd "$work/hyprmon"; makepkg --nosign)
+# Install the real desktop/TUI runtime together with compatible HyprMon.
+# Login and optional utility archives remain for explicit session-stage Apply.
+set -- "$work/build"/icewine-[0-9]*.pkg.tar.* \
+    "$work/build"/icewine-session-[0-9]*.pkg.tar.* \
+    "$work/hyprmon"/icewine-hyprmon-[0-9]*.pkg.tar.*
+[ "$#" = 3 ] || fail 'Expected core, session and HyprMon archives'
+for archive in "$@"; do
+    [ -f "$archive" ] && [ ! -L "$archive" ] || fail "Expected regular archive: $archive"
+done
+stage=core-install
+sudo pacman -U "$@"
+cp "$work/build/src/icewine/packaging/arch/onboard" "$work/onboard"
+stage=session
+printf 'Retry without rebuilding: sh "%s/onboard" "%s/build" "%s"\n' "$work" "$work" "$revision"
 # makepkg owns source validation and the locked Rust build; launch only on success.
-ICEWINE_PACKAGE_DIR="$work/build" "$work/build/src/icewine/manager/target/release/icewine-manage" \
-    --bootstrap "$work/build" "$revision"
+sh "$work/onboard" "$work/build" "$revision"
 
 exit
 }
