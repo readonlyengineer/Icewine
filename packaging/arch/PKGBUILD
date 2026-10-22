@@ -1,4 +1,4 @@
-# Build from an Icewine source archive; see README.md in this directory.
+# Build from an Icewine source archive; see the project README.
 pkgbase=icewine
 pkgname=(icewine icewine-session icewine-handheld)
 pkgver=0.1
