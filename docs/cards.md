@@ -5,11 +5,6 @@
 `Widget.qml` remains the topbar's reveal, engagement, Escape and dismissal host.
 These are first-party QML components, not a plugin API or dynamic registry.
 
-This is the implemented card contract. The separate style-guide ticket owns
-`widget-plugin-standard.md` and the other draft guides; its draft card guidance
-is superseded by this document pending that ticket's link/update. Do not copy
-its proposed plugin/service framework into a card.
-
 ## Surface and content
 
 Create a `Card`, give it natural `implicitWidth`/`implicitHeight`, and place
