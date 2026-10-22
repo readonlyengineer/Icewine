@@ -62,7 +62,7 @@ require("lazy").setup({
     { "shaunsingh/nord.nvim", lazy = false },
     { "ellisonleao/gruvbox.nvim", lazy = false },
     { "catppuccin/nvim", name = "catppuccin", lazy = false },
-    { "MeanderingProgrammer/render-markdown.nvim", opts = { heading = { backgrounds = {} } },
+    { "MeanderingProgrammer/render-markdown.nvim", opts = { heading = { backgrounds = {}, icons = { "① ", "② ", "③ ", "④ ", "⑤ ", "⑥ " } } },
       keys = { { "<leader>md", "<cmd>RenderMarkdown toggle<cr>", desc = "Markdown render toggle" } } },
     { "mikavilpas/yazi.nvim", event = "VeryLazy", dependencies = { "nvim-lua/plenary.nvim" },
       keys = {
