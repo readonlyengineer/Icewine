@@ -7,7 +7,7 @@ for status in "$drm_root"/card*-*/status; do
     [[ -r "$status" && "$(<"$status")" == connected ]] || continue
 
     connector=${status%/status}
-    decoded= edid=
+    decoded='' edid=''
     if [[ -r "$connector/edid" ]]; then
         decoded=$(edid-decode "$connector/edid" 2>/dev/null) || decoded=
         edid=$(od -An -v -tx1 "$connector/edid" | tr -d ' \n') || edid=
