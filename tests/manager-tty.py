@@ -101,6 +101,7 @@ parser.add_argument("--preview-only", action="store_true", help="run the existin
 parser.add_argument("--frames-only", action="store_true", help="capture representative visual states without repeating the semantic suite")
 parser.add_argument("--background-only", action="store_true", help="check terminal-default cells across pages, previews, errors and resize")
 parser.add_argument("--hotkeys-only", action="store_true", help="check continuous Hotkeys scrolling, editing, wrapping, mouse, focus and resize")
+parser.add_argument("--utilities-only", action="store_true", help="check Utilities columns, focus, actions and resize in ordinary/onboarding modes")
 parser.add_argument("--spacing-only", action="store_true", help="check page geometry, wrapping and action placement with synthetic data")
 parser.add_argument("--defaults-only", action="store_true", help="check Default Apps layout, chooser and persistence requests")
 options = parser.parse_args()
@@ -241,6 +242,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                    TUI_COMMAND_FAIL=str(int(command_fail)), TUI_DELIVERY_FAIL=str(int(delivery_fail)),
                    TUI_APPEARANCE=str(appearance_state), XDG_DATA_HOME=str(root / "data"), XDG_STATE_HOME=str(root / "state"),
                    ICEWINE_WALLPAPER_DATA_HOME=str(root / "data"), TMPDIR=str(root))
+        env.pop("NO_COLOR", None)
         session_stage = root / "onboarding-stage"
         session_stage.mkdir(exist_ok=True)
         (session_stage / "applied").unlink(missing_ok=True)
@@ -382,7 +384,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert b"Resize to continue; Esc: cancel." in rendered
         else:
             assert b"Utilities" in rendered
-            assert b"Overwrite existing dotfiles" in rendered
+            # Bottom controls may be offscreen until focused; dedicated cases scroll to them.
             assert b"Selected utilities are installed" in rendered
         all_calls = [json.loads(line) for line in log.read_text().splitlines()]
         all_last_calls = all_calls
@@ -417,7 +419,53 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         previews = [call for call in all_last_calls if call[0] == "theme-preview"]
         assert previews[-1] == ["theme-preview", "tokyo-night"]
         assert not any(call[:2] == ["icewine", "theme"] for call in tools())
+    def test_utilities():
+        for onboard in (False, True):
+            for size in ((24,80), (24,100), (36,120)):
+                for enabled in (False, True):
+                    visual = state(steam="native", desktop=True, gamescope=True,
+                                   screenshot=enabled, media=enabled)
+                    # The media row stays selected while its provider wraps/reflows.
+                    opening = tab+down*(5 if onboard else 6)
+                    run(opening+esc, visual, onboard=onboard, size=size,
+                        capture=f"utilities-media-{onboard}-{enabled}")
+                    frame = last_frames[-1].decode().splitlines()
+                    media_row = next(i for i,line in enumerate(frame) if "Pictures and Video" in line)
+                    providers = (("Desktop session", "Hyprland"), ("Terminal Editor", "Neovim"),
+                                 ("Screenshots", "Gradia"), ("Pictures and Video", "imv, VLC"))
+                    for label, provider in providers:
+                        line = next(line for line in frame if label in line)
+                        assert line.index(provider) == 44, (size, onboard, line)
+                    media = frame[media_row]
+                    checkbox = "[x]" if enabled else "[ ]"
+                    assert media.index(checkbox) == next(line.index(checkbox) for line in frame if "Screenshots" in line)
+                    if size[1] == 80:
+                        assert frame[media_row+1][44:].startswith("(Flatpak/Flathub)"), frame
+                    else:
+                        assert "imv, VLC (Flatpak/Flathub)" in media, media
+                    assert "Tab: Switch pane" in frame[-2]
+                    # Row hit rectangles must follow the wrapped height.
+                    run(click(46, media_row+1)+down*(5 if onboard else 6)+enter, visual,
+                        onboard=onboard, size=size, confirm=False, capture="utilities-media-click-review")
+                    changed = "[ ]" if enabled else "[x]"
+                    assert any("Pictures and Video" in line and changed in line
+                               for frame in last_frames for line in frame.decode().splitlines())
+                    assert b"Utilities / Review" in last_output
+                    assert not any(call[0] == "apply" for call in all_last_calls)
+                run(tab+up+esc, visual, onboard=onboard, size=size, capture="utilities-bottom")
+                assert all(label in last_frames[-1].decode() for label in
+                           ("Overwrite existing dotfiles", "[ Setup Monitors... ]", "[ Review and Apply ]"))
+                run(esc, state(readonly=True, media=True), onboard=onboard, size=size,
+                    capture="utilities-disabled")
+                assert b"Utilities - Read Only" in last_output and b"imv, VLC" in last_output
+            run(tab+down*(5 if onboard else 6), visual, onboard=onboard, size=(24,80),
+                capture="utilities-reflow", resize_steps=[((20,79),right), ((24,100),right), ((36,120),esc)])
+            assert b"Icewine needs an 80 x 24 terminal." in last_output
+            assert b"imv, VLC (Flatpak/Flathub)" in last_frames[-1]
+        print("PASS: shared Utilities columns, media states, row hits, actions, read-only and ordinary/onboarding resize")
+
     def test_spacing():
+        test_utilities()
         visual = state(desktop=True, terminal=True, filemanager=True, texteditor=True,
                        shellExtras=True, steam="flatpak", gamescope=True, screenshot=True, media=True)
         def frame_for(title):
@@ -440,19 +488,20 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                     action = "[ Use theme ]" if name == "theme" else "[ Save ]"
                     assert action in frame[size[0]-4], (name, size, frame)
                 if name == "utilities":
-                    selected_rows = [i for i, line in enumerate(frame) if any(label in line for label in ("Desktop session", "Steam", "Overwrite existing"))]
-                    assert len(selected_rows) >= 3
-                if name == "utilities":
                     screenshot = next(line for line in frame if "Screenshots" in line)
-                    assert "Gradia (Flatpak/Flathub)" in screenshot and "[x]" in screenshot, (size, screenshot)
+                    assert "Gradia" in screenshot and "[x]" in screenshot, (size, screenshot)
+                    if size[1] == 80:
+                        assert frame[frame.index(screenshot)+1][44:].startswith("(Flatpak/Flathub)"), (size, frame)
+                    else:
+                        assert "Gradia (Flatpak/Flathub)" in screenshot, (size, screenshot)
                     checkbox = next(line for line in frame if "Terminal Editor" in line)
                     assert screenshot.index("[x]") == checkbox.index("[x]"), (size, frame)
                     media_row = next(i for i,line in enumerate(frame) if "Pictures and Video" in line)
                     media = frame[media_row]
-                    assert "Pictures and Video imv, VLC" in media, (size, media)
+                    assert "Pictures and Video  imv, VLC" in media, (size, media)
                     assert media.index("[x]") == checkbox.index("[x]"), (size, media)
                     if size[1] == 80:
-                        assert frame[media_row+1][43:].startswith("(Flatpak/Flathub)"), (size, frame)
+                        assert frame[media_row+1][44:].startswith("(Flatpak/Flathub)"), (size, frame)
                     else:
                         assert "imv, VLC (Flatpak/Flathub)" in media, (size, media)
                     # Focus-based scrolling must reveal all three actions at 80x24.
@@ -482,7 +531,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert "Variant" in "\n".join(frame), frame
         run(esc, state(readonly=True), size=(24,80), capture="utilities-readonly")
         frame = frame_for("Utilities - Read Only")
-        assert "Hyprland + Quickshell" in "\n".join(frame) and "Neovim + LazyVIM" in "\n".join(frame)
+        assert all(part in "\n".join(frame) for part in ("Neovim + LazyVIM", "imv, VLC", "(Flatpak/Flathub)"))
         run(taskbar+esc*2, visual, size=(24,80), widgets={"barBehaviour":"keyboard-mouse"},
             widget_policy="barBehaviour", capture="taskbar-readonly")
         frame = frame_for("Appearance / Taskbar")
@@ -679,6 +728,10 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         run(opening+tab+tab+enter+esc*2, state(), capture="default-pane-focus")
         assert not changes()
         print('PASS: Default Apps geometry, eight choosers, explicit use/cancel, PDF, missing/readonly/error states and mouse/focus')
+
+    if options.utilities_only:
+        test_utilities()
+        sys.exit(0)
 
     if options.defaults_only:
         test_default_apps_page()
@@ -907,8 +960,10 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert b"live/save changes remain" in last_output
     (root / "hyprmon").rename(root / "hyprmon-hidden")
     try:
-        run(esc, state(), size=(24,80), path=str(root))
-        assert b"Hyprmon Unavailable" in last_output
+        run(tab+up+esc, state(), size=(24,80), path=str(root), capture="utilities-monitors-unavailable")
+        assert b"Hyprmon Unavailable" in last_frames[-1]
+        assert ["hyprmon"] not in tools()
+        assert not any(call[0] == "apply" for call in all_last_calls)
     finally: (root / "hyprmon-hidden").rename(root / "hyprmon")
     # Fail malformed machine state before terminal ownership and commands.
     for wire in (state()+" terminal=true", state().replace("screenshot=false","screenshot=invalid"), state().replace("terminal=false","terminal=1"), state().replace("media=false","media=1")):

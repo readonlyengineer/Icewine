@@ -742,13 +742,10 @@ fn choose(readonly: bool, onboarding: bool, selected: &mut BTreeMap<&str, bool>,
                             displayed.push_str(if Line::from(displayed.as_str()).width() + 12 > body.width as usize - 20 { "\n- Read Only" } else { " - Read Only" });
                         }
                         let text = if parts.len() == 2 {
-                            let label_width = if value.control == Control::Utility("media") { 19 } else { 18 };
+                            let label_width = ROWS.iter().map(|(_, label, _)| Line::from(*label).width()).max().unwrap_or(0) + 2;
                             let padding = 14usize.saturating_sub(Line::from(displayed.as_str()).width()) / 2;
-                            // Let Gradia's label use the existing gap before its aligned checkbox.
-                            let extra = if value.control == Control::Utility("screenshot") { padding } else { 0 };
-                            let detail_width = body.width as usize - label_width - 14 + extra;
+                            let detail_width = body.width as usize - label_width - 14;
                             let details = wrap_cells(parts[1], detail_width);
-                            let padding = padding - extra;
                             details.iter().enumerate().map(|(line, detail)| {
                                 let label = if line == 0 { parts[0] } else { "" };
                                 format!("{label:<label_width$}{detail}{}{}{}", " ".repeat(detail_width - Line::from(detail.as_str()).width()), " ".repeat(padding), if line == 0 { displayed.as_str() } else { "" })
