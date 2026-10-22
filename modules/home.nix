@@ -173,8 +173,13 @@ let
   };
   monitorCapabilities = pkgs.writeShellApplication {
     name = "icewine-monitor-capabilities";
-    runtimeInputs = [ pkgs.edid-decode ];
+    runtimeInputs = [ pkgs.edid-decode pkgs.coreutils ];
     text = builtins.readFile ../quickshell/tools/probe-monitor-capabilities;
+  };
+  geforceNow = pkgs.writeShellApplication {
+    name = "icewine-geforce-now";
+    runtimeInputs = [ pkgs.coreutils pkgs.util-linux pkgs.flatpak pkgs.gamescope pkgs.libnotify ];
+    text = builtins.readFile ../quickshell/tools/geforce-now;
   };
   steamShortcuts = import ../quickshell/tools/steam-shortcuts.nix { inherit pkgs; };
   monitorBrightness = pkgs.writeShellApplication {
@@ -197,7 +202,8 @@ let
   };
 in {
   config = lib.mkIf cfg.enable {
-    users.users.${cfg.user}.packages = [ icewineCli ];
+    users.users.${cfg.user}.packages = [ icewineCli ]
+      ++ lib.optional (cfg.desktop.enable && cfg.gamescope.enable) geforceNow;
     environment.etc."icewine/implementation".source = implementation;
     environment.sessionVariables = {
       ICEWINE_WIDGET_POLICY = builtins.toJSON cfg.widgets;

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+edid=${1?Expected EDID hex (empty for SDR)}
+shift
+app=com.nvidia.geforcenow
+unset GAMESCOPE_PATCHED_EDID_FILE ENABLE_GAMESCOPE_WSI DISABLE_GAMESCOPE_WSI vk_wsi_force_swapchain_to_current_extent
+
+close_first() {
+    notify-send --app-name=Icewine --app-icon="$app" \
+        'GeForce NOW is already running' 'Close GeForce NOW before launching it in Gamescope.'
+    exit 1
+}
+# Serialize launches for the child's lifetime, including the Flatpak startup gap.
+exec 9>"${XDG_RUNTIME_DIR:?}/icewine-geforce-now.lock"
+flock -n 9 || close_first
+running=$(flatpak ps --columns=application)
+[[ $'\n'"$running"$'\n' != *$'\n'"$app"$'\n'* ]] || close_first
+
+flatpak_args=(--env=DISABLE_GAMESCOPE_WSI=1 --unset-env=ENABLE_GAMESCOPE_WSI
+    --unset-env=GAMESCOPE_PATCHED_EDID_FILE --unset-env=vk_wsi_force_swapchain_to_current_extent)
+hdr_args=()
+temporary=
+trap '[[ -z "$temporary" ]] || rm -rf -- "$temporary"' EXIT
+# Test the matching extension inside this app's sandbox, not the host install list.
+if [[ $edid =~ ^([[:xdigit:]]{256}){1,256}$ ]] && flatpak run \
+    --command=sh --env=ENABLE_GAMESCOPE_WSI=1 --unset-env=DISABLE_GAMESCOPE_WSI "$app" -c '
+        test -r /usr/lib/extensions/vulkan/gamescope/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json &&
+        test -r /usr/lib/extensions/vulkan/gamescope/lib/libVkLayer_FROG_gamescope_wsi_x86_64.so
+    '; then
+    temporary=$(mktemp -d "$XDG_RUNTIME_DIR/icewine-gfn.XXXXXX")
+    for ((i=0; i<${#edid}; i+=2)); do
+        printf '%b' "\\x${edid:i:2}"
+    done > "$temporary/edid.bin"
+    flatpak_args=(--nosocket=wayland --unset-env=WAYLAND_DISPLAY --env=SDL_VIDEODRIVER=x11
+        --env=ENABLE_GAMESCOPE_WSI=1 --unset-env=DISABLE_GAMESCOPE_WSI
+        --env=vk_wsi_force_swapchain_to_current_extent=true
+        "--filesystem=$temporary:ro" "--env=GAMESCOPE_PATCHED_EDID_FILE=$temporary/edid.bin")
+    hdr_args=(--hdr-enabled)
+fi
+# Wait for the child before removing its private read-only EDID mount.
+gamescope "$@" "${hdr_args[@]}" -- flatpak run "${flatpak_args[@]}" "$app" &
+child=$!
+trap 'kill -TERM "$child" 2>/dev/null || true; wait "$child" || true; exit 143' INT TERM
+wait "$child"

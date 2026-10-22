@@ -59,6 +59,7 @@ package_icewine() {
     ln -s ../lib/icewine/command "$pkgdir/usr/bin/icewine-$name"
   done
   install -m755 quickshell/tools/steam-shortcuts "$pkgdir/usr/bin/icewine-steam-shortcuts"
+  install -m755 quickshell/tools/geforce-now "$pkgdir/usr/bin/icewine-geforce-now"
   install -m755 quickshell/tools/probe-monitor-capabilities "$pkgdir/usr/bin/icewine-monitor-capabilities"
   install -m755 quickshell/tools/monitor-brightness "$pkgdir/usr/bin/icewine-monitor-brightness"
   for dir in hypr quickshell/config kitty uwsm gtk-3.0 gtk-4.0 yazi/plugins; do install -d "$defaults/$dir"; done

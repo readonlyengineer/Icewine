@@ -320,3 +320,50 @@ assert.equal(shortcutsContext.reader.running, false, "Disabled Steam must not di
 shortcutsContext.root.steamEnabled = true
 shortcutsContext.refresh()
 assert.equal(shortcutsContext.reader.running, true)
+
+const gfnCommands = []
+let selected = {name: 'eDP-1', width: 2880, height: 1800, refreshHz: 120,
+    scale: 1.5, hdr: true, vrr: true, edid: 'panel-edid'}
+const gfnRoot = {gamescopeEnabled: true, handheld: false, focusedMonitor: () => selected}
+const gfnContext = vm.createContext({root: gfnRoot, monitorCapabilities: {},
+    monitorCapabilityProbe: {current: true}, monitorCapabilityProbeTimer: {restart() {}},
+    Launcher: {gfnEdid(value) { assert.equal(value, 'panel-edid'); return 'converted-edid' }},
+    Quickshell: {execDetached(args) { gfnCommands.push(Array.from(args)) }}, console})
+for (const name of ['gamescopePlan', 'launchGeForceNow', 'monitorRecord', 'updateMonitorCapabilities', 'probeMonitorCapabilities']) {
+    vm.runInContext(qmlFunction(name), gfnContext)
+    gfnRoot[name] = gfnContext[name]
+}
+gfnRoot.updateMonitorCapabilities('eDP-1\ttrue\ttrue\tpanel-edid\nHDMI-A-1\tfalse\tfalse\t\n')
+assert.equal(gfnContext.monitorCapabilities['eDP-1'].edid, 'panel-edid')
+assert.equal(gfnRoot.monitorRecord({name: 'eDP-1'}).edid, 'panel-edid')
+assert.equal(gfnContext.monitorCapabilities['HDMI-A-1'].hdr, false)
+gfnRoot.updateMonitorCapabilities('eDP-1\ttrue\ttrue\ta\neDP-1\ttrue\ttrue\tb\neDP-1\ttrue\ttrue\tc\n')
+assert.equal(gfnRoot.monitorRecord({name: 'eDP-1'}).hdr, false, 'Duplicate GPU connector names must fall back')
+assert.equal(gfnRoot.monitorRecord({name: 'eDP-1'}).edid, '')
+assert.equal(JSON.parse(gfnRoot.launchGeForceNow()).ok, true)
+assert.deepEqual(gfnCommands[0], ['uwsm', 'app', '--', 'icewine-geforce-now', 'converted-edid',
+    '--backend', 'wayland', '-W', '2880', '-H', '1800', '-w', '2880', '-h', '1800',
+    '-r', '120', '-f', '--expose-wayland', '--adaptive-sync'], 'Preserve physical geometry at outer scale 1.5')
+selected = {...selected, name: 'DP-2', width: 3840, height: 2160, refreshHz: 144, hdr: false, vrr: false}
+gfnRoot.launchGeForceNow()
+assert.deepEqual(gfnCommands[1].slice(3), ['icewine-geforce-now', '', '--backend', 'wayland',
+    '-W', '3840', '-H', '2160', '-w', '3840', '-h', '2160', '-r', '144', '-f', '--expose-wayland'])
+selected = {...selected, hdr: true}
+gfnContext.Launcher.gfnEdid = () => { throw Error('Malformed EDID fixture') }
+gfnRoot.launchGeForceNow()
+assert.equal(gfnCommands[2][4], '', 'Rejected EDID selects SDR')
+gfnRoot.gamescopeEnabled = false
+assert.equal(JSON.parse(gfnRoot.launchGeForceNow()).ok, false)
+assert.equal(gfnCommands.length, 3)
+gfnRoot.gamescopeEnabled = true
+selected = null
+assert.equal(JSON.parse(gfnRoot.launchGeForceNow()).ok, false)
+assert.equal(gfnCommands.length, 3)
+console.log('GFN monitor matching, dynamic geometry and safe SDR launch planning passed')
+
+gfnRoot.probeMonitorCapabilities()
+gfnRoot.updateMonitorCapabilities('eDP-1\ttrue\ttrue\told-edid\n')
+assert.equal(gfnRoot.monitorRecord({name: 'eDP-1'}).hdr, false, 'Discard an in-flight result after monitor change')
+gfnContext.monitorCapabilityProbe.current = true
+gfnRoot.updateMonitorCapabilities('eDP-1\ttrue\ttrue\tnew-edid\n')
+assert.equal(gfnRoot.monitorRecord({name: 'eDP-1'}).edid, 'new-edid')

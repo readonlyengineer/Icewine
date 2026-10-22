@@ -171,7 +171,7 @@ in {
   native = import ../packaging/arch/integration.nix { inherit pkgs; src = self; };
   terminal = import ./terminal.nix { inherit self nixpkgs; manager = icewineCli; };
   logic = pkgs.runCommand "icewine-logic-checks" {
-    nativeBuildInputs = [ pkgs.nodejs pkgs.lua (pkgs.python3.withPackages (python: [ python.vdf ])) ];
+    nativeBuildInputs = [ pkgs.nodejs pkgs.lua pkgs.util-linux (pkgs.python3.withPackages (python: [ python.vdf ])) ];
   } ''
     cd ${self}
     for test in quickshell/tests/*.js quickshell/deck/test-demo.js; do node "$test"; done

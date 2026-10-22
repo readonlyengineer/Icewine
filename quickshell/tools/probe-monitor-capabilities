@@ -7,8 +7,11 @@ for status in "$drm_root"/card*-*/status; do
     [[ -r "$status" && "$(<"$status")" == connected ]] || continue
 
     connector=${status%/status}
-    [[ -s "$connector/edid" ]] || continue
-    decoded=$(edid-decode "$connector/edid" 2>/dev/null) || continue
+    decoded= edid=
+    if [[ -r "$connector/edid" ]]; then
+        decoded=$(edid-decode "$connector/edid" 2>/dev/null) || decoded=
+        edid=$(od -An -v -tx1 "$connector/edid" | tr -d ' \n') || edid=
+    fi
 
     hdr=false
     [[ "$decoded" == *"SMPTE ST2084"* ]] && hdr=true
@@ -23,5 +26,5 @@ for status in "$drm_root"/card*-*/status; do
     fi
 
     name=${connector##*/}
-    printf '%s\t%s\t%s\n' "${name#*-}" "$hdr" "$vrr"
+    printf '%s\t%s\t%s\t%s\n' "${name#*-}" "$hdr" "$vrr" "$edid"
 done

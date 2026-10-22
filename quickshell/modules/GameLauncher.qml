@@ -37,20 +37,24 @@ Scope {
             refreshHz: Number(m.refreshHz || 0),
             focused: !!m.focused,
             hdr: !!capabilities.hdr,
-            vrr: !!capabilities.vrr
+            vrr: !!capabilities.vrr,
+            edid: String(capabilities.edid || "")
         }
     }
 
     function updateMonitorCapabilities(output) {
+        if (!monitorCapabilityProbe.current) return
         var next = {}
-        var lines = String(output || "").trim().split("\n")
+        var lines = String(output || "").split("\n")
 
         for (var i = 0; i < lines.length; i++) {
             var fields = lines[i].split("\t")
-            if (fields.length === 3 && fields[0]) {
-                next[fields[0]] = {
+            if (fields.length === 4 && fields[0]) {
+                // Connector names alone cannot distinguish duplicate GPUs.
+                next[fields[0]] = next[fields[0]] !== undefined ? {} : {
                     hdr: fields[1] === "true",
-                    vrr: fields[2] === "true"
+                    vrr: fields[2] === "true",
+                    edid: fields[3]
                 }
             }
         }
@@ -59,6 +63,7 @@ Scope {
     }
 
     function probeMonitorCapabilities() {
+        monitorCapabilityProbe.current = false
         monitorCapabilities = ({})
         monitorCapabilityProbeTimer.restart()
     }
@@ -120,6 +125,25 @@ Scope {
         }
 
         return JSON.stringify(plan, null, 2)
+    }
+
+    function launchGeForceNow() {
+        if (!root.gamescopeEnabled)
+            return JSON.stringify({ok: false, error: "Gamescope integration is disabled"})
+        var plan = root.gamescopePlan([], false)
+        if (!plan.ok)
+            return JSON.stringify(plan)
+        var edid = ""
+        if (plan.monitor.hdr) {
+            try { edid = Launcher.gfnEdid(plan.monitor.edid) } catch (error) {
+                console.warn("GFN using SDR:", error)
+            }
+        }
+        // The adapter checks the actual Flatpak sandbox and owns EDID lifetime.
+        var args = plan.arguments.slice(1, -1).filter(arg => arg !== "--hdr-enabled")
+        plan.arguments = ["icewine-geforce-now", edid, "--backend", "wayland"].concat(args)
+        Quickshell.execDetached(["uwsm", "app", "--"].concat(plan.arguments))
+        return JSON.stringify(plan)
     }
 
     function finishSteamLaunch() {
@@ -278,6 +302,7 @@ Scope {
 
     Process {
         id: monitorCapabilityProbe
+        property bool current: false
 
         stdout: StdioCollector {
             onStreamFinished: root.updateMonitorCapabilities(this.text)
@@ -291,8 +316,10 @@ Scope {
         onTriggered: {
             if (monitorCapabilityProbe.running)
                 monitorCapabilityProbeTimer.restart()
-            else
+            else {
+                monitorCapabilityProbe.current = true
                 monitorCapabilityProbe.exec(["icewine-monitor-capabilities"])
+            }
         }
     }
 
@@ -385,6 +412,10 @@ Scope {
 
         function launchSteamGamescope(): string {
             return root.launchSteamGamescope()
+        }
+
+        function launchGeForceNow(): string {
+            return root.launchGeForceNow()
         }
 
         function launchCommand(commandJson: string): string {

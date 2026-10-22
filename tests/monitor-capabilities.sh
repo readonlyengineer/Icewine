@@ -17,7 +17,20 @@ printf '#!%s\ncat "$1"\n' "$BASH" > "$root/bin/edid-decode"
 chmod +x "$root/bin/edid-decode"
 
 actual=$(PATH="$root/bin:$PATH" bash "$1" "$root/drm")
-expected=$'DP-1\ttrue\ttrue\nHDMI-A-1\tfalse\tfalse'
+dp_edid=$(od -An -v -tx1 "$root/drm/card1-DP-1/edid" | tr -d ' \n')
+hdmi_edid=$(od -An -v -tx1 "$root/drm/card1-HDMI-A-1/edid" | tr -d ' \n')
+expected=$(printf 'DP-1\ttrue\ttrue\t%s\nHDMI-A-1\tfalse\tfalse\t%s' "$dp_edid" "$hdmi_edid")
 [[ "$actual" == "$expected" ]]
 
-printf 'monitor capability probe ok\n'
+# /proc is a readable pseudo-file with stat size zero, like a sysfs EDID.
+mkdir -p "$root/drm/card2-ZERO-1" "$root/drm/card2-DP-1"
+printf connected > "$root/drm/card2-ZERO-1/status"
+printf connected > "$root/drm/card2-DP-1/status"
+ln -s /proc/version "$root/drm/card2-ZERO-1/edid"
+[[ -r "$root/drm/card2-ZERO-1/edid" && ! -s "$root/drm/card2-ZERO-1/edid" ]]
+actual=$(PATH="$root/bin:$PATH" bash "$1" "$root/drm")
+zero_edid=$(od -An -v -tx1 /proc/version | tr -d ' \n')
+expected=$(printf '%s\nDP-1\tfalse\tfalse\t\nZERO-1\tfalse\tfalse\t%s' "$expected" "$zero_edid")
+[[ "$actual" == "$expected" ]]
+# Keep even an unreadable duplicate connector row so the consumer cannot pick one GPU.
+printf 'monitor capability probe and zero-size/duplicate connector checks ok\n'
