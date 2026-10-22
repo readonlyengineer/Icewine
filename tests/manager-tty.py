@@ -101,6 +101,7 @@ parser.add_argument("--preview-only", action="store_true", help="run the existin
 parser.add_argument("--frames-only", action="store_true", help="capture representative visual states without repeating the semantic suite")
 parser.add_argument("--background-only", action="store_true", help="check terminal-default cells across pages, previews, errors and resize")
 parser.add_argument("--hotkeys-only", action="store_true", help="check continuous Hotkeys scrolling, editing, wrapping, mouse, focus and resize")
+parser.add_argument("--onboarding-only", action="store_true", help="check session stage, full settings, monitor handoff and optional wallpaper picker")
 parser.add_argument("--utilities-only", action="store_true", help="check Utilities columns, focus, actions and resize in ordinary/onboarding modes")
 parser.add_argument("--spacing-only", action="store_true", help="check page geometry, wrapping and action placement with synthetic data")
 parser.add_argument("--defaults-only", action="store_true", help="check Default Apps layout, chooser and persistence requests")
@@ -213,7 +214,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, onboard=False, reboot=False, in_session=True, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None, hotkeys=None, hotkey_readonly=False, hotkey_error="", default_apps=None, default_readonly=(), default_error="", default_empty=False, default_many=False):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, onboard=False, reboot=False, in_session=True, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None, hotkeys=None, hotkey_readonly=False, hotkey_error="", default_apps=None, default_readonly=(), default_error="", default_empty=False, default_many=False, missing_session=()):
         global last_output, last_frames, last_widget_calls, all_last_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.write_text("")  # A run may legitimately invoke no external tools.
@@ -250,6 +251,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         if (onboard or bootstrap) and in_session:
             env.update(ICEWINE_ONBOARDING_STAGE="session", ICEWINE_ONBOARDING_DIR=str(session_stage),
                        WAYLAND_DISPLAY="wayland-fixture", HYPRLAND_INSTANCE_SIGNATURE="fixture")
+        for name in missing_session: env.pop(name, None)
         arguments = [str(binary)]
         if bootstrap:
             package_dir = Path(tempfile.mkdtemp(dir=root))
@@ -463,6 +465,82 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             assert b"Icewine needs an 80 x 24 terminal." in last_output
             assert b"imv, VLC (Flatpak/Flathub)" in last_frames[-1]
         print("PASS: shared Utilities columns, media states, row hits, actions, read-only and ordinary/onboarding resize")
+
+    def test_onboarding():
+        # The full compiled frontend must reject headless entry before any settings read.
+        for mode in ({"onboard": True}, {"bootstrap": True}):
+            for missing in ("ICEWINE_ONBOARDING_STAGE", "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE"):
+                assert run(b"", "", valid=False, missing_session=(missing,), **mode) == []
+                assert not log.exists() and not tools()
+        for size in ((24,80), (36,120)):
+            for index, title, row in ((1,"Appearance",7),(2,"Default Apps",9),(3,"Widgets",11),(4,"Hotkeys",13)):
+                for opening in (down*index+tab, click(5,row)+tab):
+                    run(opening+esc, state(), onboard=True, size=size, capture="session-"+title.replace(" ","-"))
+                    assert any(title in frame.decode().splitlines()[1][22:] for frame in last_frames)
+                    assert not tools() and not saves()
+            run(page(1)+enter+up+up*2+enter+esc, state(), onboard=True, size=size, capture="session-theme-save")
+            assert ["icewine","theme","dracula"] in tools()
+            run(page(2)+b"ns"+esc*2, state(), onboard=True, size=size, capture="session-widgets-save")
+            assert "stack-1/launcher" in save_field("cardStacks")
+            run(page(3)+down*3+enter+b"\x15Super+Alt+F8"+enter+esc, state(), onboard=True, size=size, capture="session-hotkey-save")
+            assert any(call[0] == "hotkeys-apply" and call[2:] == ["launcher","Super+Alt+F8"] for call in all_last_calls)
+            run(down*2+tab+enter+down+enter+esc, state(), onboard=True, size=size, capture="session-default-save")
+            assert any(call[0] == "default-apps-apply" and call[2:] == ["0","Firefox"] for call in all_last_calls)
+            run(down*2+tab+enter+esc*2, state(), onboard=True, size=size, default_apps=[""]*8, default_empty=True, capture="session-default-empty")
+            assert b"No installed applications found." in last_output
+            assert not any(call[0] == "default-apps-apply" for call in all_last_calls)
+            run(page(3)+down*3+enter+b"r"+esc, state(), onboard=True, size=size, hotkey_readonly=True, capture="session-hotkeys-readonly")
+            assert not any(call[0] == "hotkeys-apply" for call in all_last_calls)
+            run(page(2)+b"ns"+esc*2, state(), onboard=True, size=size, widget_supported=False, capture="session-widgets-unsupported")
+            assert not saves()
+            run(tab+up+esc, state(), onboard=True, size=size, capture="session-utilities-actions")
+            lines = last_frames[-1].decode().splitlines()
+            monitor_row = next(i+1 for i,line in enumerate(lines) if "[ Setup Monitors... ]" in line)
+            for opening in (tab+up*2+enter, tab+up+click(26,monitor_row)):
+                run(opening+esc, state(), onboard=True, size=size, capture="session-monitors")
+                assert ["hyprmon"] in tools()
+                assert any("live/save changes remain" in " ".join(line[24:-1].strip() for line in frame.decode().splitlines()) for frame in last_frames)
+            run(tab+up*2+enter+esc, state(), onboard=True, size=size,
+                file_state="theme=false transparency=false wallpaper=false monitors=true layout=false", capture="session-monitors-readonly")
+            assert ["hyprmon"] not in tools() and b"Setup Monitors - Read Only" in last_output
+            # File manager stays optional in both full onboarding and the ordinary manager.
+            (root / "yazi").rename(root / "yazi-hidden")
+            try:
+                for onboard in (False, True):
+                    run(page(1)+esc, state(), onboard=onboard, size=size, path=str(root), capture="wallpaper-missing")
+                    lines = last_frames[-1].decode().splitlines()
+                    wallpaper_row = next(i+1 for i,line in enumerate(lines) if "Wallpaper" in line)
+                    assert "Yazi Unavailable" in lines[wallpaper_row-1]
+                    run(click(5,7)+click(26,wallpaper_row)+esc, state(), onboard=onboard, size=size, path=str(root), capture="wallpaper-missing-click")
+                    assert not tools()
+                    run(page(1)+down*2+right+esc, state(), onboard=onboard, size=size, path=str(root), capture="wallpaper-missing-keyboard")
+                    assert tools() == [["icewine","layout","dwindle"]], tools()
+            finally: (root / "yazi-hidden").rename(root / "yazi")
+            for onboard in (False, True):
+                picked = str(root / "picture with spaces.png")
+                for opening in (page(1)+down*2+enter, click(5,7)+click(26,wallpaper_row)):
+                    run(opening+esc, state(), onboard=onboard, size=size, path=str(root), pick=picked+"\n", capture="wallpaper-present")
+                    assert any(call[0] == "yazi" for call in tools()) and ["icewine","wallpaper",picked] in tools()
+                run(click(5,7)+click(26,wallpaper_row)+esc, state(), onboard=onboard, size=size,
+                    file_state="theme=false transparency=false wallpaper=true monitors=false layout=false", capture="wallpaper-readonly")
+                assert not tools()
+                run(page(1)+down*2+enter+esc, state(), onboard=onboard, size=size, pick="", capture="wallpaper-cancel")
+                assert not any(call[:2] == ["icewine","wallpaper"] for call in tools())
+        # Full-session settings retain normal validation, not a fake Appearance placeholder.
+        run(b"", state(), valid=False, onboard=True, appearance_wire="invalid saved desktop state")
+        assert ["appearance-state"] in [json.loads(line) for line in log.read_text().splitlines()]
+        for keys in (esc, b"\x03", b"q", tab+up+enter):
+            run(keys, state(), onboard=True, confirm=False, capture="session-cancel")
+            assert not any(call[0] == "apply" for call in all_last_calls)
+            assert not (root / "onboarding-stage/applied").exists()
+        for code in (1,0):
+            run(tab+up+enter, state(desktop=True, handheld=True, steam="native", gamescope=True), onboard=True,
+                apply_exit=code, capture="session-apply")
+            choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
+            assert choices["desktop"] == "true" and choices["handheld"] == "false"
+            assert (root / "onboarding-stage/applied").exists() == (code == 0)
+            assert ["sudo","systemctl","reboot"] not in tools()
+        print("PASS: prepared-session full pages/settings, stage guard, monitor handoff, optional Yazi and cancellation/Apply")
 
     def test_spacing():
         test_utilities()
@@ -729,6 +807,10 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         assert not changes()
         print('PASS: Default Apps geometry, eight choosers, explicit use/cancel, PDF, missing/readonly/error states and mouse/focus')
 
+    if options.onboarding_only:
+        test_onboarding()
+        sys.exit(0)
+
     if options.utilities_only:
         test_utilities()
         sys.exit(0)
@@ -817,6 +899,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         # Expanded Common fills short viewports; test_hotkeys traverses every heading.
         assert b"Common" in last_output and b"Show/Toggle Taskbar" in last_output
         assert not saves()
+    test_onboarding()
     test_default_apps_page()
     test_spacing()
     test_hotkeys()

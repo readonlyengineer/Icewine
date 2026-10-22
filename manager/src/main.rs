@@ -503,7 +503,8 @@ fn choose(readonly: bool, onboarding: bool, selected: &mut BTreeMap<&str, bool>,
             } else if page == 1 {
                 rows = vec![row("Theme", display_name(&appearance.themes[appearance.theme]), Control::Theme, !appearance.readonly[0] && !appearance.policy),
                     row("Transparency", ["Off", "Low", "Medium", "High"][appearance.transparency].into(), Control::Transparency, !appearance.readonly[1]),
-                    row("Wallpaper", filename(&appearance.wallpaper), Control::Wallpaper, !appearance.readonly[2]),
+                    if executable("yazi") { row("Wallpaper", filename(&appearance.wallpaper), Control::Wallpaper, !appearance.readonly[2]) }
+                    else { ViewRow { label: "Wallpaper".into(), value: "Yazi Unavailable".into(), control: Control::Wallpaper, enabled: false } },
                     row("Default layout", display_name(LAYOUTS[appearance.layout]), Control::Layout, !appearance.readonly[4]),
                     row("Taskbar", "Configure…".into(), Control::Taskbar, true),
                     row("Notifications", tick(widgets.enabled[0]), Control::Widget(0), editable(0))];
