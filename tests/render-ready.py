@@ -175,7 +175,8 @@ ShellRoot {
                 wait(20)
                 compare(backgrounds[0].color.a, 0)
                 compare(backgrounds[1].color, Theme.Palette.primary)
-                mouseClick(buttons[1])
+                const secondLabel = descendants(buttons[1], item => item.text === "2")[0]
+                mouseClick(secondLabel, secondLabel.width / 2, secondLabel.height / 2)
                 compare(compositor.requests, 1)
                 compare(workspaces.activeId, 2)
                 wait(150)

@@ -101,6 +101,15 @@ ShellRoot {
     QtObject { id: c; property string address: "0x3"; property string title: "Third"; property var workspace: ws3; property var wayland: null }
     QtObject { id: d; property string address: "0x4"; property string title: "Fourth"; property var workspace: ws1; property var wayland: null }
     Component {
+        id: fixtureWayland
+        QtObject {
+            property string appId: "same-application"
+            property var target
+            property var callback
+            function activate() { callback(target) }
+        }
+    }
+    Component {
         id: fixtureMonitor
         QtObject {
             property string name
@@ -256,6 +265,100 @@ ShellRoot {
                     && sizedLoader.width <= 1000 && sizedLoader.height <= 720
                     && sizedLoader.width <= geometryHost.width && sizedLoader.height <= geometryHost.height
             }
+            function workspaceIconClicks(first, second, primary) {
+                const savedCompositor = topbar.compositor
+                const savedWorkspaces = [a.workspace, b.workspace, c.workspace]
+                const empty = fixtureWorkspace.createObject(shell, {id: 5, monitor: primary})
+                Hyprland.workspaces.values = [first, second, empty]
+                first.toplevels.values = [a, b]; second.toplevels.values = [c]
+                a.workspace = first; b.workspace = first; c.workspace = second
+                Hyprland.toplevels.values = [a, b, c]
+                Hyprland.activeToplevel = a
+                const calls = []
+                const activated = target => {
+                    verify(!widgetGrab.active && !topbar.widgetEngaged,
+                        "Native activation follows release of the real widget grab binding")
+                    compare(topbar.previousToplevel, null, "Previous focus cannot undo icon selection")
+                    calls.push(target)
+                    Hyprland.activeToplevel = target
+                }
+                for (const target of [a, b, c, d]) target.wayland = fixtureWayland.createObject(shell,
+                    {target: target, callback: activated})
+                topbar.compositor = workspaceCompositor
+                function icons() { return descendants(workspaces, item => item.appId !== undefined) }
+                function show() {
+                    topbar.pressBar()
+                    wait(200)
+                }
+                function click(target) {
+                    const icon = icons().find(item => item.modelData === target)
+                    verify(icon !== undefined)
+                    mouseClick(icon, icon.width / 2, icon.height / 2)
+                }
+                show()
+                compare(icons().length, 3)
+                // Same-app windows on the current workspace must remain distinct.
+                for (const target of [b, a, c]) {
+                    show()
+                    topbar.openWidget("audio", true, "DP-1")
+                    verify(widgetGrab.active)
+                    Hyprland.activatedWorkspace = 0
+                    const count = calls.length
+                    click(target)
+                    compare(calls.length, count, "Activation is deferred until input release")
+                    console.log("WORKSPACE_ICON_CLICK", target.address, "parent workspace:", Hyprland.activatedWorkspace,
+                        "synchronous window calls:", calls.length - count)
+                    compare(Hyprland.activatedWorkspace, 0, "Icon did not also run parent workspace tap")
+                    tryCompare(calls, "length", count + 1)
+                    compare(calls[count], target, "Exact clicked native object")
+                    compare(Hyprland.activatedWorkspace, target.workspace.id)
+                    topbar.releaseBar()
+                    wait(1)
+                    compare(calls.length, count + 1, "Opening shortcut release cannot replay selection")
+                }
+                // Number/unused button area still uses workspace-only navigation.
+                show()
+                const buttons = descendants(workspaces, item => item.workspaceId !== undefined)
+                const count = calls.length
+                const label = descendants(buttons[0], item => item.text === "1")[0]
+                mouseClick(label, label.width / 2, label.height / 2)
+                compare(Hyprland.activatedWorkspace, 1)
+                show()
+                mouseClick(buttons[2], buttons[2].width - 1, buttons[2].height / 2)
+                compare(Hyprland.activatedWorkspace, 5, "Empty workspace padding remains clickable")
+                wait(1)
+                compare(calls.length, count, "Workspace-only clicks never select a window")
+                // The final real adapter boundary rejects stale and reused identities.
+                show(); click(b)
+                d.address = b.address
+                Hyprland.toplevels.values = [a, d, c]
+                wait(1)
+                compare(calls.length, count, "Closed target cannot activate same-address replacement")
+                show(); click(b)
+                wait(1)
+                compare(calls.length, count, "Already stale icon is rejected before handoff")
+                Hyprland.toplevels.values = [a, b, c]
+                show(); click(b); topbar.releaseBar(); topbar.beginInteraction()
+                wait(1)
+                compare(calls.length, count, "New interaction invalidates a pending handoff")
+                topbar.dismiss(false)
+                show(); click(c); mockSession.beginLock()
+                wait(1)
+                compare(calls.length, count, "Lock cancels the deferred click")
+                topbar.activateToplevel(a)
+                wait(1)
+                compare(calls.length, count, "Locked shell rejects new activation")
+                mockSession.fixturePam.completed(PamResult.Success)
+                topbar.compositor = savedCompositor
+                topbar.dismiss(false)
+                first.toplevels.values = []; second.toplevels.values = []
+                Hyprland.toplevels.values = []; Hyprland.activeToplevel = null
+                Hyprland.workspaces.values = [first, second]
+                ;[a.workspace, b.workspace, c.workspace] = savedWorkspaces
+                for (const target of [a, b, c, d]) target.wayland = null
+                d.address = "0x4"
+                console.log("WORKSPACE_ICON_CLICKS_PASSED")
+            }
             function workspacesAfterUnlock() {
                 Config.Settings.widgetSelections = {barBehaviour: "keyboard", barWidth: 100}
                 const secondary = fixtureMonitor.createObject(shell, {name: "DP-2"})
@@ -284,6 +387,10 @@ ShellRoot {
                 topbar.pressBar()
                 wait(200)
                 shown([1,3], 1)
+                workspaceIconClicks(first, second, primary)
+                Hyprland.workspaces.values = [first, second, other]
+                topbar.pressBar()
+                wait(200)
                 const original = workspaces
                 for (let cycle = 0; cycle < 3; ++cycle) {
                     mockSession.beginLock()
@@ -521,7 +628,7 @@ ShellRoot {
                     topbar.toggleSwitcher()
                     compare(topbar.ui.page, "switcher")
                     compare(topbar.barVisible, visible, "Switcher adds no visibility owner")
-                    topbar.activateSwitcherWindow(b)
+                    topbar.activateToplevel(b)
                     wait(1)
                     compare(mockCompositor.restored, b.address)
                     topbar.openWidget("audio", true, "DP-1")
@@ -994,7 +1101,7 @@ Scope {
                             capture_output=True, text=True, timeout=40)
     output = result.stdout + result.stderr
     assert result.returncode == 0 and 'SWITCHER_PASSED' in output and 'SWITCHER_SIZING_PASSED' in output, output
-    assert 'WORKSPACES_UNLOCK_PASSED' in output, output
+    assert 'WORKSPACES_UNLOCK_PASSED' in output and 'WORKSPACE_ICON_CLICKS_PASSED' in output, output
     assert 'CARD_SWITCHING_PASSED' in output and 'FULLSCREEN_FLOW_PASSED' in output, output
     assert not re.search(r'ReferenceError|TypeError|Binding loop|Unable to assign|not a type', output), output
     # One lightweight mixed policy case exercises both fixed directions against
@@ -1075,4 +1182,4 @@ ShellRoot {
     output = result.stdout + result.stderr
     assert result.returncode == 0 and 'SESSION_RELOAD_PASSED' in output, output
     assert not re.search(r'ReferenceError|TypeError|Binding loop|Unable to assign|not a type', output), output
-    print('Card native hover/click/focus in representative mouse/Always modes, fullscreen special-workspace refresh/hold conversion, switcher bounds/scroll/keys, lock/privacy/reload and workspace lifecycle pass')
+    print('Workspace icon nested clicks/exact native target/parent isolation/input release/stale identity/lock/generation; card native hover/click/focus in representative mouse/Always modes, fullscreen special-workspace refresh/hold conversion, switcher bounds/scroll/keys, lock/privacy/reload and workspace lifecycle pass')

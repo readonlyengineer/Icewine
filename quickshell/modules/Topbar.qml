@@ -315,7 +315,7 @@ Scope {
         else openWidget("switcher", true, focusedScreenName())
     }
 
-    function activateSwitcherWindow(window) {
+    function activateToplevel(window) {
         if (sessionLocked || !compositor.toplevels.includes(window))
             return
         yieldFocus()
@@ -591,7 +591,12 @@ Scope {
                                 backgroundAttention: statusPopout.backgroundAttention
                                 onActivated: root.openWidget("launcher", true, panel.screen.name)
                             }
-                            Bar.Workspaces { id: workspaces; compositor: root.compositor; screen: panel.screen }
+                            Bar.Workspaces {
+                                id: workspaces
+                                compositor: root.compositor
+                                screen: panel.screen
+                                onActivateRequested: window => root.activateToplevel(window)
+                            }
                         }
                     }
                     Bar.Clock { id: barClock; anchors.centerIn: parent; now: clock.date }
@@ -805,7 +810,7 @@ Scope {
                         compositor: root.compositor
                         monitorName: panel.screen.name
                         onDismissRequested: root.dismissWidget()
-                        onActivateRequested: window => root.activateSwitcherWindow(window)
+                        onActivateRequested: window => root.activateToplevel(window)
                     }
                 }
                 Bar.StatusPopout {

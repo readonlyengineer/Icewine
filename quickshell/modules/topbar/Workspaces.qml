@@ -10,6 +10,8 @@ Rectangle {
     required property var compositor
     required property var screen
 
+    signal activateRequested(var window)
+
     readonly property var monitor: compositor.monitorFor(screen)
     readonly property int activeId: monitor?.activeWorkspace?.id ?? 1
     readonly property var workspaceIds: compositor.workspaceIdsForMonitor(monitor)
@@ -115,6 +117,12 @@ Rectangle {
             anchors.margins: -2
             radius: 4
             color: applicationIcon.focused ? Theme.Palette.primary : "transparent"
+        }
+
+        TapHandler {
+            // Take the grab so the workspace's passive tap cannot also navigate.
+            gesturePolicy: TapHandler.ReleaseWithinBounds
+            onTapped: root.activateRequested(applicationIcon.modelData)
         }
 
         Image {

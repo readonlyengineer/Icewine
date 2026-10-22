@@ -295,7 +295,7 @@ assert.equal(raises, 1)
 const selected = shell.compositor.toplevels[0]
 shell.ui = State.reduce(shell.ui, {type: "open", page: "switcher", engaged: true, screen: "external"})
 shell.beginInteraction()
-shell.activateSwitcherWindow(selected)
+shell.activateToplevel(selected)
 assert.equal(shell.ui.page, "")
 assert.equal(State.barVisible(shell.ui, false, false, "always"), true,
     "Instant window activation handoff must leave Always Show visible")
@@ -305,12 +305,12 @@ assert.deepEqual(focused, [selected])
 shell.finishInteraction()
 flush()
 focused.length = 0
-shell.activateSwitcherWindow(selected)
+shell.activateToplevel(selected)
 shell.sessionLocked = true
 flush()
 assert.equal(focused.length, 0, "Lock cancels deferred activation")
 shell.sessionLocked = false
-shell.activateSwitcherWindow(selected)
+shell.activateToplevel(selected)
 shell.beginInteraction()
 flush()
 assert.equal(focused.length, 0, "A new interaction cancels deferred activation")
@@ -585,7 +585,7 @@ for (const page of ["launcher", "audio", "switcher"]) {
     assert.equal(shell.previousToplevel, null, "External focus wins over retained app restoration")
     flush()
 }
-for (const close of [() => shell.dismissWidget(), () => shell.activateSwitcherWindow(shell.compositor.toplevels[0]),
+for (const close of [() => shell.dismissWidget(), () => shell.activateToplevel(shell.compositor.toplevels[0]),
     () => vm.runInNewContext(clearSwitcher, {root: shell, panel: {widgetHere: true}})]) {
     shell.Config.Settings.barBehaviour = "toggle"
     shell.ui = State.reduce(State.initial(), {type: "press", behaviour: "toggle"})
