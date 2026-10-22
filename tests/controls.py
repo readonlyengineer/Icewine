@@ -2668,6 +2668,226 @@ SERVICE_FIXTURES = {
     "ConnectionFailReason": "enum Reason { NoSecrets }",
 }
 
+TAILSCALE_MENU_QML = """import QtQuick
+import QtQuick.Window
+import QtTest
+import Quickshell
+import "icewine/modules/topbar/popouts" as Popouts
+ShellRoot {
+    id: root
+    Window {
+        id: window
+        visible: true
+        width: 800; height: 600
+        color: "#16161e"
+        property bool bottom: false
+        property bool leftEdge: false
+        Rectangle { width: parent.width; height: 40; y: window.bottom ? parent.height - height : 0; color: "#565f89" }
+        Popouts.Tailscale {
+            id: page
+            x: window.leftEdge ? 8 : window.width - width - 8
+            y: window.bottom ? 8 : 48
+            width: 280; height: window.height - 96
+        }
+        TestCase { id: keys; when: false }
+    }
+    function find(item, name) {
+        if (item.Accessible.name === name) return item
+        for (const child of item.children ?? []) {
+            const result = find(child, name)
+            if (result) return result
+        }
+        return null
+    }
+    function capture(name) {
+        if (!CAPTURE_PATH) return
+        let done = false
+        window.contentItem.grabToImage(result => {
+            if (!result.saveToFile(CAPTURE_PATH + "/" + name + ".png")) throw new Error("Capture failed")
+            done = true
+        })
+        keys.tryVerify(() => done)
+    }
+    function bounded(menu) {
+        const point = menu.contentItem.mapToItem(window.contentItem, 0, 0)
+        if (point.y - menu.topPadding < page.y - 1
+                || point.y + menu.contentItem.height + menu.bottomPadding > page.y + page.height + 1
+                || point.x < -1 || point.x + menu.contentItem.width > window.width + 1)
+            throw new Error(`Menu overflow: y=${point.y}, height=${menu.height}, margins=${menu.topMargin}/${menu.bottomMargin}, parent=${menu.parent}, card=${page.y}/${page.height}`)
+        if (!menu.contentItem.clip) throw new Error("Menu does not clip")
+    }
+    function last(menu) {
+        menu.currentIndex = 0
+        menu.forceActiveFocus()
+        let index = menu.count - 1
+        while (menu.itemAt(index).text === undefined || !menu.itemAt(index).visible || !menu.itemAt(index).enabled) --index
+        for (let i = 0; i < menu.count && menu.currentIndex !== index; ++i) keys.keyClick(Qt.Key_Down)
+        keys.tryCompare(menu, "currentIndex", index)
+        const item = menu.itemAt(index)
+        keys.tryVerify(() => {
+            const point = item.mapToItem(menu.contentItem, 0, 0)
+            return point.y >= -1 && point.y + item.height <= menu.contentItem.height + 1
+        }, 2000, "Keyboard did not reveal final entry")
+        return item
+    }
+    function scrollInput(menu) {
+        const list = menu.contentItem
+        menu.currentIndex = 0
+        menu.forceActiveFocus()
+        keys.wait(20)
+        list.positionViewAtBeginning()
+        keys.wait(20)
+        keys.mouseMove(list, list.width / 2, list.height / 2)
+        keys.wait(20)
+        keys.mouseWheel(list, list.width / 2, list.height / 2, 0, -120)
+        keys.tryVerify(() => list.contentY > list.originY, 1000, "Wheel did not scroll")
+    }
+    function touchInput(menu) {
+        const list = menu.contentItem
+        list.positionViewAtBeginning()
+        const touch = keys.touchEvent(list)
+        touch.press(0, list, list.width / 2, list.height - 20).commit()
+        keys.wait(20)
+        touch.move(0, list, list.width / 2, list.height - 40).commit()
+        keys.wait(20)
+        touch.move(0, list, list.width / 2, 20).commit()
+        keys.wait(20)
+        touch.release(0, list, list.width / 2, 20).commit()
+        keys.tryVerify(() => list.contentY > list.originY, 1000, "Touch did not scroll")
+        list.cancelFlick()
+    }
+    function selectLast(menu, pointer) {
+        const item = last(menu)
+        let triggered = false
+        item.triggered.connect(() => triggered = true)
+        if (pointer) keys.mouseClick(item, item.width / 2, item.height / 2)
+        else keys.keyClick(Qt.Key_Return)
+        keys.tryVerify(() => triggered, 1000, "Final entry was not selectable")
+    }
+    Timer {
+        interval: 100; running: true
+        onTriggered: {
+            try {
+                window.requestActivate()
+                keys.tryCompare(window, "active", true)
+                const picker = find(page, "Exit node")
+                // Exercise the real menu/model without starting any status process.
+                const devices = Array.from({length: 35}, (_, i) => ({id: "device" + i,
+                    name: "Device " + String(i).padStart(2, "0"), address: "100.64.0.2", online: true}))
+                const cities = Array.from({length: 40}, (_, i) => ({id: "city" + i,
+                    name: "City " + String(i).padStart(2, "0"), address: "100.64.0.3", online: true,
+                    mullvad: true, countryCode: "34", cityCode: String(i),
+                    country: "Country 34", city: "City " + String(i).padStart(2, "0")}))
+                const countries = Array.from({length: 34}, (_, i) => ({id: "country" + i,
+                    name: "Country " + String(i).padStart(2, "0"), address: "100.64.0.4", online: true,
+                    mullvad: true, countryCode: String(i), cityCode: "only",
+                    country: "Country " + String(i).padStart(2, "0"), city: "Only city"}))
+                const none = {id: "", name: "None", address: ""}
+                function setExits(exits) {
+                    page.data = {state: "Running", connected: true, self: "fixture", selected: "",
+                        label: "Connected", peers: [], exits: [none].concat(exits)}
+                    keys.wait(30)
+                }
+                setExits(devices.concat(countries, cities))
+                const menu = Array.from(picker.data).find(child => child.count !== undefined)
+                if (menu.itemAt(0).text !== "None" || menu.itemAt(1).text !== "Device 00"
+                        || menu.menuAt(37).title !== "Country 00") throw new Error("Grouping changed")
+                for (const height of [360, 800]) for (const bottom of [false, true]) for (const left of [false, true]) {
+                    window.height = height
+                    window.bottom = bottom
+                    window.leftEdge = left
+                    keys.wait(20)
+                    picker.click()
+                    keys.tryCompare(menu, "visible", true)
+                    keys.wait(50)
+                    capture(`root-${height}-${bottom}-${left}`)
+                    if (!BASELINE) {
+                        bounded(menu)
+                        if (!menu.contentItem.interactive) throw new Error("Long root not scrollable")
+                        scrollInput(menu)
+                        last(menu)
+                    } else { menu.currentIndex = menu.count - 1; menu.forceActiveFocus() }
+                    keys.keyClick(Qt.Key_Right)
+                    const country = menu.menuAt(menu.count - 1)
+                    keys.tryCompare(country, "visible", true)
+                    keys.wait(50)
+                    capture(`country-${height}-${bottom}-${left}`)
+                    if (!BASELINE) {
+                        bounded(country)
+                        if (!country.contentItem.interactive) throw new Error("Long country not scrollable")
+                        scrollInput(country)
+                        last(country)
+                        capture(`last-city-${height}-${bottom}-${left}`)
+                        selectLast(country, left)
+                        keys.tryCompare(menu, "visible", false)
+                        picker.click()
+                        keys.tryCompare(menu, "visible", true)
+                        last(menu)
+                        keys.keyClick(Qt.Key_Right)
+                        keys.tryCompare(country, "visible", true)
+                    }
+                    keys.keyClick(Qt.Key_Escape)
+                    keys.tryCompare(country, "visible", false)
+                    keys.keyClick(Qt.Key_Escape)
+                    keys.tryCompare(menu, "visible", false)
+                }
+                if (!BASELINE) {
+                    // Overflow devices alone, then cities alone with a naturally sized root.
+                    for (const exits of [devices, cities]) {
+                        setExits(exits)
+                        picker.click()
+                        keys.tryCompare(menu, "visible", true)
+                        bounded(menu)
+                        if (exits === devices) selectLast(menu, true)
+                        else {
+                            if (menu.height !== menu.implicitHeight) throw new Error("Short root has blank space")
+                            last(menu)
+                            keys.keyClick(Qt.Key_Right)
+                            const country = menu.menuAt(menu.count - 1)
+                            keys.tryCompare(country, "visible", true)
+                            bounded(country)
+                            selectLast(country, false)
+                        }
+                        keys.tryCompare(menu, "visible", false)
+                    }
+                    // Finish with touch input so synthesized mouse events do not overlap later wheel events.
+                    for (const exits of [devices, cities]) {
+                        setExits(exits)
+                        picker.click()
+                        keys.tryCompare(menu, "visible", true)
+                        if (exits === devices) touchInput(menu)
+                        else {
+                            last(menu)
+                            keys.keyClick(Qt.Key_Right)
+                            const country = menu.menuAt(menu.count - 1)
+                            keys.tryCompare(country, "visible", true)
+                            touchInput(country)
+                            country.close()
+                        }
+                        menu.close()
+                        keys.tryCompare(menu, "visible", false)
+                    }
+                    setExits([devices[0], countries[0]])
+                    picker.click()
+                    keys.tryCompare(menu, "visible", true)
+                    if (menu.height !== menu.implicitHeight) throw new Error("Short menu has blank space")
+                    last(menu)
+                    keys.keyClick(Qt.Key_Right)
+                    const shortCountry = menu.menuAt(menu.count - 1)
+                    keys.tryCompare(shortCountry, "visible", true)
+                    if (shortCountry.height !== shortCountry.implicitHeight) throw new Error("Short country has blank space")
+                    keys.mouseClick(window.contentItem, window.width - 2, window.height / 2)
+                    keys.tryCompare(menu, "visible", false)
+                    keys.tryCompare(shortCountry, "visible", false)
+                }
+                console.log("TAILSCALE_MENU_PASSED")
+                Qt.quit()
+            } catch (error) { console.error(error, error.stack); Qt.exit(1) }
+        }
+    }
+}
+"""
+
 source = Path(sys.argv[1]).resolve()
 QML = QML.replace("ssh-ed25519 fixture-public", SSH_PUBLIC)
 
@@ -2812,6 +3032,21 @@ print(json.dumps(dict(available=True, error="", entries=[dict(public="ssh-ed2551
         assert not (root / "state/icewine").exists(), "First-use fixture must lack the preference directory"
     else:
         (root / "state/icewine").mkdir(parents=True)
+    if "--tailscale-menu-only" in sys.argv or len(sys.argv) == 2:
+        import json
+        captures = os.environ.get("ICEWINE_CONTROL_CAPTURES", "")
+        if captures: Path(captures).mkdir(parents=True, exist_ok=True)
+        (root / "shell.qml").write_text(TAILSCALE_MENU_QML.replace("CAPTURE_PATH", json.dumps(captures))
+            .replace("BASELINE", "true" if "--baseline" in sys.argv else "false"))
+        result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,
+                                capture_output=True, text=True, timeout=45)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0 and "TAILSCALE_MENU_PASSED" in output, output
+        assert not re.search(r"ReferenceError|TypeError|[Bb]inding loop|Unable to assign", output), output
+        assert not (root / "tailscale-calls").exists(), "Geometry fixture started a Tailscale command"
+        print("Tailscale baseline captures complete" if "--baseline" in sys.argv else
+              "actual Tailscale root/country geometry, wheel/touch, keyboard, selection and dismissal pass")
+        if "--tailscale-menu-only" in sys.argv: sys.exit(0)
     if "--capture-only" in sys.argv or len(sys.argv) == 2:
         (root / "shell.qml").write_text(CAPTURE_QML)
         result = subprocess.run(["qs", "-p", str(root), "--no-color"], env=env,

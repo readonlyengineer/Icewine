@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Controls as Controls
 import Quickshell
@@ -23,6 +24,15 @@ Flickable {
     contentHeight: implicitHeight
     clip: true
     boundsBehavior: Flickable.StopAtBounds
+
+    // Keep native menu scrolling inside the card, including when the bar overlays the output.
+    component ExitMenu: Controls.Menu {
+        popupType: Controls.Popup.Item
+        height: Math.min(implicitHeight, root.height)
+        onCurrentIndexChanged: contentItem.positionViewAtIndex(currentIndex, ListView.Contain)
+        bottomMargin: root.Window.height - topMargin - root.height
+        onAboutToShow: topMargin = root.mapToItem(root.Window.contentItem, 0, 0).y
+    }
 
     function refresh() {
         if (!active || busy || process.running || exitPicker.visible) return
@@ -229,7 +239,7 @@ Flickable {
             Accessible.name: "Exit node"
             onClicked: exitPicker.popup(exitButton, 0, exitButton.height)
 
-            Controls.Menu {
+            ExitMenu {
                 id: exitPicker
                 width: root.width - 24
                 palette.window: Theme.Palette.surface
@@ -280,7 +290,7 @@ Flickable {
                     model: root.menuData.countries
                     onObjectAdded: (index, object) => exitPicker.insertMenu(index + deviceItems.count + 2, object)
                     onObjectRemoved: (index, object) => exitPicker.removeMenu(object)
-                    delegate: Controls.Menu {
+                    delegate: ExitMenu {
                         id: countryMenu
                         required property var modelData
                         title: modelData.name
