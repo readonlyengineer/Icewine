@@ -417,7 +417,7 @@ fn theme_colours(id: &str) -> io::Result<[Color; 6]> {
     }
     Ok(colours)
 }
-fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize) -> io::Result<Option<bool>> {
+fn choose(readonly: bool, onboarding: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize) -> io::Result<Option<bool>> {
     let mut appearance = Appearance::load()?;
     let (mut widgets, mut message) = match Widgets::load() {
         Ok(value) => (value, String::new()),
@@ -482,7 +482,8 @@ fn choose(readonly: bool, selected: &mut BTreeMap<&str, bool>, steam: &mut usize
                 rows.extend([row("[ Save ]", "".into(), Control::Apply, (3..8).any(editable)), row("[ Back ]", "".into(), Control::Back, true)]);
             } else if page == 0 {
                 for (id, label, detail) in ROWS.iter().filter(|(id, _, _)| *id != "login") {
-                    let enabled = !readonly && (*id != "gamescope" || *steam != 0) && (*id != "handheld" || handheld_available(*steam, selected));
+                    let enabled = !readonly && (!onboarding || !matches!(*id, "desktop" | "handheld"))
+                        && (*id != "gamescope" || *steam != 0) && (*id != "handheld" || handheld_available(*steam, selected));
                     let value = match *id {
                         "steam" => ["None", "Native", "Flatpak"][*steam].into(),
                         "handheld" => if selected[id] && enabled { "Steamdeck" } else { "Off" }.into(),
@@ -1235,19 +1236,22 @@ fn bootstrap(directory: &str, revision: &str) -> Result<ExitCode, Box<dyn std::e
     if !confirm(" Icewine onboarding: base package ", vec![
         "Experimental Arch/CachyOS x86_64; installed sessions remain unqualified.".into(),
         format!("Source commit: {revision}"),
-        "Prerequisites: full distro upgrade, base-devel, cargo, python; keep a fallback desktop.".into(),
+        "Prerequisites prepared; keep a recovery TTY (Ctrl+Alt+F2).".into(),
         "Plan: sudo pacman -U the prepared base archive and its runtime dependencies.".into(),
         format!("Archive: {}", archives[0].display()),
         "Pacman will show its transaction and request approval. User configuration is untouched here.".into(),
         "Then review the utility selections in the installed manager before applying them.".into(),
-        "Cancel retains build/cache files; packages and user configuration remain unchanged.".into(),
-    ])? { return Ok(ExitCode::SUCCESS); }
+        "Cancel retains prerequisites/build files; the base package and user configuration are unchanged.".into(),
+    ])? {
+        eprintln!("Base installation cancelled. Prerequisites may be installed; retry the bootstrap to continue.");
+        return Ok(ExitCode::SUCCESS);
+    }
     let status = Command::new("sudo").args(["pacman", "-U"]).arg(&archives[0]).status()?;
     if !status.success() {
         eprintln!("Base installation failed; packages may have changed. Retained archives: {}. Retry this bootstrap or inspect pacman output before proceeding.", directory.display());
         return Ok(ExitCode::FAILURE);
     }
-    let status = Command::new("icewine-manage").env("ICEWINE_PACKAGE_DIR", &directory).status()?;
+    let status = Command::new("icewine-manage").arg("--onboard").env("ICEWINE_PACKAGE_DIR", &directory).status()?;
     Ok(if status.success() { ExitCode::SUCCESS } else { ExitCode::FAILURE })
 }
 
@@ -1257,7 +1261,10 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     }
     let args = std::env::args().collect::<Vec<_>>();
     if args.len() == 4 && args[1] == "--bootstrap" { return bootstrap(&args[2], &args[3]); }
-    if args.len() != 1 { return Err("Usage: icewine".into()); }
+    let onboarding = args.len() == 2 && args[1] == "--onboard";
+    if onboarding { std::env::set_var("ICEWINE_ONBOARDING", "1"); }
+    else { std::env::remove_var("ICEWINE_ONBOARDING"); }
+    if args.len() != 1 && !onboarding { return Err("Usage: icewine".into()); }
     let output = Command::new("icewine-manage-backend").arg("state").output()?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).into_owned().into());
@@ -1283,11 +1290,22 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         || (selected["handheld"] && !handheld_available(steam, &selected)) {
         return Err("Invalid manager selections".into());
     }
-    if let Some(overwrite) = choose(readonly, &mut selected, &mut steam)? {
+    if onboarding {
+        selected.insert("desktop", true);
+        selected.insert("handheld", false);
+    }
+    if let Some(overwrite) = choose(readonly, onboarding, &mut selected, &mut steam)? {
+        if onboarding && (readonly || !selected["desktop"] || selected["handheld"]) {
+            return Err("Headless onboarding requires Desktop with Handheld off; rerun icewine-manage --onboard to retry".into());
+        }
         let choices = ROWS.iter().map(|(id, label, _)| format!("{label}: {}",
             if *id == "steam" { STEAM[steam].to_owned() } else { selected[id].to_string() })).collect::<Vec<_>>();
         let mut plan = vec![if readonly { "Host packages/services remain unchanged; deploy selected user defaults.".into() }
             else { "Install selected packages; configure selected utilities; deselection keeps packages.".into() }];
+        if onboarding {
+            plan.push("Headless login: install icewine-login, greetd and tuigreet; enable greetd for next boot; set graphical.target as boot default. Existing login services block this path.".into());
+            plan.push("Authenticate at the console greeter to start Icewine. No automatic login. Ctrl+Alt+F2 keeps a recovery TTY.".into());
+        }
         plan.push("Create missing shared Quickshell/wallpaper defaults and publish theme outputs.".into());
         plan.extend(choices);
         if selected["texteditor"] { plan.push("Terminal Editor: isolated icewine-nvim data; Arch first launch downloads LazyVim plugins. Personal nvim and host EDITOR/VISUAL stay unchanged.".into()); }
@@ -1297,13 +1315,24 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             else { "Host prerequisites: services/device permissions; Multilib for native Steam; private packages for Handheld.".into() });
         plan.push("Earlier package/file changes can remain after failure or interruption. Retry Apply after resolving the error.".into());
         plan.push("Cancel leaves utility choices unapplied; earlier Appearance changes remain.".into());
-        if !review_utilities(plan)? { return Ok(ExitCode::SUCCESS); }
+        if !review_utilities(plan)? {
+            if onboarding { eprintln!("Onboarding Apply cancelled. Base package remains installed; retry with ICEWINE_PACKAGE_DIR=<retained-build> icewine-manage --onboard."); }
+            return Ok(ExitCode::SUCCESS);
+        }
         let status = Command::new("icewine-manage-backend").arg("apply")
             .args(selected.iter().map(|(id, value)| format!("{id}={value}")))
             .arg(format!("steam={}", STEAM[steam]))
             .arg(format!("overwrite={overwrite}")).status()?;
+        if onboarding && status.success() && confirm(" Icewine ready: reboot? ", vec![
+            "Apply completed. Reboot to the authenticated Icewine login.".into(),
+            "I: reboot now; Esc/Q: stay in this TTY and reboot later.".into(),
+        ])? {
+            let reboot = Command::new("sudo").args(["systemctl", "reboot"]).status()?;
+            if !reboot.success() { return Err("Reboot failed; setup is retained. Reboot later from this TTY.".into()); }
+        }
         return Ok(if status.success() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
     }
+    if onboarding { eprintln!("Onboarding cancelled before Apply. Base package remains installed; retry with ICEWINE_PACKAGE_DIR=<retained-build> icewine-manage --onboard."); }
     Ok(ExitCode::SUCCESS)
 }
 

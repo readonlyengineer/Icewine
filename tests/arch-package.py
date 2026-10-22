@@ -10,6 +10,7 @@ import sys
 import tempfile
 import importlib.machinery
 import vdf
+import tomllib
 
 source = Path(sys.argv[1]).resolve()
 native = source / "packaging/arch"
@@ -145,7 +146,13 @@ print("PASS: real python-vdf shortcut binary API and literal command filtering")
 if len(sys.argv) == 2:
     sys.exit(0)
 
-desktop, session, handheld, idle = map(Path, sys.argv[2:6])
+desktop, session, handheld, idle, login = map(Path, sys.argv[2:7])
+login_config = tomllib.loads((login / "usr/share/icewine/login.toml").read_text())
+assert login_config == {"terminal": {"vt": 1}, "default_session": {
+    "command": "/usr/bin/tuigreet --cmd /usr/bin/icewine-session", "user": "greeter"}}
+assert (login / "usr/lib/systemd/system/greetd.service.d/icewine.conf").read_text() == (native / "login.conf").read_text()
+assert not (login / "etc").exists(), "login package overwrote host configuration"
+
 assert sorted(str(p.relative_to(idle)) for p in idle.rglob("*") if p.is_file() and not p.name.startswith(".")) == ["usr/lib/icewine/wljoywake"]
 assert {p.name for p in (handheld / "usr/lib/systemd/user").iterdir()} == {
     "icewine-inputplumber-hyprland.service", "icewine-controller-idle.service"}

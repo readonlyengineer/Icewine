@@ -438,6 +438,27 @@ def session_environment(selected):
          f"ICEWINE_HANDHELD_ENABLED={str(selected['handheld']).lower()}"])
 
 
+def onboarding_login():
+    """Only the fresh headless path may take ownership of the login service."""
+    managed = subprocess.run(["pacman", "-Qq", "icewine-login"], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL).returncode == 0
+    display = Path("/etc/systemd/system/display-manager.service")
+    if display.exists() or display.is_symlink():
+        if not managed or display.resolve() != Path("/usr/lib/systemd/system/greetd.service"):
+            raise ValueError("Existing display manager: keep host login; headless onboarding cannot replace it")
+    for root in (Path("/etc/systemd/system"), Path("/run/systemd/system")):
+        if any((root / name).exists() or (root / name).is_symlink()
+               for name in ("greetd.service", "greetd.service.d")):
+            raise ValueError("Existing greetd service override: preserve it; use host-owned login")
+    if not managed and subprocess.run(["pacman", "-Qq", "greetd"], stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL).returncode == 0:
+        raise ValueError("Existing greetd installation: preserve host login configuration")
+    for unit in ("display-manager.service", "greetd.service"):
+        if subprocess.run(["systemctl", "is-active", "--quiet", unit], stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode == 0:
+            raise ValueError("A login service is running; headless onboarding requires a TTY-only host")
+
+
 def apply(selected, overwrite, readonly, previous, config, data, state):
     if readonly and selected != previous:
         raise ValueError("utility selections are read-only (host policy or symlink)")
@@ -452,15 +473,22 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
     applied = validate(json.loads(applied_path.read_text()), saved=True) if applied_path.exists() else previous if (state / "manage.json").exists() else dict.fromkeys(FEATURES, False) | {"steam": "none"}
     if not readonly and selected["login"]:
         raise ValueError("Login configuration belongs to the host; login styling is NixOS-only")
+    onboarding = os.environ.get("ICEWINE_ONBOARDING") == "1"
+    if onboarding:
+        if readonly or not selected["desktop"] or selected["handheld"]:
+            raise ValueError("Headless onboarding requires Desktop and supports desktop/laptop only; leave Handheld off")
+        onboarding_login()
     if not readonly:
         packages = [package for feature in FEATURES if selected[feature] and feature != "steam" for package in PACKAGES[feature]]
         if selected["steam"] == "native":
             packages.append("steam")
         if selected["steam"] == "flatpak" or selected["screenshot"] or selected["media"]:
             packages.append("flatpak")
+        if onboarding:
+            packages.append("icewine-login")
         local = []
         package_dir = os.environ.get("ICEWINE_PACKAGE_DIR")
-        for package in ("icewine-session", "icewine-handheld", "icewine-keyboard", "icewine-controller-idle"):
+        for package in ("icewine-session", "icewine-handheld", "icewine-keyboard", "icewine-controller-idle", "icewine-login"):
             if package not in packages:
                 continue
             archives = sorted(path for path in Path(package_dir).glob(package + "-[0-9]*.pkg.tar.*") if path.suffix != ".sig") if package_dir else []
@@ -562,6 +590,12 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
             except subprocess.CalledProcessError as error:
                 print(f"Failed to restore session flags: {error}", file=sys.stderr)
         raise
+    if onboarding:
+        # Enable for the next boot only; never evict the current TTY login.
+        onboarding_login()
+        run(["sudo", "systemctl", "daemon-reload"])
+        run(["sudo", "systemctl", "enable", "greetd.service"])
+        run(["sudo", "systemctl", "set-default", "graphical.target"])
     theme.atomic_text(applied_path, json.dumps(selected, sort_keys=True) + "\n")
     if not readonly:
         theme.atomic_text(state / "manage.json", json.dumps(selected, sort_keys=True) + "\n", setting=True)
@@ -1037,5 +1071,6 @@ if __name__ == "__main__":
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"Icewine Apply failed: {error}", file=sys.stderr)
         if sys.argv[1:2] == ["apply"]:
-            print("Earlier packages/files may have changed; no complete rollback occurred. Resolve the error, then reopen icewine and retry Apply with overwrite off. Keep the local split-package directory available.", file=sys.stderr)
+            retry = "icewine-manage --onboard" if os.environ.get("ICEWINE_ONBOARDING") == "1" else "icewine"
+            print(f"Earlier packages/files may have changed; no complete rollback occurred. Resolve the error, then reopen {retry} and retry Apply with overwrite off. Keep the local split-package directory available.", file=sys.stderr)
         sys.exit(1)

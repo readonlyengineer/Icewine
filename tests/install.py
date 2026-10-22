@@ -555,6 +555,40 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         assert [call.args[0] for call in commands.call_args_list] == [
             ["sudo", "pacman", "-U", str(session_archive)]]
         assert widget_preferences.read_bytes() == saved_widget_preferences
+    # Fresh onboarding adds the login package and only schedules a greeter after Apply.
+    login_archive = archives / "icewine-login-0.1-1-x86_64.pkg.tar.zst"
+    login_archive.write_bytes(b"prepared login")
+    with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives), ICEWINE_ONBOARDING="1"), \
+         patch.object(manage, "onboarding_login") as preflight, \
+         patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+        apply(("desktop",))
+        calls = [call.args[0] for call in commands.call_args_list]
+        assert ["sudo", "pacman", "-U", str(session_archive), str(login_archive)] == calls[0]
+        assert calls[-3:] == [["sudo", "systemctl", "daemon-reload"],
+                              ["sudo", "systemctl", "enable", "greetd.service"],
+                              ["sudo", "systemctl", "set-default", "graphical.target"]]
+        assert preflight.call_count == 2
+    with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives), ICEWINE_ONBOARDING="1"), \
+         patch.object(manage, "onboarding_login"), \
+         patch.object(manage.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "pacman")) as commands:
+        try:
+            apply(("desktop",))
+        except subprocess.CalledProcessError:
+            pass
+        else:
+            raise AssertionError("Failed package installation reached login enablement")
+        assert not any(call.args[0][:3] == ["sudo", "systemctl", "enable"] for call in commands.call_args_list)
+    with patch.dict(os.environ, ICEWINE_ONBOARDING="1"), patch.object(manage, "onboarding_login") as preflight, \
+         patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:
+        for features in ((), ("desktop", "handheld", "gamescope")):
+            try:
+                apply(features, steam="native" if "handheld" in features else "none")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("Onboarding accepted an unsupported selection")
+        assert not preflight.called and not commands.called
+    login_archive.unlink()
     # A prepared directory need not supply unrelated/private dependency archives.
     with patch.dict(os.environ, ICEWINE_PACKAGE_DIR=str(archives), ICEWINE_HANDHELD_DEFAULT_FILES=str(defaults)), \
          patch.object(manage, "handheld_policy"), patch.object(manage.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as commands:

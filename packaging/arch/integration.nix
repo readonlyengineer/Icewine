@@ -19,7 +19,7 @@ in pkgs.stdenv.mkDerivation {
   dontInstall = true;
   dontWrapQtApps = true;
   nativeBuildInputs = [ pkgs.pacman pkgs.libarchive pkgs.fakeroot
-    (pkgs.python3.withPackages (python: [ python.vdf ])) pkgs.lua pkgs.zstd
+    (pkgs.python3.withPackages (python: [ python.vdf ])) pkgs.lua pkgs.zstd pkgs.fish
     pkgs.meson pkgs.ninja pkgs.pkg-config pkgs.wayland-scanner
     pkgs.qt6.qtdeclarative pkgs.cargo pkgs.rustc pkgs.rustPlatform.cargoSetupHook ];
   buildInputs = [ pkgs.wayland pkgs.wayland-protocols pkgs.udev ];
@@ -67,7 +67,9 @@ in pkgs.stdenv.mkDerivation {
   done
   # These copies are test inputs; leave the native /usr/bin/env shebangs in archives.
   patchShebangs icewine/packaging/arch/command icewine/packaging/arch/session
+  python icewine/tests/bootstrap.py "$PWD/icewine"
+  python icewine/tests/onboarding-login.py "$PWD/icewine"
   python icewine/tests/handheld.py "$PWD/icewine"
-  python icewine/tests/arch-package.py "$PWD/icewine" "$PWD/pkg/icewine" "$PWD/pkg/icewine-session" "$PWD/pkg/icewine-handheld" "$PWD/dependencies/pkg/icewine-controller-idle"
+  python icewine/tests/arch-package.py "$PWD/icewine" "$PWD/pkg/icewine" "$PWD/pkg/icewine-session" "$PWD/pkg/icewine-handheld" "$PWD/dependencies/pkg/icewine-controller-idle" "$PWD/pkg/icewine-login"
 '';
 }

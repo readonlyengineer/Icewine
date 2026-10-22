@@ -212,7 +212,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
 ''')
         executable.chmod(0o755)
     log = root / "calls"
-    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None, hotkeys=None, hotkey_readonly=False, hotkey_error="", default_apps=None, default_readonly=(), default_error="", default_empty=False, default_many=False):
+    def run(keys, state, valid=True, policy=False, pick="", pick_exit=0, hyprmon_exit=0, auth=False, command_fail=False, delivery_fail=False, size=(24, 100), path=None, widgets=None, widget_policy="", widget_supported=True, widget_fail=False, capture="run", layout="scrolling", confirm=True, apply_exit=0, bootstrap=False, onboard=False, reboot=False, archives=None, revision="a"*40, file_state="theme=false transparency=false wallpaper=false monitors=false layout=false", widget_linked=False, appearance_wire="", refresh_bad=False, resize_steps=(), widget_owners=None, hotkeys=None, hotkey_readonly=False, hotkey_error="", default_apps=None, default_readonly=(), default_error="", default_empty=False, default_many=False):
         global last_output, last_frames, last_widget_calls, all_last_calls, capture_number
         log.unlink(missing_ok=True)
         tool_log.write_text("")  # A run may legitimately invoke no external tools.
@@ -252,6 +252,8 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
                 elif kind == "fifo": os.mkfifo(archive)
                 else: archive.write_bytes(b"synthetic package")
             arguments += ["--bootstrap", str(package_dir), revision]
+        if onboard:
+            arguments.append("--onboard")
         process = subprocess.Popen(arguments, stdin=slave, stdout=slave, stderr=slave, env=env)
         os.close(slave)
         output = bytearray()
@@ -280,6 +282,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         resize_events = []
         resize_keys = None
         reviewed = False
+        reboot_prompted = False
         stop_reason = "child-exit"
         while process.poll() is None and time.monotonic() < deadline:
             readable = select.select([master], [], [], 0.1)[0]
@@ -296,6 +299,9 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
             if sent and not reviewed and b"Utilities / Review" in rendered:
                 os.write(master, b"i" if confirm else b"\x1b")
                 reviewed = True
+            if onboard and reviewed and not reboot_prompted and b"Icewine ready: reboot?" in rendered:
+                os.write(master, b"i" if reboot else b"\x1b")
+                reboot_prompted = True
             if not sent and frames:
                 assert (b"Icewine needs an 80 x 24 terminal." if size[1] < 80 or size[0] < 24 else
                         b"Icewine onboarding: base package" if bootstrap else
@@ -382,7 +388,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         return " ".join([f"{name}={str(selected.get(name, "none" if name == "steam" else False)).lower()}" for name in reversed(ids)]
                         + [f"readonly={str(readonly).lower()}"])
     def applied(calls):
-        assert calls[0] == ["state"] and calls[1][0] == "apply" and len(calls) == 2
+        assert len(calls) == 2 and calls[0] == ["state"] and calls[1][0] == "apply", calls
         fields = dict(field.split("=") for field in calls[1][1:])
         assert len(fields) == len(ids) + 1 and set(fields) == {*ids, "overwrite"}
         return fields
@@ -703,7 +709,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert run(b"", "", valid=False, bootstrap=True, archives=ignored) == []
     calls = run(b"i", "", bootstrap=True, archives={base: "file", **ignored})
     assert calls[0][:3] == ["sudo", "pacman", "-U"] and Path(calls[0][3]).name == base
-    assert len(calls) == 2 and calls[1] == ["icewine-manage"]
+    assert len(calls) == 2 and calls[1] == ["icewine-manage", "--onboard"]
     assert run(b"", "", valid=False, bootstrap=True,
                archives={base: "file", "icewine-0.1-1-x86_64.pkg.tar.xz": "file"}) == []
     for kind in ("symlink", "directory", "fifo"):
@@ -715,9 +721,21 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert run(b"i\x1b", "", bootstrap=True, size=(24, 79)) == []
     calls = run(b"i", "", bootstrap=True)
     assert calls[0][:3] == ["sudo", "pacman", "-U"] and len(calls)==2
-    assert calls[1] == ["icewine-manage"]
+    assert calls[1] == ["icewine-manage", "--onboard"]
     calls = run(b"i", "", bootstrap=True, apply_exit=1)
     assert len(calls)==1 and calls[0][0] == "sudo"
+    for reboot_choice in (False, True):
+        run(tab+up+enter, state(), onboard=True, reboot=reboot_choice)
+        assert b"Icewine ready: reboot?" in last_output
+        assert (["sudo", "systemctl", "reboot"] in tools()) == reboot_choice
+        assert applied([call for call in all_last_calls if call[0] in ("state", "apply")])["desktop"] == "true"
+    run(tab+up+enter, state(desktop=True, handheld=True, steam="native", gamescope=True), onboard=True)
+    choices = applied([call for call in all_last_calls if call[0] in ("state", "apply")])
+    assert choices["desktop"] == "true" and choices["handheld"] == "false"
+    run(tab+up+enter, state(), onboard=True, apply_exit=1)
+    assert b"Icewine ready: reboot?" not in last_output
+    assert ["sudo", "systemctl", "reboot"] not in tools()
+    assert applied([call for call in all_last_calls if call[0] in ("state", "apply")])["desktop"] == "true"
     for size in ((24,80), (24,160), (48,80), (48,160)):
         run(tab+up+esc, state(), size=size)
         assert b"Utilities" in last_output and b"Appearance" in last_output and b"Hotkeys" in last_output

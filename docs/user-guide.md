@@ -428,8 +428,8 @@ autologin remain host-owned; greetd autologin uses `settings.initial_session`.
 Disabling the opt-in removes only Icewine's service defaults. A host's explicit
 `services.greetd.enable = true` and command remain; if Icewine supplied the only
 login service, configure a replacement or use console login before rebuilding.
-The Arch/CachyOS installer does not install or configure a greeter; retain your
-host's login manager there.
+On fresh headless Arch/CachyOS, the onboarding installer configures authenticated
+greetd/tuigreet for the next boot; existing login managers block that path.
 
 The default greeter command sets only the session launch command and available
 Wayland sessions, leaving appearance and session remembering at tuigreet defaults.

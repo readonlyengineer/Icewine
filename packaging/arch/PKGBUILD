@@ -1,6 +1,6 @@
 # Build from an Icewine source archive; see the project README.
 pkgbase=icewine
-pkgname=(icewine icewine-session icewine-handheld)
+pkgname=(icewine icewine-session icewine-handheld icewine-login)
 pkgver=0.1
 pkgrel=1
 arch=(x86_64)
@@ -122,4 +122,13 @@ package_icewine-handheld() {
   for unit in packaging/arch/handheld/*.service; do
     install -Dm644 "$unit" "$pkgdir/usr/lib/systemd/user/${unit##*/}"
   done
+}
+
+# Explicit fresh-headless onboarding; ordinary Desktop Apply leaves host login alone.
+package_icewine-login() {
+  pkgdesc='Icewine authenticated console login for a headless host'
+  depends=(icewine-session greetd greetd-tuigreet)
+  cd "$srcdir/icewine"
+  install -Dm644 packaging/arch/login.toml "$pkgdir/usr/share/icewine/login.toml"
+  install -Dm644 packaging/arch/login.conf "$pkgdir/usr/lib/systemd/system/greetd.service.d/icewine.conf"
 }
