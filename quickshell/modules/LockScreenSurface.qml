@@ -82,7 +82,7 @@ FocusScope {
             height: Math.min(implicitHeight, Math.max(34, root.height - root.keyboardInset
                 - date.height - (nowPlaying.visible ? nowPlaying.height : 0)
                 - password.height - statusText.height - 3 * parent.spacing
-                - (nowPlaying.visible ? 56 : 24)))
+                - (nowPlaying.visible ? nowPlaying.anchors.bottomMargin - root.keyboardInset + 44 : 24)))
             horizontalAlignment: Text.AlignHCenter
             fontSizeMode: Text.Fit
             minimumPixelSize: 28
@@ -165,7 +165,8 @@ FocusScope {
         objectName: "lockNowPlaying"
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: root.keyboardInset + 12
+        anchors.bottomMargin: root.keyboardInset + (root.keyboardInset > 0 ? 12
+            : Math.max(12, Math.min(160, (root.height - 360) * 0.35 + 12)))
         width: Math.max(0, Math.min(parent.width - 128, 440))
         visible: root.player !== null
         height: Math.max(metadata.height, playPause.height)

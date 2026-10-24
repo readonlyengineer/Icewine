@@ -454,6 +454,15 @@ ShellRoot {
                     root.phase = "shared keyboard " + size.join("x")
                     win.width = size[0]; win.height = size[1]
                     keys.wait(100)
+                    const closedMediaTop = media.mapToItem(view, 0, 0).y
+                    const closedStatusBottom = prompt.mapToItem(view, 0, prompt.height).y
+                    keys.verify(closedMediaTop >= closedStatusBottom + 16 - 0.01,
+                        "closed OSK leaves a visible status/media gap")
+                    keys.verify(closedMediaTop + media.height <= win.height - 12 + 0.01,
+                        "media remains within the output")
+                    if (size[0] >= 800 && size[1] >= 600)
+                        keys.verify(win.height - closedMediaTop - media.height >= 96 - 0.01,
+                            "desktop layout raises media from the bottom edge")
                     keys.verify(toggle.visible && toggle.x === 12
                         && toggle.y + toggle.height === view.height - 12,
                         "compact icon at bottom left before opening OSK")
@@ -464,6 +473,9 @@ ShellRoot {
                     keys.verify(panel && panel.width <= Math.min(2080, win.width - 24)
                         && panel.height > 0 && panel.y + panel.height <= win.height, "shared keyboard bounds")
                     keys.wait(250)
+                    if (size[0] === 1920)
+                        keys.verify(clock.height >= 80,
+                            "tall OSK layout keeps the clock prominent above the date")
                     keys.verify(toggle.x === 12 && toggle.y >= 0
                         && toggle.y + toggle.height <= panel.y,
                         "bottom-left icon remains reachable above shared OSK")
