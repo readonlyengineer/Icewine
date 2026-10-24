@@ -5,7 +5,7 @@ var defaults = [
     {id: "launcher", modules: ["launcher", "background", "layout"]},
     {id: "media", modules: ["media"]},
     {id: "audio", modules: ["audio", "bluetooth"]},
-    {id: "network", modules: ["network", "tailscale", "ssh"]},
+    {id: "network", modules: ["network"]},
     {id: "notifications", modules: ["notifications", "clipboard"]},
     {id: "battery", modules: ["battery", "performance"]}
 ]

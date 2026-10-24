@@ -94,7 +94,7 @@ CARD_MODULES = ("launcher", "background", "layout", "media", "audio", "bluetooth
                 "clipboard", "network", "tailscale", "ssh", "notifications", "battery", "performance")
 CARD_DEFAULTS = [{"id": names[0], "modules": list(names)} for names in (
     ("launcher", "background", "layout"), ("media",), ("audio", "bluetooth"),
-    ("network", "tailscale", "ssh"), ("notifications", "clipboard"), ("battery", "performance"))]
+    ("network",), ("notifications", "clipboard"), ("battery", "performance"))]
 
 
 def validate_stacks(stacks):

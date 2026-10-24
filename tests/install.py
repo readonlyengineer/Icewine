@@ -489,6 +489,10 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         assert initial["supported"] == "true"
         assert initial["notificationToasts"] == initial["windowSwitcher"] == "true:user"
         assert initial["cardStacks"] == manage.stack_text(manage.CARD_DEFAULTS) + ":user"
+        assert [name for name in manage.CARD_MODULES
+                if not any(name in stack["modules"] for stack in manage.CARD_DEFAULTS)] == ["tailscale", "ssh"]
+        assert next(stack for stack in manage.CARD_DEFAULTS if stack["id"] == "network") == {
+            "id": "network", "modules": ["network"]}
         # Do not save yet: widget_saved remains absent (Cancel's backend contract).
         assert not (widget_saved / "widgets.json").exists()
         # A draft loaded while absent must not overwrite malformed empty state.
@@ -596,14 +600,14 @@ with tempfile.TemporaryDirectory(prefix="icewine manager with spaces ") as tempo
         save_widgets(widget_status()["revision"], behaviour="keyboard", location="above")
         # A mixed stack round-trips order and disabled modules without touching
         # old boolean preferences. Empty top-level list disables every card.
-        mixed = [{"id": "mixed", "modules": ["ssh", "audio", "clipboard", "launcher"]}]
-        save_widgets(widget_status()["revision"], "false", "true", "mixed/ssh,audio,clipboard,launcher")
+        mixed = [{"id": "mixed", "modules": ["ssh", "tailscale", "audio", "clipboard", "launcher"]}]
+        save_widgets(widget_status()["revision"], "false", "true", "mixed/ssh,tailscale,audio,clipboard,launcher")
         assert json.loads((widget_saved / "widgets.json").read_text()) == {
             "notificationToasts": False, "windowSwitcher": True, "cardStacks": mixed, "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80, "oskAccess": "none"}
-        assert widget_status()["cardStacks"] == "mixed/ssh,audio,clipboard,launcher:user"
+        assert widget_status()["cardStacks"] == "mixed/ssh,tailscale,audio,clipboard,launcher:user"
         # A policy override may be empty. It is immutable, and saving other
         # settings must preserve the user's hidden stack choice for later.
-        for policy in ([], [{"id": "host", "modules": ["battery"]}]):
+        for policy in ([], [{"id": "host", "modules": ["tailscale", "ssh"]}]):
             with patch.dict(os.environ, {"ICEWINE_WIDGET_POLICY": json.dumps({"cardStacks": policy})}):
                 assert widget_status()["cardStacks"] == manage.stack_text(policy) + ":policy"
                 before = (widget_saved / "widgets.json").read_bytes()

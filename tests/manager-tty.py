@@ -227,7 +227,7 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
         if auth: (data / "auth.img").write_bytes(b"fixture")
         widgets_state = root / "widgets-state"
         widgets_state.write_text(json.dumps({"notificationToasts": True, "windowSwitcher": True,
-            "cardStacks": "launcher/launcher,background,layout;media/media;audio/audio,bluetooth;network/network,tailscale,ssh;notifications/notifications,clipboard;battery/battery,performance", "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80, "oskAccess": "none"} | (widgets or {})))
+            "cardStacks": "launcher/launcher,background,layout;media/media;audio/audio,bluetooth;network/network;notifications/notifications,clipboard;battery/battery,performance", "barBehaviour": "keyboard", "barLocation": "above", "barStyle": "anchored", "barWidth": 80, "oskAccess": "none"} | (widgets or {})))
         hotkey_state = root / "hotkeys-state"
         hotkey_state.write_text(json.dumps({row[0]: row[3] for row in hotkey_rows} | (hotkeys or {})))
         defaults_state = root / "default-apps-state"
@@ -1055,6 +1055,13 @@ sys.exit(int(os.environ["TUI_APPLY_EXIT"] if os.path.basename(sys.argv[0]) == "s
     assert saves()[-1][2:] == ["notificationToasts=false"]
     # Remove, place in the visible grid, cancel placement and preserve destination IDs.
     widgets = page(2)
+    run(widgets+b"s"+esc*2, state())
+    assert b"Unassigned (2)" in last_output and b"Tailscale" in last_output and b"SSH" in last_output
+    assert "network/network;" in save_field("cardStacks")
+    assert "tailscale" not in save_field("cardStacks") and "ssh" not in save_field("cardStacks")
+    legacy = "network/network,tailscale,ssh"
+    run(widgets+b"s"+esc*2, state(), widgets={"cardStacks":legacy})
+    assert save_field("cardStacks") == legacy and b"Unassigned (10)" in last_output
     run(widgets+enter+b"  "+right+enter+b"s"+esc*2, state())
     assert "media/media,launcher" in save_field("cardStacks")
     run(widgets+enter+b"  "+esc+b"s"+esc*2, state())

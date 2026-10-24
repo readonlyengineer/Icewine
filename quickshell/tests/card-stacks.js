@@ -7,7 +7,8 @@ assert.equal(Cards.modules.includes("screenshot"), false)
 assert.deepEqual(Cards.containing(Cards.defaults, "clipboard"),
     {id: "notifications", modules: ["notifications", "clipboard"]})
 assert.equal(Cards.validate(Cards.defaults), Cards.defaults)
-assert.deepEqual(Cards.defaults.flatMap(stack => stack.modules).sort(), [...Cards.modules].sort())
+assert.deepEqual(Cards.modules.filter(name => !Cards.containing(Cards.defaults, name)), ["tailscale", "ssh"])
+assert.deepEqual(Cards.containing(Cards.defaults, "network"), {id: "network", modules: ["network"]})
 assert.deepEqual(Cards.preferences({notificationToasts: false}), {notificationToasts: false})
 assert.deepEqual(Cards.validate([]), [])
 const mixed = [{id: "mixed", modules: ["clipboard", "launcher", "ssh", "layout"]}]
@@ -39,8 +40,13 @@ const topbar = fs.readFileSync(path.join(__dirname, "../modules/Topbar.qml"), "u
 assert.doesNotMatch(topbar, /function screenshot\(/)
 const manager = fs.readFileSync(path.join(__dirname, "../../manager/src/main.rs"), "utf8")
 assert.deepEqual(JSON.parse("[" + manager.match(/const CARD_MODULES:[^=]+=\s*&?\s*\[([\s\S]*?)\];/)[1] + "]"), Cards.modules)
-const saved = [{id: "saved", modules: ["ssh"]}]
-for (const policy of [undefined, null, [], [{id: "policy", modules: ["clipboard"]}], "bad", [{id: "old", modules: ["screenshot"]}]]) {
+const saved = [{id: "saved", modules: ["network", "tailscale", "ssh"]}]
+for (const policy of [undefined, null]) {
+    assert.equal(vm.runInNewContext(`(() => {${binding}})()`, {
+        widgetPolicy: {cardStacks: policy}, widgetSelections: {}, Cards
+    }), Cards.defaults)
+}
+for (const policy of [undefined, null, [], [{id: "policy", modules: ["tailscale", "ssh"]}], "bad", [{id: "old", modules: ["screenshot"]}]]) {
     const result = vm.runInNewContext(`(() => {${binding}})()`, {
         widgetPolicy: {cardStacks: policy}, widgetSelections: {cardStacks: saved}, Cards,
         console: {warn() {}}
