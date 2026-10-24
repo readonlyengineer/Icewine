@@ -412,13 +412,16 @@ Hyprland opens terminals through `xdg-terminal-exec`, directories through
 `~/.config/xdg-terminals.list`, or customise shortcuts in `hypr/hyprland.lua`.
 
 
-Terminal Editor provides `icewine-editor` (Neovim + LazyVim) in its own
-`icewine-nvim` config/data/cache/state namespace. NixOS opts in with
-`services.icewine.texteditor.enable = true`; plugins/tools come from native Nix
-packages. Arch first launch downloads LazyVim plugins into that private data
-directory and needs network access. Personal `nvim` configuration, plugin trees,
-lockfiles and host EDITOR/VISUAL choices are preserved. Icewine's generated
-`icewine/current/nvim-theme.lua` adapter supplies appearance.
+Terminal Editor installs ordinary `nvim` with LazyVim and Icewine plugins.
+NixOS opts in with `services.icewine.texteditor.enable`; on either platform,
+explicit Apply installs the standard `nvim/init.lua` configuration. Existing
+regular config is preserved unless Overwrite is selected, and symlinks stay
+read-only. A personal `init.vim` needs explicit migration before Icewine can
+install its Lua init. Disabling and applying retires unchanged owned config;
+modified personal files and downloaded plugin data remain. Native first launch
+needs network access for plugins; failures are reported in the terminal.
+Terminal and file-manager launches use the same ordinary Neovim configuration.
+Host `EDITOR`/`VISUAL` and file associations remain user-owned.
 
 On NixOS, `services.icewine.login.greeter.enable = true` opts into native
 greetd/tuigreet with the Icewine Hyprland UWSM session and session selection.

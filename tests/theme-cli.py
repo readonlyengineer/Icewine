@@ -617,14 +617,13 @@ with tempfile.TemporaryDirectory() as temporary:
     # Synthetic proc entries exercise scoped pidfd dispatch and exit handling.
     proc = root / "proc"
     proc.mkdir()
-    def process(pid, name, arguments, *, config_home=str(config), runtime_dir=str(runtime), kitty_config="", appname=None, editor_defaults=None):
+    def process(pid, name, arguments, *, config_home=str(config), runtime_dir=str(runtime), kitty_config="", appname=None):
         entry = proc / str(pid)
         entry.mkdir()
         (entry / "comm").write_text(name + "\n")
         (entry / "cmdline").write_bytes(b"\0".join(arg.encode() for arg in arguments) + b"\0")
         environment = f"HOME={root}\0XDG_CONFIG_HOME={config_home}\0XDG_RUNTIME_DIR={runtime_dir}\0KITTY_CONFIG_DIRECTORY={kitty_config}\0"
         if appname is not None: environment += f"NVIM_APPNAME={appname}\0"
-        if editor_defaults is not None: environment += f"ICEWINE_NVIM_DEFAULTS={editor_defaults}\0"
         (entry / "environ").write_bytes(environment.encode())
     process(123, "kitty", ["kitty"])
     process(124, "kitty", ["kitty"], runtime_dir="/other-session")
@@ -642,27 +641,18 @@ with tempfile.TemporaryDirectory() as temporary:
     process(135, ".kitty-wrapped", ["kitty"], config_home=str(root / "other-config"))
     process(136, ".kitty-wrapped", ["kitty", "-obackground=red"])
     process(137, ".kitty-wrapped", ["kitty"], kitty_config="relative-kitty")
-    arch_init = "/usr/share/icewine/editor/init.lua"
-    process(138, "nvim", ["nvim", "-u", arch_init, "notes.md"], appname="icewine-nvim")
-    process(139, "nvim", ["nvim"], appname="icewine-nvim")
-    process(140, "nvim", ["nvim", "-u", "/personal/init.lua"], appname="icewine-nvim")
-    process(141, "nvim", ["nvim", "-u", arch_init], appname="nvim")
-    process(142, "nvim", ["nvim", "-u", arch_init], appname="icewine-nvim", runtime_dir="/other-session")
-    process(143, "nvim", ["nvim", "-u", arch_init], appname="icewine-nvim", config_home=str(root / "other-config"))
-    # Actual native Nix wrapper argv: unwrapped nvim + provider-disable --cmd,
-    # then the explicit shipped init. Also cover the wrapped executable identity.
-    nix_init = str(root / "store/source-init.lua")
-    nix_defaults = str(root / "store/source-defaults.lua")
-    providers = "lua vim.g.loaded_node_provider=0;vim.g.loaded_perl_provider=0;vim.g.loaded_ruby_provider=0;vim.g.loaded_python3_provider=0"
-    nix_argv = ["/nix/store/example-neovim-unwrapped/bin/nvim", "--cmd", providers, "-u", nix_init]
-    process(144, "nvim", nix_argv + ["notes.md"], appname="icewine-nvim", editor_defaults=nix_defaults)
-    process(145, ".nvim-wrapped", ["/nix/store/example-neovim/bin/.nvim-wrapped", *nix_argv[1:]], appname="icewine-nvim", editor_defaults=nix_defaults)
-    process(146, "nvim", nix_argv + ["-u", "/personal/init.lua"], appname="icewine-nvim", editor_defaults=nix_defaults)
-    process(147, "nvim", ["nvim", "--cmd", "lua print('custom startup')", "-u", nix_init], appname="icewine-nvim", editor_defaults=nix_defaults)
-    process(148, "nvim", nix_argv + ["--headless"], appname="icewine-nvim", editor_defaults=nix_defaults)
-    process(149, "nvim", nix_argv, appname="icewine-nvim", editor_defaults="/personal/defaults.lua")
-    process(150, ".nvim-wrapped", ["nvim", "notes.md"])
-    process(151, "other-program", nix_argv, appname="icewine-nvim", editor_defaults=nix_defaults)
+    managed_init = root / "packaged-init.lua"
+    managed_init.write_text("managed Neovim init\n")
+    (config / "nvim").mkdir(exist_ok=True)
+    (config / "nvim/init.lua").write_bytes(managed_init.read_bytes())
+    process(138, "nvim", ["nvim", "-u", str(managed_init)])
+    process(139, "nvim", ["nvim"], appname="personal-nvim")
+    process(140, "nvim", ["nvim", "--clean"])
+    process(141, "nvim", ["nvim", "--headless"])
+    process(142, "nvim", ["nvim"], runtime_dir="/other-session")
+    process(143, "nvim", ["nvim"], config_home=str(root / "other-config"))
+    process(144, "nvim", ["/nix/store/example-neovim-unwrapped/bin/nvim", "notes.md"])
+    process(145, "other-program", ["nvim", "notes.md"])
     delivered = []
     fd_pids = {}
     def open_pid(pid):
@@ -673,14 +663,20 @@ with tempfile.TemporaryDirectory() as temporary:
         delivered.append((fd_pids[fd], number))
     with mock.patch.object(module, "PROC", proc), \
          mock.patch.object(module.os, "pidfd_open", open_pid, create=True), \
-         mock.patch.object(module.signal, "pidfd_send_signal", send, create=True):
+         mock.patch.object(module.signal, "pidfd_send_signal", send, create=True), \
+         mock.patch.dict(os.environ, ICEWINE_EDITOR_INIT=str(managed_init)):
         assert module.signal_reload("kitty", config, str(runtime)) is False
         assert module.signal_reload("nvim", config, str(runtime)) is False
-        assert sorted(delivered) == [(pid, signal.SIGUSR1) for pid in (123, 126, 128, 133, 138)], delivered
+        assert sorted(delivered) == [(pid, signal.SIGUSR1) for pid in (123, 126, 128, 133, 144)], delivered
         delivered.clear()
-        with mock.patch.dict(os.environ, ICEWINE_EDITOR_INIT=nix_init, ICEWINE_EDITOR_DEFAULTS=nix_defaults):
-            assert module.signal_reload("nvim", config, str(runtime)) is False
-        assert sorted(delivered) == [(pid, signal.SIGUSR1) for pid in (126, 144, 145)], delivered
+        (config / "nvim/init.lua").write_text("personal config\n")
+        assert module.signal_reload("nvim", config, str(runtime)) is False
+        assert not delivered
+        (config / "nvim/init.lua").write_bytes(managed_init.read_bytes())
+        (config / "nvim/init.vim").write_text("personal vim config\n")
+        assert module.signal_reload("nvim", config, str(runtime)) is False
+        assert not delivered
+        (config / "nvim/init.vim").unlink()
         with mock.patch.object(module.signal, "pidfd_send_signal", mock.Mock(side_effect=ProcessLookupError)):
             assert module.signal_reload("kitty", config, str(runtime)) is False
         with mock.patch.object(module.signal, "pidfd_send_signal", mock.Mock(side_effect=PermissionError)):

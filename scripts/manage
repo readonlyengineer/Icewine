@@ -24,7 +24,7 @@ APPS = {
     "desktop": ("hypr", "uwsm", "gtk", "user-dirs", "applications"),
     "terminal": ("kitty",), "filemanager": ("yazi",),
     "steam": (), "gamescope": ("gamescope",), "handheld": (), "login": (),
-    "shellExtras": ("starship", "fastfetch", "btop"), "texteditor": (), "screenshot": (), "media": (),
+    "shellExtras": ("starship", "fastfetch", "btop"), "texteditor": ("nvim",), "screenshot": (), "media": (),
 }
 PACKAGES = {
     "desktop": ("icewine-session",), "terminal": ("kitty",),
@@ -399,7 +399,7 @@ def retire(config, data, state, feature):
             if not matches:
                 continue
             path = root / name
-            if theme.still_current(path, root, signature, signature[5:] if signature.startswith("link:") else None):
+            if theme.still_current(path, root, signature, signature[5:] if (feature != "texteditor" or name == "nvim/icewine") and signature.startswith("link:") else None):
                 path.unlink(missing_ok=True)
                 del entry["files"][name]
     theme.atomic_text(state / "default-files.json", json.dumps(records, sort_keys=True) + "\n")
@@ -583,6 +583,8 @@ def apply(selected, overwrite, readonly, previous, config, data, state):
                 continue
             for app in APPS[feature]:
                 theme.install_defaults(defaults, config, data, state, overwrite, app)
+                if app == "nvim" and any(theme.default_signature(config / relative) != theme.default_signature(Path(defaults) / "config" / relative) for relative in ("nvim/init.lua", "nvim/icewine")):
+                    print("Pending: personal Neovim config preserved; Overwrite can replace regular init.lua files, while symlinks remain read-only.", file=sys.stderr)
                 if app in theme.APPS and theme.APPS[app]:
                     theme.install_links(config, state, overwrite, app)
         if selected["filemanager"] and not readonly:

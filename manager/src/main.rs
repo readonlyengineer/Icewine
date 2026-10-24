@@ -1286,7 +1286,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
         if selected["texteditor"] {
             plan.extend(["".into(), "Terminal Editor:".into(),
-                "Use isolated icewine-nvim data. Arch first launch downloads LazyVim plugins; personal nvim and host EDITOR/VISUAL stay unchanged.".into()]);
+                "Configure ordinary nvim with LazyVim. Existing personal nvim config is preserved unless Overwrite is selected; symlinks stay read-only. Arch first launch downloads plugins. Host EDITOR/VISUAL stay unchanged.".into()]);
         }
         plan.extend(["".into(), "Selections:".into()]);
         plan.extend(choices);

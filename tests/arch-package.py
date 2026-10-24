@@ -60,7 +60,7 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
     fake.chmod(0o755)
     for name in ("steam", "flatpak", "icewine", "uwsm", "python3", "nvim"):
         (commands / name).symlink_to(fake)
-    for name in ("steam", "shell", "clipboard", "ssh", "editor"):
+    for name in ("steam", "shell", "clipboard", "ssh"):
         (commands / ("icewine-" + name)).symlink_to(native / "command")
     env = dict(os.environ, PATH=str(commands) + ":" + os.environ["PATH"],
                HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), ICEWINE_TEST_LOG=str(log), ICEWINE_TEST_ENV=str(root / "editor-env"))
@@ -72,13 +72,6 @@ sys.exit(int(os.environ.get("ICEWINE_TEST_FAIL", "0")))
     def run(name, *args, **extra):
         return subprocess.run([str(commands / name), *args], env=dict(env, **extra),
                               capture_output=True, text=True)
-    disabled = run("icewine-editor", "file with spaces", TEST_SELECTIONS="texteditor=false")
-    assert disabled.returncode == 1 and "disabled" in disabled.stderr
-    result = run("icewine-editor", "file with spaces", TEST_SELECTIONS="texteditor=true",
-                 EDITOR="personal-editor", VISUAL="personal-visual")
-    assert result.returncode == 0, result.stderr
-    assert json.loads(log.read_text().splitlines()[-1]) == ["nvim", "-u", "/usr/share/icewine/editor/init.lua", "file with spaces"]
-    assert json.loads((root / "editor-env").read_text()) == {"EDITOR":"personal-editor", "VISUAL":"personal-visual", "NVIM_APPNAME":"icewine-nvim"}
     for name, expected in {
         "steam": ["steam"],
         "clipboard": ["python3", "/usr/lib/icewine/clipboard"],
@@ -247,14 +240,12 @@ for variant, profile in [("defaults", "desktop"), ("defaults-handheld", "handhel
         subprocess.run(["lua", str(source / "hyprland/tests/startup.lua"), str(config / "hypr/hyprland.lua"), profile],
                        env=os.environ | {"XDG_CONFIG_HOME": str(config)}, check=True)
 assert (desktop / "usr/bin/icewine-manage").is_file()
-editor_launcher = desktop / "usr/bin/icewine-editor"
-assert editor_launcher.is_symlink()
-assert os.readlink(editor_launcher) == "../lib/icewine/command"
-assert editor_launcher.resolve() == (desktop / "usr/lib/icewine/command").resolve()
-for name in ("init.lua", "defaults.lua"):
-    assert (payload / "editor" / name).read_bytes() == (source / "editor" / name).read_bytes()
+assert not (desktop / "usr/bin/icewine-editor").exists()
+assert not (desktop / "usr/share/applications/icewine-editor.desktop").exists()
+assert (defaults / "config/nvim/init.lua").read_bytes() == (source / "editor/init.lua").read_bytes()
+assert os.readlink(defaults / "config/nvim/icewine") == "/usr/share/icewine/editor"
+assert (payload / "editor/defaults.lua").read_bytes() == (source / "editor/defaults.lua").read_bytes()
 assert not (defaults / "config/nano").exists()
-assert not (defaults / "config/nvim").exists()
 assert not (desktop / "usr/share/wayland-sessions").exists()
 assert not (desktop / "usr/lib/systemd/user").exists()
 assert not (desktop / "etc/pam.d/icewine").exists()

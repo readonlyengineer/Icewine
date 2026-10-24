@@ -500,7 +500,21 @@ def install_defaults(defaults, config, data, state, replace, app):
     """Explicit Apply only: copy missing files, or replace without backups."""
     if not defaults:
         raise ValueError("Icewine default files are unavailable")
+    if app == "nvim" and ((config / "nvim/init.vim").exists() or (config / "nvim/init.vim").is_symlink()):
+        print("Pending: personal nvim/init.vim preserved; migrate it explicitly before installing Icewine Neovim config.", file=sys.stderr)
+        return
     records = default_records(state)
+    if app == "nvim" and (Path(defaults) / "config/nvim/icewine").is_symlink():
+        # The main init must not change unless its required support can follow.
+        support = config / "nvim/icewine"
+        target = config / os.readlink(Path(defaults) / "config/nvim/icewine")
+        signature = default_signature(support)
+        recorded = records.get("config", {}).get("files", {}).get("nvim/icewine")
+        previous_target = signature[5:] if signature and signature.startswith("link:") and signature == recorded else target
+        if (not still_current(support, config, signature, previous_target) or
+                (signature is not None and signature != "link:" + str(target) and not replace and signature != recorded)):
+            print("Pending: Neovim config group preserved; resolve the personal nvim/icewine support conflict before installing its init.", file=sys.stderr)
+            return
     for root_name, root in (("config", config), ("data", data), ("home", Path.home())):
         source = Path(defaults) / root_name
         entry = records.setdefault(root_name, {"root": str(root), "files": {}})
@@ -631,7 +645,7 @@ PROC = Path("/proc")
 
 
 def signal_reload(name, config, runtime):
-    """Reload this user's default config or the exact shipped optional editor."""
+    """Reload this user's managed default config in the current session."""
     if not runtime or not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
         print(f"Pending: {name} native reload is unavailable on this session.", file=sys.stderr)
         return False
@@ -639,8 +653,14 @@ def signal_reload(name, config, runtime):
     failed = False
     # Native wrappers can retain a wrapped executable's comm/argv basename.
     process_names = (name.encode(), b"." + name.encode() + b"-wrapped")
-    editor_init = Path(os.environ.get("ICEWINE_EDITOR_INIT", "/usr/share/icewine/editor/init.lua")).resolve()
-    editor_defaults = Path(os.environ.get("ICEWINE_EDITOR_DEFAULTS", "/usr/share/icewine/editor/defaults.lua")).resolve()
+    if name == "nvim":
+        editor_init = Path(os.environ.get("ICEWINE_EDITOR_INIT", "/usr/share/icewine/defaults/config/nvim/init.lua"))
+        try:
+            if ((config / "nvim/init.vim").exists() or
+                    (config / "nvim/init.lua").read_bytes() != editor_init.read_bytes()):
+                return False
+        except OSError:
+            return False
     try:
         processes = list(PROC.iterdir())
     except OSError as error:
@@ -677,25 +697,12 @@ def signal_reload(name, config, runtime):
                 options = [os.fsdecode(arg) for arg in args[1:] if arg]
                 env = dict(item.split(b"=", 1) for item in (process / "environ").read_bytes().split(b"\0")
                            if b"=" in item and item.split(b"=", 1)[0] in
-                           (b"HOME", b"XDG_CONFIG_HOME", b"XDG_RUNTIME_DIR", b"NVIM_APPNAME", b"KITTY_CONFIG_DIRECTORY", b"ICEWINE_NVIM_DEFAULTS"))
-                editor_options = options
-                # Nix's native wrapper prepends provider-disable commands. Permit
-                # only those inert assignments, never arbitrary --cmd startup code.
-                if (name == "nvim" and len(options) >= 2 and options[0] == "--cmd"
-                        and re.fullmatch(r"lua (?:vim\.g\.loaded_(?:node|perl|ruby|python3)_provider=0;?)+", options[1])):
-                    editor_options = options[2:]
-                packaged_editor = (name == "nvim" and env.get(b"NVIM_APPNAME") == b"icewine-nvim"
-                    and len(editor_options) >= 2 and editor_options[0] == "-u"
-                    and Path(editor_options[1]).is_absolute()
-                    and Path(editor_options[1]).resolve() == editor_init
-                    and Path(os.fsdecode(env.get(b"ICEWINE_NVIM_DEFAULTS", b"/usr/share/icewine/editor/defaults.lua"))).resolve() == editor_defaults)
-                checked_options = editor_options[2:] if packaged_editor else options
+                           (b"HOME", b"XDG_CONFIG_HOME", b"XDG_RUNTIME_DIR", b"NVIM_APPNAME", b"KITTY_CONFIG_DIRECTORY"))
                 blocked = ("--config", "--override", "-c", "-o") if name == "kitty" else ("-u", "--clean", "--headless", "--cmd", "--noplugin")
                 if (any(option == flag or option.startswith(flag + "=") or
                         (flag in ("-c", "-o", "-u") and option.startswith(flag) and option != flag)
-                        for option in checked_options for flag in blocked)
-                        or (name == "nvim" and not packaged_editor and
-                            (identity != b"nvim" or executable != "nvim"))):
+                        for option in options for flag in blocked)
+                        or (name == "nvim" and (identity != b"nvim" or executable != "nvim"))):
                     skipped += 1
                     continue
                 home = os.fsdecode(env.get(b"HOME", b""))
@@ -705,7 +712,7 @@ def signal_reload(name, config, runtime):
                         not target_config or Path(target_config).resolve() != config.resolve() or
                         (name == "kitty" and kitty_config and
                          (not Path(kitty_config).is_absolute() or Path(kitty_config).resolve() != (config / "kitty").resolve())) or
-                        (name == "nvim" and not packaged_editor and env.get(b"NVIM_APPNAME", b"nvim") != b"nvim")):
+                        (name == "nvim" and env.get(b"NVIM_APPNAME", b"nvim") != b"nvim")):
                     skipped += 1
                     continue
                 signal.pidfd_send_signal(fd, signal.SIGUSR1)

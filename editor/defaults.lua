@@ -28,7 +28,7 @@ end
 vim.api.nvim_create_user_command("IcewineReloadTheme", reload_theme, {})
 vim.api.nvim_create_autocmd("Signal", { pattern = "SIGUSR1", callback = reload_theme })
 
-local plugins = os.getenv("ICEWINE_NVIM_PLUGINS")
+local plugins = vim.g.icewine_plugins
 local packaged = plugins ~= nil
 require("lazy").setup({
   spec = {

@@ -1,6 +1,7 @@
 { config, lib, pkgs, icewineNixpkgsLastModified ? 0, ... }:
 let
   cfg = config.services.icewine;
+  editor = import ../editor/package.nix { inherit pkgs; };
   userHome = config.users.users.${cfg.user}.home;
   configHome = "${userHome}/.config";
   dataHome = "${userHome}/.local/share";
@@ -35,6 +36,11 @@ let
     ${lib.optionalString cfg.handheld.enable ''
       chmod u+w $out/hyprland/icewine.lua
       printf '\nrequire("icewine.modules.Deck")\n' >> $out/hyprland/icewine.lua
+    ''}
+    ${lib.optionalString cfg.texteditor.enable ''
+      mkdir -p $out/nvim
+      cp ${../editor/defaults.lua} $out/nvim/defaults.lua
+      printf 'return { plugins = "%s" }\n' ${editor.pluginDirectory} > $out/nvim/paths.lua
     ''}
     cp ${../theme/assets/templates}/kitty-base.conf $out/kitty/defaults.conf
     substituteInPlace $out/kitty/defaults.conf \
@@ -75,6 +81,10 @@ let
       mkdir -p $out/config/yazi/plugins/mount.yazi
       cp -r ${pkgs.yaziPlugins.mount}/. $out/config/yazi/plugins/mount.yazi/
     ''}
+    ${lib.optionalString cfg.texteditor.enable ''
+      mkdir -p $out/config/nvim
+      cp ${../editor/init.lua} $out/config/nvim/init.lua
+    ''}
     ${lib.optionalString cfg.shellExtras.enable "install -Dm644 ${../theme/assets/templates/btop.conf} $out/config/btop/btop.conf"}
     cp ${if cfg.handheld.enable then ../quickshell/deck/shell.qml else ../quickshell/shell.qml} $out/config/quickshell/shell.qml
     cp ${../quickshell/config/qmldir} $out/config/quickshell/config/qmldir
@@ -94,6 +104,7 @@ let
       ln -s /etc/icewine/implementation/gtk $out/config/gtk-3.0/icewine
       ln -s /etc/icewine/implementation/gtk $out/config/gtk-4.0/icewine
     ''}
+    ${lib.optionalString cfg.texteditor.enable "ln -s /etc/icewine/implementation/nvim $out/config/nvim/icewine"}
     ${lib.optionalString (cfg.terminal.enable) "ln -s /etc/icewine/implementation/kitty $out/config/kitty/icewine"}
   '';
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
@@ -120,7 +131,6 @@ let
       export ICEWINE_GTK_ENABLE=${if cfg.gtk.enable then "true" else "false"}
       export ICEWINE_THEME_ASSETS=${../theme/assets}
       export ICEWINE_EDITOR_INIT=${../editor/init.lua}
-      export ICEWINE_EDITOR_DEFAULTS=${../editor/defaults.lua}
       export ICEWINE_DEFAULT_FILES=${defaults}
       export ICEWINE_THEME_POLICY=${lib.escapeShellArg (if cfg.theme == null then "" else cfg.theme)}
       export ICEWINE_THEME_SKIP=${lib.escapeShellArg (lib.concatStringsSep ":" skippedThemeFiles)}
@@ -203,6 +213,7 @@ let
 in {
   config = lib.mkIf cfg.enable {
     users.users.${cfg.user}.packages = [ icewineCli ]
+      ++ lib.optionals cfg.texteditor.enable editor.packages
       ++ lib.optional (cfg.desktop.enable && cfg.gamescope.enable) geforceNow;
     environment.etc."icewine/implementation".source = implementation;
     environment.sessionVariables = {

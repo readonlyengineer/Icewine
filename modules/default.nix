@@ -87,7 +87,7 @@ in {
       enable = lib.mkEnableOption "Starship/Fastfetch defaults and btop styling";
       git.enable = lib.mkEnableOption "Starship Git prompt modules" // { default = true; };
     };
-    texteditor.enable = lib.mkEnableOption "optional isolated Neovim + LazyVim utility (icewine-editor)";
+    texteditor.enable = lib.mkEnableOption "Neovim with Icewine LazyVim configuration";
     screenshot = lib.mkOption {
       type = lib.types.bool;
       default = cfg.desktop.enable;
@@ -122,8 +122,8 @@ in {
       { assertion = lib.all (name: name != "" && lib.all (part: part != "" && part != "." && part != "..") (lib.splitString "/" name))
           (builtins.attrNames cfg.defaultFiles.config ++ builtins.attrNames cfg.defaultFiles.data);
         message = "Icewine defaultFiles keys must be relative paths without . or .. components."; }
-      { assertion = lib.all (name: !(builtins.elem name [ "gtk-3.0/icewine" "gtk-4.0/icewine" "hypr/icewine" "hypr/hypridle-icewine" "kitty/icewine" "uwsm/icewine" "icewine/shell/icewine" "quickshell/icewine" "quickshell/modules" "quickshell/adapters" "quickshell/theme" "quickshell/DeckOverlay.qml" "quickshell/DeckMenu.js" ] || lib.hasPrefix "quickshell/icewine/" name
-          || lib.any (link: lib.hasPrefix (link + "/") name) [ "gtk-3.0/icewine" "gtk-4.0/icewine" "hypr/icewine" "hypr/hypridle-icewine" "kitty/icewine" "uwsm/icewine" "icewine/shell/icewine" ]
+      { assertion = lib.all (name: !(builtins.elem name [ "nvim/icewine" "gtk-3.0/icewine" "gtk-4.0/icewine" "hypr/icewine" "hypr/hypridle-icewine" "kitty/icewine" "uwsm/icewine" "icewine/shell/icewine" "quickshell/icewine" "quickshell/modules" "quickshell/adapters" "quickshell/theme" "quickshell/DeckOverlay.qml" "quickshell/DeckMenu.js" ] || lib.hasPrefix "quickshell/icewine/" name
+          || lib.any (link: lib.hasPrefix (link + "/") name) [ "nvim/icewine" "gtk-3.0/icewine" "gtk-4.0/icewine" "hypr/icewine" "hypr/hypridle-icewine" "kitty/icewine" "uwsm/icewine" "icewine/shell/icewine" ]
           || lib.hasPrefix "quickshell/modules/" name || lib.hasPrefix "quickshell/adapters/" name
           || lib.hasPrefix "quickshell/theme/" name
           || builtins.elem name (map (module: "hypr/modules/${module}.lua")
@@ -174,7 +174,6 @@ in {
     users.users.${cfg.user}.packages = lib.optional cfg.terminal.enable pkgs.kitty
       ++ lib.optional cfg.media.enable pkgs.imv
       ++ lib.optionals cfg.shellExtras.enable [ pkgs.starship pkgs.fastfetch ]
-      ++ lib.optional cfg.monitors.enable cfg.monitors.package
-      ++ lib.optional cfg.texteditor.enable (import ../editor/package.nix { inherit pkgs; });
+      ++ lib.optional cfg.monitors.enable cfg.monitors.package;
   };
 }

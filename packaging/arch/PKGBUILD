@@ -57,7 +57,7 @@ package_icewine() {
   install -m755 manager/target/release/icewine-manage "$pkgdir/usr/bin/icewine-manage"
   install -m755 scripts/icewine "$pkgdir/usr/bin/icewine"
   install -m755 packaging/arch/command "$pkgdir/usr/lib/icewine/command"
-  for name in editor shell theme wallpaper clipboard ssh manage-backend steam inputplumber-intercept inputplumber-hyprland inputplumber-restore keyboard-toggle; do
+  for name in shell theme wallpaper clipboard ssh manage-backend steam inputplumber-intercept inputplumber-hyprland inputplumber-restore keyboard-toggle; do
     ln -s ../lib/icewine/command "$pkgdir/usr/bin/icewine-$name"
   done
   install -m755 quickshell/tools/steam-shortcuts "$pkgdir/usr/bin/icewine-steam-shortcuts"
@@ -88,6 +88,8 @@ package_icewine() {
     printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Steam' 'NoDisplay=true' 'Hidden=true' > "$share/defaults/data/applications/$name"
   done
   install -Dm644 packaging/arch/steam-gamescope.desktop "$share/defaults/data/applications/steam-gamescope.desktop"
+  install -Dm644 editor/init.lua "$defaults/nvim/init.lua"
+  ln -s /usr/share/icewine/editor "$defaults/nvim/icewine"
   cp -r "$share/defaults" "$share/defaults-handheld"
   cp quickshell/deck/shell.qml "$share/defaults-handheld/config/quickshell/shell.qml"
   ln -sfn /usr/share/icewine/hyprland-handheld "$share/defaults-handheld/config/hypr/icewine"

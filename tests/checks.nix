@@ -86,7 +86,7 @@ let
   contains = needle: lib.hasInfix (builtins.unsafeDiscardStringContext needle);
   greeterCommand = greeter.services.greetd.settings.default_session.command;
   quickshell = pkgs.callPackage ../quickshell/package.nix { };
-  optionalEditor = builtins.head (lib.filter (package: lib.getName package == "icewine-editor") editorEnabled.users.users.demo.packages);
+  editorCli = builtins.head (lib.filter (package: lib.getName package == "icewine") editorEnabled.users.users.demo.packages);
   icewineCli = builtins.head (lib.filter
     (package: lib.getName package == "icewine") optIn.users.users.demo.packages);
   handheldCli = builtins.head (lib.filter
@@ -208,8 +208,8 @@ in {
     assert handheld.services.icewine.screenshot && handheld.services.flatpak.enable;
     assert map (package: package.appId) handheld.services.flatpak.packages == [ "be.alexandervanhee.gradia" "org.videolan.VLC" ];
     assert handheld.services.icewine.steam == "native";
-    assert hasPackage "icewine-editor" editorEnabled.users.users.demo.packages;
-    assert !(hasPackage "icewine-editor" desktop.users.users.demo.packages);
+    assert hasPackage "neovim-unwrapped" editorEnabled.users.users.demo.packages;
+    assert !(hasPackage "neovim-unwrapped" desktop.users.users.demo.packages);
     assert lib.all (name: !desktop.services.icewine.${name}.enable)
       [ "desktop" "terminal" "filemanager" "login" "shellExtras" ];
     assert desktop.services.icewine.steam == "none";
@@ -307,11 +307,19 @@ in {
       mkdir -p "$XDG_CONFIG_HOME/nvim" "$XDG_DATA_HOME/nvim/lazy/personal"
       printf 'personal init\n' > "$XDG_CONFIG_HOME/nvim/init.lua"
       printf 'personal plugin\n' > "$XDG_DATA_HOME/nvim/lazy/personal/sentinel"
-      EDITOR=personal-editor VISUAL=personal-visual ${optionalEditor}/bin/icewine-editor --headless -c 'luafile ${./editor.lua}' -c qa
+      selections=$(${editorCli}/bin/icewine-manage-backend state)
+      selections=''${selections#readonly=true }
+      ${editorCli}/bin/icewine-manage-backend apply $selections overwrite=false
       grep -Fx 'personal init' "$XDG_CONFIG_HOME/nvim/init.lua"
+      ${editorCli}/bin/icewine-manage-backend apply $selections overwrite=true
+      # The implementation link normally resolves through /etc on a host.
+      rm "$XDG_CONFIG_HOME/nvim/icewine"
+      ln -s ${editorEnabled.environment.etc."icewine/implementation".source}/nvim "$XDG_CONFIG_HOME/nvim/icewine"
+      EDITOR=personal-editor VISUAL=personal-visual ${pkgs.neovim-unwrapped}/bin/nvim --headless -c 'luafile ${./editor.lua}' -c qa
       grep -Fx 'personal plugin' "$XDG_DATA_HOME/nvim/lazy/personal/sentinel"
       # Use a separate fixture for manager/default deployment below.
-      export XDG_CONFIG_HOME=$TMPDIR/manager-config XDG_DATA_HOME=$TMPDIR/manager-data
+      export XDG_CONFIG_HOME=$TMPDIR/manager-config XDG_DATA_HOME=$TMPDIR/manager-data XDG_STATE_HOME=$TMPDIR/manager-state
+      test ! -e "$XDG_STATE_HOME"
       # Compositor callers must resolve the helper without Quickshell's private PATH.
       for cli in ${icewineCli} ${handheldCli}; do
         if PATH=$cli/bin icewine-monitor-brightness ../eDP-1 2>"$TMPDIR/brightness-error"; then exit 1; fi

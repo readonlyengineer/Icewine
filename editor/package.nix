@@ -51,15 +51,8 @@ let
   };
   pluginDirectory = pkgs.linkFarm "lazyvim-plugins" (pkgs.lib.mapAttrsToList
     (name: path: { inherit name path; }) plugins);
-  editor = pkgs.wrapNeovimUnstable pkgs.neovim-unwrapped {
-    wrapRc = false;
-    plugins = [ pkgs.vimPlugins.lazy-nvim ];
-  };
-in pkgs.writeShellScriptBin "icewine-editor" ''
-  export PATH=${pkgs.lib.makeBinPath (with pkgs; [ git curl gcc tree-sitter ripgrep fd unzip lazygit stylua shfmt
-    lua-language-server clang-tools nixd pyright kdePackages.qtdeclarative bash-language-server marksman ])}:"$PATH"
-  export NVIM_APPNAME=icewine-nvim
-  export ICEWINE_NVIM_PLUGINS=${pluginDirectory}
-  export ICEWINE_NVIM_DEFAULTS=${./defaults.lua}
-  exec ${editor}/bin/nvim -u ${./init.lua} "$@"
-''
+in {
+  inherit pluginDirectory;
+  packages = with pkgs; [ neovim-unwrapped git curl gcc tree-sitter ripgrep fd unzip lazygit stylua shfmt
+    lua-language-server clang-tools nixd pyright kdePackages.qtdeclarative bash-language-server marksman ];
+}
