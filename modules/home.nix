@@ -216,6 +216,7 @@ in {
       ++ lib.optionals cfg.texteditor.enable editor.packages
       ++ lib.optional (cfg.desktop.enable && cfg.gamescope.enable) geforceNow;
     environment.etc."icewine/implementation".source = implementation;
+    environment.etc."icewine/nixpkgs-last-modified".text = "${toString icewineNixpkgsLastModified}\n";
     environment.sessionVariables = {
       ICEWINE_WIDGET_POLICY = builtins.toJSON cfg.widgets;
       ICEWINE_AUTHENTICATION_REQUIRED = if cfg.authenticationRequired then "true" else "false";

@@ -1,8 +1,10 @@
-m=@nixpkgsLastModified@
+# Read the active generation, even when this rendered config or session is older.
+m=$(cat /etc/icewine/nixpkgs-last-modified 2>/dev/null)
+case "$m" in ''|*[!0-9]*|0[0-9]*) printf 'unknown'; exit 0;; esac
 [ "$m" -gt 0 ] 2>/dev/null || { printf 'unknown'; exit 0; }
-d=$(( ($(date +%s) - m) / 86400 ))
-if [ "$d" -gt 7 ]; then
-  printf '%sd old  \033[33m⚠ Update Overdue\033[0m' "$d"
+age=$(( $(date +%s) - m ))
+if [ "$age" -lt 0 ]; then
+  printf 'input date is in the future'
 else
-  printf '%sd old' "$d"
+  printf '%sd old' "$((age / 86400))"
 fi

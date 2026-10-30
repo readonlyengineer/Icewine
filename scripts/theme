@@ -291,7 +291,6 @@ def render_theme(assets, palette_file, level="high"):
     values["kernelCommandJson"] = json.dumps((templates / kernel).read_text(encoding="utf-8"))
     values["nixpkgsRow"] = ""
     if last_modified is not None:
-        values["nixpkgsLastModified"] = last_modified
         age_command = render((templates / "nixpkgs-age.sh.in").read_text(encoding="utf-8"), values)
         values["nixpkgsCommandJson"] = json.dumps(age_command)
         values["nixpkgsRow"] = render((templates / "fastfetch-nixpkgs-row.json.in").read_text(encoding="utf-8"), values)

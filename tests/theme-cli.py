@@ -12,6 +12,7 @@ import io
 import re
 import signal
 import shutil
+import shlex
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
@@ -133,7 +134,7 @@ def check_indexed_output(files, colours, git_enabled, nixpkgs):
     assert len(headings) == 3
     assert all(resolve(code) == (18, colours["highlight"]) for code in headings)
     assert len(commands) == (2 if nixpkgs else 1)
-    assert any(item["key"].endswith("Nixpkgs") for item in commands) == nixpkgs
+    assert any(item["key"].endswith("Nixpkgs input") for item in commands) == nixpkgs
     prompt = tomllib.loads(files["starship.toml"])
     # Stable role indices, not RGB equality, preserve past output across themes.
     for module, index in (("directory", 18), ("time", 19), ("cmd_duration", 19),
@@ -176,6 +177,54 @@ for git_enabled in (True, False):
             files = theme.render_theme(assets, assets / "themes/dracula.json")
         check_indexed_output(files, json.loads((assets / "themes/dracula.json").read_text()), git_enabled, nixpkgs)
 print("PASS: stable terminal palette roles and all Git/Nixpkgs flag combinations")
+
+# A booted generation can change while the user-owned render and session survive.
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    config = root / "config"
+    metadata = root / "nixpkgs-last-modified"
+    fake_bin = root / "bin"
+    fake_bin.mkdir()
+    now = 1793404800
+    # Substitute only the external system inputs; execute the real published command.
+    for name, body in {
+        "cat": 'test "$1" = /etc/icewine/nixpkgs-last-modified || exit 1\nexec ' + shlex.quote(shutil.which("cat")) + ' "$TEST_METADATA"\n',
+        "date": 'printf "%s\\n" "$TEST_NOW"\n',
+    }.items():
+        command = fake_bin / name
+        command.write_text("#!/bin/sh\n" + body)
+        command.chmod(0o755)
+    env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(config),
+               XDG_STATE_HOME=str(root / "state"), XDG_DATA_HOME=str(root / "data"),
+               ICEWINE_THEME_ASSETS=str(assets), ICEWINE_GTK_ENABLE="false",
+               ICEWINE_NIXPKGS_LAST_MODIFIED=str(now - 9 * 86400), ICEWINE_THEME_POLICY="",
+               WAYLAND_DISPLAY="", HYPRLAND_INSTANCE_SIGNATURE="")
+    result = subprocess.run([sys.executable, str(script), "apply"], env=env,
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    current = (config / "icewine/current").resolve()
+    report = json.loads((current / "fastfetch.jsonc").read_text())
+    command = next(item["text"] for item in report["modules"]
+                   if isinstance(item, dict) and item.get("key", "").endswith("Nixpkgs input"))
+    env.update(PATH=str(fake_bin), TEST_METADATA=str(metadata), TEST_NOW=str(now))
+    def age():
+        result = subprocess.run(["/bin/sh", "-c", command], env=env, capture_output=True, text=True)
+        assert result.returncode == 0 and not result.stderr, result
+        assert "Overdue" not in result.stdout and "Update" not in result.stdout
+        return result.stdout
+    metadata.write_text(str(now - 9 * 86400) + "\n")
+    assert age() == "9d old"
+    metadata.write_text(str(now - 3 * 86400) + "\n")
+    assert age() == "3d old"  # No rerender; inherited timestamp still says nine days.
+    assert (config / "icewine/current").resolve() == current
+    for value in ("0", "invalid", "0008", " 123", "1+2", "99999999999999999999999999999999"):
+        metadata.write_text(value + "\n")
+        assert age() == "unknown"
+    metadata.unlink()
+    assert age() == "unknown"
+    metadata.write_text(str(now + 1) + "\n")
+    assert age() == "input date is in the future"
+print("PASS: retained Fastfetch render follows active generation metadata offline")
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     config, state = root / "config", root / "state"

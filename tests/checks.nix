@@ -170,7 +170,9 @@ in {
   '';
   native = import ../packaging/arch/integration.nix { inherit pkgs; src = self; };
   terminal = import ./terminal.nix { inherit self nixpkgs; manager = icewineCli; };
-  logic = pkgs.runCommand "icewine-logic-checks" {
+  logic =
+    assert optIn.environment.etc."icewine/nixpkgs-last-modified".text == "${toString nixpkgs.lastModified}\n";
+    pkgs.runCommand "icewine-logic-checks" {
     nativeBuildInputs = [ pkgs.nodejs pkgs.lua pkgs.util-linux (pkgs.python3.withPackages (python: [ python.vdf ])) ];
   } ''
     cd ${self}
