@@ -29,6 +29,7 @@ in {
       message = "Icewine handheld integration requires desktop, native Steam and Gamescope enabled.";
     } ];
     services.inputplumber.enable = true;
+    systemd.services.inputplumber.path = [ pkgs.acl ];
     services.pipewire.alsa.support32Bit = true;
     environment.systemPackages = [ icewineInputplumberIntercept icewineKeyboardToggle ];
   environment.etc."inputplumber/profiles/icewine-hyprland.yaml".source =
