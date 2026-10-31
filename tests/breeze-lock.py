@@ -470,6 +470,8 @@ ShellRoot {
                     keys.mouseClick(toggle)
                     keys.tryCompare(keyboardOwner, "keyboardVisible", true, 2000)
                     const panel = find(view, item => item.objectName === "sharedKeyboard")
+                    keys.verify(panel, "shared keyboard exists")
+                    panel.relativePosition = Qt.point(0.5, 1); panel.place()
                     keys.verify(panel && panel.width <= Math.min(2080, win.width - 24)
                         && panel.height > 0 && panel.y + panel.height <= win.height, "shared keyboard bounds")
                     keys.wait(250)
@@ -511,10 +513,9 @@ ShellRoot {
                     if (size[0] === 1280) {
                         field.forceActiveFocus()
                         keys.keyClick(Qt.Key_Tab); keys.keyClick(Qt.Key_Tab)
-                        const accessiblePin = find(panel, item => item.objectName === "keyboardPin")
-                        keys.verify(accessiblePin.activeFocus, "Tab reaches the visible pin control")
-                        keys.keyClick(Qt.Key_Space); keys.verify(!panel.pinned, "keyboard can unpin")
-                        keys.keyClick(Qt.Key_Space); keys.verify(panel.pinned, "keyboard can repin")
+                        const accessibleHide = find(panel, item => item.objectName === "keyboardHide")
+                        keys.verify(accessibleHide.activeFocus, "Tab reaches Hide")
+                        keys.verify(!find(panel, item => item.objectName === "keyboardPin"), "no pin control")
                         field.forceActiveFocus()
                         const a = KeyboardModel.keys.find(key => key.text === "a").index
                         const shift = KeyboardModel.keys.find(key => key.modifier === KeyboardModel.shift).index
@@ -562,24 +563,19 @@ ShellRoot {
                         keys.compare(field.text, afterRepeat, "release stops future repeat without duplicate click")
                         field.text = before
                         Theme.Palette.snapshot = Object.assign({}, Theme.Palette.snapshot, {keyboardOpacity:0.4})
-                        keys.fuzzyCompare(panel.color.a, 0.4, 0.01, "live transparency")
+                        keys.fuzzyCompare(panel.color.a, 0.9, 0.01, "keyboard opacity floor")
                     }
                     panel.arm(KeyboardModel.keys.find(key => key.text === "a").index)
                     panel.cancelGesture()
                     panel.release(KeyboardModel.keys.find(key => key.text === "a").index)
                     keys.compare(field.text, before, "cancelled gesture does not type")
-                    const pin = find(panel, item => item.objectName === "keyboardPin")
-                    keys.mouseClick(pin)
-                    keys.verify(!panel.pinned, "accessible pin toggle")
                     if (size[0] === 1280) {
                         const oldX = panel.x, oldY = panel.y
                         keys.mouseDrag(panel, panel.width/2, 20, -70, -60)
-                        keys.verify(panel.x < oldX && panel.y < oldY, "unpinned header drag moves the keyboard")
+                        keys.verify(panel.x < oldX && panel.y < oldY, "header drag moves without unpinning")
                     }
                     panel.x = -100; panel.y = -100; panel.place()
-                    keys.verify(panel.x >= 0 && panel.y >= 0, "unpinned position clamped")
-                    keys.mouseClick(pin)
-                    keys.verify(panel.pinned && panel.x === (win.width-panel.width)/2, "repin restores standard placement")
+                    keys.verify(panel.x >= 0 && panel.y >= 0, "saved position restored within bounds")
                     if (size[0] === 320) {
                         root.phase = "small-screen selection visibility"
                         function visibleSelection() {

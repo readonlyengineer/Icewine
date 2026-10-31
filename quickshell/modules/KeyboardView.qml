@@ -7,11 +7,11 @@ import "KeyboardModel.js" as Model
 
 Rectangle {
     id: root
-    readonly property Item firstControl: pinControl
+    readonly property Item firstControl: hideControl
     property bool locked: false
     property bool busy: false
     property string error: ""
-    property bool pinned: true
+    property point relativePosition: Qt.point(0.5, 1)
     property int selected: 0
     property int modifiers: 0
     property bool caps: false
@@ -30,15 +30,23 @@ Rectangle {
     width: Math.max(0, Math.min(1040 * sizeScale, (parent?.width ?? 0) - 24))
     height: Math.max(0, Math.min(344 * sizeScale, (parent?.height ?? 0) * 0.55))
     radius: 12 * sizeScale
-    color: Theme.Palette.alpha(Theme.Palette.backgroundDark, Theme.Palette.keyboardOpacity)
+    color: Theme.Palette.alpha(Theme.Palette.backgroundDark, Math.max(0.9, Theme.Palette.keyboardOpacity))
     border.color: Theme.Palette.border
     border.width: 1
     clip: true
 
     function place() {
+        if (!parent || keyboardDrag?.active) return
+        x = Math.max(0, parent.width-width) * relativePosition.x
+        y = Math.max(0, parent.height-height-12) * relativePosition.y
+    }
+    function rememberPosition() {
         if (!parent) return
-        x = pinned ? (parent.width-width)/2 : Math.max(0, Math.min(x, parent.width-width))
-        y = pinned ? Math.max(0, parent.height-height-12) : Math.max(0, Math.min(y, parent.height-height))
+        const travelX = Math.max(0, parent.width-width)
+        const travelY = Math.max(0, parent.height-height-12)
+        relativePosition = Qt.point(
+            travelX > 0 ? Math.max(0, Math.min(1, x/travelX)) : relativePosition.x,
+            travelY > 0 ? Math.max(0, Math.min(1, y/travelY)) : relativePosition.y)
     }
     function cancelGesture() { if (repeated) modifiers = 0; armed = -1; repeatDelay.stop(); repeatTick.stop(); repeated = false }
     function cancel() { cancelGesture(); modifiers = 0; caps = false; heldDirection = ""; navigation.stop() }
@@ -92,10 +100,9 @@ Rectangle {
         } else if (event.action === "ui_back" && !event.pressed) hideRequested()
     }
     onSelectedChanged: revealSelected()
-    onPinnedChanged: place()
     onWidthChanged: place()
     onHeightChanged: place()
-    onVisibleChanged: { cancel(); if (visible) { pinned = true; selected = 0; place(); revealSelected() } }
+    onVisibleChanged: { cancel(); if (visible) { selected = 0; place(); revealSelected() } }
     onEnabledChanged: if (!enabled) cancel()
     Component.onCompleted: place()
     Connections { target: root.parent; function onWidthChanged() { root.place() } function onHeightChanged() { root.place() } }
@@ -108,48 +115,20 @@ Rectangle {
         x: 8 * root.sizeScale; y: 2 * root.sizeScale
         width: Math.max(0, root.width - 16 * root.sizeScale)
         height: root.keyHeight; spacing: 4 * root.sizeScale
-        ToolButton {
-            id: pinControl
-            objectName: "keyboardPin"
-            hoverEnabled: true
-            text: root.pinned ? qsTr("Unpin") : qsTr("Pin")
-            Accessible.name: root.pinned ? qsTr("Unpin keyboard") : qsTr("Pin keyboard")
-            palette.buttonText: Theme.Palette.foreground
-            focusPolicy: Qt.TabFocus
-            width: Math.max(0, Math.min(80 * root.sizeScale, (header.width - 2 * header.spacing) / 2))
-            height: root.keyHeight
-            font.pixelSize: 13 * root.sizeScale
-            background: Rectangle {
-                radius: 6 * root.sizeScale
-                color: pinControl.down ? Theme.Palette.primary
-                    : pinControl.hovered ? Theme.Palette.selection : root.pinned ? Theme.Palette.surface : "transparent"
-                border.width: pinControl.activeFocus ? 2 : root.pinned ? 1 : 0
-                border.color: Theme.Palette.primary
-            }
-            contentItem: Text {
-                text: pinControl.text
-                font: pinControl.font
-                color: pinControl.down ? Theme.Palette.highlightedText : Theme.Palette.foreground
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
-            }
-            onClicked: root.pinned = !root.pinned
-        }
         Label {
             text: root.error || qsTr("Keyboard")
             color: Theme.Palette.foreground
             height: root.keyHeight
             font.pixelSize: 13 * root.sizeScale
             verticalAlignment: Text.AlignVCenter
-            width: Math.max(0, header.width - pinControl.width - hideControl.width - 2 * header.spacing)
+            width: Math.max(0, header.width - hideControl.width - header.spacing)
             elide: Text.ElideRight
             DragHandler {
+                id: keyboardDrag
                 target: root
-                enabled: !root.pinned
                 xAxis.minimum: 0; xAxis.maximum: Math.max(0, (root.parent?.width ?? 0) - root.width)
-                yAxis.minimum: 0; yAxis.maximum: Math.max(0, (root.parent?.height ?? 0) - root.height)
-                onActiveChanged: if (active) root.cancelGesture()
+                yAxis.minimum: 0; yAxis.maximum: Math.max(0, (root.parent?.height ?? 0) - root.height - 12)
+                onActiveChanged: if (active) root.cancelGesture(); else root.rememberPosition()
             }
         }
         ToolButton {
@@ -159,7 +138,7 @@ Rectangle {
             text: qsTr("Hide")
             palette.buttonText: Theme.Palette.foreground
             focusPolicy: Qt.TabFocus
-            width: Math.max(0, Math.min(80 * root.sizeScale, (header.width - 2 * header.spacing) / 2))
+            width: Math.max(0, Math.min(80 * root.sizeScale, header.width))
             height: root.keyHeight
             font.pixelSize: 13 * root.sizeScale
             onClicked: root.hideRequested()

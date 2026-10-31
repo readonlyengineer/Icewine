@@ -70,19 +70,17 @@ ShellRoot {
             const panel = owner.view
             check.tryCompare(panel, "visible", true)
             check.verify(panel.width <= width-24 && panel.height <= height*0.55+0.01, "output fit")
-            const pin = find(panel, "keyboardPin"), hide = find(panel, "keyboardHide")
-            for (const control of [pin, hide]) {
+            const hide = find(panel, "keyboardHide")
+            check.verify(!find(panel, "keyboardPin"), "no pin control")
+            for (const control of [hide]) {
                 const point = control.mapToItem(panel, 0, 0)
                 check.verify(point.x >= 0 && point.x+control.width <= panel.width, "header control fits")
                 check.verify(point.y >= 0 && point.y+control.height <= panel.height, "header control height fits")
                 check.compare(control.height, panel.keyHeight)
             }
-            check.mouseClick(pin); check.verify(!panel.pinned)
             check.mouseDrag(panel, panel.width/2, panel.keyHeight/2, -70, -60)
             check.verify(panel.x >= 0 && panel.y >= 0 && panel.x+panel.width <= width+0.01
                 && panel.y+panel.height <= height+0.01, "drag stays bounded")
-            check.mouseClick(pin); check.verify(panel.pinned)
-            check.compare(panel.x, (width-panel.width)/2)
             for (const key of [Model.keys[0], Model.keys.find(key => key.text === " "), Model.keys[Model.keys.length - 1]]) {
                 panel.selected = key.index; panel.revealSelected()
                 const button = find(panel, "oskKey"+key.index), viewport = button.parent.parent
@@ -112,13 +110,14 @@ ShellRoot {
         session.lockRequested = locked
         session.keyboardHost = lockView
         for (const touch of [false, true]) {
-            for (const mode of ["pinned", "unpinned", "dragged", "repinned"]) {
+            for (const mode of ["shown", "dragged"]) {
                 root.phase = (locked ? "lock" : "desktop") + " Hide " + mode + (touch ? " touch" : " mouse")
                 owner.show()
                 check.tryCompare(owner, "visible", true)
                 const panel = owner.view
-                check.verify(panel.pinned, "reopening resets pin")
-                const pin = find(panel, "keyboardPin"), hide = find(panel, "keyboardHide")
+                panel.relativePosition = Qt.point(0.5, 1); panel.place()
+                check.verify(!find(panel, "keyboardPin"), "no pin control")
+                const hide = find(panel, "keyboardHide")
                 const tap = item => {
                     if (touch) {
                         const sequence = check.touchEvent(win)
@@ -126,11 +125,7 @@ ShellRoot {
                         sequence.release(0, item, item.width/2, item.height/2).commit()
                     } else check.mouseClick(item)
                 }
-                if (mode !== "pinned") {
-                    tap(pin)
-                    check.verify(!panel.pinned, "pointer unpins")
-                }
-                if (mode === "dragged" || mode === "repinned") {
+                if (mode === "dragged") {
                     const oldX = panel.x, oldY = panel.y
                     if (touch) {
                         const sequence = check.touchEvent(win)
@@ -142,11 +137,11 @@ ShellRoot {
                     } else check.mouseDrag(panel, panel.width/2, 20, -70, -60)
                     check.verify(panel.x < oldX && panel.y < oldY, "real header drag moves view")
                 }
-                if (mode === "repinned") {
-                    tap(pin)
-                    check.verify(panel.pinned, "pointer repins")
-                    check.compare(panel.x, (panel.parent.width-panel.width)/2)
-                }
+                const savedX = panel.x, savedY = panel.y
+                owner.hide(); owner.show()
+                check.tryCompare(panel, "visible", true)
+                check.fuzzyCompare(panel.x, savedX, 0.01, "reopen retains horizontal position")
+                check.fuzzyCompare(panel.y, savedY, 0.01, "reopen retains vertical position")
                 if (!locked) panel.controller({action:"ui_left", pressed:true})
                 panel.modifiers = Model.shift; panel.caps = true
                 const key = Model.keys.find(key => key.text === "a").index
@@ -178,9 +173,8 @@ ShellRoot {
     Timer { interval: 200; running: true; onTriggered: {
         try {
             owner.show()
-            const pin = find(owner.view, "keyboardPin"), hide = find(owner.view, "keyboardHide")
-            pin.forceActiveFocus(); const pinned = owner.view.pinned
-            check.keyClick(Qt.Key_Space); check.compare(owner.view.pinned, !pinned)
+            const hide = find(owner.view, "keyboardHide")
+            check.compare(owner.view.firstControl, hide, "Tab entry is Hide")
             hide.forceActiveFocus(); check.keyClick(Qt.Key_Space)
             check.tryCompare(owner, "visible", false)
             const action = Model.action(Model.keys.find(key => key.text === "a"), Model.control, false)
@@ -319,4 +313,4 @@ sys.exit(1 if pathlib.Path(os.environ["TEST_KEYBOARD_CONTROL"]).read_text() == "
     # This synthetic input is logged only by the explicit fake developer backend.
     commands = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
     assert commands == [["-M", "ctrl", "-k", "U0061", "-m", "ctrl"]] * 5, commands
-print("PASS: real delivery FailedToStart (0 started/0 exited) versus shell exit127 (1/1), constant production argv/stdin privacy, lock/busy/reopen/no-backlog exact fake-wtype argv, desktop/lock bounded geometry/edge and wide-key reachability/controller and keyboard navigation, mouse/touch Hide pinned/unpinned/drag/repin/reopen and input cancellation")
+print("PASS: real delivery FailedToStart (0 started/0 exited) versus shell exit127 (1/1), constant production argv/stdin privacy, lock/busy/reopen/no-backlog exact fake-wtype argv, desktop/lock bounded geometry/edge and wide-key reachability/controller and keyboard navigation, mouse/touch Hide, always-draggable header and remembered reopen position and input cancellation")

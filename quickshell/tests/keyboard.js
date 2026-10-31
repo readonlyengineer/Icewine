@@ -39,3 +39,42 @@ context.busy=false; context.session.locked=true; context.send(K.action(a,0,false
 context.session.locked=false; context.compositor.activeWindowAddress='0x2'; context.send(K.action(a,0,false)); assert(!context.delivery.running)
 context.compositor.activeWindowAddress='0x1'; context.compositor.toplevels=[replacement]; context.send(K.action(a,0,false)); assert(!context.delivery.running,'address reuse is not destination identity')
 console.log('PASS: 84-key semantics, chords, lock restrictions, navigation and real owner no-backlog/focus guards')
+
+// Exercise the real view geometry and reopen/drag handlers without a QML engine.
+const viewSource = fs.readFileSync(require('node:path').join(__dirname, '../modules/KeyboardView.qml'), 'utf8')
+const geometry = vm.createContext({parent: {width:1280, height:800}, width:1040, height:344,
+    x:0, y:0, relativePosition:{x:0.5,y:1}, keyboardDrag:{active:false},
+    Qt:{point:(x,y)=>({x,y})}, selected:8, visible:true, cancel(){}, revealSelected(){}})
+for (const name of ['place','rememberPosition'])
+    vm.runInContext(viewSource.match(new RegExp('    function '+name+'\\([^\\n]*\\) \\{[\\s\\S]*?^    \\}', 'm'))[0], geometry)
+geometry.root = geometry
+geometry.place()
+assert.equal(geometry.x,120); assert.equal(geometry.y,444)
+geometry.x=60; geometry.y=111; geometry.rememberPosition()
+assert.equal(geometry.relativePosition.x,0.25); assert.equal(geometry.relativePosition.y,0.25)
+geometry.x=0; geometry.y=0
+vm.runInContext(viewSource.match(/    onVisibleChanged: (.+)/)[1], geometry)
+assert.equal(geometry.x,60); assert.equal(geometry.y,111)
+assert.equal(geometry.selected,0,'reopening still resets key selection')
+geometry.parent.width=2560; geometry.parent.height=1440; geometry.place()
+assert.equal(geometry.x,380); assert.equal(geometry.y,271,'screen-relative position scales')
+geometry.width=3000; geometry.height=1500; geometry.place(); geometry.rememberPosition()
+assert.equal(geometry.x,0); assert.equal(geometry.y,0)
+assert.equal(geometry.relativePosition.x,0.25,'zero travel preserves saved horizontal fraction')
+assert.equal(geometry.relativePosition.y,0.25,'zero travel preserves saved vertical fraction')
+geometry.width=1040; geometry.height=344
+geometry.x=-100; geometry.y=9999; geometry.rememberPosition(); geometry.place()
+assert.equal(geometry.x,0); assert.equal(geometry.y,1084,'remembered positions stay bounded')
+geometry.keyboardDrag.active=true; geometry.x=123; geometry.place()
+assert.equal(geometry.x,123,'geometry notifications do not overwrite an active drag')
+assert(!viewSource.includes('pinControl') && !viewSource.includes('property bool pinned'))
+const dragHandler=viewSource.match(/                onActiveChanged: (.+)/)[1]
+geometry.keyboardDrag.active=false; geometry.active=false; geometry.x=380; geometry.y=271
+vm.runInContext(dragHandler,geometry)
+assert.equal(geometry.relativePosition.x,0.25,'drag release remembers actual position')
+const color=viewSource.match(/    color: (.+)/)[1]
+geometry.Theme={Palette:{backgroundDark:'dark',keyboardOpacity:0.4,alpha:(_,a)=>a}}
+assert.equal(vm.runInContext(color,geometry),0.9,'background has a 90% opacity floor')
+geometry.Theme.Palette.keyboardOpacity=1
+assert.equal(vm.runInContext(color,geometry),1,'opaque themes remain opaque')
+console.log('PASS: always-draggable geometry, relative reopen/resize position, bounds and opacity floor')
